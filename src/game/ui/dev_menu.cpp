@@ -16,6 +16,7 @@
 #include "game/input/mouse_aim.h"
 #include "game/frame/present_rate.h"
 #include "game/session/restart.h"
+#include "game/settings/options.h"
 #include "config_loader.h"
 #include "gpu.h"
 #include "host_ui.h"
@@ -38,6 +39,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <set>
 #include <string>
 #include <string_view>
 
@@ -82,45 +84,27 @@ struct DevMenuState {
 DevMenuState g_menu;
 
 namespace fs = std::filesystem;
-
-enum PreferenceDirty : uint32_t {
-    PREF_MOUSE_AIM         = 1u << 0,
-    PREF_MODERN_CONTROLS   = 1u << 1,
-    PREF_SENSITIVITY       = 1u << 2,
-    PREF_INVERT_X          = 1u << 3,
-    PREF_GEOMETRY          = 1u << 5,
-    PREF_TEXTURES          = 1u << 6,
-    PREF_VSYNC             = 1u << 7,
-    PREF_VERTICAL_LOOK     = 1u << 10,
-    PREF_VERTICAL_SENS     = 1u << 11,
-    PREF_INVERT_Y          = 1u << 12,
-    PREF_ASPECT            = 1u << 13,
-    PREF_SUPERSAMPLING     = 1u << 14,
-    PREF_FULLSCREEN        = 1u << 15,
-    PREF_MASTER_VOLUME     = 1u << 16,
-    PREF_AUDIO_MUTED       = 1u << 17,
-    PREF_HUD_SCALE         = 1u << 18,
-    PREF_FRAME_UNLOCK      = 1u << 19,
-    PREF_SHADOW_SHAPE      = 1u << 20,
-    PREF_PRESENT_RATE      = 1u << 21,
-    PREF_SKIP_INTRO        = 1u << 22,
-    PREF_PRESENT_ENABLED   = 1u << 23,
-    PREF_LANGUAGE_DISC     = 1u << 24,
-    PREF_OCCLUSION         = 1u << 25,
-    PREF_OCCLUSION_SHAPE   = 1u << 26,
-    PREF_GAP_FILLING       = 1u << 27,
-    PREF_WORLD_DEPTH       = 1u << 28,
-    PREF_DIAGNOSTIC_VIEW   = 1u << 29,
-    PREF_SMOOTH_TURN       = 1u << 30,
-};
+using disruptor::settings::find_option;
+using disruptor::settings::Option;
 
 struct PreferenceState {
     fs::path path;
     PSXRecompV4::UserSettings pending;
-    uint32_t dirty = 0;
+    std::set<const Option *> changed;
+    bool language_disc_changed = false;
+    bool diagnostic_view_changed = false;
     bool loaded = false;
     bool save_failed = false;
     std::string status;
+
+    bool dirty() const {
+        return !changed.empty() || language_disc_changed ||
+               diagnostic_view_changed;
+    }
+    void clean() {
+        changed.clear();
+        language_disc_changed = diagnostic_view_changed = false;
+    }
 };
 
 PreferenceState g_preferences;
@@ -203,65 +187,45 @@ void set_modern_controls_live(bool enabled) {
     disruptor_modern_controls_set_enabled(enabled ? 1 : 0);
 }
 
-void mark_mouse_aim(bool value) {
-    g_preferences.pending.has_mouse_aim = true;
-    g_preferences.pending.mouse_aim = value;
-    g_preferences.dirty |= PREF_MOUSE_AIM;
+void mark(const char *key, int value) {
+    const Option *option = find_option(key);
+    option->set(g_preferences.pending, value);
+    g_preferences.changed.insert(option);
 }
 
-void mark_modern_controls(bool value) {
-    g_preferences.pending.has_modern_controls = true;
-    g_preferences.pending.modern_controls = value;
-    g_preferences.dirty |= PREF_MODERN_CONTROLS;
+bool changed(const char *key) {
+    return g_preferences.changed.contains(find_option(key));
 }
+
+void mark_mouse_aim(bool value) { mark("disruptor.mouse_aim", value); }
+
+void mark_modern_controls(bool value) { mark("disruptor.modern_controls", value); }
 
 void mark_sensitivity(double value) {
     g_preferences.pending.has_horizontal_sensitivity = true;
     g_preferences.pending.horizontal_sensitivity = value;
-    g_preferences.dirty |= PREF_SENSITIVITY;
+    g_preferences.changed.insert(
+        find_option("disruptor.horizontal_sensitivity"));
 }
 
-void mark_invert_x(bool value) {
-    g_preferences.pending.has_invert_horizontal = true;
-    g_preferences.pending.invert_horizontal = value;
-    g_preferences.dirty |= PREF_INVERT_X;
-}
+void mark_invert_x(bool value) { mark("disruptor.invert_horizontal", value); }
 
-void mark_vertical_look(bool value) {
-    g_preferences.pending.has_vertical_look = true;
-    g_preferences.pending.vertical_look = value;
-    g_preferences.dirty |= PREF_VERTICAL_LOOK;
-}
+void mark_vertical_look(bool value) { mark("disruptor.vertical_look", value); }
 
 void mark_vertical_sensitivity(double value) {
     g_preferences.pending.has_vertical_sensitivity = true;
     g_preferences.pending.vertical_sensitivity = value;
-    g_preferences.dirty |= PREF_VERTICAL_SENS;
+    g_preferences.changed.insert(
+        find_option("disruptor.vertical_sensitivity"));
 }
 
-void mark_invert_y(bool value) {
-    g_preferences.pending.has_invert_vertical = true;
-    g_preferences.pending.invert_vertical = value;
-    g_preferences.dirty |= PREF_INVERT_Y;
-}
+void mark_invert_y(bool value) { mark("disruptor.invert_vertical", value); }
 
-void mark_geometry(bool value) {
-    g_preferences.pending.has_geometry_correction = true;
-    g_preferences.pending.geometry_correction = value;
-    g_preferences.dirty |= PREF_GEOMETRY;
-}
+void mark_geometry(bool value) { mark("disruptor.geometry_correction", value); }
 
-void mark_textures(bool value) {
-    g_preferences.pending.has_perspective_textures = true;
-    g_preferences.pending.perspective_textures = value;
-    g_preferences.dirty |= PREF_TEXTURES;
-}
+void mark_textures(bool value) { mark("disruptor.perspective_textures", value); }
 
-void mark_vsync(int value) {
-    g_preferences.pending.has_vsync = true;
-    g_preferences.pending.vsync = value;
-    g_preferences.dirty |= PREF_VSYNC;
-}
+void mark_vsync(int value) { mark("video.vsync", value + 1); }
 
 void mark_aspect(int numerator, int denominator, bool adaptive) {
     g_preferences.pending.has_aspect_ratio = true;
@@ -271,88 +235,42 @@ void mark_aspect(int numerator, int denominator, bool adaptive) {
      * settings update as the fallback/initial aspect. */
     g_preferences.pending.has_adaptive_view = true;
     g_preferences.pending.adaptive_view = adaptive;
-    g_preferences.dirty |= PREF_ASPECT;
+    g_preferences.changed.insert(find_option("video.aspect_ratio"));
 }
 
-void mark_supersampling(int value) {
-    g_preferences.pending.has_supersampling = true;
-    g_preferences.pending.supersampling = value;
-    g_preferences.dirty |= PREF_SUPERSAMPLING;
-}
+void mark_supersampling(int value) { mark("video.supersampling", value - 1); }
 
-void mark_fullscreen(int value) {
-    g_preferences.pending.has_fullscreen = true;
-    g_preferences.pending.fullscreen = value;
-    g_preferences.dirty |= PREF_FULLSCREEN;
-}
+void mark_fullscreen(int value) { mark("video.fullscreen", value); }
 
-void mark_master_volume(int value) {
-    g_preferences.pending.has_master_volume = true;
-    g_preferences.pending.master_volume = value;
-    g_preferences.dirty |= PREF_MASTER_VOLUME;
-}
+void mark_master_volume(int value) { mark("audio.master_volume", value); }
 
-void mark_audio_muted(bool value) {
-    g_preferences.pending.has_audio_muted = true;
-    g_preferences.pending.audio_muted = value;
-    g_preferences.dirty |= PREF_AUDIO_MUTED;
-}
+void mark_audio_muted(bool value) { mark("audio.muted", value); }
 
-void mark_skip_intro(bool value) {
-    g_preferences.pending.has_skip_intro = true;
-    g_preferences.pending.skip_intro = value;
-    g_preferences.dirty |= PREF_SKIP_INTRO;
-}
+void mark_skip_intro(bool value) { mark("disruptor.skip_intro", value); }
 
 void mark_language_disc(const std::string &path) {
     g_language_disc = path;
     g_preferences.pending.has_language_disc = true;
     g_preferences.pending.language_disc = path;
-    g_preferences.dirty |= PREF_LANGUAGE_DISC;
+    g_preferences.language_disc_changed = true;
 }
 
-void mark_hud_scale(int value) {
-    g_preferences.pending.has_hud_scale = true;
-    g_preferences.pending.hud_scale = value;
-    g_preferences.dirty |= PREF_HUD_SCALE;
-}
+void mark_hud_scale(int value) { mark("disruptor.hud_scale", value); }
 
-void mark_frame_unlock(bool value) {
-    g_preferences.pending.has_frame_unlock = true;
-    g_preferences.pending.frame_unlock = value;
-    g_preferences.dirty |= PREF_FRAME_UNLOCK;
-}
+void mark_frame_unlock(bool value) { mark("disruptor.frame_unlock", value); }
 
-void mark_shadow_shape(bool improved) {
-    g_preferences.pending.has_improved_shadows = true;
-    g_preferences.pending.improved_shadows = improved;
-    g_preferences.dirty |= PREF_SHADOW_SHAPE;
-}
+void mark_shadow_shape(bool improved) { mark("disruptor.improved_shadows", improved); }
 
-void mark_occlusion(bool value) {
-    g_preferences.pending.has_ambient_occlusion = true;
-    g_preferences.pending.ambient_occlusion = value;
-    g_preferences.dirty |= PREF_OCCLUSION;
-}
+void mark_occlusion(bool value) { mark("disruptor.ambient_occlusion", value); }
 
 void mark_occlusion_shape(int reach, int strength) {
-    g_preferences.pending.has_occlusion_reach = g_preferences.pending.has_occlusion_strength = true;
-    g_preferences.pending.occlusion_reach = reach;
-    g_preferences.pending.occlusion_strength = strength;
-    g_preferences.dirty |= PREF_OCCLUSION_SHAPE;
+    mark("disruptor.occlusion_reach", reach);
+    mark("disruptor.occlusion_strength", strength);
 }
 
-void mark_gap_filling(bool value) {
-    g_preferences.pending.has_gap_filling = true;
-    g_preferences.pending.gap_filling = value;
-    g_preferences.dirty |= PREF_GAP_FILLING;
-}
+void mark_gap_filling(bool value) { mark("disruptor.gap_filling", value); }
 
-void mark_world_depth(bool value) {
-    g_preferences.pending.has_depth_sorted_world = true;
-    g_preferences.pending.depth_sorted_world = value;
-    g_preferences.dirty |= PREF_WORLD_DEPTH;
-}
+void mark_world_depth(bool value) { mark("disruptor.depth_sorted_world", value); }
 
 // Views 1 to 4 are layers of the occlusion pass, 5 is the mesh drawn over in-between frames.
 void apply_diagnostic_view(int view) {
@@ -363,7 +281,7 @@ void apply_diagnostic_view(int view) {
 void mark_diagnostic_view(int value) {
     g_preferences.pending.has_diagnostic_view = true;
     g_preferences.pending.diagnostic_view = value;
-    g_preferences.dirty |= PREF_DIAGNOSTIC_VIEW;
+    g_preferences.diagnostic_view_changed = true;
 }
 
 // With the vertical divided too a renderer turn of one step misses the game's next step in a median of 8604 pixels of 307200, without in 24274.
@@ -372,146 +290,28 @@ void apply_smooth_turn(bool enabled) {
     if (!env_override_present("PSX_GEOMETRY_FULL_YAW")) gl_renderer_set_full_yaw(enabled ? 1 : 0);
 }
 
-void mark_smooth_turn(bool value) {
-    g_preferences.pending.has_high_precision_camera = true;
-    g_preferences.pending.high_precision_camera = value;
-    g_preferences.dirty |= PREF_SMOOTH_TURN;
-}
+void mark_smooth_turn(bool value) { mark("disruptor.high_precision_camera", value); }
 
-void mark_present_rate(int value) {
-    g_preferences.pending.has_frame_interpolation_fps = true;
-    g_preferences.pending.frame_interpolation_fps = value;
-    g_preferences.dirty |= PREF_PRESENT_RATE;
-}
+void mark_present_rate(int value) { mark("video.frame_interpolation_fps", value); }
 
-void mark_present_enabled(bool value) {
-    g_preferences.pending.has_frame_interpolation = true;
-    g_preferences.pending.frame_interpolation = value;
-    g_preferences.dirty |= PREF_PRESENT_ENABLED;
-}
+void mark_present_enabled(bool value) { mark("video.frame_interpolation", value); }
 
 void merge_dirty_preferences(PSXRecompV4::UserSettings &settings) {
     const auto &pending = g_preferences.pending;
-    if (g_preferences.dirty & PREF_MOUSE_AIM) {
-        settings.has_mouse_aim = true;
-        settings.mouse_aim = pending.mouse_aim;
-    }
-    if (g_preferences.dirty & PREF_MODERN_CONTROLS) {
-        settings.has_modern_controls = true;
-        settings.modern_controls = pending.modern_controls;
-    }
-    if (g_preferences.dirty & PREF_SENSITIVITY) {
-        settings.has_horizontal_sensitivity = true;
-        settings.horizontal_sensitivity = pending.horizontal_sensitivity;
-    }
-    if (g_preferences.dirty & PREF_INVERT_X) {
-        settings.has_invert_horizontal = true;
-        settings.invert_horizontal = pending.invert_horizontal;
-    }
-    if (g_preferences.dirty & PREF_VERTICAL_LOOK) {
-        settings.has_vertical_look = true;
-        settings.vertical_look = pending.vertical_look;
-    }
-    if (g_preferences.dirty & PREF_VERTICAL_SENS) {
-        settings.has_vertical_sensitivity = true;
-        settings.vertical_sensitivity = pending.vertical_sensitivity;
-    }
-    if (g_preferences.dirty & PREF_INVERT_Y) {
-        settings.has_invert_vertical = true;
-        settings.invert_vertical = pending.invert_vertical;
-    }
-    if (g_preferences.dirty & PREF_GEOMETRY) {
-        settings.has_geometry_correction = true;
-        settings.geometry_correction = pending.geometry_correction;
-    }
-    if (g_preferences.dirty & PREF_TEXTURES) {
-        settings.has_perspective_textures = true;
-        settings.perspective_textures = pending.perspective_textures;
-    }
-    if (g_preferences.dirty & PREF_VSYNC) {
-        settings.has_vsync = true;
-        settings.vsync = pending.vsync;
-    }
-    if (g_preferences.dirty & PREF_ASPECT) {
-        settings.has_aspect_ratio = true;
-        settings.aspect_num = pending.aspect_num;
-        settings.aspect_den = pending.aspect_den;
-        settings.has_adaptive_view = true;
-        settings.adaptive_view = pending.adaptive_view;
-    }
-    if (g_preferences.dirty & PREF_SUPERSAMPLING) {
-        settings.has_supersampling = true;
-        settings.supersampling = pending.supersampling;
-    }
-    if (g_preferences.dirty & PREF_FULLSCREEN) {
-        settings.has_fullscreen = true;
-        settings.fullscreen = pending.fullscreen;
-    }
-    if (g_preferences.dirty & PREF_MASTER_VOLUME) {
-        settings.has_master_volume = true;
-        settings.master_volume = pending.master_volume;
-    }
-    if (g_preferences.dirty & PREF_AUDIO_MUTED) {
-        settings.has_audio_muted = true;
-        settings.audio_muted = pending.audio_muted;
-    }
-    if (g_preferences.dirty & PREF_SKIP_INTRO) {
-        settings.has_skip_intro = true;
-        settings.skip_intro = pending.skip_intro;
-    }
-    if (g_preferences.dirty & PREF_LANGUAGE_DISC) {
+    for (const Option *option : g_preferences.changed)
+        option->set(settings, option->get(pending));
+    if (g_preferences.language_disc_changed) {
         settings.has_language_disc = true;
         settings.language_disc = pending.language_disc;
     }
-    if (g_preferences.dirty & PREF_HUD_SCALE) {
-        settings.has_hud_scale = true;
-        settings.hud_scale = pending.hud_scale;
-    }
-    if (g_preferences.dirty & PREF_FRAME_UNLOCK) {
-        settings.has_frame_unlock = true;
-        settings.frame_unlock = pending.frame_unlock;
-    }
-    if (g_preferences.dirty & PREF_SHADOW_SHAPE) {
-        settings.has_improved_shadows = true;
-        settings.improved_shadows = pending.improved_shadows;
-    }
-    if (g_preferences.dirty & PREF_OCCLUSION) {
-        settings.has_ambient_occlusion = true;
-        settings.ambient_occlusion = pending.ambient_occlusion;
-    }
-    if (g_preferences.dirty & PREF_OCCLUSION_SHAPE) {
-        settings.has_occlusion_reach = settings.has_occlusion_strength = true;
-        settings.occlusion_reach = pending.occlusion_reach;
-        settings.occlusion_strength = pending.occlusion_strength;
-    }
-    if (g_preferences.dirty & PREF_GAP_FILLING) {
-        settings.has_gap_filling = true;
-        settings.gap_filling = pending.gap_filling;
-    }
-    if (g_preferences.dirty & PREF_WORLD_DEPTH) {
-        settings.has_depth_sorted_world = true;
-        settings.depth_sorted_world = pending.depth_sorted_world;
-    }
-    if (g_preferences.dirty & PREF_DIAGNOSTIC_VIEW) {
+    if (g_preferences.diagnostic_view_changed) {
         settings.has_diagnostic_view = true;
         settings.diagnostic_view = pending.diagnostic_view;
-    }
-    if (g_preferences.dirty & PREF_SMOOTH_TURN) {
-        settings.has_high_precision_camera = true;
-        settings.high_precision_camera = pending.high_precision_camera;
-    }
-    if (g_preferences.dirty & PREF_PRESENT_RATE) {
-        settings.has_frame_interpolation_fps = true;
-        settings.frame_interpolation_fps = pending.frame_interpolation_fps;
-    }
-    if (g_preferences.dirty & PREF_PRESENT_ENABLED) {
-        settings.has_frame_interpolation = true;
-        settings.frame_interpolation = pending.frame_interpolation;
     }
 }
 
 bool flush_preferences() {
-    if (g_preferences.dirty == 0) return true;
+    if (!g_preferences.dirty()) return true;
     if (g_preferences.path.empty()) {
         g_preferences.save_failed = true;
         g_preferences.status = "Runtime settings path is unavailable.";
@@ -534,7 +334,7 @@ bool flush_preferences() {
         return false;
     }
 
-    g_preferences.dirty = 0;
+    g_preferences.clean();
     g_preferences.save_failed = false;
     g_preferences.status = "Settings saved.";
     std::fprintf(stdout, "disruptor: saved in-game settings to %s\n",
@@ -638,74 +438,75 @@ void apply_saved_preferences(const PSXRecompV4::UserSettings &settings) {
 
 void apply_pending_preferences() {
     const auto &pending = g_preferences.pending;
-    if (g_preferences.dirty & PREF_MOUSE_AIM)
+    if (changed("disruptor.mouse_aim"))
         disruptor_mouse_aim_set_enabled(pending.mouse_aim ? 1 : 0);
-    if (g_preferences.dirty & PREF_MODERN_CONTROLS)
+    if (changed("disruptor.modern_controls"))
         set_modern_controls_live(pending.modern_controls);
-    if (g_preferences.dirty & PREF_SENSITIVITY)
+    if (changed("disruptor.horizontal_sensitivity"))
         (void)disruptor_mouse_set_horizontal_sensitivity(
             pending.horizontal_sensitivity);
-    if (g_preferences.dirty & PREF_INVERT_X)
+    if (changed("disruptor.invert_horizontal"))
         disruptor_mouse_set_invert_horizontal(
             pending.invert_horizontal ? 1 : 0);
-    if (g_preferences.dirty & PREF_VERTICAL_LOOK)
+    if (changed("disruptor.vertical_look"))
         disruptor_mouse_set_vertical_look_enabled(
             pending.vertical_look ? 1 : 0);
-    if (g_preferences.dirty & PREF_VERTICAL_SENS)
+    if (changed("disruptor.vertical_sensitivity"))
         (void)disruptor_mouse_set_vertical_sensitivity(
             pending.vertical_sensitivity);
-    if (g_preferences.dirty & PREF_INVERT_Y)
+    if (changed("disruptor.invert_vertical"))
         disruptor_mouse_set_invert_vertical(
             pending.invert_vertical ? 1 : 0);
-    if (g_preferences.dirty & PREF_GEOMETRY)
+    if (changed("disruptor.geometry_correction"))
         gpu_geometry_correction_set(pending.geometry_correction ? 1 : 0);
-    if (g_preferences.dirty & PREF_TEXTURES)
+    if (changed("disruptor.perspective_textures"))
         gpu_texture_correction_set(
             pending.perspective_textures &&
                     gpu_geometry_correction_enabled()
                 ? 1 : 0);
-    if (g_preferences.dirty & PREF_VSYNC)
+    if (changed("video.vsync"))
         (void)psx_host_video_set_vsync(pending.vsync);
-    if (g_preferences.dirty & PREF_ASPECT) {
+    if (changed("video.aspect_ratio")) {
         if (pending.adaptive_view)
             (void)psx_host_video_set_adaptive_view(1);
         else
             (void)psx_host_video_set_display_aspect(
                 pending.aspect_num, pending.aspect_den);
     }
-    if (g_preferences.dirty & PREF_SUPERSAMPLING)
+    if (changed("video.supersampling"))
         (void)psx_host_video_set_internal_scale(pending.supersampling);
-    if (g_preferences.dirty & PREF_FULLSCREEN)
+    if (changed("video.fullscreen"))
         g_menu.fullscreen_apply_failed =
             psx_host_video_set_fullscreen_mode(pending.fullscreen) == 0;
-    if (g_preferences.dirty & PREF_MASTER_VOLUME)
+    if (changed("audio.master_volume"))
         (void)psx_host_audio_set_master_volume(pending.master_volume);
-    if (g_preferences.dirty & PREF_AUDIO_MUTED)
+    if (changed("audio.muted"))
         (void)psx_host_audio_set_muted(pending.audio_muted ? 1 : 0);
-    if (g_preferences.dirty & PREF_HUD_SCALE)
+    if (changed("disruptor.hud_scale"))
         gpu_ws_set_hud_scale(pending.hud_scale);
-    if (g_preferences.dirty & PREF_FRAME_UNLOCK)
+    if (changed("disruptor.frame_unlock"))
         disruptor_frame_rate_set_unlocked(pending.frame_unlock ? 1 : 0);
-    if (g_preferences.dirty & PREF_SKIP_INTRO)
+    if (changed("disruptor.skip_intro"))
         disruptor_intro_skip_set_enabled(pending.skip_intro ? 1 : 0);
-    if (g_preferences.dirty & PREF_SHADOW_SHAPE)
+    if (changed("disruptor.improved_shadows"))
         gpu_set_shadow_shape(pending.improved_shadows ? 1 : 0);
-    if (g_preferences.dirty & PREF_OCCLUSION)
+    if (changed("disruptor.ambient_occlusion"))
         gl_renderer_set_ssao(pending.ambient_occlusion ? 1 : 0);
-    if (g_preferences.dirty & PREF_OCCLUSION_SHAPE)
+    if (changed("disruptor.occlusion_reach") ||
+        changed("disruptor.occlusion_strength"))
         gl_renderer_set_ssao_shape(static_cast<float>(pending.occlusion_reach), pending.occlusion_strength / 100.0f);
-    if (g_preferences.dirty & PREF_GAP_FILLING)
+    if (changed("disruptor.gap_filling"))
         gl_renderer_set_gap_fill(pending.gap_filling ? 1 : 0);
-    if (g_preferences.dirty & PREF_WORLD_DEPTH)
+    if (changed("disruptor.depth_sorted_world"))
         gl_renderer_set_world_depth(pending.depth_sorted_world ? 1 : 0);
-    if (g_preferences.dirty & PREF_DIAGNOSTIC_VIEW)
+    if (g_preferences.diagnostic_view_changed)
         apply_diagnostic_view(pending.diagnostic_view);
-    if (g_preferences.dirty & PREF_SMOOTH_TURN)
+    if (changed("disruptor.high_precision_camera"))
         apply_smooth_turn(pending.high_precision_camera);
 #ifndef PSX_DISABLE_FRAME_INTERPOLATION
-    if (g_preferences.dirty & PREF_PRESENT_ENABLED)
+    if (changed("video.frame_interpolation"))
         (void)disruptor_present_rate_enable(pending.frame_interpolation ? 1 : 0);
-    if (g_preferences.dirty & PREF_PRESENT_RATE)
+    if (changed("video.frame_interpolation_fps"))
         (void)disruptor_present_rate_apply(pending.frame_interpolation_fps);
 #endif
 }
@@ -1403,14 +1204,14 @@ void draw_system_tab() {
     if (g_preferences.save_failed)
         ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.25f, 1.0f),
                            "Not saved");
-    else if (g_preferences.dirty)
+    else if (g_preferences.dirty())
         ImGui::TextColored(ImVec4(1.0f, 0.73f, 0.25f, 1.0f),
                            "Unsaved changes");
     else
         ImGui::TextColored(ImVec4(0.35f, 0.90f, 0.45f, 1.0f), "Saved");
     if (!g_preferences.status.empty())
         ImGui::TextWrapped("%s", g_preferences.status.c_str());
-    if (g_preferences.dirty && ImGui::Button("Save now"))
+    if (g_preferences.dirty() && ImGui::Button("Save now"))
         (void)flush_preferences();
     ImGui::TextDisabled(
         "Current vertical pitch, menu layout, "

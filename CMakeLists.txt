@@ -89,6 +89,7 @@ if(DISRUPTOR_DEV_MENU)
     endif()
 
     list(APPEND DISRUPTOR_EXTRA_SOURCES
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings/options.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/dev_menu.cpp")
     if(DISRUPTOR_FRAME_INTERPOLATION)
         list(APPEND DISRUPTOR_EXTRA_SOURCES

@@ -59,6 +59,18 @@ main_cpp = read("psxrecomp-overlay/runtime/src/main.cpp")
 gl = read("psxrecomp-overlay/runtime/src/gpu_gl_renderer.c")
 gte = read("psxrecomp-overlay/runtime/src/gte.cpp")
 menu = read("src/game/ui/dev_menu.cpp")
+options = read("src/game/settings/options.cpp")
+STAGED = (
+    "void mark(const char *key, int value) {\n"
+    "    const Option *option = find_option(key);\n"
+    "    option->set(g_preferences.pending, value);\n"
+    "    g_preferences.changed.insert(option);\n"
+    "}\n"
+)
+MERGED = (
+    "    for (const Option *option : g_preferences.changed)\n"
+    "        option->set(settings, option->get(pending));\n"
+)
 mouse = read("src/game/input/mouse_aim.cpp")
 cheats = read("src/game/session/cheats.cpp")
 cheats_h = read("src/game/session/cheats.h")
@@ -542,12 +554,13 @@ for token in (
 ):
     require(token in scale_controls,
             f"live internal-resolution controls are missing {token}")
-require("PREF_SUPERSAMPLING" in
-        function_body(menu, "merge_dirty_preferences") and
-        "settings.has_supersampling = true" in
-        function_body(menu, "merge_dirty_preferences"),
+require('void mark_supersampling(int value) { mark("video.supersampling", value - 1); }\n' in menu and
+        MERGED in function_body(menu, "merge_dirty_preferences") and
+        "void set_scale(Settings& settings, int index) { settings.has_supersampling = true; "
+        "settings.supersampling = index + 1; }\n" in options and
+        "saved<&Settings::has_supersampling>, scale, set_scale)" in options,
         "internal scale must be merged into the user settings")
-require("PREF_SUPERSAMPLING" in
+require('changed("video.supersampling")' in
         function_body(menu, "apply_pending_preferences") and
         "psx_host_video_set_internal_scale" in
         function_body(menu, "apply_pending_preferences"),
@@ -571,14 +584,11 @@ for token in (
 ):
     require(token in fullscreen_controls,
             f"live fullscreen controls are missing {token}")
-require("PREF_FULLSCREEN" in
-        function_body(menu, "merge_dirty_preferences") and
-        "settings.has_fullscreen = true" in
-        function_body(menu, "merge_dirty_preferences") and
-        "settings.fullscreen = pending.fullscreen" in
-        function_body(menu, "merge_dirty_preferences"),
+require('void mark_fullscreen(int value) { mark("video.fullscreen", value); }\n' in menu and
+        MERGED in function_body(menu, "merge_dirty_preferences") and
+        "write<&Settings::has_fullscreen, &Settings::fullscreen>)" in options,
         "explicit fullscreen selections must be merged into user settings")
-require("PREF_FULLSCREEN" in
+require('changed("video.fullscreen")' in
         function_body(menu, "apply_pending_preferences") and
         "psx_host_video_set_fullscreen_mode" in
         function_body(menu, "apply_pending_preferences"),
@@ -608,17 +618,16 @@ for token in (
     require(token in audio_controls,
             f"live host-audio controls are missing {token}")
 merge_preferences = function_body(menu, "merge_dirty_preferences")
-require("PREF_MASTER_VOLUME" in merge_preferences and
-        "settings.has_master_volume = true" in merge_preferences and
-        "settings.master_volume = pending.master_volume" in merge_preferences and
-        "PREF_AUDIO_MUTED" in merge_preferences and
-        "settings.has_audio_muted = true" in merge_preferences and
-        "settings.audio_muted = pending.audio_muted" in merge_preferences,
+require('void mark_master_volume(int value) { mark("audio.master_volume", value); }\n' in menu and
+        'void mark_audio_muted(bool value) { mark("audio.muted", value); }\n' in menu and
+        MERGED in merge_preferences and
+        "write<&Settings::has_master_volume, &Settings::master_volume>)" in options and
+        '    toggle<&Settings::has_audio_muted, &Settings::audio_muted>("audio.muted",' in options,
         "host-audio selections must be merged into user settings")
 pending_preferences = function_body(menu, "apply_pending_preferences")
-require("PREF_MASTER_VOLUME" in pending_preferences and
+require('changed("audio.master_volume")' in pending_preferences and
         "psx_host_audio_set_master_volume" in pending_preferences and
-        "PREF_AUDIO_MUTED" in pending_preferences and
+        'changed("audio.muted")' in pending_preferences and
         "psx_host_audio_set_muted" in pending_preferences,
         "pending host-audio settings must survive a soft runtime session")
 saved_preferences = function_body(menu, "apply_saved_preferences")
@@ -671,15 +680,14 @@ for function_name in ("on_runtime_ready", "on_runtime_shutdown"):
     require("disruptor_billboard_aspect_all_site_mask" in session_body and
             "disruptor_billboard_aspect_set_site_mask" in session_body,
             f"{function_name} must restore every billboard repair path")
-require("PREF_ASPECT" in function_body(menu, "merge_dirty_preferences") and
-        "settings.has_aspect_ratio = true" in
-        function_body(menu, "merge_dirty_preferences") and
-        "settings.has_adaptive_view = true" in
-        function_body(menu, "merge_dirty_preferences") and
-        "settings.adaptive_view = pending.adaptive_view" in
-        function_body(menu, "merge_dirty_preferences"),
+require('g_preferences.changed.insert(find_option("video.aspect_ratio"));' in
+        function_body(menu, "mark_aspect") and
+        MERGED in function_body(menu, "merge_dirty_preferences") and
+        "    settings.has_aspect_ratio = settings.has_adaptive_view = true;\n"
+        "    settings.adaptive_view = index == window_aspect;\n" in options and
+        "aspect_saved, aspect, set_aspect)" in options,
         "fixed and adaptive aspect choices must persist atomically")
-require("PREF_ASPECT" in function_body(menu, "apply_pending_preferences") and
+require('changed("video.aspect_ratio")' in function_body(menu, "apply_pending_preferences") and
         "psx_host_video_set_display_aspect" in
         function_body(menu, "apply_pending_preferences") and
         "psx_host_video_set_adaptive_view" in
@@ -728,5 +736,41 @@ require("--perspective-textures" in run_sh and
 require("PSX_VIDEO_ASPECT'] = '16:9'" in run_ps1 and
         "export PSX_VIDEO_ASPECT=16:9" in run_sh,
         "explicit widescreen launch switches must override a saved aspect")
+
+shared_keys = set(re.findall(r'\b(?:toggle|choice|slider)(?:<[^>]*>)?\(\s*"([\w.]+)"', options))
+staged_keys = set(re.findall(r'\bmark\("([\w.]+)"', menu)) | set(
+    re.findall(r'g_preferences\.changed\.insert\(\s*find_option\("([\w.]+)"\)\)', menu))
+applied_keys = set(re.findall(r'\bchanged\("([\w.]+)"\)', function_body(menu, "apply_pending_preferences")))
+require(len(shared_keys) == 27 and staged_keys == shared_keys and applied_keys == shared_keys and
+        set(re.findall(r'\bfind_option\("([\w.]+)"', menu)) <= shared_keys,
+        "the menu must stage every shared option, apply every one it staged and name no key the table lacks")
+require('void mark_vsync(int value) { mark("video.vsync", value + 1); }\n' in menu and
+        "    g_preferences.pending.horizontal_sensitivity = value;\n"
+        "    g_preferences.changed.insert(\n"
+        '        find_option("disruptor.horizontal_sensitivity"));\n' in function_body(menu, "mark_sensitivity") and
+        "    g_preferences.pending.vertical_sensitivity = value;\n"
+        "    g_preferences.changed.insert(\n"
+        '        find_option("disruptor.vertical_sensitivity"));\n' in function_body(menu, "mark_vertical_sensitivity") and
+        "(void)disruptor_mouse_set_horizontal_sensitivity(\n            pending.horizontal_sensitivity);" in
+        function_body(menu, "apply_pending_preferences") and
+        "int vsync(const Settings& settings) { return std::clamp(settings.vsync + 1, 0, 2); }\n" in options and
+        "    return static_cast<int>(std::lround(settings.*Value * 1000.0));\n" in options and
+        "    settings.*Value = value / 1000.0;\n" in options,
+        "a value the menu holds in its own unit must be staged in the shared table's, and a sensitivity kept whole "
+        "for the running game and rounded only where it is written")
+require(STAGED in menu and
+        "    return g_preferences.changed.contains(find_option(key));\n" in menu and
+        "    std::set<const Option *> changed;\n" in menu and
+        "        return !changed.empty() || language_disc_changed ||\n"
+        "               diagnostic_view_changed;\n" in menu and
+        "        changed.clear();\n"
+        "        language_disc_changed = diagnostic_view_changed = false;\n" in menu and
+        "    if (!g_preferences.dirty()) return true;\n" in function_body(menu, "flush_preferences") and
+        "    g_preferences.clean();\n    g_preferences.save_failed = false;\n" in function_body(menu, "flush_preferences") and
+        "PreferenceDirty" not in menu and "PREF_" not in menu and
+        '    list(APPEND DISRUPTOR_EXTRA_SOURCES\n'
+        '        "${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings/options.cpp"\n'
+        '        "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/dev_menu.cpp")\n' in cmake,
+        "a staged change must be an option of the shared table, and a save must write and then forget every one")
 
 print("developer menu contract: PASS")

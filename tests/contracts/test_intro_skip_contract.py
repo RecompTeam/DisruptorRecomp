@@ -48,6 +48,18 @@ cmake = read("CMakeLists.txt")
 source = read("src/game/session/intro_skip.cpp")
 header = read("src/game/session/intro_skip.h")
 menu = read("src/game/ui/dev_menu.cpp")
+options = read("src/game/settings/options.cpp")
+STAGED = (
+    "void mark(const char *key, int value) {\n"
+    "    const Option *option = find_option(key);\n"
+    "    option->set(g_preferences.pending, value);\n"
+    "    g_preferences.changed.insert(option);\n"
+    "}\n"
+)
+MERGED = (
+    "    for (const Option *option : g_preferences.changed)\n"
+    "        option->set(settings, option->get(pending));\n"
+)
 generator = read("psxrecomp-overlay/recompiler/src/code_generator.cpp")
 interpreter = read("psxrecomp-overlay/runtime/src/dirty_ram_interp.c")
 audit = read("tools/audit_codegen.py")
@@ -165,9 +177,10 @@ require(
     "the settings menu must apply the switch live and stage it for saving",
 )
 require(
-    "if (g_preferences.dirty & PREF_SKIP_INTRO) {\n"
-    "        settings.has_skip_intro = true;\n"
-    "        settings.skip_intro = pending.skip_intro;" in menu,
+    'void mark_skip_intro(bool value) { mark("disruptor.skip_intro", value); }\n' in menu
+    and STAGED in menu
+    and MERGED in menu
+    and '    toggle<&Settings::has_skip_intro, &Settings::skip_intro>(\n        "disruptor.skip_intro",' in options,
     "a changed switch must reach settings.toml",
 )
 require(

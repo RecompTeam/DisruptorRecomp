@@ -25,6 +25,17 @@ renderer = read("psxrecomp-overlay/runtime/src/gpu_gl_renderer.c")
 menu = read("src/game/ui/dev_menu.cpp")
 launcher = read("src/launcher/launcher_settings.cpp")
 options = read("src/game/settings/options.cpp")
+STAGED = (
+    "void mark(const char *key, int value) {\n"
+    "    const Option *option = find_option(key);\n"
+    "    option->set(g_preferences.pending, value);\n"
+    "    g_preferences.changed.insert(option);\n"
+    "}\n"
+)
+MERGED = (
+    "    for (const Option *option : g_preferences.changed)\n"
+    "        option->set(settings, option->get(pending));\n"
+)
 loader = read("psxrecomp-overlay/recompiler/src/config_loader.cpp")
 settings = read("psxrecomp-overlay/recompiler/src/config_loader.h")
 
@@ -96,29 +107,18 @@ require(
 )
 
 require(
-    """void mark_occlusion(bool value) {
-    g_preferences.pending.has_ambient_occlusion = true;
-    g_preferences.pending.ambient_occlusion = value;
-    g_preferences.dirty |= PREF_OCCLUSION;
-}
+    """void mark_occlusion(bool value) { mark("disruptor.ambient_occlusion", value); }
 
 void mark_occlusion_shape(int reach, int strength) {
-    g_preferences.pending.has_occlusion_reach = g_preferences.pending.has_occlusion_strength = true;
-    g_preferences.pending.occlusion_reach = reach;
-    g_preferences.pending.occlusion_strength = strength;
-    g_preferences.dirty |= PREF_OCCLUSION_SHAPE;
+    mark("disruptor.occlusion_reach", reach);
+    mark("disruptor.occlusion_strength", strength);
 }
 """ in menu
-    and """    if (g_preferences.dirty & PREF_OCCLUSION) {
-        settings.has_ambient_occlusion = true;
-        settings.ambient_occlusion = pending.ambient_occlusion;
-    }
-    if (g_preferences.dirty & PREF_OCCLUSION_SHAPE) {
-        settings.has_occlusion_reach = settings.has_occlusion_strength = true;
-        settings.occlusion_reach = pending.occlusion_reach;
-        settings.occlusion_strength = pending.occlusion_strength;
-    }
-""" in menu
+    and STAGED in menu
+    and MERGED in menu
+    and '    toggle<&Settings::has_ambient_occlusion, &Settings::ambient_occlusion>(\n        "disruptor.ambient_occlusion",' in options
+    and "write<&Settings::has_occlusion_reach, &Settings::occlusion_reach>, occlusion_key)" in options
+    and "write<&Settings::has_occlusion_strength, &Settings::occlusion_strength>, occlusion_key)" in options
     and """    if (!env_override_present("PSX_GL_SSAO")) {
         if (settings.has_ambient_occlusion) gl_renderer_set_ssao(settings.ambient_occlusion ? 1 : 0);
 """ in menu
@@ -128,12 +128,13 @@ void mark_occlusion_shape(int reach, int strength) {
         settings.has_occlusion_strength && !env_override_present("PSX_GL_SSAO_STRENGTH")
             ? settings.occlusion_strength / 100.0f : -1.0f);
 """ in menu
-    and """    if (g_preferences.dirty & PREF_OCCLUSION)
+    and """    if (changed("disruptor.ambient_occlusion"))
         gl_renderer_set_ssao(pending.ambient_occlusion ? 1 : 0);
-    if (g_preferences.dirty & PREF_OCCLUSION_SHAPE)
+    if (changed("disruptor.occlusion_reach") ||
+        changed("disruptor.occlusion_strength"))
         gl_renderer_set_ssao_shape(static_cast<float>(pending.occlusion_reach), pending.occlusion_strength / 100.0f);
 """ in menu,
-    "the switch and the shape are each staged under a bit of their own, merged into the file's settings, applied at the "
+    "the switch and the shape are each staged as options of the shared table, merged into the file's settings, applied at the "
     "next start unless the environment decides that one, and applied when another run saved them",
 )
 

@@ -64,6 +64,46 @@ void table() {
                     "a preset sets a value outside its option");
 }
 
+// The in-game menu saves a staged value by get and set from one settings to another.
+void carried() {
+    for (const auto& one : options()) {
+        std::set<int> values{one.initial};
+        for (int value = one.lowest; value <= one.highest; ++value) values.insert(value);
+        for (const int value : values) {
+            Settings staged{}, file{};
+            one.set(staged, value);
+            one.set(file, one.get(staged));
+            require(one.saved(file) && one.get(file) == value, "a staged value is not carried whole");
+        }
+    }
+    const Option& aspect = option("video.aspect_ratio");
+    const int shapes[][3] = {{4, 3, 0}, {16, 9, 0}, {21, 9, 0}, {32, 9, 0}, {32, 9, 1}};
+    for (const auto& shape : shapes) {
+        Settings staged{}, file{};
+        staged.has_aspect_ratio = staged.has_adaptive_view = true;
+        staged.aspect_num = shape[0];
+        staged.aspect_den = shape[1];
+        staged.adaptive_view = shape[2] != 0;
+        aspect.set(file, aspect.get(staged));
+        require(file.has_aspect_ratio && file.has_adaptive_view && file.aspect_num == shape[0] &&
+                file.aspect_den == shape[1] && file.adaptive_view == staged.adaptive_view,
+                "an aspect the menu stages is not carried whole");
+    }
+    Settings probe{};
+    option("video.vsync").set(probe, 0);
+    option("video.supersampling").set(probe, 3);
+    option("disruptor.horizontal_sensitivity").set(probe, 83);
+    require(probe.vsync == -1 && probe.supersampling == 4 && probe.horizontal_sensitivity == 0.083,
+            "the menu's own values are not the table's");
+    const Option& turn = option("disruptor.horizontal_sensitivity");
+    Settings typed{}, written{};
+    typed.has_horizontal_sensitivity = true;
+    typed.horizontal_sensitivity = 0.0834;
+    turn.set(written, turn.get(typed));
+    require(written.has_horizontal_sensitivity && written.horizontal_sensitivity == 0.083,
+            "a sensitivity is not written in whole thousandths");
+}
+
 void placements() {
     std::set<std::string> placed;
     for (const auto& row : layout()) {
@@ -427,6 +467,7 @@ int main() {
         fs::remove_all(folder);
         fs::create_directories(folder);
         table();
+        carried();
         placements();
         absent(folder);
         one_change(folder);
