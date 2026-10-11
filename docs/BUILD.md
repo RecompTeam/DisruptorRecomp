@@ -129,6 +129,27 @@ files are listed in `PSXRECOMP_OVERLAY_FILES.txt`. Runtime preferences live in
 `settings.toml` beside the executable; game files, generated code, and build
 directories are ignored by Git.
 
+## Layout
+
+| Folder | Holds |
+| --- | --- |
+| `src/game/` | The game's own module by area: `input`, `render`, `frame`, `language`, `session`, `ui` |
+| `src/launcher/` | The Windows launcher |
+| `psxrecomp-overlay/` | The framework files this project replaces or adds |
+| `tests/unit/` | Unit tests, one executable each |
+| `tests/contracts/` | Source contracts, run by Python |
+| `tests/support/` | Stubs and fakes the unit tests build against |
+| `cmake/` | Build helpers: test registration, launcher staging |
+| `config/` | Key presets |
+| `tools/` | Regeneration, the overlay, packaging, capsule replay |
+
+`game.toml`, `game-widescreen.toml` and `mouse-aim.ini` stay at the root: the
+game is started from there and reads them by those names.
+
+A unit test is registered in `CMakeLists.txt` with
+`disruptor_unit_test(<test> tests/unit/<file>)` and a contract with
+`disruptor_contract(<name>)` for `tests/contracts/test_<name>_contract.py`.
+
 ## Replay capsules
 
 Ctrl+F12 in the game starts a recording and Ctrl+F12 again ends it. The game
