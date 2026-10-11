@@ -17,13 +17,18 @@ disc revision; the redistributable OpenBIOS backend is used for booting.
   the screen too, movies stay at 4:3, and the HUD retains its proportions. A
   HUD size setting shrinks it toward the screen edges.
 - Optional geometry and perspective-texture correction.
+- Optional gap filling, a depth-sorted world, and experimental ambient
+  occlusion on top of geometry correction.
 - Optional 60 FPS gameplay and in-between frames.
 - Keyboard/controller input and optional modern WASD/mouse controls.
+- Optional smooth mouse turning between the game's 256 turn steps.
 - Experimental vertical mouse look and weapon aim.
 - In-game settings for controls, display, fullscreen, VSync, volume, and mute.
+- Diagnostic views and a screen recorder for reports of a fault in the picture.
 - Memory-card saves and twelve save-state slots.
 - Windows launcher with disc-image browsing, automatic copy/CUE setup,
-  full-disc SHA-256 verification, the game's settings, and game launch.
+  full-disc SHA-256 verification, the game's settings with a hint for each,
+  and game launch.
 - Optional French, German, and Japanese game content from an additional disc
   image you own; the supported USA disc remains required.
 - Optional intro skipping and a key to skip a logo or movie.

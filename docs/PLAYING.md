@@ -31,9 +31,10 @@ and share feedback.
 6. At the game menu, use the arrow keys and **Enter** to select **New Game**,
    or choose **Practice Mode** to try a training mission.
 
-The launcher's **Display**, **Enhancements**, **Controls** and **Audio** tabs
-hold the settings of the in-game menu. A change is saved to `settings.toml`
-at once and applies the next time the game starts. **Original** and
+The launcher's **Display**, **Enhancements**, **Controls**, **Audio** and
+**Experimental** tabs hold the settings of the in-game menu. A long page
+scrolls, and a row shows a hint under the pointer. A change is saved to
+`settings.toml` at once and applies the next time the game starts. **Original** and
 **Enhanced** set a group of them in one step, and **Reset settings** returns
 them to those of a new installation. The tabs are locked while the game runs.
 If the game stops with an error, the launcher shows the end of `startup.log`.
@@ -79,6 +80,16 @@ frame options start off; in-between frames need exact geometry.
 The **Shadows** setting offers Vanilla and Improved shapes when geometry
 correction is enabled. HUD size ranges from 50% to 100% in widescreen and
 leaves the weapon size unchanged.
+
+With geometry correction, **Gap filling** closes hairline gaps between
+polygons and starts on. **Depth-sorted world** draws the world by depth where
+the game's own order puts a far polygon over a near one; it starts off.
+**Settings → Experimental** has ambient occlusion, which shades corners and
+the floor under things and starts off. **Smooth mouse turning** in
+**Settings → Controls** turns the picture between the game's 256 turn steps
+while the mouse is captured; it starts off too. **Settings → Debug** has
+diagnostic views and a two-second screen recorder for a report of a fault in
+the picture.
 
 **Skip the logos and the title movie** in Enhancements skips the boot intro
 automatically. It starts off; the other movies still play normally. Escape

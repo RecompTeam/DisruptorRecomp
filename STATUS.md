@@ -9,8 +9,8 @@ and public-release validation are incomplete.
 | Gameplay | Boot, menus, FMVs, audio, and the first mission have been exercised on Windows. |
 | Rendering | OpenGL supports 1x–8x resolution, widescreen, geometry correction, and perspective textures. Minor edge gaps and localized texture wobble can remain. |
 | Controls | Modern keyboard/mouse controls are available. Vertical look and weapon aim remain experimental. |
-| Settings | Controls, Enhancements, Cheats, and System tabs; supported preferences persist between runs. |
-| Interpolation and diagnostics | In-between frames are experimental and off until switched on in Settings. The Diagnostics tab and experimental debug controls are removed. |
+| Settings | Controls, Enhancements, Experimental, Language, System, Debug, and Cheats tabs; supported preferences persist between runs. |
+| Interpolation and diagnostics | In-between frames are off until switched on in Settings. The Debug tab has diagnostic views and a screen recorder. |
 | Ultrawide corruption | Fixed primitive-buffer overflow. The user's 8x / 32:9 training retest stayed correct through 8,934 frames and closed normally. |
 | Save states | Save states require a matching build and language. The alpha.3 code-generation changes make alpha.1 and alpha.2 states incompatible; use memory-card saves for progress across releases. |
 | Automated checks | Windows Release build, code-generation audit, and all 59 root CTests passed. |
