@@ -27,7 +27,9 @@ The build verifies the executable, applies the framework overlay, generates and
 audits the translated code, builds the runtime, and runs the tests. The runtime
 is produced in `build/`, or `build/Release/` for a multi-configuration generator.
 Set `DISRUPTOR_BUILD_DIRECTORY` to build into and run from another folder of the
-repository instead. `build.sh` and `run.sh` read it too.
+repository instead. `build.sh` and `run.sh` read it too. Set
+`DISRUPTOR_COMPILER_LAUNCHER` to a compiler cache such as `ccache` and `build.sh`
+compiles through it.
 
 Windows builds also produce `DisruptorLauncher.exe` beside the runtime and
 stage its configuration, help, and initial settings there. The launcher is

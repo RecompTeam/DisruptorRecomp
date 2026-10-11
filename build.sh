@@ -29,9 +29,14 @@ python3 "$ROOT/tools/patch_openbios_seeds.py" --framework "$FRAMEWORK"
 
 GENERATOR=""
 if command -v ninja >/dev/null 2>&1; then GENERATOR="-G Ninja"; fi
+# Named in CMake's own environment variables, a launcher also wraps every configure probe, which no cache reuses.
+LAUNCHER=""
+if [ -n "${DISRUPTOR_COMPILER_LAUNCHER:-}" ]; then
+    LAUNCHER="-DCMAKE_C_COMPILER_LAUNCHER=$DISRUPTOR_COMPILER_LAUNCHER -DCMAKE_CXX_COMPILER_LAUNCHER=$DISRUPTOR_COMPILER_LAUNCHER"
+fi
 
 # shellcheck disable=SC2086
-cmake -S "$FRAMEWORK/recompiler" -B "$FRAMEWORK/recompiler/build" $GENERATOR \
+cmake -S "$FRAMEWORK/recompiler" -B "$FRAMEWORK/recompiler/build" $GENERATOR $LAUNCHER \
     -DCMAKE_BUILD_TYPE=Release
 cmake --build "$FRAMEWORK/recompiler/build" --parallel \
     --target psxrecomp-game psxrecomp-bios
@@ -63,7 +68,8 @@ if [ -n "$WITHOUT_GAME" ]; then
         : > "$DISPATCH"
         trap 'rm -f "$DISPATCH"' EXIT
     fi
-    cmake -S . -B "$BUILD" -G Ninja -DCMAKE_BUILD_TYPE=Release \
+    # shellcheck disable=SC2086
+    cmake -S . -B "$BUILD" -G Ninja $LAUNCHER -DCMAKE_BUILD_TYPE=Release \
         -DPSX_RECOMP_UI=OFF -DPSX_ENABLE_VULKAN=OFF -DBUILD_TESTING=ON
     TARGETS=$(ninja -C "$BUILD" -t targets all)
     OBJECTS=$(printf '%s\n' "$TARGETS" | sed -n 's/^\(.*\.o\(bj\)\{0,1\}\): .*/\1/p' |
@@ -75,8 +81,9 @@ if [ -n "$WITHOUT_GAME" ]; then
     }
     # The launcher needs nothing of the game, so it is linked where it exists.
     case "$TARGETS" in *"disruptor-launcher: "*) TESTS="$TESTS disruptor-launcher" ;; esac
+    # A command line holds about 32 thousand characters on Windows and the object names alone are more: 100 names a call.
     # shellcheck disable=SC2086
-    ninja -C "$BUILD" $OBJECTS $TESTS
+    printf '%s\n' $OBJECTS $TESTS | xargs -n 100 ninja -C "$BUILD"
     ctest --test-dir "$BUILD" --output-on-failure --no-tests=error -LE retail
     # The retail contracts still check the sources when the image is not asked for.
     for contract in tests/test_*_contract.py; do
@@ -86,9 +93,9 @@ if [ -n "$WITHOUT_GAME" ]; then
     exit 0
 fi
 
-# shellcheck disable=SC2086
 BUILD="${DISRUPTOR_BUILD_DIRECTORY:-build}"
-cmake -S . -B "$BUILD" $GENERATOR -DCMAKE_BUILD_TYPE=Release \
+# shellcheck disable=SC2086
+cmake -S . -B "$BUILD" $GENERATOR $LAUNCHER -DCMAKE_BUILD_TYPE=Release \
     -DPSX_RECOMP_UI=OFF -DPSX_ENABLE_VULKAN=OFF
 cmake --build "$BUILD" --parallel
 ctest --test-dir "$BUILD" --output-on-failure
