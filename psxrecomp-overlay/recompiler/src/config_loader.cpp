@@ -2148,7 +2148,10 @@ UserSettings load_user_settings(const fs::path& path) {
 
     toml::value doc;
     try {
-        doc = toml::parse(path.string());
+        // Opened by its wide name: path.string() is UTF-8 under MinGW, which the narrow open reads as the ANSI page.
+        std::ifstream file(path, std::ios::binary);
+        if (!file) throw std::runtime_error("settings.toml could not be opened");
+        doc = toml::parse(file, "settings.toml");
     } catch (const std::exception&) {
         // Malformed file: fall back to all-defaults rather than refuse to boot,
         // but tell the caller so the user hears about it (and so the file can
