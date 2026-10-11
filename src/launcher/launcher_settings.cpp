@@ -73,86 +73,133 @@ constexpr const char* occlusion_key = "disruptor.ambient_occlusion";
 constexpr const char* aim_key = "disruptor.mouse_aim";
 
 template <auto Has, auto Value>
-constexpr Option toggle(const char* key, Page page, const wchar_t* label, int initial, const char* needs = nullptr) {
-    return {key, page, Kind::toggle, label, saved<Has>, read<Value>, write<Has, Value>, initial, 0, 1, {}, needs, Unit::none};
+constexpr Option toggle(const char* key, Page page, const wchar_t* label, int initial, const wchar_t* hint,
+                        const char* needs = nullptr) {
+    return {key, page, Kind::toggle, label, saved<Has>, read<Value>, write<Has, Value>, initial, 0, 1, {}, needs,
+            Unit::none, hint};
 }
 
-constexpr Option choice(const char* key, Page page, const wchar_t* label, int initial,
+constexpr Option choice(const char* key, Page page, const wchar_t* label, int initial, const wchar_t* hint,
                         std::span<const wchar_t* const> choices, Saved saved, Get get, Set set) {
     return {key, page, Kind::choice, label, saved, get, set, initial, 0, static_cast<int>(choices.size()) - 1,
-            choices, nullptr, Unit::none};
+            choices, nullptr, Unit::none, hint};
 }
 
-constexpr Option slider(const char* key, Page page, const wchar_t* label, int initial, int lowest, int highest,
-                        Unit unit, Saved saved, Get get, Set set, const char* needs = nullptr) {
-    return {key, page, Kind::slider, label, saved, get, set, initial, lowest, highest, {}, needs, unit};
+constexpr Option slider(const char* key, Page page, const wchar_t* label, int initial, const wchar_t* hint,
+                        int lowest, int highest, Unit unit, Saved saved, Get get, Set set,
+                        const char* needs = nullptr) {
+    return {key, page, Kind::slider, label, saved, get, set, initial, lowest, highest, {}, needs, unit, hint};
 }
 
 constexpr Option option_list[] = {
-    choice("video.fullscreen", Page::display, L"Display mode", 0, display_modes,
+    choice("video.fullscreen", Page::display, L"Display mode", 0,
+           L"A window, a borderless window the size of the screen, or exclusive fullscreen. Alt+Enter "
+           L"switches between a window and fullscreen while playing.", display_modes,
            saved<&Settings::has_fullscreen>, read<&Settings::fullscreen>,
            write<&Settings::has_fullscreen, &Settings::fullscreen>),
-    choice("video.aspect_ratio", Page::display, L"Aspect ratio", 0, aspects,
+    choice("video.aspect_ratio", Page::display, L"Aspect ratio", 0,
+           L"4:3 is the original picture. The wider choices show more of the world at the sides. Match "
+           L"window follows the window's shape, up to 32:9. Movies stay 4:3.", aspects,
            aspect_saved, aspect, set_aspect),
-    choice("video.supersampling", Page::display, L"Internal resolution scale", 3, scales,
+    choice("video.supersampling", Page::display, L"Internal resolution scale", 3,
+           L"Draws the picture at this multiple of the original resolution. Higher is sharper. What it "
+           L"costs the graphics card grows roughly with the square of the value.", scales,
            saved<&Settings::has_supersampling>, scale, set_scale),
-    choice("video.vsync", Page::display, L"VSync", 2, vsyncs, saved<&Settings::has_vsync>, vsync, set_vsync),
-    slider("disruptor.hud_scale", Page::display, L"HUD size", 100, 50, 100, Unit::percent,
+    choice("video.vsync", Page::display, L"VSync", 2,
+           L"Synchronised waits for the display, so the picture never tears. Immediate does not wait. "
+           L"Adaptive waits only while the game keeps up with the display.",
+           vsyncs, saved<&Settings::has_vsync>, vsync, set_vsync),
+    slider("disruptor.hud_scale", Page::display, L"HUD size", 100,
+           L"Widescreen only. Shrinks the health and ammunition displays toward their screen edges. "
+           L"The weapon keeps its size.", 50, 100, Unit::percent,
            saved<&Settings::has_hud_scale>, read<&Settings::hud_scale>,
            write<&Settings::has_hud_scale, &Settings::hud_scale>),
 
     toggle<&Settings::has_geometry_correction, &Settings::geometry_correction>(
-        "disruptor.geometry_correction", Page::enhancements, L"Exact-provenance geometry", 1),
+        "disruptor.geometry_correction", Page::enhancements, L"Exact-provenance geometry", 1,
+        L"Places polygons from the game's own arithmetic before it is rounded to whole pixels, which "
+        L"steadies the PlayStation's wobbling edges. Other options need it."),
     toggle<&Settings::has_perspective_textures, &Settings::perspective_textures>(
-        "disruptor.perspective_textures", Page::enhancements, L"Perspective-correct world textures", 1, geometry_key),
+        "disruptor.perspective_textures", Page::enhancements, L"Perspective-correct world textures", 1,
+        L"Draws wall and floor textures in true perspective. The PlayStation's own way bends them near "
+        L"the viewer.", geometry_key),
     toggle<&Settings::has_gap_filling, &Settings::gap_filling>(
-        "disruptor.gap_filling", Page::enhancements, L"Gap filling", 1, geometry_key),
+        "disruptor.gap_filling", Page::enhancements, L"Gap filling", 1,
+        L"Closes hairline gaps between polygons and keeps the game's own patches off their neighbours.", geometry_key),
     toggle<&Settings::has_depth_sorted_world, &Settings::depth_sorted_world>(
-        "disruptor.depth_sorted_world", Page::enhancements, L"Depth-sorted world", 0, geometry_key),
-    choice("disruptor.improved_shadows", Page::enhancements, L"Shadows", 0, shadows,
+        "disruptor.depth_sorted_world", Page::enhancements, L"Depth-sorted world", 0,
+        L"Draws world polygons by their depth where the game's own order puts a far one over a near "
+        L"one.", geometry_key),
+    choice("disruptor.improved_shadows", Page::enhancements, L"Shadows", 0,
+           L"Vanilla is the game's own shape. Improved lays a shadow flat on the floor: as wide as the "
+           L"game makes it and as tall as the floor's perspective gives. Improved needs exact "
+           L"geometry.", shadows,
            saved<&Settings::has_improved_shadows>, read<&Settings::improved_shadows>,
            write<&Settings::has_improved_shadows, &Settings::improved_shadows>),
     toggle<&Settings::has_frame_unlock, &Settings::frame_unlock>(
-        "disruptor.frame_unlock", Page::enhancements, L"60 FPS gameplay", 0),
+        "disruptor.frame_unlock", Page::enhancements, L"60 FPS gameplay", 0,
+        L"Lets the game run at up to 60 frames a second in place of its original rate."),
     toggle<&Settings::has_frame_interpolation, &Settings::frame_interpolation>(
-        "video.frame_interpolation", Page::enhancements, L"In-between frames", 0, geometry_key),
+        "video.frame_interpolation", Page::enhancements, L"In-between frames", 0,
+        L"Shows extra pictures between the game's frames, built from the game's own geometry, for "
+        L"smoother motion.", geometry_key),
     slider("video.frame_interpolation_fps", Page::enhancements, L"In-between frame rate", 0,
+           L"Pictures shown per second while in-between frames are on.",
            kDisruptorPresentRateLowest, kDisruptorPresentRateHighest, Unit::frames,
            saved<&Settings::has_frame_interpolation_fps>, read<&Settings::frame_interpolation_fps>,
            write<&Settings::has_frame_interpolation_fps, &Settings::frame_interpolation_fps>, frames_key),
     toggle<&Settings::has_skip_intro, &Settings::skip_intro>(
-        "disruptor.skip_intro", Page::enhancements, L"Skip the logos and the title movie", 0),
+        "disruptor.skip_intro", Page::enhancements, L"Skip the logos and the title movie", 0,
+        L"Starts at the main menu without the logos and the title movie. Escape skips a logo or a "
+        L"movie either way."),
 
     toggle<&Settings::has_mouse_aim, &Settings::mouse_aim>(
-        "disruptor.mouse_aim", Page::controls, L"Horizontal mouse aim", 1),
+        "disruptor.mouse_aim", Page::controls, L"Horizontal mouse aim", 1,
+        L"Turns the view with the mouse. In the game a middle-click captures the mouse, and a middle- "
+        L"click or Escape releases it."),
     toggle<&Settings::has_modern_controls, &Settings::modern_controls>(
-        "disruptor.modern_controls", Page::controls, L"Modern keyboard and mouse controls", 1),
-    slider("disruptor.horizontal_sensitivity", Page::controls, L"Horizontal sensitivity", 80, 5, 2000, Unit::thousandths,
+        "disruptor.modern_controls", Page::controls, L"Modern keyboard and mouse controls", 1,
+        L"WASD moves, the left mouse button fires, the right one uses psionics, Space jumps and E "
+        L"interacts."),
+    slider("disruptor.horizontal_sensitivity", Page::controls, L"Horizontal sensitivity", 80,
+           L"How far the view turns for a movement of the mouse.", 5, 2000, Unit::thousandths,
            saved<&Settings::has_horizontal_sensitivity>, thousandths<&Settings::horizontal_sensitivity>,
            set_thousandths<&Settings::has_horizontal_sensitivity, &Settings::horizontal_sensitivity>),
     toggle<&Settings::has_invert_horizontal, &Settings::invert_horizontal>(
-        "disruptor.invert_horizontal", Page::controls, L"Invert horizontal mouse", 0),
+        "disruptor.invert_horizontal", Page::controls, L"Invert horizontal mouse", 0,
+        L"Turns the view left when the mouse moves right."),
     toggle<&Settings::has_high_precision_camera, &Settings::high_precision_camera>(
-        "disruptor.high_precision_camera", Page::controls, L"Smooth mouse turning", 0, aim_key),
+        "disruptor.high_precision_camera", Page::controls, L"Smooth mouse turning", 0,
+        L"The game turns in 256 steps of a circle. With this on, the picture also turns by the part of "
+        L"a step in between. Needs exact geometry.", aim_key),
     toggle<&Settings::has_vertical_look, &Settings::vertical_look>(
-        "disruptor.vertical_look", Page::controls, L"Vertical mouse look", 0),
-    slider("disruptor.vertical_sensitivity", Page::controls, L"Vertical sensitivity", 80, 5, 2000, Unit::thousandths,
+        "disruptor.vertical_look", Page::controls, L"Vertical mouse look", 0,
+        L"Looks up and down with the mouse, to about 31 degrees each way. The original game has no "
+        L"such view. Experimental."),
+    slider("disruptor.vertical_sensitivity", Page::controls, L"Vertical sensitivity", 80,
+           L"How far the view tilts for a movement of the mouse.", 5, 2000, Unit::thousandths,
            saved<&Settings::has_vertical_sensitivity>, thousandths<&Settings::vertical_sensitivity>,
            set_thousandths<&Settings::has_vertical_sensitivity, &Settings::vertical_sensitivity>),
     toggle<&Settings::has_invert_vertical, &Settings::invert_vertical>(
-        "disruptor.invert_vertical", Page::controls, L"Invert vertical mouse", 0),
+        "disruptor.invert_vertical", Page::controls, L"Invert vertical mouse", 0,
+        L"Looks down when the mouse moves forward."),
 
-    slider("audio.master_volume", Page::audio, L"Master volume", 100, 0, 100, Unit::percent,
+    slider("audio.master_volume", Page::audio, L"Master volume", 100,
+           L"The loudness of everything the game plays.", 0, 100, Unit::percent,
            saved<&Settings::has_master_volume>, read<&Settings::master_volume>,
            write<&Settings::has_master_volume, &Settings::master_volume>),
-    toggle<&Settings::has_audio_muted, &Settings::audio_muted>("audio.muted", Page::audio, L"Mute all audio", 0),
+    toggle<&Settings::has_audio_muted, &Settings::audio_muted>("audio.muted", Page::audio, L"Mute all audio", 0,
+        L"Silences the game and keeps the volume setting."),
 
     toggle<&Settings::has_ambient_occlusion, &Settings::ambient_occlusion>(
-        "disruptor.ambient_occlusion", Page::experimental, L"Ambient occlusion", 0, geometry_key),
-    slider("disruptor.occlusion_reach", Page::experimental, L"Occlusion reach", 160, 50, 800, Unit::none,
+        "disruptor.ambient_occlusion", Page::experimental, L"Ambient occlusion", 0,
+        L"Shades corners and the floor under things. Unfinished.", geometry_key),
+    slider("disruptor.occlusion_reach", Page::experimental, L"Occlusion reach", 160,
+           L"How far from a corner or an object the shade spreads.", 50, 800, Unit::none,
            saved<&Settings::has_occlusion_reach>, read<&Settings::occlusion_reach>,
            write<&Settings::has_occlusion_reach, &Settings::occlusion_reach>, occlusion_key),
-    slider("disruptor.occlusion_strength", Page::experimental, L"Occlusion strength", 80, 0, 300, Unit::percent,
+    slider("disruptor.occlusion_strength", Page::experimental, L"Occlusion strength", 80,
+           L"How dark the shade is.", 0, 300, Unit::percent,
            saved<&Settings::has_occlusion_strength>, read<&Settings::occlusion_strength>,
            write<&Settings::has_occlusion_strength, &Settings::occlusion_strength>, occlusion_key),
 };

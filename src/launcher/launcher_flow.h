@@ -79,6 +79,9 @@ std::wstring quote(const std::wstring& argument);
 std::wstring game_command(const std::filesystem::path& root, const VerifiedDisc& disc);
 
 constexpr int slider_steps = 200;
+constexpr int page_slots = 7; // rows a settings page shows at once
+// The first row a page shows after a move of `step` rows.
+int scrolled_to(int first, int step, int rows);
 std::wstring value_text(const Option& option, int value);
 // Sensitivity spans 0.005 to 2.000, so its slider is logarithmic like the in-game one.
 int to_position(const Option& option, int value, int highest);

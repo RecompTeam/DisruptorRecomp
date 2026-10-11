@@ -3,6 +3,8 @@
 
 #include <windows.h>
 
+#include <cwchar>
+
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -53,6 +55,7 @@ void table() {
         if (one.kind == Kind::toggle) require(one.initial == 0 || one.initial == 1, "a toggle starts as neither");
         if (one.needs) require(option(one.needs).kind == Kind::toggle && &option(one.needs) != &one, "a row needs no toggle");
         require(static_cast<size_t>(one.page) < page_labels().size(), "a row is on no page");
+        require(one.hint && std::wcslen(one.hint) >= 20 && std::wcslen(one.hint) <= 240, "a row has no hint to show");
     }
     require(presets().size() == 2, "the two presets are expected");
     for (const auto& preset : presets())

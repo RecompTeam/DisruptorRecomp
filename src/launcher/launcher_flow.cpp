@@ -138,6 +138,8 @@ std::wstring game_command(const std::filesystem::path& root, const VerifiedDisc&
         quote(disc.profile->game_config) + L" --disc " + quote(disc.cue.lexically_relative(root).wstring());
 }
 
+int scrolled_to(int first, int step, int rows) { return std::clamp(first + step, 0, std::max(0, rows - page_slots)); }
+
 std::wstring value_text(const Option& option, int value) {
     wchar_t text[32] = L"";
     if (option.unit == Unit::percent) swprintf(text, 32, L"%d%%", value);

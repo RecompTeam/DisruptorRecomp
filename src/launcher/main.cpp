@@ -114,7 +114,7 @@ std::optional<fs::path> pick_image(HWND owner, const wchar_t* title) {
 
 struct Update { std::wstring status; unsigned percent; };
 struct Placed { HWND window; int x, y, width, height; bool heading; };
-struct Row { const Option* option; HWND label = nullptr, control = nullptr, value = nullptr; };
+struct Row { const Option* option; int order = 0; HWND label = nullptr, control = nullptr, value = nullptr; };
 
 struct App {
     fs::path root;
@@ -122,7 +122,8 @@ struct App {
     HWND window = nullptr, status = nullptr, progress = nullptr, disc_text = nullptr;
     HWND browse = nullptr, play = nullptr, cancel = nullptr, auto_play = nullptr;
     HWND language = nullptr, language_note = nullptr, add_disc = nullptr, remove_disc = nullptr;
-    HWND tabs = nullptr, page_note = nullptr, reset = nullptr;
+    HWND tabs = nullptr, page_note = nullptr, reset = nullptr, scroll = nullptr, tips = nullptr;
+    std::vector<int> page_rows, first_row;
     std::vector<HWND> preset_buttons;
     std::vector<Placed> placed;
     std::vector<Row> rows;
@@ -205,6 +206,12 @@ struct App {
         if (heading_font) DeleteObject(heading_font);
         body_font = body;
         heading_font = heading;
+        SendMessageW(tips, TTM_SETMAXTIPWIDTH, 0, scale(380));
+        for (int slot = 0; slot < page_slots; ++slot) {
+            TTTOOLINFOW band{sizeof(band), 0, tabs, static_cast<UINT_PTR>(slot)};
+            band.rect = {scale(12), scale(38 + 28 * slot), scale(594), scale(38 + 28 * (slot + 1))};
+            SendMessageW(tips, TTM_NEWTOOLRECTW, 0, reinterpret_cast<LPARAM>(&band));
+        }
     }
 
     void show_languages() {
@@ -216,8 +223,40 @@ struct App {
         SetWindowTextW(language_note, list.note.c_str());
         EnableWindow(remove_disc, editable() && list.selected > 0);
     }
+    int page() const {
+        const int chosen = static_cast<int>(SendMessageW(tabs, TCM_GETCURSEL, 0, 0));
+        return std::clamp(chosen, 0, static_cast<int>(page_rows.size()) - 1);
+    }
+    void put_row(const Row& row, int slot) {
+        const int dpi = static_cast<int>(GetDpiForWindow(window)), y = 38 + 28 * slot;
+        for (auto& item : placed) {
+            if (item.window != row.label && item.window != row.control && item.window != row.value) continue;
+            item.y = item.window == row.control ? y : y + 4;
+            SetWindowPos(item.window, nullptr, MulDiv(item.x, dpi, 96), MulDiv(item.y, dpi, 96), 0, 0,
+                         SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+    }
+    // A disabled control and a label take no mouse, so the row's band on the page carries the hint as well.
+    void tip_of(int slot, const wchar_t* hint) {
+        TTTOOLINFOW band{sizeof(band), 0, tabs, static_cast<UINT_PTR>(slot)};
+        band.lpszText = const_cast<wchar_t*>(hint);
+        SendMessageW(tips, TTM_UPDATETIPTEXTW, 0, reinterpret_cast<LPARAM>(&band));
+    }
+    void scroll_page(int step) {
+        const int shown = page(), first = scrolled_to(first_row[shown], step, page_rows[shown]);
+        if (first == first_row[shown]) return;
+        first_row[shown] = first;
+        show_settings();
+    }
+    void scroll_request(int code, int thumb) {
+        const int first = first_row[page()];
+        scroll_page(code == SB_LINEUP ? -1 : code == SB_LINEDOWN ? 1 : code == SB_PAGEUP ? -page_slots
+            : code == SB_PAGEDOWN ? page_slots : code == SB_TOP ? -first : code == SB_BOTTOM ? page_rows[page()]
+            : code == SB_THUMBTRACK || code == SB_THUMBPOSITION ? thumb - first : 0);
+    }
     void show_settings() {
-        const int page = static_cast<int>(SendMessageW(tabs, TCM_GETCURSEL, 0, 0));
+        const int page = this->page(), first = first_row[page];
+        for (int slot = page_rows[page] - first; slot < page_slots; ++slot) tip_of(slot, L"");
         for (const auto& row : rows) {
             const Option& option = *row.option;
             const int value = settings.shown(option), highest = settings.highest(option);
@@ -233,13 +272,24 @@ struct App {
                 SetWindowTextW(row.value, value_text(option, value).c_str());
             }
             const bool on = editable() && settings.applies(option);
-            const int shown = static_cast<int>(option.page) == page ? SW_SHOW : SW_HIDE;
+            const int slot = row.order - first;
+            const bool here = static_cast<int>(option.page) == page && slot >= 0 && slot < page_slots;
+            if (here) put_row(row, slot);
+            const int shown = here ? SW_SHOW : SW_HIDE;
+            if (here) tip_of(slot, option.hint);
             for (HWND part : {row.label, row.control, row.value}) {
                 if (!part) continue;
                 EnableWindow(part, on);
                 ShowWindow(part, shown);
             }
         }
+        SCROLLINFO range{sizeof(range), SIF_RANGE | SIF_PAGE | SIF_POS, 0, page_rows[page] - 1,
+                         static_cast<UINT>(page_slots), first, 0};
+        SetScrollInfo(scroll, SB_CTL, &range, TRUE);
+        ShowWindow(scroll, page_rows[page] > page_slots ? SW_SHOW : SW_HIDE);
+        // A row scrolled away with the keyboard on it would leave Tab nowhere to go from.
+        if (HWND focus = GetFocus(); focus && GetParent(focus) == tabs && !IsWindowVisible(focus))
+            SetFocus(page_rows[page] > page_slots ? scroll : tabs);
         SetWindowTextW(page_note, page_notes[std::clamp(page, 0, 3)]);
     }
     void controls() {
@@ -319,9 +369,16 @@ struct App {
 
 // Controls on a tab page are the tab control's children, so their messages are passed on to the window.
 LRESULT CALLBACK pass_to_window(HWND tab, UINT message, WPARAM wparam, LPARAM lparam, UINT_PTR, DWORD_PTR) {
-    if (message == WM_COMMAND || message == WM_HSCROLL || message == WM_CTLCOLORSTATIC || message == WM_CTLCOLORBTN)
+    if (message == WM_COMMAND || message == WM_HSCROLL || message == WM_VSCROLL || message == WM_MOUSEWHEEL ||
+        message == WM_CTLCOLORSTATIC || message == WM_CTLCOLORBTN)
         return SendMessageW(GetParent(tab), message, wparam, lparam);
     return DefSubclassProc(tab, message, wparam, lparam);
+}
+
+// Under the pointer a list or a slider takes the wheel for itself and changes, where the page was meant to move.
+LRESULT CALLBACK wheel_to_window(HWND control, UINT message, WPARAM wparam, LPARAM lparam, UINT_PTR, DWORD_PTR) {
+    if (message == WM_MOUSEWHEEL) return SendMessageW(GetAncestor(control, GA_ROOT), message, wparam, lparam);
+    return DefSubclassProc(control, message, wparam, lparam);
 }
 
 void create_controls(App& app) {
@@ -357,9 +414,9 @@ void create_controls(App& app) {
     std::vector<int> rows_on_page(page_labels().size(), 0);
     index = 0;
     for (const auto& option : options()) {
-        const int y = 38 + 28 * rows_on_page[static_cast<int>(option.page)]++;
+        const int order = rows_on_page[static_cast<int>(option.page)]++, y = 38 + 28 * std::min(order, page_slots - 1);
         const int id = option_base + index++;
-        Row row{&option};
+        Row row{&option, order};
         if (option.kind == Kind::toggle) {
             row.control = app.add(app.tabs, L"BUTTON", option.label, BS_AUTOCHECKBOX | WS_TABSTOP, 0,
                                   18, y, 560, 24, id);
@@ -373,11 +430,30 @@ void create_controls(App& app) {
             } else {
                 row.control = app.add(app.tabs, TRACKBAR_CLASSW, L"", TBS_HORZ | TBS_NOTICKS | WS_TABSTOP, 0,
                                       274, y, 256, 26, id);
-                row.value = app.add(app.tabs, L"STATIC", L"", SS_LEFT, 0, 538, y + 4, 70, 20);
+                row.value = app.add(app.tabs, L"STATIC", L"", SS_LEFT, 0, 538, y + 4, 54, 20);
             }
+            SetWindowSubclass(row.control, wheel_to_window, 2, 0);
         }
         app.rows.push_back(row);
     }
+    app.tips = CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, nullptr, WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX,
+                               CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, window, nullptr, nullptr,
+                               nullptr);
+    SendMessageW(app.tips, TTM_SETDELAYTIME, TTDT_AUTOPOP, 20000);
+    for (const auto& row : app.rows) {
+        TTTOOLINFOW tool{sizeof(tool), TTF_IDISHWND | TTF_SUBCLASS, app.tabs};
+        tool.uId = reinterpret_cast<UINT_PTR>(row.control);
+        tool.lpszText = const_cast<wchar_t*>(row.option->hint);
+        SendMessageW(app.tips, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&tool));
+    }
+    for (int slot = 0; slot < page_slots; ++slot) {
+        TTTOOLINFOW band{sizeof(band), TTF_SUBCLASS, app.tabs, static_cast<UINT_PTR>(slot)};
+        band.lpszText = const_cast<wchar_t*>(L"");
+        SendMessageW(app.tips, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&band));
+    }
+    app.page_rows = rows_on_page;
+    app.first_row.assign(rows_on_page.size(), 0);
+    app.scroll = app.add(app.tabs, L"SCROLLBAR", L"", SBS_VERT | WS_TABSTOP, 0, 596, 38, 16, 28 * page_slots - 4);
     app.page_note = app.add(app.tabs, L"STATIC", L"", SS_LEFT, 0, 18, 238, 584, 20);
 
     app.add(window, L"STATIC", L"Presets", SS_LEFT, 0, 30, 486, 86, 20);
@@ -524,6 +600,16 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lp
                 app->saved(app->settings.set(*row.option, value));
         }
         return 0;
+    case WM_VSCROLL:
+        if (reinterpret_cast<HWND>(lparam) == app->scroll) app->scroll_request(LOWORD(wparam), HIWORD(wparam));
+        return 0;
+    case WM_MOUSEWHEEL: {
+        RECT pages{};
+        GetWindowRect(app->tabs, &pages);
+        const POINT pointer{static_cast<short>(LOWORD(lparam)), static_cast<short>(HIWORD(lparam))};
+        if (PtInRect(&pages, pointer)) app->scroll_page(GET_WHEEL_DELTA_WPARAM(wparam) > 0 ? -1 : 1);
+        return 0;
+    }
     case WM_NOTIFY:
         if (reinterpret_cast<NMHDR*>(lparam)->hwndFrom == app->tabs &&
             reinterpret_cast<NMHDR*>(lparam)->code == TCN_SELCHANGE)
