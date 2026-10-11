@@ -3,6 +3,7 @@
 
 #include <windows.h>
 
+#include <cstring>
 #include <cwchar>
 
 #include <filesystem>
@@ -54,14 +55,24 @@ void table() {
                     one.highest == static_cast<int>(one.choices.size()) - 1, "a choice starts outside its list");
         if (one.kind == Kind::toggle) require(one.initial == 0 || one.initial == 1, "a toggle starts as neither");
         if (one.needs) require(option(one.needs).kind == Kind::toggle && &option(one.needs) != &one, "a row needs no toggle");
-        require(static_cast<size_t>(one.page) < page_labels().size(), "a row is on no page");
-        require(one.hint && std::wcslen(one.hint) >= 20 && std::wcslen(one.hint) <= 240, "a row has no hint to show");
+        require(one.hint && std::strlen(one.hint) >= 20 && std::strlen(one.hint) <= 240, "a row has no hint to show");
     }
     require(presets().size() == 2, "the two presets are expected");
     for (const auto& preset : presets())
         for (const auto& value : preset.values)
             require(value.value >= option(value.key).lowest && value.value <= option(value.key).highest,
                     "a preset sets a value outside its option");
+}
+
+void placements() {
+    std::set<std::string> placed;
+    for (const auto& row : layout()) {
+        require(find_option(row.key) != nullptr, "a row names no option");
+        require(placed.insert(row.key).second, "an option is on two rows");
+        require(static_cast<size_t>(row.page) < page_labels().size(), "a row is on no page");
+    }
+    require(placed.size() == options().size(), "an option is on no page");
+    require(wide("caf\xC3\xA9") == L"café" && wide("").empty(), "an option's text is read as UTF-8");
 }
 
 void absent(const fs::path& folder) {
@@ -416,6 +427,7 @@ int main() {
         fs::remove_all(folder);
         fs::create_directories(folder);
         table();
+        placements();
         absent(folder);
         one_change(folder);
         round_trip(folder);

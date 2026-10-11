@@ -28,6 +28,7 @@ renderer = read("psxrecomp-overlay/runtime/src/gpu_gl_renderer.c")
 presenter = read("psxrecomp-overlay/runtime/src/gpu_gl_temporal.c.inc")
 menu = read("src/game/ui/dev_menu.cpp")
 launcher = read("src/launcher/launcher_settings.cpp")
+options = read("src/game/settings/options.cpp")
 loader = read("psxrecomp-overlay/recompiler/src/config_loader.cpp")
 
 require(
@@ -160,9 +161,11 @@ require(
     "the settings file keeps the choice, which is off until made",
 )
 
-row = between(launcher, '"disruptor.depth_sorted_world", Page::enhancements, L"Depth-sorted world", 0,', "),\n")
+row = between(options, '"disruptor.depth_sorted_world", "Depth-sorted world", 0,', "),\n")
 require(
-    row.endswith("geometry_key") and launcher.count('"disruptor.depth_sorted_world"') == 1,
+    row.endswith("geometry_key")
+    and options.count('"disruptor.depth_sorted_world"') == launcher.count('"disruptor.depth_sorted_world"') == 1
+    and '    {"disruptor.depth_sorted_world", Page::enhancements},\n' in launcher,
     "the launcher offers it on the Enhancements page, off at first and only with geometry correction",
 )
 

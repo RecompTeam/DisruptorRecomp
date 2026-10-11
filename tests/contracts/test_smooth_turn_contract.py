@@ -27,6 +27,7 @@ gpu = read("psxrecomp-overlay/runtime/src/gpu.c")
 mouse = read("src/game/input/mouse_aim.cpp")
 menu = read("src/game/ui/dev_menu.cpp")
 launcher = read("src/launcher/launcher_settings.cpp")
+options = read("src/game/settings/options.cpp")
 
 require(
     overlay.count("+runtime/include/gpu_turned_perspective.h\n") == 1
@@ -117,11 +118,12 @@ require(
     "into the file's settings, applied at the next start with the environment first, and applied when another run saved it",
 )
 
-row = between(launcher, '"disruptor.high_precision_camera", Page::controls, L"Smooth mouse turning", 0,', "),\n")
+row = between(options, '"disruptor.high_precision_camera", "Smooth mouse turning", 0,', "),\n")
 require(
     row.endswith("aim_key")
-    and 'constexpr const char* aim_key = "disruptor.mouse_aim";\n' in launcher
-    and launcher.count('"disruptor.high_precision_camera"') == 1,
+    and 'constexpr const char* aim_key = "disruptor.mouse_aim";\n' in options
+    and options.count('"disruptor.high_precision_camera"') == launcher.count('"disruptor.high_precision_camera"') == 1
+    and '    {"disruptor.high_precision_camera", Page::controls},\n' in launcher,
     "the launcher offers it on the Controls page, off at first and only with mouse aim",
 )
 

@@ -24,6 +24,7 @@ cmake = read("CMakeLists.txt")
 renderer = read("psxrecomp-overlay/runtime/src/gpu_gl_renderer.c")
 menu = read("src/game/ui/dev_menu.cpp")
 launcher = read("src/launcher/launcher_settings.cpp")
+options = read("src/game/settings/options.cpp")
 loader = read("psxrecomp-overlay/recompiler/src/config_loader.cpp")
 
 require("    disruptor_contract(gap_filling)\n" in cmake, "this contract is registered")
@@ -177,9 +178,11 @@ require(
     "the settings file keeps the choice, which is on until changed",
 )
 
-row = between(launcher, '"disruptor.gap_filling", Page::enhancements, L"Gap filling", 1,', "),\n")
+row = between(options, '"disruptor.gap_filling", "Gap filling", 1,', "),\n")
 require(
-    row.endswith("geometry_key") and launcher.count('"disruptor.gap_filling"') == 1,
+    row.endswith("geometry_key")
+    and options.count('"disruptor.gap_filling"') == launcher.count('"disruptor.gap_filling"') == 1
+    and '    {"disruptor.gap_filling", Page::enhancements},\n' in launcher,
     "the launcher offers it on the Enhancements page, on at first and only with geometry correction",
 )
 

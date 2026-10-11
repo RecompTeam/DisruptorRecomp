@@ -38,6 +38,7 @@ def plain_values(text: str) -> dict[str, str]:
 
 
 table = read("src/launcher/launcher_settings.cpp")
+options = read("src/game/settings/options.cpp")
 window = read("src/launcher/main.cpp")
 region = read("src/launcher/region_disc.cpp")
 launcher_cmake = read("src/launcher/CMakeLists.txt")
@@ -45,10 +46,20 @@ cmake = read("CMakeLists.txt")
 loader = read("psxrecomp-overlay/recompiler/src/config_loader.cpp")
 menu = read("src/game/ui/dev_menu.cpp") + read("src/game/frame/present_rate.cpp")
 
-rows = re.findall(r'\b(toggle|choice|slider)(?:<[^>]*>)?\(\s*"([\w.]+)", Page::(\w+), L"([^"]+)", (-?\d+)', table)
-keys = [key for _, key, _, _, _ in rows]
-initial = {key: int(value) for _, key, _, _, value in rows}
-require(len(rows) == 27 and len(set(keys)) == 27, "the launcher's table must hold its 27 rows, each key once")
+ROW = r'\b(toggle|choice|slider)(?:<[^>]*>)?\(\s*"([\w.]+)", "([^"]+)", (-?\d+)'
+rows = re.findall(ROW, options)
+keys = [key for _, key, _, _ in rows]
+initial = {key: int(value) for _, key, _, value in rows}
+require(len(rows) == 27 and len(set(keys)) == 27, "the shared table must hold its 27 options, each key once")
+placed = re.findall(r'^    \{"([\w.]+)", Page::\w+\},$', table, re.MULTILINE)
+require(
+    sorted(placed) == sorted(keys)
+    and not re.findall(ROW, table)
+    and '    "${PROJECT_SOURCE_DIR}/src/game/settings/options.cpp")\n' in launcher_cmake
+    and "std::span<const Placement> layout() { return placed; }\n" in table
+    and "    for (const auto& placement : layout()) {\n        const Option& option = *find_option(placement.key);\n" in window,
+    "the launcher puts each shared option on one page and describes none itself",
+)
 
 writer = loader[loader.index("bool save_user_settings(") :]
 saved, section = set(), ""
@@ -65,14 +76,14 @@ require(
     f"keys listed here are no longer saved: {sorted((NOT_OFFERED | COVERED) - saved)}",
 )
 
-for kind, key, _, label, _ in rows:
+for kind, key, label, _ in rows:
     require(f'"{label}"' in menu, f"the row {key} must be named as the in-game menu names it: {label}")
 for label in (
     "Windowed", "Borderless fullscreen", "Exclusive fullscreen", "16:9", "21:9", "32:9", "Match window (up to 32:9)",
     "1x (native)", "8x", "Adaptive", "Immediate", "Synchronised",
 ):
-    require(f'L"{label}"' in table and f'"{label}"' in menu, f"the choice {label} must read as in the in-game menu")
-require('L"Vanilla", L"Improved"' in table and '"Vanilla\\0Improved\\0"' in menu, "the shadow choices must match")
+    require(f'"{label}"' in options and f'"{label}"' in menu, f"the choice {label} must read as in the in-game menu")
+require('"Vanilla", "Improved"' in options and '"Vanilla\\0Improved\\0"' in menu, "the shadow choices must match")
 
 shipped = plain_values(read("release/windows/settings.toml"))
 require(not set(shipped) - set(keys), f"the shipped settings.toml sets keys the launcher does not show: {sorted(set(shipped) - set(keys))}")
