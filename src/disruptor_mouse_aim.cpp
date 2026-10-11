@@ -83,6 +83,7 @@ struct MouseAimState {
     bool high_precision_camera = false;
     bool configured = false;
     bool captured = false;
+    bool recapture_on_focus = false;
     bool middle_was_down = false;
     bool escape_was_down = false;
     bool invert_horizontal = false;
@@ -569,14 +570,28 @@ void mouse_aim_frame() {
     const uint32_t buttons = get_mouse_buttons();
     const bool middle_down = (buttons & SDL_BUTTON_MMASK) != 0;
 
-    if (g_mouse.captured &&
-        (SDL_GetWindowFlags(sdl_window) & SDL_WINDOW_INPUT_FOCUS) == 0) {
-        set_capture(false, "focus-lost-release");
-    } else if (middle_down && !g_mouse.middle_was_down) {
-        set_capture(!g_mouse.captured,
-                    g_mouse.captured ? "middle-release" : "middle-capture");
-    } else if (g_mouse.captured && escape_down && !g_mouse.escape_was_down) {
+    const bool focused =
+        (SDL_GetWindowFlags(sdl_window) & SDL_WINDOW_INPUT_FOCUS) != 0;
+    if (escape_down && !g_mouse.escape_was_down &&
+        (g_mouse.captured || g_mouse.recapture_on_focus)) {
+        /* The player's key and click come before the focus branches: on the
+         * frame focus goes or comes back those would take them and the mouse
+         * would return uncalled. */
+        g_mouse.recapture_on_focus = false;
         set_capture(false, "escape-release");
+    } else if (middle_down && !g_mouse.middle_was_down) {
+        /* A capture that waits for focus counts as held: the click gives it up. */
+        const bool held = g_mouse.captured || g_mouse.recapture_on_focus;
+        g_mouse.recapture_on_focus = false;
+        set_capture(!held, held ? "middle-release" : "middle-capture");
+    } else if (g_mouse.captured && !focused) {
+        set_capture(false, "focus-lost-release");
+        g_mouse.recapture_on_focus = !g_mouse.captured;
+    } else if (g_mouse.recapture_on_focus && focused) {
+        /* The player's own choice stands across Alt+Tab: only a middle click
+         * or Escape gives the mouse up for good. */
+        g_mouse.recapture_on_focus = false;
+        set_capture(true, "focus-regained-capture");
     }
 
     g_mouse.middle_was_down = middle_down;
@@ -866,6 +881,7 @@ extern "C" int disruptor_mouse_captured(void) {
 extern "C" int disruptor_mouse_set_captured(int captured) {
     load_configuration();
     const bool next = captured != 0;
+    g_mouse.recapture_on_focus = false;
     if (next && !g_mouse.mouse_aim_enabled &&
         !g_mouse.vertical_look_enabled &&
         !g_mouse.modern_controls_enabled) {
