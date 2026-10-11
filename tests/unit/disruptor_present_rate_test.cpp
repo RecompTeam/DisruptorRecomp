@@ -1,4 +1,4 @@
-#include "../../src/disruptor_present_rate.h"
+#include "../../src/game/frame/present_rate.h"
 
 #include <cstdint>
 #include <cstdlib>
@@ -97,7 +97,7 @@ bool SliderInt(const char *, int *value, int lowest, int highest, const char *, 
 void TextDisabled(const char *text, ...) { g_slider.text = text; }
 }  // namespace ImGui
 
-#include "../../src/disruptor_present_rate.cpp"
+#include "../../src/game/frame/present_rate.cpp"
 
 namespace {
 

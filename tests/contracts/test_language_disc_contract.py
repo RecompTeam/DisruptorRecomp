@@ -65,23 +65,23 @@ def require(condition: bool, message: str) -> None:
 
 cmake = read("CMakeLists.txt")
 overlay_files = read("PSXRECOMP_OVERLAY_FILES.txt")
-disc = read("src/disruptor_language_disc.cpp")
-disc_header = read("src/disruptor_language_disc.h")
-rules = read("src/disruptor_language_pack.h")
-source = read("src/disruptor_language_source.cpp")
+disc = read("src/game/language/language_disc.cpp")
+disc_header = read("src/game/language/language_disc.h")
+rules = read("src/game/language/language_pack.h")
+source = read("src/game/language/language_source.cpp")
 header = read("psxrecomp-overlay/runtime/include/iso_overlay.h")
 host = read("psxrecomp-overlay/runtime/src/main.cpp")
 host_header = read("psxrecomp-overlay/runtime/include/host_ui.h")
 pick_slot = read("psxrecomp-overlay/runtime/include/host_pick_slot.h")
-restart = read("src/disruptor_restart.cpp")
+restart = read("src/game/session/restart.cpp")
 settings_header = read("psxrecomp-overlay/recompiler/src/config_loader.h")
 settings_loader = read("psxrecomp-overlay/recompiler/src/config_loader.cpp")
-menu = read("src/disruptor_dev_menu.cpp")
+menu = read("src/game/ui/dev_menu.cpp")
 reader = read("psxrecomp-overlay/runtime/src/iso_reader_c.cpp")
 
 require(
-    '/src/disruptor_language_disc.cpp"' in cmake
-    and '/src/disruptor_language_source.cpp"' in cmake
+    '/src/game/language/language_disc.cpp"' in cmake
+    and '/src/game/language/language_source.cpp"' in cmake
     and "add_test(NAME disruptor_language_disc\n" in cmake
     and "add_test(NAME disruptor_language_overlay\n" in cmake
     and "add_test(NAME disruptor_language_overlay_tall\n        COMMAND disruptor-language-overlay-test tall)" in cmake
@@ -353,7 +353,7 @@ require(
     and "    if (psx_host_pick_disc_image_poll(picked, static_cast<int>(sizeof picked)) == 1) mark_language_disc(picked);" in menu
     and '    if (ImGui::Button("Restart now") && !psx_netplay_active() && flush_preferences() && disruptor_restart_arm()) {' in menu
     and "        quit.type = SDL_QUIT;\n        SDL_PushEvent(&quit);" in menu
-    and '/src/disruptor_restart.cpp"' in cmake
+    and '/src/game/session/restart.cpp"' in cmake
     and "add_test(NAME disruptor_restart\n" in cmake
     and "    if (!before) return GetLastError() == ERROR_INVALID_PARAMETER;" in restart
     and "    return waited == WAIT_OBJECT_0;" in restart

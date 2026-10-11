@@ -63,8 +63,8 @@ extern "C" int disruptor_language_disc_pack(const uint8_t **data, uint32_t *size
     return 1;
 }
 
-#include "../../src/disruptor_language.cpp"
-#include "../../src/disruptor_language_disc.cpp"
+#include "../../src/game/language/language.cpp"
+#include "../../src/game/language/language_disc.cpp"
 
 namespace {
 

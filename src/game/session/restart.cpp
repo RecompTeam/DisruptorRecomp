@@ -9,7 +9,7 @@
  * ended by then, the new one ends itself and the player starts the game.
  */
 
-#include "disruptor_restart.h"
+#include "game/session/restart.h"
 
 #include "mod_plugins.h"
 

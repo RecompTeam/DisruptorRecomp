@@ -39,7 +39,7 @@ cmake = read("CMakeLists.txt")
 temporal = read("psxrecomp-overlay/runtime/src/gpu_gl_temporal.c.inc")
 renderer = read("psxrecomp-overlay/runtime/src/gpu_gl_renderer.c")
 gpu = read("psxrecomp-overlay/runtime/src/gpu.c")
-billboards = read("src/disruptor_billboard_aspect.cpp")
+billboards = read("src/game/render/billboard_aspect.cpp")
 
 require(
     "disruptor_temporal_presenter_contract" in cmake and "PSX_HAS_DISRUPTOR_SPRITE_DEPTH=1" in cmake,

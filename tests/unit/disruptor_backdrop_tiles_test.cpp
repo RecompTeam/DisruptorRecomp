@@ -85,7 +85,7 @@ void gpu_ws_tag_screen_tile(CPUState *cpu, std::uint32_t primitive_addr) {
 
 }  // extern "C"
 
-#include "../../src/disruptor_backdrop_tiles.cpp"
+#include "../../src/game/render/backdrop_tiles.cpp"
 
 namespace {
 

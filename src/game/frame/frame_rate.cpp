@@ -12,7 +12,7 @@
  * wait counts loop iterations for its timeout and always runs at stock cost.
  */
 
-#include "disruptor_frame_rate.h"
+#include "game/frame/frame_rate.h"
 
 #include "cpu_state.h"
 #include "interrupts.h"

@@ -124,7 +124,7 @@ extern "C" void gte_ws_x_squash(std::int32_t *num, std::int32_t *den) {
     *den = g_range_den;
 }
 
-#include "../../src/disruptor_sprite_depth.cpp"
+#include "../../src/game/render/sprite_depth.cpp"
 
 namespace {
 

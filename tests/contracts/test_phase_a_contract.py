@@ -16,7 +16,7 @@ GPU_HEADER = ROOT / "psxrecomp-overlay" / "runtime" / "include" / "gpu.h"
 GTE_HEADER = (
     ROOT / "psxrecomp-overlay" / "runtime" / "include" / "gte_precision.h"
 )
-MOUSE = ROOT / "src" / "disruptor_mouse_aim.cpp"
+MOUSE = ROOT / "src" / "game" / "input" / "mouse_aim.cpp"
 OVERLAY_LIST = ROOT / "PSXRECOMP_OVERLAY_FILES.txt"
 
 

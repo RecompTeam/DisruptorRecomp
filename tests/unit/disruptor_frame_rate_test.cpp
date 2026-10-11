@@ -71,7 +71,7 @@ int psx_mod_register_function_entry_plugin(
 
 uint32_t interrupts_cycles_to_vblank(void) { return g_cycles_to_vblank; }
 
-#include "../../src/disruptor_frame_rate.cpp"
+#include "../../src/game/frame/frame_rate.cpp"
 
 namespace {
 

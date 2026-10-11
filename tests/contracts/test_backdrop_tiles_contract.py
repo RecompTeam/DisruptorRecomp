@@ -53,7 +53,7 @@ def require(condition: bool, message: str) -> None:
 
 
 cmake = read("CMakeLists.txt")
-source = read("src/disruptor_backdrop_tiles.cpp")
+source = read("src/game/render/backdrop_tiles.cpp")
 gpu = read("psxrecomp-overlay/runtime/src/gpu.c")
 gpu_header = read("psxrecomp-overlay/runtime/include/gpu.h")
 codegen = read("psxrecomp-overlay/recompiler/src/code_generator.cpp")
@@ -61,7 +61,7 @@ interpreter = read("psxrecomp-overlay/runtime/src/dirty_ram_interp.c")
 audit = read("tools/audit_codegen.py")
 
 require(
-    "src/disruptor_backdrop_tiles.cpp" in cmake
+    "src/game/render/backdrop_tiles.cpp" in cmake
     and "disruptor_backdrop_tiles_contract" in cmake
     and "add_test(NAME disruptor_backdrop_tiles\n" in cmake,
     "backdrop tile source, its unit test and its contract test must remain registered",

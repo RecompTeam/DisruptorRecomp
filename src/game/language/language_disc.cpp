@@ -29,9 +29,9 @@
  * header says, so it takes the other disc's header and that second part.
  */
 
-#include "disruptor_language_disc.h"
+#include "game/language/language_disc.h"
 
-#include "disruptor_language_pack.h"
+#include "game/language/language_pack.h"
 
 #include <algorithm>
 #include <array>

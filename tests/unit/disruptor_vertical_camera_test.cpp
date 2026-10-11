@@ -132,7 +132,7 @@ void gpu_geometry_camera_projection_center_y_set(double center_y) {
 }  // extern "C"
 
 // Include the implementation to exercise the version-pinned internal guards.
-#include "../../src/disruptor_vertical_camera.cpp"
+#include "../../src/game/input/vertical_camera.cpp"
 
 namespace {
 

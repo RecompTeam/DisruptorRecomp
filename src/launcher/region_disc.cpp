@@ -1,7 +1,7 @@
 #include "region_disc.h"
 
 #include "disc_import.h"
-#include "disruptor_language_disc.h"
+#include "game/language/language_disc.h"
 
 #include <cstdint>
 #include <exception>

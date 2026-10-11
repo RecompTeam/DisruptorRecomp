@@ -23,8 +23,8 @@ def require(condition: bool, message: str) -> None:
 
 
 cmake = read("CMakeLists.txt")
-source = read("src/disruptor_cheats.cpp")
-header = read("src/disruptor_cheats.h")
+source = read("src/game/session/cheats.cpp")
+header = read("src/game/session/cheats.h")
 game = read("game.toml")
 wide = read("game-widescreen.toml")
 

@@ -43,9 +43,9 @@ def require(condition: bool, message: str) -> None:
 
 
 cmake = read("CMakeLists.txt")
-source = read("src/disruptor_frame_rate.cpp")
-header = read("src/disruptor_frame_rate.h")
-menu = read("src/disruptor_dev_menu.cpp")
+source = read("src/game/frame/frame_rate.cpp")
+header = read("src/game/frame/frame_rate.h")
+menu = read("src/game/ui/dev_menu.cpp")
 manifest = read("PSXRECOMP_OVERLAY_FILES.txt")
 cycle_header = read("psxrecomp-overlay/runtime/include/psx_cyc.h")
 cycle_source = read("psxrecomp-overlay/runtime/src/psx_cycles.c")
@@ -55,7 +55,7 @@ require(
     "the build gate must run this contract with its inputs required",
 )
 require(
-    "src/disruptor_frame_rate.cpp" in cmake
+    "src/game/frame/frame_rate.cpp" in cmake
     and "disruptor_frame_rate_contract" in cmake
     and "add_test(NAME disruptor_frame_rate\n" in cmake,
     "frame-rate source, its unit test and its contract test must remain registered",
@@ -161,8 +161,8 @@ require(
     "the divisor must charge whole cycles and carry the remainder",
 )
 
-present_rate = read("src/disruptor_present_rate.h")
-present_control = read("src/disruptor_present_rate.cpp")
+present_rate = read("src/game/frame/present_rate.h")
+present_control = read("src/game/frame/present_rate.cpp")
 renderer = read("psxrecomp-overlay/runtime/src/gpu_gl_renderer.c")
 host = read("psxrecomp-overlay/runtime/src/main.cpp")
 require(
@@ -174,7 +174,7 @@ require(
 require(
     "    if(DISRUPTOR_FRAME_INTERPOLATION)\n"
     "        list(APPEND DISRUPTOR_EXTRA_SOURCES\n"
-    '            "${CMAKE_CURRENT_SOURCE_DIR}/src/disruptor_present_rate.cpp")\n'
+    '            "${CMAKE_CURRENT_SOURCE_DIR}/src/game/frame/present_rate.cpp")\n'
     in cmake
     and "#ifndef PSX_DISABLE_FRAME_INTERPOLATION\n"
     "    int present_enabled = 0;\n"

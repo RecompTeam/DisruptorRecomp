@@ -58,11 +58,11 @@ host_ui = read("psxrecomp-overlay/runtime/include/host_ui.h")
 main_cpp = read("psxrecomp-overlay/runtime/src/main.cpp")
 gl = read("psxrecomp-overlay/runtime/src/gpu_gl_renderer.c")
 gte = read("psxrecomp-overlay/runtime/src/gte.cpp")
-menu = read("src/disruptor_dev_menu.cpp")
-mouse = read("src/disruptor_mouse_aim.cpp")
-cheats = read("src/disruptor_cheats.cpp")
-cheats_h = read("src/disruptor_cheats.h")
-far_rendering_h = read("src/disruptor_far_rendering.h")
+menu = read("src/game/ui/dev_menu.cpp")
+mouse = read("src/game/input/mouse_aim.cpp")
+cheats = read("src/game/session/cheats.cpp")
+cheats_h = read("src/game/session/cheats.h")
+far_rendering_h = read("src/game/render/far_rendering.h")
 config_h = read("psxrecomp-overlay/recompiler/src/config_loader.h")
 config_cpp = read("psxrecomp-overlay/recompiler/src/config_loader.cpp")
 run_ps1 = read("run.ps1")
@@ -76,10 +76,10 @@ require("v1.92.6.tar.gz" in cmake and
         "5b17c01f69545bde732b14936d89ce0f508adb83e8b56fa82448371845172bc3"
         in cmake.lower(),
         "Dear ImGui source must remain versioned and integrity-pinned")
-require("src/disruptor_dev_menu.cpp" in cmake and
+require("src/game/ui/dev_menu.cpp" in cmake and
         "target_link_libraries(psx-runtime PRIVATE disruptor-imgui)" in cmake,
         "menu implementation must be linked only into the game runtime")
-require("src/disruptor_cheats.cpp" in cmake and
+require("src/game/session/cheats.cpp" in cmake and
         "tests/unit/disruptor_cheats_test.cpp" in cmake,
         "version-pinned cheats and their behavioral test must be built")
 require("+runtime/include/host_ui.h" in manifest,

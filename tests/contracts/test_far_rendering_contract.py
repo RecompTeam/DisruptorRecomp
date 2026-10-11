@@ -19,8 +19,8 @@ def require(condition: bool, message: str) -> None:
         raise SystemExit(1)
 
 
-source = read("src/disruptor_far_rendering.cpp")
-header = read("src/disruptor_far_rendering.h")
+source = read("src/game/render/far_rendering.cpp")
+header = read("src/game/render/far_rendering.h")
 codegen = read("psxrecomp-overlay/recompiler/src/code_generator.cpp")
 dirty = read("psxrecomp-overlay/runtime/src/dirty_ram_interp.c")
 main = read("psxrecomp-overlay/runtime/src/main.cpp")
@@ -28,7 +28,7 @@ audit = read("tools/audit_codegen.py")
 cmake = read("CMakeLists.txt")
 configs = read("game.toml") + read("game-widescreen.toml")
 
-require("src/disruptor_far_rendering.cpp" in cmake and
+require("src/game/render/far_rendering.cpp" in cmake and
         "tests/unit/disruptor_far_rendering_test.cpp" in cmake and
         "add_test(NAME disruptor_far_rendering" in cmake,
         "runtime source and focused behavior test must remain enabled")

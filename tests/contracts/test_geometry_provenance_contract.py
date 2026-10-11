@@ -18,7 +18,7 @@ DIRTY_INTERP = (
 GTE_HEADER = (
     ROOT / "psxrecomp-overlay" / "runtime" / "include" / "gte_precision.h"
 )
-MOUSE = ROOT / "src" / "disruptor_mouse_aim.cpp"
+MOUSE = ROOT / "src" / "game" / "input" / "mouse_aim.cpp"
 MAIN = ROOT / "psxrecomp-overlay" / "runtime" / "src" / "main.cpp"
 CODEGEN = (
     ROOT / "psxrecomp-overlay" / "recompiler" / "src" / "code_generator.cpp"

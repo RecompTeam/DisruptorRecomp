@@ -36,11 +36,11 @@ def require(condition: bool, message: str) -> None:
 
 
 cmake = read("CMakeLists.txt")
-source = read("src/disruptor_grown_quad.cpp")
+source = read("src/game/render/grown_quad.cpp")
 gpu = read("psxrecomp-overlay/runtime/src/gpu.c")
 
 require(
-    '"${CMAKE_CURRENT_SOURCE_DIR}/src/disruptor_grown_quad.cpp"' in cmake
+    '"${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/grown_quad.cpp"' in cmake
     and "PSX_HAS_DISRUPTOR_GROWN_QUAD=1" in cmake
     and "add_test(NAME disruptor_grown_quad\n" in cmake
     and 'tests/contracts/test_grown_quad_contract.py"\n            --require-artifacts)' in cmake,

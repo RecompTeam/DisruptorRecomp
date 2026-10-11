@@ -2,7 +2,7 @@
 /* PSX_DISRUPTOR_CAPSULE_FRAMES=<folder> writes each replayed frame as a picture, which is whole only without a window. */
 /* PSX_DISRUPTOR_CAPSULE_RECORD=<frames> is the key for a script: two seconds in, it records that many frames and ends the run. */
 /* Measured: a loaded state takes its interrupts a few instructions apart, so one frame in four differs in a few bytes, nine in a row at most. */
-#include "disruptor_capsule.h"
+#include "game/session/capsule.h"
 
 #include <chrono>
 #include <cstdio>

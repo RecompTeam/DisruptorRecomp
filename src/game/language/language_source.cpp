@@ -3,15 +3,15 @@
  *
  * The player names an image of another region's disc. When the runtime sets
  * its save states up, or at the latest the first time the drive reads the
- * game disc, the two are laid out as one (see disruptor_language_disc.cpp),
+ * game disc, the two are laid out as one (see language_disc.cpp),
  * and from then on every sector comes from that layout. A disc that is not a
  * known version, or does not fit, is refused whole and the game disc is read
  * as it is.
  */
 
-#include "disruptor_language.h"
+#include "game/language/language.h"
 
-#include "disruptor_language_disc.h"
+#include "game/language/language_disc.h"
 #include "iso_overlay.h"
 #include "mod_plugins.h"
 #include "savestate.h"

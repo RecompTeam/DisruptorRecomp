@@ -14,7 +14,7 @@
  * results and memory are left byte-for-byte untouched.
  */
 
-#include "disruptor_vertical_camera.h"
+#include "game/input/vertical_camera.h"
 
 #include "cpu_state.h"
 #include "lockstep.h"

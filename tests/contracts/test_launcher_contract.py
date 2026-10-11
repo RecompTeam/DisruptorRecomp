@@ -43,7 +43,7 @@ region = read("src/launcher/region_disc.cpp")
 launcher_cmake = read("src/launcher/CMakeLists.txt")
 cmake = read("CMakeLists.txt")
 loader = read("psxrecomp-overlay/recompiler/src/config_loader.cpp")
-menu = read("src/disruptor_dev_menu.cpp") + read("src/disruptor_present_rate.cpp")
+menu = read("src/game/ui/dev_menu.cpp") + read("src/game/frame/present_rate.cpp")
 
 rows = re.findall(r'\b(toggle|choice|slider)(?:<[^>]*>)?\(\s*"([\w.]+)", Page::(\w+), L"([^"]+)", (-?\d+)', table)
 keys = [key for _, key, _, _, _ in rows]
@@ -76,7 +76,7 @@ require('L"Vanilla", L"Improved"' in table and '"Vanilla\\0Improved\\0"' in menu
 
 shipped = plain_values(read("release/windows/settings.toml"))
 require(not set(shipped) - set(keys), f"the shipped settings.toml sets keys the launcher does not show: {sorted(set(shipped) - set(keys))}")
-mouse = read("src/disruptor_mouse_aim.cpp")
+mouse = read("src/game/input/mouse_aim.cpp")
 require(
     "constexpr double kDefaultHorizontalSensitivity = 0.080;" in mouse
     and "constexpr double kDefaultVerticalSensitivity = 0.080;" in mouse
@@ -91,7 +91,7 @@ require(
 
 require(
     '"${PSXRECOMP_ROOT}/recompiler/src/config_loader.cpp"' in launcher_cmake
-    and '"${PROJECT_SOURCE_DIR}/src/disruptor_language_disc.cpp"' in launcher_cmake
+    and '"${PROJECT_SOURCE_DIR}/src/game/language/language_disc.cpp"' in launcher_cmake
     and "    Settings fresh = PSXRecompV4::load_user_settings(path_);" in table
     and "    if (!PSXRecompV4::save_user_settings(path_, fresh)) return false;" in table
     and "    if (!readable_) return false;\n    alter(fresh);" in table,
@@ -145,10 +145,10 @@ require(
     "drag and drop, the per-monitor layout and the log tail must stay",
 )
 require(
-    UTF8_PAGE in read("src/disruptor.manifest") and UTF8_PAGE in read("src/launcher/launcher.manifest")
-    and '1 RT_MANIFEST "disruptor.manifest"' in read("src/disruptor.rc")
-    and 'target_sources(psx-runtime PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/disruptor.manifest")' in cmake
-    and 'target_sources(psx-runtime PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/disruptor.rc")' in cmake,
+    UTF8_PAGE in read("src/game/disruptor.manifest") and UTF8_PAGE in read("src/launcher/launcher.manifest")
+    and '1 RT_MANIFEST "disruptor.manifest"' in read("src/game/disruptor.rc")
+    and 'target_sources(psx-runtime PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/game/disruptor.manifest")' in cmake
+    and 'target_sources(psx-runtime PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/game/disruptor.rc")' in cmake,
     "the game and the launcher must both run with UTF-8 as their code page, or a path outside it cannot be named",
 )
 require(

@@ -14,7 +14,7 @@
  * the new invocation is rejected, so a missed seam fails closed.
  */
 
-#include "disruptor_far_rendering.h"
+#include "game/render/far_rendering.h"
 
 #include "cpu_state.h"
 #include "lockstep.h"

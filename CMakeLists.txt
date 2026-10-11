@@ -25,31 +25,32 @@ option(DISRUPTOR_FRAME_INTERPOLATION
     ON)
 
 set(DISRUPTOR_EXTRA_SOURCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/disruptor_backdrop_tiles.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/disruptor_billboard_aspect.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/disruptor_capsule.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/disruptor_cheats.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/disruptor_control_probe.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/disruptor_far_rendering.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/disruptor_frame_rate.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/disruptor_intro_skip.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/disruptor_language.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/disruptor_language_disc.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/disruptor_language_hints.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/disruptor_language_source.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/disruptor_restart.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/disruptor_mouse_aim.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/disruptor_name_entry.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/disruptor_render_arena.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/disruptor_grown_quad.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/disruptor_hud_widgets.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/disruptor_sprite_depth.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/disruptor_vertical_camera.cpp")
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/backdrop_tiles.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/billboard_aspect.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/capsule.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/cheats.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/control_probe.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/far_rendering.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/frame/frame_rate.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/intro_skip.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/language.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/language_disc.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/language_hints.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/language_source.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/restart.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/mouse_aim.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/name_entry.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/render_arena.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/grown_quad.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/hud_widgets.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/sprite_depth.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/vertical_camera.cpp")
 
 # The project deliberately uses the redistributable OpenBIOS backend only.
 set(PSXRECOMP_BIOS_STEMS "OpenBIOS" CACHE STRING "" FORCE)
 set(PSX_RECOMP_UI OFF CACHE BOOL "" FORCE)
 
+include_directories("${CMAKE_CURRENT_SOURCE_DIR}/src")
 include("${PSXRECOMP_ROOT}/runtime/runtime.cmake")
 
 if(DISRUPTOR_DEV_MENU)
@@ -88,10 +89,10 @@ if(DISRUPTOR_DEV_MENU)
     endif()
 
     list(APPEND DISRUPTOR_EXTRA_SOURCES
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/disruptor_dev_menu.cpp")
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/dev_menu.cpp")
     if(DISRUPTOR_FRAME_INTERPOLATION)
         list(APPEND DISRUPTOR_EXTRA_SOURCES
-            "${CMAKE_CURRENT_SOURCE_DIR}/src/disruptor_present_rate.cpp")
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/game/frame/present_rate.cpp")
     endif()
 endif()
 
@@ -166,9 +167,9 @@ endif()
 if(WIN32)
     # UTF-8 as the game's code page: a path in settings.toml may hold letters the system's own page lacks.
     if(MINGW)
-        target_sources(psx-runtime PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/disruptor.rc")
+        target_sources(psx-runtime PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/game/disruptor.rc")
     else()
-        target_sources(psx-runtime PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/disruptor.manifest")
+        target_sources(psx-runtime PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/game/disruptor.manifest")
     endif()
 endif()
 

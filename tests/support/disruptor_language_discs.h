@@ -3,7 +3,7 @@
 
 /* Synthetic discs for the language tests. The disc code is included whole, so that a test reaches its internals. */
 
-#include "../../src/disruptor_language_disc.cpp"
+#include "../../src/game/language/language_disc.cpp"
 
 namespace {
 

@@ -43,7 +43,7 @@ int psx_mod_register_function_entry_plugin(const char *, uint32_t address, PSXMo
 }
 extern "C" void psx_host_set_fast_forward_query(int (*query)(void)) { g_registered_query = query; }
 
-#include "../../src/disruptor_intro_skip.cpp"
+#include "../../src/game/session/intro_skip.cpp"
 
 namespace {
 

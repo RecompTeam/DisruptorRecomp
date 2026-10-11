@@ -23,14 +23,14 @@
  * which characters to give that routine for the letters the other disc
  * writes. That swap is made for every string func_80044BDC draws.
  *
- * The pack comes from the language disc (disruptor_language_disc.cpp) and
- * holds what disruptor_language_pack.h says, by the rules written there.
+ * The pack comes from the language disc (language_disc.cpp) and
+ * holds what language_pack.h says, by the rules written there.
  */
 
-#include "disruptor_language.h"
+#include "game/language/language.h"
 
 #include "cpu_state.h"
-#include "disruptor_language_pack.h"
+#include "game/language/language_pack.h"
 #include "lockstep.h"
 #include "mod_plugins.h"
 #include "psx_netplay.h"
