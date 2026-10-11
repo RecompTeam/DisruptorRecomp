@@ -113,9 +113,9 @@ constexpr Option option_list[] = {
            saved<&Settings::has_improved_shadows>, read<&Settings::improved_shadows>,
            write<&Settings::has_improved_shadows, &Settings::improved_shadows>),
     toggle<&Settings::has_frame_unlock, &Settings::frame_unlock>(
-        "disruptor.frame_unlock", Page::enhancements, L"60 FPS gameplay (experimental)", 0),
+        "disruptor.frame_unlock", Page::enhancements, L"60 FPS gameplay", 0),
     toggle<&Settings::has_frame_interpolation, &Settings::frame_interpolation>(
-        "video.frame_interpolation", Page::enhancements, L"In-between frames (experimental)", 0, geometry_key),
+        "video.frame_interpolation", Page::enhancements, L"In-between frames", 0, geometry_key),
     slider("video.frame_interpolation_fps", Page::enhancements, L"In-between frame rate", 0,
            kDisruptorPresentRateLowest, kDisruptorPresentRateHighest, Unit::frames,
            saved<&Settings::has_frame_interpolation_fps>, read<&Settings::frame_interpolation_fps>,
@@ -164,7 +164,7 @@ constexpr PresetValue original_values[] = {
 constexpr PresetValue enhanced_values[] = {
     {"video.aspect_ratio", 1}, {"disruptor.geometry_correction", 1}, {"disruptor.perspective_textures", 1},
     {"disruptor.improved_shadows", 1}, {"disruptor.frame_unlock", 1}, {"video.frame_interpolation", 1}};
-constexpr Preset preset_list[] = {{L"Original", original_values}, {L"Enhanced (experimental)", enhanced_values}};
+constexpr Preset preset_list[] = {{L"Original", original_values}, {L"Enhanced", enhanced_values}};
 
 constexpr const char* shipped_keys[] = {
     "disruptor.mouse_aim", "disruptor.modern_controls", "disruptor.vertical_look", "disruptor.geometry_correction",

@@ -74,8 +74,8 @@ are enabled initially. Vertical mouse look is experimental and starts off;
 enable it in **Settings → Controls** if desired.
 
 **Settings → Enhancements** offers 1x–8x resolution, widescreen options,
-HUD size for widescreen, and experimental 60 FPS gameplay and in-between
-frames. Both frame options start off; in-between frames need exact geometry.
+HUD size for widescreen, and 60 FPS gameplay and in-between frames. Both
+frame options start off; in-between frames need exact geometry.
 The **Shadows** setting offers Vanilla and Improved shapes when geometry
 correction is enabled. HUD size ranges from 50% to 100% in widescreen and
 leaves the weapon size unchanged.
@@ -152,8 +152,8 @@ as cheated, including subsequent game saves.
   BIN is 636,350,064 bytes and has SHA-256
   `3b49f9874e30c613ca9d17720716764cd76d0ac968c0acd0f53159366c0cf3a4`.
 - **Slow rendering:** lower resolution to 2x or 1x in Enhancements and update
-  your graphics driver. Try turning off experimental 60 FPS gameplay and
-  in-between frames if they are enabled.
+  your graphics driver. Try turning off 60 FPS gameplay and in-between
+  frames if they are enabled.
 - **Mouse does not turn:** enter gameplay and middle-click to capture it.
 - **Other problems:** include the level, reproduction steps, render settings,
   and `startup.log` in a [bug report](https://github.com/micmea668/DisruptorRecomp/issues).
