@@ -121,7 +121,7 @@ for token in (
 
 require(
     "disruptor_frame_rate_set_unlocked(unlocked ? 1 : 0);\n        mark_frame_unlock(unlocked);" in menu
-    and '"60 FPS gameplay (experimental)"' in menu,
+    and '"60 FPS gameplay"' in menu,
     "the settings menu must apply the switch live and stage it for saving",
 )
 require(
@@ -214,7 +214,7 @@ require(
 )
 require(
     "    return psx_host_video_set_interpolation(enabled ? 1 : 0, target, blend) != 0;\n" in present_control
-    and 'if (ImGui::Checkbox("In-between frames (experimental)", &checked) &&\n'
+    and 'if (ImGui::Checkbox("In-between frames", &checked) &&\n'
     "        disruptor_present_rate_enable(checked ? 1 : 0)) {\n"
     "        if (enabled) *enabled = checked ? 1 : 0;\n"
     in present_control,

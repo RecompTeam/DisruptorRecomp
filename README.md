@@ -17,7 +17,7 @@ disc revision; the redistributable OpenBIOS backend is used for booting.
   the screen too, movies stay at 4:3, and the HUD retains its proportions. A
   HUD size setting shrinks it toward the screen edges.
 - Optional geometry and perspective-texture correction.
-- Optional 60 FPS gameplay and in-between frames, both experimental.
+- Optional 60 FPS gameplay and in-between frames.
 - Keyboard/controller input and optional modern WASD/mouse controls.
 - Experimental vertical mouse look and weapon aim.
 - In-game settings for controls, display, fullscreen, VSync, volume, and mute.

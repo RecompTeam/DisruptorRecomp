@@ -26,7 +26,7 @@ int disruptor_present_rate_switch(int available, int *enabled) {
     bool checked = on != 0;
     const bool locked = !available && !checked;
     if (locked) ImGui::BeginDisabled();
-    if (ImGui::Checkbox("In-between frames (experimental)", &checked) &&
+    if (ImGui::Checkbox("In-between frames", &checked) &&
         disruptor_present_rate_enable(checked ? 1 : 0)) {
         if (enabled) *enabled = checked ? 1 : 0;
         changed = 1;

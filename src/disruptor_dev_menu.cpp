@@ -1169,7 +1169,7 @@ void draw_enhancements_tab() {
     }
 
     bool unlocked = disruptor_frame_rate_unlocked() != 0;
-    if (ImGui::Checkbox("60 FPS gameplay (experimental)", &unlocked)) {
+    if (ImGui::Checkbox("60 FPS gameplay", &unlocked)) {
         disruptor_frame_rate_set_unlocked(unlocked ? 1 : 0);
         mark_frame_unlock(unlocked);
     }
