@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 NOT_OFFERED = {
     "video.renderer", "video.window_width", "video.antialiasing", "video.texture_filtering", "video.crt_filter",
     "video.auto_skip_fmv", "video.turbo_loads", "video.fast_boot", "video.bios_hle", "video.low_latency_input",
-    "video.frame_interpolation_blend", "audio.spu_hq", "disruptor.high_precision_camera",
+    "video.frame_interpolation_blend", "audio.spu_hq", "disruptor.high_precision_camera", "disruptor.diagnostic_view",
 }
 # Keys written together with a launcher row, or by the language row.
 COVERED = {"video.adaptive_view", "disruptor.language_disc", "disruptor.language_discs"}

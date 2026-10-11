@@ -588,8 +588,53 @@ static void temporal_mask(int check,int value) {
     glStencilOp(GL_KEEP,GL_KEEP,check ? (value ? GL_INVERT : GL_KEEP) : GL_REPLACE);
 }
 /* Draw part of one retained command with the scene's own state. */
+static void temporal_submit_faces(const TemporalScene *s,const TemporalCommand *c,int height,
+                                  const float *vertices,int count);
+/* How the frame being shown was placed, for a screen recording's list. */
+static GpuTemporalMeshStats s_temp_shown_stats;
+static int s_temp_shown_faces;
+
+/* The diagnostic mesh view: after a textured command's faces the edges of its triangles, white whatever the texture, inside
+ * black where the context draws a line wider than the white one. */
 static void temporal_submit(const TemporalScene *s,const TemporalCommand *c,int height,
                             const float *vertices,int count) {
+    temporal_submit_faces(s,c,height,vertices,count);
+    if (!s_mesh_view || !c->textured || c->mode!=GL_TRIANGLES || s_temp_underlaying || s_temp_fill || count<=0) return;
+    TemporalUniforms *u=&s_temp_uniforms[1];
+    int sy=c->sy, sh=c->sh;
+    float wide=0.75f*s->scale, narrow=0.375f*s->scale;
+    if (sy<0) { sh+=sy;sy=0; }
+    if (sy+sh>height) sh=height-sy;
+    if (sh<=0) return;
+    if (wide>s_line_width_max) wide=s_line_width_max;
+    if (narrow>s_line_width_max) narrow=s_line_width_max;
+    if (narrow<1.0f) narrow=1.0f;
+    if (wide<narrow) wide=narrow;
+    glEnable(GL_SCISSOR_TEST); glScissor(0,sy*s->scale,s->width*s->scale,sh*s->scale);
+    p_glUseProgram(s_temp_tex_prog);
+    p_glUniform1f(u->shift,0.5f/s->scale-1.0f/64.0f);
+    p_glUniform1f(u->xhalf,s->width/2.0f); p_glUniform1f(u->visual,1);
+    p_glUniform4f(u->options,0,0,s->tint,-1.0f);
+    p_glBindVertexArray(s_temp_vao[1]); p_glBindBuffer(PSXGL_ARRAY_BUFFER,s_temp_vbo);
+    p_glBufferData(PSXGL_ARRAY_BUFFER,count*TEXV*sizeof(float),vertices,PSXGL_STREAM_DRAW);
+    glBindTexture(GL_TEXTURE_2D,s->textures[c->texture]);
+    p_glUniform4i(u->twin,c->twin[0],c->twin[1],c->twin[2],c->twin[3]);
+    p_glUniform1i(u->mask,c->mask); p_glUniform1i(u->filter,c->filter);
+    p_glUniform1i(u->semi,0); p_glUniform1i(u->pass,0);
+    glDisable(GL_BLEND); glDisable(GL_STENCIL_TEST); glDepthFunc(GL_ALWAYS); glDepthMask(GL_FALSE);
+    glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_FALSE);
+    glPolygonMode(GL_FRONT_AND_BACK,GL_LINE); glEnable(GL_COLOR_LOGIC_OP);
+    glLogicOp(GL_CLEAR); glLineWidth(wide);
+    glDrawArrays(GL_TRIANGLES,0,count);
+    glLogicOp(GL_SET); glLineWidth(narrow);
+    glDrawArrays(GL_TRIANGLES,0,count);
+    glLogicOp(GL_COPY); glDisable(GL_COLOR_LOGIC_OP); glPolygonMode(GL_FRONT_AND_BACK,GL_FILL); glLineWidth(1.0f);
+    glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE); glDepthMask(GL_TRUE);
+    p_glUniform4f(u->options,0,0,s->tint,0.0f);
+}
+
+static void temporal_submit_faces(const TemporalScene *s,const TemporalCommand *c,int height,
+                                  const float *vertices,int count) {
     const int t=c->textured;
     TemporalUniforms *u=&s_temp_uniforms[t];
     int sy=c->sy, sh=c->sh;
@@ -818,6 +863,7 @@ static int temporal_present(float alpha,int lx,int ly,int lw,int lh) {
     glEnable(GL_DEPTH_TEST); glDepthFunc(GL_ALWAYS); glDepthMask(GL_TRUE); glClearDepth(1.0);
     glClear(GL_COLOR_BUFFER_BIT|GL_STENCIL_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
     s_temp_scene_depth=1;
+    s_temp_shown_stats=s->mesh_stats; s_temp_shown_faces=s->nt;
     p_glActiveTexture(PSXGL_TEXTURE0);
     for (int i=0;i<s->nc;++i) {
         TemporalCommand *c=&s->commands[i];

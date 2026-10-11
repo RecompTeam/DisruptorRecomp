@@ -32,6 +32,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cmath>
 #include <cstdlib>
 #include <cstdint>
@@ -44,9 +45,15 @@ extern "C" void gte_ws_set_far_threshold(int threshold);
 extern "C" void gte_ws_set_backdrop_repair_enabled(int enabled);
 extern "C" void gl_renderer_set_world_depth(int enabled);
 extern "C" int gl_renderer_world_depth(void);
+extern "C" void gl_renderer_set_mesh_view(int enabled);
+extern "C" int gl_renderer_mesh_view(void);
+extern "C" int gl_renderer_record_shown(const char *folder, int skip, int count, int width);
+extern "C" int gl_renderer_recording_shown(void);
 extern "C" void gl_renderer_set_gap_fill(int enabled);
 extern "C" int gl_renderer_gap_fill(void);
 extern "C" void gl_renderer_set_ssao(int enabled);
+extern "C" void gl_renderer_set_ssao_view(int view);
+extern "C" int gl_renderer_ssao_view(void);
 extern "C" int gl_renderer_ssao(void);
 extern "C" void gl_renderer_set_ssao_shape(float radius, float strength);
 extern "C" float gl_renderer_ssao_radius(void);
@@ -64,6 +71,8 @@ struct DevMenuState {
     bool internal_scale_apply_failed = false;
     bool fullscreen_apply_failed = false;
     bool base_keybinds_valid = false;
+    bool record_shown = false;  // armed in the menu, started when it closes
+    std::string shown_note;
     int selected_wide_aspect = 0;
     std::string cheat_status;
     std::array<SDL_Scancode, PSX_KB_COUNT> base_keybinds{};
@@ -100,6 +109,7 @@ enum PreferenceDirty : uint32_t {
     PREF_OCCLUSION_SHAPE   = 1u << 26,
     PREF_GAP_FILLING       = 1u << 27,
     PREF_WORLD_DEPTH       = 1u << 28,
+    PREF_DIAGNOSTIC_VIEW   = 1u << 29,
 };
 
 struct PreferenceState {
@@ -342,6 +352,18 @@ void mark_world_depth(bool value) {
     g_preferences.dirty |= PREF_WORLD_DEPTH;
 }
 
+// Views 1 to 4 are layers of the occlusion pass, 5 is the mesh drawn over in-between frames.
+void apply_diagnostic_view(int view) {
+    gl_renderer_set_ssao_view(view >= 1 && view <= 4 ? view : 0);
+    gl_renderer_set_mesh_view(view == 5 ? 1 : 0);
+}
+
+void mark_diagnostic_view(int value) {
+    g_preferences.pending.has_diagnostic_view = true;
+    g_preferences.pending.diagnostic_view = value;
+    g_preferences.dirty |= PREF_DIAGNOSTIC_VIEW;
+}
+
 void mark_present_rate(int value) {
     g_preferences.pending.has_frame_interpolation_fps = true;
     g_preferences.pending.frame_interpolation_fps = value;
@@ -455,6 +477,10 @@ void merge_dirty_preferences(PSXRecompV4::UserSettings &settings) {
     if (g_preferences.dirty & PREF_WORLD_DEPTH) {
         settings.has_depth_sorted_world = true;
         settings.depth_sorted_world = pending.depth_sorted_world;
+    }
+    if (g_preferences.dirty & PREF_DIAGNOSTIC_VIEW) {
+        settings.has_diagnostic_view = true;
+        settings.diagnostic_view = pending.diagnostic_view;
     }
     if (g_preferences.dirty & PREF_PRESENT_RATE) {
         settings.has_frame_interpolation_fps = true;
@@ -572,6 +598,9 @@ void apply_saved_preferences(const PSXRecompV4::UserSettings &settings) {
         gpu_set_shadow_shape(settings.improved_shadows ? 1 : 0);
     if (!env_override_present("PSX_GL_SSAO")) {
         if (settings.has_ambient_occlusion) gl_renderer_set_ssao(settings.ambient_occlusion ? 1 : 0);
+        /* A layer is a session's own. Only a capsule's replay starts in the one its recording was made in. */
+        apply_diagnostic_view(settings.has_diagnostic_view && env_override_present("PSX_DISRUPTOR_CAPSULE_REPLAY")
+                                  ? settings.diagnostic_view : 0);
     }
     gl_renderer_set_ssao_shape(
         settings.has_occlusion_reach && !env_override_present("PSX_GL_SSAO_RADIUS")
@@ -646,6 +675,8 @@ void apply_pending_preferences() {
         gl_renderer_set_gap_fill(pending.gap_filling ? 1 : 0);
     if (g_preferences.dirty & PREF_WORLD_DEPTH)
         gl_renderer_set_world_depth(pending.depth_sorted_world ? 1 : 0);
+    if (g_preferences.dirty & PREF_DIAGNOSTIC_VIEW)
+        apply_diagnostic_view(pending.diagnostic_view);
 #ifndef PSX_DISABLE_FRAME_INTERPOLATION
     if (g_preferences.dirty & PREF_PRESENT_ENABLED)
         (void)disruptor_present_rate_enable(pending.frame_interpolation ? 1 : 0);
@@ -674,6 +705,11 @@ void load_preferences_for_session() {
     capture_base_keybinds();
     apply_saved_preferences(settings);
     apply_pending_preferences();
+    /* A capsule recorded later copies the file: a layer left there by the last session must not go into it. */
+    if (settings.has_diagnostic_view && settings.diagnostic_view != 0 && !env_override_present("PSX_DISRUPTOR_CAPSULE_REPLAY")) {
+        mark_diagnostic_view(0);
+        (void)flush_preferences();
+    }
     g_preferences.loaded = true;
     if (!g_preferences.save_failed)
         g_preferences.status = "Settings loaded.";
@@ -770,6 +806,21 @@ bool initialize_imgui() {
     return true;
 }
 
+// A second after the menu closes, two seconds of what is swapped to the screen go to shown/<unix time>/ beside settings.toml.
+void start_shown_recording() {
+    g_menu.record_shown = false;
+    const auto now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+    const fs::path folder = g_preferences.path.parent_path() / "shown" / std::to_string(now);
+    std::error_code failed;
+    fs::create_directories(folder, failed);
+    if (failed) {
+        g_menu.shown_note = "The folder for the pictures could not be made.";
+        return;
+    }
+    g_menu.shown_note = gl_renderer_record_shown(utf8(folder).c_str(), 120, 240, 960) ? "Last recording: " + utf8(folder)
+                                                                                      : "The recording could not start.";
+}
+
 void set_menu_open(bool open) {
     if (open == g_menu.open) return;
     if (open) {
@@ -780,6 +831,7 @@ void set_menu_open(bool open) {
     } else {
         g_menu.open = false;
         (void)flush_preferences();
+        if (g_menu.record_shown) start_shown_recording();
         if (g_menu.restore_mouse_capture)
             (void)disruptor_mouse_set_captured(1);
         g_menu.restore_mouse_capture = false;
@@ -1158,6 +1210,32 @@ void draw_experimental_tab() {
     ImGui::TextDisabled("Shades corners and the floor under things.");
 }
 
+void draw_debug_tab() {
+    ImGui::TextDisabled("Tools for a report of a fault in the picture.");
+    ImGui::Spacing();
+
+    if (ImGui::Button("Record the screen") && !gl_renderer_recording_shown()) g_menu.record_shown = true;
+    draw_status_badge("SESSION", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
+    ImGui::TextDisabled(
+        "For a report: two seconds of the pictures that reach the screen, with "
+        "their times. It starts a second after this menu closes.");
+    if (g_menu.record_shown) ImGui::TextDisabled("Armed. Close the menu and do what you want to show.");
+    else if (!g_menu.shown_note.empty()) ImGui::TextDisabled("%s", g_menu.shown_note.c_str());
+
+    ImGui::Separator();
+    int view = gl_renderer_mesh_view() ? 5 : gl_renderer_ssao_view();
+    ImGui::SetNextItemWidth(260.0f);
+    if (ImGui::Combo("Diagnostic view", &view, "Off\0Shading alone\0Depth\0Surface normals\0Fog fade\0Mesh\0")) {
+        apply_diagnostic_view(view);
+        mark_diagnostic_view(view);
+    }
+    draw_status_badge("SESSION", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
+    ImGui::TextDisabled(
+        "Shows a layer of the renderer in the picture's place, for reports. A "
+        "replay capsule recorded with one on replays in it. Off again at the "
+        "next start.");
+}
+
 void draw_cheats_tab() {
     const bool netplay = disruptor_cheats_netplay_blocked() != 0;
     const bool gameplay_ready = disruptor_cheats_gameplay_ready() != 0;
@@ -1354,6 +1432,10 @@ void draw_menu() {
             }
             if (ImGui::BeginTabItem("System")) {
                 draw_system_tab();
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Debug")) {
+                draw_debug_tab();
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Cheats")) {
