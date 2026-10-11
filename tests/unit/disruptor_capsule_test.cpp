@@ -1,5 +1,5 @@
 #define DISRUPTOR_CAPSULE_NO_HOST 1
-#include "../../src/disruptor_capsule.cpp"
+#include "../../src/game/session/capsule.cpp"
 
 #include <cstring>
 #include <iostream>

@@ -87,13 +87,13 @@ def require(condition: bool, message: str) -> None:
 
 
 cmake = read("CMakeLists.txt")
-source = read("src/disruptor_language.cpp")
-rules = read("src/disruptor_language_pack.h")
-header = read("src/disruptor_language.h")
-hints = read("src/disruptor_language_hints.cpp")
+source = read("src/game/language/language.cpp")
+rules = read("src/game/language/language_pack.h")
+header = read("src/game/language/language.h")
+hints = read("src/game/language/language_hints.cpp")
 
 require(
-    '/src/disruptor_language.cpp"' in cmake
+    '/src/game/language/language.cpp"' in cmake
     and "add_test(NAME disruptor_language\n" in cmake
     and 'tests/contracts/test_language_contract.py"\n            --require-artifacts)' in cmake,
     "the language source and both of its tests must remain registered, the contract with its inputs required",
@@ -192,7 +192,7 @@ require(
     "by the rules the disc code writes it by",
 )
 require(
-    '/src/disruptor_language_hints.cpp"' in cmake
+    '/src/game/language/language_hints.cpp"' in cmake
     and "add_test(NAME disruptor_language_hints\n" in cmake
     and "constexpr uint32_t kRead = 0x80011888u, kLoadImage = 0x8004D348u, kMoveImage = 0x8004D410u;" in hints
     and "constexpr uint32_t kReadReturn = 0x80020928u, kStageReturn = 0x80020954u;" in hints

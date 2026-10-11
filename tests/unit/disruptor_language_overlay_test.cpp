@@ -68,7 +68,7 @@ extern "C" void savestate_get_integrity(uint32_t *bios_checksum, uint32_t *entry
 }
 
 #include "../../psxrecomp-overlay/runtime/src/iso_reader_c.cpp"
-#include "../../src/disruptor_language_source.cpp"
+#include "../../src/game/language/language_source.cpp"
 
 namespace {
 

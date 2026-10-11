@@ -24,7 +24,7 @@ add_library(disruptor-launcher-model STATIC
     launcher_settings.cpp
     region_disc.cpp
     startup_log.cpp
-    "${PROJECT_SOURCE_DIR}/src/disruptor_language_disc.cpp")
+    "${PROJECT_SOURCE_DIR}/src/game/language/language_disc.cpp")
 target_include_directories(disruptor-launcher-model PUBLIC "${PROJECT_SOURCE_DIR}/src")
 target_link_libraries(disruptor-launcher-model PUBLIC
     disruptor-disc-import disruptor-launcher-config)

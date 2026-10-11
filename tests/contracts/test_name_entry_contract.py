@@ -93,11 +93,11 @@ def require(condition: bool, message: str) -> None:
 
 
 cmake = read("CMakeLists.txt")
-module = read("src/disruptor_name_entry.cpp")
+module = read("src/game/input/name_entry.cpp")
 host = read("psxrecomp-overlay/runtime/src/main.cpp")
 
 require(
-    '    "${CMAKE_CURRENT_SOURCE_DIR}/src/disruptor_name_entry.cpp"\n' in cmake
+    '    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/name_entry.cpp"\n' in cmake
     and "    PSX_HAS_DISRUPTOR_NAME_ENTRY=1\n" in cmake
     and "    add_test(NAME disruptor_name_entry COMMAND disruptor-name-entry-test)\n" in cmake
     and 'tests/contracts/test_name_entry_contract.py"\n            --require-artifacts)\n'

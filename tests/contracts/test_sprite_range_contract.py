@@ -183,7 +183,7 @@ def require(condition: bool, message: str) -> None:
 
 
 cmake = read("CMakeLists.txt")
-source = read("src/disruptor_sprite_depth.cpp")
+source = read("src/game/render/sprite_depth.cpp")
 gte = read("psxrecomp-overlay/runtime/src/gte.cpp")
 
 require(

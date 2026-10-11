@@ -19,7 +19,7 @@
  * after launch instead of 14.
  */
 
-#include "disruptor_intro_skip.h"
+#include "game/session/intro_skip.h"
 
 #include "cpu_state.h"
 #include "lockstep.h"

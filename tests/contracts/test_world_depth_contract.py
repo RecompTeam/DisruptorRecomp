@@ -26,7 +26,7 @@ overlay = read("PSXRECOMP_OVERLAY_FILES.txt")
 header = read("psxrecomp-overlay/runtime/include/gpu_world_depth.h")
 renderer = read("psxrecomp-overlay/runtime/src/gpu_gl_renderer.c")
 presenter = read("psxrecomp-overlay/runtime/src/gpu_gl_temporal.c.inc")
-menu = read("src/disruptor_dev_menu.cpp")
+menu = read("src/game/ui/dev_menu.cpp")
 launcher = read("src/launcher/launcher_settings.cpp")
 loader = read("psxrecomp-overlay/recompiler/src/config_loader.cpp")
 

@@ -16,9 +16,9 @@ def require(condition: bool, message: str) -> None:
 
 
 host = read("psxrecomp-overlay/runtime/src/main.cpp")
-capsule = read("src/disruptor_capsule.cpp")
-mouse = read("src/disruptor_mouse_aim.cpp")
-menu = read("src/disruptor_dev_menu.cpp")
+capsule = read("src/game/session/capsule.cpp")
+mouse = read("src/game/input/mouse_aim.cpp")
+menu = read("src/game/ui/dev_menu.cpp")
 cmake = read("CMakeLists.txt")
 
 require(
@@ -128,9 +128,9 @@ require(
     "Ctrl+F12 must start and end a recording and must not reach the save state keys",
 )
 require(
-    '    "${CMAKE_CURRENT_SOURCE_DIR}/src/disruptor_capsule.cpp"\n' in cmake
+    '    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/capsule.cpp"\n' in cmake
     and "    PSX_HAS_DISRUPTOR_CAPSULE=1\n" in cmake
-    and '#define DISRUPTOR_CAPSULE_NO_HOST 1\n#include "../../src/disruptor_capsule.cpp"\n'
+    and '#define DISRUPTOR_CAPSULE_NO_HOST 1\n#include "../../src/game/session/capsule.cpp"\n'
     in read("tests/unit/disruptor_capsule_test.cpp")
     and "    add_test(NAME disruptor_capsule\n        COMMAND disruptor-capsule-test)\n" in cmake
     and 'tests/contracts/test_capsule_contract.py")' in cmake,

@@ -45,16 +45,16 @@ def require(condition: bool, message: str) -> None:
 
 
 cmake = read("CMakeLists.txt")
-source = read("src/disruptor_intro_skip.cpp")
-header = read("src/disruptor_intro_skip.h")
-menu = read("src/disruptor_dev_menu.cpp")
+source = read("src/game/session/intro_skip.cpp")
+header = read("src/game/session/intro_skip.h")
+menu = read("src/game/ui/dev_menu.cpp")
 generator = read("psxrecomp-overlay/recompiler/src/code_generator.cpp")
 interpreter = read("psxrecomp-overlay/runtime/src/dirty_ram_interp.c")
 audit = read("tools/audit_codegen.py")
 settings_loader = read("psxrecomp-overlay/recompiler/src/config_loader.cpp")
 
 require(
-    "src/disruptor_intro_skip.cpp" in cmake
+    "src/game/session/intro_skip.cpp" in cmake
     and "PSX_HAS_DISRUPTOR_INTRO_SKIP=1" in cmake
     and "disruptor_intro_skip_contract" in cmake
     and "add_test(NAME disruptor_intro_skip\n" in cmake,

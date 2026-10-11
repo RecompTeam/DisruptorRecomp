@@ -184,7 +184,7 @@ const char *SDL_GetError() {
 
 // Include the implementation so its internal pure helpers and state can be
 // exercised against the mocks above without exposing a test-only production ABI.
-#include "../../src/disruptor_mouse_aim.cpp"
+#include "../../src/game/input/mouse_aim.cpp"
 
 namespace {
 

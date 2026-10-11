@@ -66,7 +66,7 @@ void disruptor_sprite_depth_packet(CPUState *, std::uint32_t, std::uint32_t) {}
 }  // extern "C"
 
 // Include the implementation to exercise its exact private packet guards.
-#include "../../src/disruptor_billboard_aspect.cpp"
+#include "../../src/game/render/billboard_aspect.cpp"
 
 namespace {
 

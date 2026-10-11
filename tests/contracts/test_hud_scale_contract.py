@@ -20,7 +20,7 @@ manifest = read("PSXRECOMP_OVERLAY_FILES.txt")
 scale_header = read("psxrecomp-overlay/runtime/include/gpu_ws_hud_scale.h")
 gpu = read("psxrecomp-overlay/runtime/src/gpu.c")
 header = read("psxrecomp-overlay/runtime/include/gpu.h")
-menu = read("src/disruptor_dev_menu.cpp")
+menu = read("src/game/ui/dev_menu.cpp")
 settings_loader = read("psxrecomp-overlay/recompiler/src/config_loader.cpp")
 
 require(

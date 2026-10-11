@@ -62,7 +62,7 @@ int psx_mod_register_vblank_plugin(const char *, PSXModVBlankCallback callback) 
 }
 }
 
-#include "../../src/disruptor_name_entry.cpp"
+#include "../../src/game/input/name_entry.cpp"
 
 namespace {
 

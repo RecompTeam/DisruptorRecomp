@@ -10,7 +10,7 @@
  * below are guarded by source/codegen contract tests for this exact executable.
  */
 
-#include "disruptor_cheats.h"
+#include "game/session/cheats.h"
 
 #include "cpu_state.h"
 #include "mod_plugins.h"

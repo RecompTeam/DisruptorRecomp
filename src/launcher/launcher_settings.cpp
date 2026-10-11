@@ -1,6 +1,6 @@
 #include "launcher_settings.h"
 
-#include "disruptor_present_rate.h"
+#include "game/frame/present_rate.h"
 
 #include <windows.h>
 

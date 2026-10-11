@@ -3,7 +3,7 @@
  * Built only together with the frame interpolator.
  */
 
-#include "disruptor_present_rate.h"
+#include "game/frame/present_rate.h"
 
 #include "host_ui.h"
 #include "imgui.h"

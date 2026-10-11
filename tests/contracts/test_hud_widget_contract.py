@@ -24,7 +24,7 @@ cmake = read("CMakeLists.txt")
 manifest = read("PSXRECOMP_OVERLAY_FILES.txt")
 gpu = read("psxrecomp-overlay/runtime/src/gpu.c")
 header = read("psxrecomp-overlay/runtime/include/gpu.h")
-module = read("src/disruptor_hud_widgets.cpp")
+module = read("src/game/render/hud_widgets.cpp")
 
 require(
     "+runtime/include/gpu_ws_hud_widget.h" in manifest.splitlines(),
@@ -35,7 +35,7 @@ require(
     and "    add_test(NAME disruptor_gpu_ws_hud_widget\n        COMMAND disruptor-gpu-ws-hud-widget-test)\n" in cmake
     and '    add_test(NAME disruptor_hud_widget_contract\n        COMMAND "${Python3_EXECUTABLE}" -B\n'
     '            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_hud_widget_contract.py")\n' in cmake
-    and '"${CMAKE_CURRENT_SOURCE_DIR}/src/disruptor_hud_widgets.cpp"' in cmake,
+    and '"${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/hud_widgets.cpp"' in cmake,
     "the widget unit test, its contract and the game's widget list must remain in the build",
 )
 require(

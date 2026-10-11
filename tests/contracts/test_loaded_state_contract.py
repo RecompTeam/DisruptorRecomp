@@ -24,8 +24,8 @@ memory = read("psxrecomp-overlay/runtime/src/memory.c")
 state = read("psxrecomp-overlay/runtime/src/boot_state.c")
 cycles = read("psxrecomp-overlay/runtime/include/psx_cyc.h")
 latch = read("psxrecomp/runtime/src/fntrace.c")
-menu = read("src/disruptor_dev_menu.cpp")
-rate = read("src/disruptor_frame_rate.cpp")
+menu = read("src/game/ui/dev_menu.cpp")
+rate = read("src/game/frame/frame_rate.cpp")
 
 require(
     "static void engage_widescreen_at_game_entry(void) {\n"

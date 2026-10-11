@@ -104,7 +104,7 @@ void psx_mod_write_word(std::uint32_t address, std::uint32_t value) {
 }  // extern "C"
 
 // Include the implementation to exercise its version-pinned internal guards.
-#include "../../src/disruptor_cheats.cpp"
+#include "../../src/game/session/cheats.cpp"
 
 namespace {
 

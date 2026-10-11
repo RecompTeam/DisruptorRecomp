@@ -109,7 +109,7 @@ void psx_mod_write_word(std::uint32_t address, std::uint32_t value) {
 
 }  // extern "C"
 
-#include "../../src/disruptor_far_rendering.cpp"
+#include "../../src/game/render/far_rendering.cpp"
 
 namespace {
 

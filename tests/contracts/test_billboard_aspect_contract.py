@@ -19,8 +19,8 @@ def require(condition: bool, message: str) -> None:
         raise SystemExit(1)
 
 
-source = read("src/disruptor_billboard_aspect.cpp")
-header = read("src/disruptor_billboard_aspect.h")
+source = read("src/game/render/billboard_aspect.cpp")
+header = read("src/game/render/billboard_aspect.h")
 codegen = read("psxrecomp-overlay/recompiler/src/code_generator.cpp")
 dirty = read("psxrecomp-overlay/runtime/src/dirty_ram_interp.c")
 gpu = read("psxrecomp-overlay/runtime/src/gpu.c")
@@ -69,7 +69,7 @@ require("#ifdef PSX_HAS_DISRUPTOR_BILLBOARD_ASPECT" in dirty and
         "disruptor_billboard_aspect_instruction_hook(cpu, pc, insn, 1)" in dirty,
         "dirty-interpreter parity must be project-gated and post-instruction")
 require("PSX_HAS_DISRUPTOR_BILLBOARD_ASPECT=1" in cmake and
-        "src/disruptor_billboard_aspect.cpp" in cmake and
+        "src/game/render/billboard_aspect.cpp" in cmake and
         "tests/unit/disruptor_billboard_aspect_test.cpp" in cmake,
         "runtime source, dirty seam, and focused behavior test must be enabled")
 

@@ -21,10 +21,10 @@
  * code then shows the upper half.
  */
 
-#include "disruptor_language.h"
+#include "game/language/language.h"
 
 #include "cpu_state.h"
-#include "disruptor_language_disc.h"
+#include "game/language/language_disc.h"
 #include "lockstep.h"
 #include "mod_plugins.h"
 #include "psx_netplay.h"

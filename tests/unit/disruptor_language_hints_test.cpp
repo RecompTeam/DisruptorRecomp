@@ -60,7 +60,7 @@ int psx_mod_register_function_entry_plugin(const char *, uint32_t address, PSXMo
 }
 extern "C" int disruptor_language_disc_tall_hints(void) { return g_tall; }
 
-#include "../../src/disruptor_language_hints.cpp"
+#include "../../src/game/language/language_hints.cpp"
 
 namespace {
 

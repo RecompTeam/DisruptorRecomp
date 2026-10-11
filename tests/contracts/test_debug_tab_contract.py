@@ -22,7 +22,7 @@ def between(source: str, opening: str, closing: str) -> str:
 
 cmake = read("CMakeLists.txt")
 renderer = read("psxrecomp-overlay/runtime/src/gpu_gl_renderer.c")
-menu = read("src/disruptor_dev_menu.cpp")
+menu = read("src/game/ui/dev_menu.cpp")
 loader = read("psxrecomp-overlay/recompiler/src/config_loader.cpp")
 settings = read("psxrecomp-overlay/recompiler/src/config_loader.h")
 

@@ -19,9 +19,9 @@ def require(condition: bool, message: str) -> None:
         raise SystemExit(1)
 
 
-camera = read("src/disruptor_vertical_camera.cpp")
-camera_h = read("src/disruptor_vertical_camera.h")
-mouse = read("src/disruptor_mouse_aim.cpp")
+camera = read("src/game/input/vertical_camera.cpp")
+camera_h = read("src/game/input/vertical_camera.h")
+mouse = read("src/game/input/mouse_aim.cpp")
 codegen = read("psxrecomp-overlay/recompiler/src/code_generator.cpp")
 dirty = read("psxrecomp-overlay/runtime/src/dirty_ram_interp.c")
 gpu = read("psxrecomp-overlay/runtime/src/gpu.c")

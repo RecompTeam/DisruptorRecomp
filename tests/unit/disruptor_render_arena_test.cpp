@@ -52,7 +52,7 @@ int psx_mod_register_function_entry_plugin(
         const char *, uint32_t, PSXModFunctionEntryCallback) { return 1; }
 }
 
-#include "../../src/disruptor_render_arena.cpp"
+#include "../../src/game/render/render_arena.cpp"
 
 int main() {
     CPUState cpu{};

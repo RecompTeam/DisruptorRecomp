@@ -14,7 +14,7 @@
  * Guest RAM, Y, UVs, HUD SPRTs, and the first-person weapon path are untouched.
  */
 
-#include "disruptor_billboard_aspect.h"
+#include "game/render/billboard_aspect.h"
 
 #include "cpu_state.h"
 #include "gpu.h"

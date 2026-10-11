@@ -21,7 +21,7 @@ extern "C" std::uint32_t psx_mod_read_word(std::uint32_t address) {
     return found == g_memory.end() ? 0xDEADBEEFu : found->second;
 }
 
-#include "../../src/disruptor_grown_quad.cpp"
+#include "../../src/game/render/grown_quad.cpp"
 
 namespace {
 

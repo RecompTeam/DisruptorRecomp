@@ -18,10 +18,10 @@
  */
 
 #include "psx_sdl.h"
-#include "disruptor_mouse_aim.h"
-#include "disruptor_capsule.h"
-#include "disruptor_vertical_camera.h"
-#include "../psxrecomp-overlay/runtime/include/gpu.h"
+#include "game/input/mouse_aim.h"
+#include "game/session/capsule.h"
+#include "game/input/vertical_camera.h"
+#include "../../../psxrecomp-overlay/runtime/include/gpu.h"
 
 #include <algorithm>
 #include <cmath>
