@@ -64,11 +64,12 @@ constexpr const wchar_t* aspects[] = {L"4:3", L"16:9", L"21:9", L"32:9", L"Match
 constexpr const wchar_t* scales[] = {L"1x (native)", L"2x", L"3x", L"4x", L"5x", L"6x", L"7x", L"8x"};
 constexpr const wchar_t* vsyncs[] = {L"Adaptive", L"Immediate", L"Synchronised"};
 constexpr const wchar_t* shadows[] = {L"Vanilla", L"Improved"};
-constexpr const wchar_t* pages[] = {L"Display", L"Enhancements", L"Controls", L"Audio"};
+constexpr const wchar_t* pages[] = {L"Display", L"Enhancements", L"Controls", L"Audio", L"Experimental"};
 
 constexpr const char* geometry_key = "disruptor.geometry_correction";
 constexpr const char* frames_key = "video.frame_interpolation";
 constexpr const char* rate_key = "video.frame_interpolation_fps";
+constexpr const char* occlusion_key = "disruptor.ambient_occlusion";
 
 template <auto Has, auto Value>
 constexpr Option toggle(const char* key, Page page, const wchar_t* label, int initial, const char* needs = nullptr) {
@@ -103,6 +104,10 @@ constexpr Option option_list[] = {
         "disruptor.geometry_correction", Page::enhancements, L"Exact-provenance geometry", 1),
     toggle<&Settings::has_perspective_textures, &Settings::perspective_textures>(
         "disruptor.perspective_textures", Page::enhancements, L"Perspective-correct world textures", 1, geometry_key),
+    toggle<&Settings::has_gap_filling, &Settings::gap_filling>(
+        "disruptor.gap_filling", Page::enhancements, L"Gap filling", 1, geometry_key),
+    toggle<&Settings::has_depth_sorted_world, &Settings::depth_sorted_world>(
+        "disruptor.depth_sorted_world", Page::enhancements, L"Depth-sorted world", 0, geometry_key),
     choice("disruptor.improved_shadows", Page::enhancements, L"Shadows", 0, shadows,
            saved<&Settings::has_improved_shadows>, read<&Settings::improved_shadows>,
            write<&Settings::has_improved_shadows, &Settings::improved_shadows>),
@@ -138,6 +143,15 @@ constexpr Option option_list[] = {
            saved<&Settings::has_master_volume>, read<&Settings::master_volume>,
            write<&Settings::has_master_volume, &Settings::master_volume>),
     toggle<&Settings::has_audio_muted, &Settings::audio_muted>("audio.muted", Page::audio, L"Mute all audio", 0),
+
+    toggle<&Settings::has_ambient_occlusion, &Settings::ambient_occlusion>(
+        "disruptor.ambient_occlusion", Page::experimental, L"Ambient occlusion", 0, geometry_key),
+    slider("disruptor.occlusion_reach", Page::experimental, L"Occlusion reach", 160, 50, 800, Unit::none,
+           saved<&Settings::has_occlusion_reach>, read<&Settings::occlusion_reach>,
+           write<&Settings::has_occlusion_reach, &Settings::occlusion_reach>, occlusion_key),
+    slider("disruptor.occlusion_strength", Page::experimental, L"Occlusion strength", 80, 0, 300, Unit::percent,
+           saved<&Settings::has_occlusion_strength>, read<&Settings::occlusion_strength>,
+           write<&Settings::has_occlusion_strength, &Settings::occlusion_strength>, occlusion_key),
 };
 
 constexpr PresetValue original_values[] = {

@@ -11,7 +11,7 @@ namespace disruptor::launcher {
 
 using Settings = PSXRecompV4::UserSettings;
 
-enum class Page { display, enhancements, controls, audio };
+enum class Page { display, enhancements, controls, audio, experimental };
 enum class Kind { toggle, choice, slider };
 enum class Unit { none, percent, frames, thousandths };
 

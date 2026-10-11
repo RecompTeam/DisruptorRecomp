@@ -36,6 +36,7 @@ int psx_netplay_active(void) { return netplay; }
 /* As in the runtime: no margin for a frame the game has just called flat, unless it is forced or the frame is native-wide. */
 int32_t psx_mod_widescreen_x_margin(void) { return told && !margin_forced ? 0 : margin; }
 void gpu_ws_tell_frame_kind(int flat) { told = flat; }
+void gl_renderer_set_ssao_fade(float, float) {}
 uint8_t psx_mod_read_byte(uint32_t address) { return *bytes(address); }
 uint32_t psx_mod_read_word(uint32_t address) {
     uint32_t value; std::memcpy(&value, bytes(address), 4); return value;

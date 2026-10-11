@@ -134,6 +134,9 @@ void gr_set_temporal_depth_triangle(int enabled,
     if (g_b->set_temporal_depth_triangle)
         g_b->set_temporal_depth_triangle(enabled, z0, z1, z2);
 }
+void gr_set_surface_depth_triangle(float z0, float z1, float z2) {
+    if (g_b->set_surface_depth_triangle) g_b->set_surface_depth_triangle(z0, z1, z2);
+}
 void gr_set_temporal_identity_triangle(uint64_t id0, uint64_t id1, uint64_t id2) {
     if (g_b->set_temporal_identity_triangle)
         g_b->set_temporal_identity_triangle(id0, id1, id2);

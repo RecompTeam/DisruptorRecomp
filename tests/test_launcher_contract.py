@@ -48,7 +48,7 @@ menu = read("src/disruptor_dev_menu.cpp") + read("src/disruptor_present_rate.cpp
 rows = re.findall(r'\b(toggle|choice|slider)(?:<[^>]*>)?\(\s*"([\w.]+)", Page::(\w+), L"([^"]+)", (-?\d+)', table)
 keys = [key for _, key, _, _, _ in rows]
 initial = {key: int(value) for _, key, _, _, value in rows}
-require(len(rows) == 21 and len(set(keys)) == 21, "the launcher's table must hold its 21 rows, each key once")
+require(len(rows) == 26 and len(set(keys)) == 26, "the launcher's table must hold its 26 rows, each key once")
 
 writer = loader[loader.index("bool save_user_settings(") :]
 saved, section = set(), ""

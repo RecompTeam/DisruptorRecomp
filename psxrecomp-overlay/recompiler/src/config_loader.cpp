@@ -2483,6 +2483,32 @@ UserSettings load_user_settings(const fs::path& path) {
             s.improved_shadows = toml::find<bool>(d, "improved_shadows");
             s.has_improved_shadows = true;
         });
+        if (d.contains("ambient_occlusion")) try_get([&]{
+            s.ambient_occlusion = toml::find<bool>(d, "ambient_occlusion");
+            s.has_ambient_occlusion = true;
+        });
+        if (d.contains("occlusion_reach")) try_get([&]{
+            const int reach = toml::find<int>(d, "occlusion_reach");
+            if (reach >= 50 && reach <= 800) {
+                s.occlusion_reach = reach;
+                s.has_occlusion_reach = true;
+            }
+        });
+        if (d.contains("occlusion_strength")) try_get([&]{
+            const int percent = toml::find<int>(d, "occlusion_strength");
+            if (percent >= 0 && percent <= 300) {
+                s.occlusion_strength = percent;
+                s.has_occlusion_strength = true;
+            }
+        });
+        if (d.contains("gap_filling")) try_get([&]{
+            s.gap_filling = toml::find<bool>(d, "gap_filling");
+            s.has_gap_filling = true;
+        });
+        if (d.contains("depth_sorted_world")) try_get([&]{
+            s.depth_sorted_world = toml::find<bool>(d, "depth_sorted_world");
+            s.has_depth_sorted_world = true;
+        });
     }
     return s;
 }
@@ -2688,6 +2714,8 @@ bool save_user_settings(const fs::path& path, const UserSettings& s) {
         s.has_invert_vertical ||
         s.has_high_precision_camera || s.has_geometry_correction ||
         s.has_perspective_textures || s.has_frame_unlock || s.has_improved_shadows ||
+        s.has_ambient_occlusion || s.has_occlusion_reach || s.has_occlusion_strength ||
+        s.has_gap_filling || s.has_depth_sorted_world ||
         s.has_language_discs ||
         s.has_language_disc || s.has_skip_intro ||
         s.has_hud_scale) {
@@ -2740,6 +2768,16 @@ bool save_user_settings(const fs::path& path, const UserSettings& s) {
             f << "hud_scale = " << s.hud_scale << "\n";
         if (s.has_improved_shadows)
             f << "improved_shadows = " << (s.improved_shadows ? "true" : "false") << "\n";
+        if (s.has_ambient_occlusion)
+            f << "ambient_occlusion = " << (s.ambient_occlusion ? "true" : "false") << "\n";
+        if (s.has_occlusion_reach && s.occlusion_reach >= 50 && s.occlusion_reach <= 800)
+            f << "occlusion_reach = " << s.occlusion_reach << "\n";
+        if (s.has_occlusion_strength && s.occlusion_strength >= 0 && s.occlusion_strength <= 300)
+            f << "occlusion_strength = " << s.occlusion_strength << "\n";
+        if (s.has_gap_filling)
+            f << "gap_filling = " << (s.gap_filling ? "true" : "false") << "\n";
+        if (s.has_depth_sorted_world)
+            f << "depth_sorted_world = " << (s.depth_sorted_world ? "true" : "false") << "\n";
     }
 
     f.flush();

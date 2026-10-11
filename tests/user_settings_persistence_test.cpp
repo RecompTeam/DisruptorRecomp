@@ -102,6 +102,16 @@ int main() {
         written.hud_scale = 70;
         written.has_improved_shadows = true;
         written.improved_shadows = true;
+        written.has_ambient_occlusion = true;
+        written.ambient_occlusion = true;
+        written.has_occlusion_reach = true;
+        written.occlusion_reach = 240;
+        written.has_occlusion_strength = true;
+        written.occlusion_strength = 130;
+        written.has_gap_filling = true;
+        written.gap_filling = false;
+        written.has_depth_sorted_world = true;
+        written.depth_sorted_world = true;
         written.has_language = true;
         written.language = "en";
 
@@ -150,7 +160,12 @@ int main() {
                     loaded.has_language_disc && loaded.language_disc == "C:\\Games \"old\"\\Disruptor (France).cue" &&
                     loaded.has_language_discs && loaded.language_discs == written.language_discs &&
                     loaded.has_hud_scale && loaded.hud_scale == 70 &&
-                    loaded.has_improved_shadows && loaded.improved_shadows,
+                    loaded.has_improved_shadows && loaded.improved_shadows &&
+                    loaded.has_ambient_occlusion && loaded.ambient_occlusion &&
+                    loaded.has_occlusion_reach && loaded.occlusion_reach == 240 &&
+                    loaded.has_occlusion_strength && loaded.occlusion_strength == 130 &&
+                    loaded.has_gap_filling && !loaded.gap_filling &&
+                    loaded.has_depth_sorted_world && loaded.depth_sorted_world,
                 "Disruptor preferences did not round-trip");
         require(loaded.has_language && loaded.language == "en",
                 "merge-save dropped an unrelated known setting");

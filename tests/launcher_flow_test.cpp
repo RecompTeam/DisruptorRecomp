@@ -292,8 +292,9 @@ void test_the_sliders() {
     const Option* sensitivity = find_option("disruptor.horizontal_sensitivity");
     const Option* volume = find_option("audio.master_volume");
     const Option* rate = find_option("video.frame_interpolation_fps");
-    require(sensitivity && volume && rate && value_text(*sensitivity, 80) == L"0.080" && value_text(*volume, 55) == L"55%" &&
-                value_text(*rate, 120) == L"120 FPS",
+    const Option* reach = find_option("disruptor.occlusion_reach");
+    require(sensitivity && volume && rate && reach && value_text(*sensitivity, 80) == L"0.080" &&
+                value_text(*volume, 55) == L"55%" && value_text(*rate, 120) == L"120 FPS" && value_text(*reach, 240) == L"240",
             "a value is shown in its unit");
 }
 } // namespace
