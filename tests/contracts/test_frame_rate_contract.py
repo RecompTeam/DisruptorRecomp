@@ -1,0 +1,301 @@
+#!/usr/bin/env python3
+"""Version and codegen contract for Disruptor's gameplay frame-rate unlock."""
+
+import re
+import struct
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[2]
+LOAD_ADDRESS = 0x80011200
+ROM_TEXT_OFFSET = 0x800
+
+RETAIL_INSTRUCTIONS = {
+    0x80043A50: 0x8F8202EC,
+    0x80043A60: 0x938305A4,
+    0x80043A80: 0x93830310,
+    0x80043A98: 0x2A220006,
+    0x80043AA4: 0x0C00E514,
+    0x80043AAC: 0x0235102A,
+    0x80043E7C: 0x0C012CF5,
+    0x80043E80: 0x00002021,
+    0x80043E84: 0x0C012CF5,
+    0x80043E88: 0x2404FFFF,
+    0x80043E8C: 0x00561023,
+    0x80043E90: 0x28420002,
+    0x80043E94: 0x10400003,
+    0x80043E9C: 0x0C012CF5,
+    0x80043EAC: 0x0056A823,
+    0x80043EB0: 0x0040B021,
+    0x8004B3D4: 0x3C028006,
+    0x8004B414: 0x3C028006,
+    0x8004B418: 0x8C42B920,
+}
+
+
+def read(path: str) -> str:
+    return (ROOT / path).read_text(encoding="utf-8")
+
+
+def require(condition: bool, message: str) -> None:
+    if not condition:
+        raise AssertionError(message)
+
+
+cmake = read("CMakeLists.txt")
+source = read("src/disruptor_frame_rate.cpp")
+header = read("src/disruptor_frame_rate.h")
+menu = read("src/disruptor_dev_menu.cpp")
+manifest = read("PSXRECOMP_OVERLAY_FILES.txt")
+cycle_header = read("psxrecomp-overlay/runtime/include/psx_cyc.h")
+cycle_source = read("psxrecomp-overlay/runtime/src/psx_cycles.c")
+
+require(
+    'tests/contracts/test_frame_rate_contract.py"\n            --require-artifacts)' in cmake,
+    "the build gate must run this contract with its inputs required",
+)
+require(
+    "src/disruptor_frame_rate.cpp" in cmake
+    and "disruptor_frame_rate_contract" in cmake
+    and "add_test(NAME disruptor_frame_rate\n" in cmake,
+    "frame-rate source, its unit test and its contract test must remain registered",
+)
+
+for name in ("game.toml", "game-widescreen.toml"):
+    config = read(name)
+    entries = re.search(r"mod_function_entry_funcs\s*=\s*\[([^\]]*)\]", config)
+    require(
+        entries is not None and '"0x8004B3D4"' in entries.group(1),
+        f"{name} must hook the VSync entry that restores the retail floor",
+    )
+    patch = re.search(
+        r'\[\[recompiler\.patch\]\]\s*id = "disruptor-gameplay-frame-floor"\s*'
+        r'address = "0x80043E90"\s*expected = "0x28420002"\s*replacement = "0x28420001"',
+        config,
+    )
+    require(patch is not None, f"{name} must carry the guarded frame-floor patch")
+
+for token in (
+    "0x8004B3D4u",
+    "0x80043E84u",
+    "0x800438FCu",
+    "0x800442F4u",
+    "0x8005B920u",
+    "0x80071438u",
+    "0x800716F0u",
+    "0x8007145Cu",
+):
+    require(token in source, f"reviewed frame-rate identity missing: {token}")
+
+require(
+    "std::atomic<bool> g_unlocked{false}" in source,
+    "the retail 30 FPS cadence must stay the default",
+)
+require(
+    "if (!unlocked) cpu->gpr[4] = kRetailFloorVBlanks;" in source and "kRetailFloorVBlanks = 2u" in source,
+    "the locked path must restore the retail two-VBlank floor",
+)
+require(
+    "simulation_follows_elapsed_vblanks()" in source
+    and "kAttractLoopMode" in source
+    and "kSingleStepPlayerState" in source
+    and "kFixedStepOverride" in source,
+    "fixed-step loop states must keep the retail cadence",
+)
+require(
+    "static_cast<int32_t>(cpu->gpr[4]) >= 0" in source and "g_psx_cyc_overclock_shift = 0u;" in source,
+    "every waiting VSync call must run at the stock instruction cost",
+)
+require(
+    'g_unlocked.store(env_enabled("PSX_DISRUPTOR_FRAME_UNLOCK"),' in source,
+    "the environment must be able to switch the unlock on at start",
+)
+require("psx_mod_write" not in source, "the unlock must not write guest memory")
+
+for token in (
+    "disruptor_frame_rate_unlocked",
+    "disruptor_frame_rate_set_unlocked",
+    "disruptor_frame_rate_last_window",
+):
+    require(token in header and token in source, f"frame-rate API is missing {token}")
+
+require(
+    "disruptor_frame_rate_set_unlocked(unlocked ? 1 : 0);\n        mark_frame_unlock(unlocked);" in menu
+    and '"60 FPS gameplay"' in menu,
+    "the settings menu must apply the switch live and stage it for saving",
+)
+require(
+    "if (g_preferences.dirty & PREF_FRAME_UNLOCK) {\n"
+    "        settings.has_frame_unlock = true;\n"
+    "        settings.frame_unlock = pending.frame_unlock;" in menu,
+    "a changed switch must reach settings.toml",
+)
+require(
+    "if (settings.has_frame_unlock &&\n"
+    '        !env_override_present("PSX_DISRUPTOR_FRAME_UNLOCK"))\n'
+    "        disruptor_frame_rate_set_unlocked(settings.frame_unlock ? 1 : 0);" in menu,
+    "a saved switch must be applied at start unless the environment overrides it",
+)
+settings_loader = read("psxrecomp-overlay/recompiler/src/config_loader.cpp")
+require(
+    's.frame_unlock = toml::find<bool>(d, "frame_unlock");' in settings_loader
+    and 'f << "frame_unlock = " << (s.frame_unlock ? "true" : "false")' in settings_loader
+    and "s.has_perspective_textures || s.has_frame_unlock ||" in settings_loader,
+    "settings.toml must read and write [disruptor] frame_unlock",
+)
+
+for path in ("runtime/include/psx_cyc.h", "runtime/src/psx_cycles.c"):
+    require(path in manifest.splitlines(), f"overlay manifest must list {path}")
+require(
+    "g_psx_cyc_overclock_shift" in cycle_header and "uint32_t g_psx_cyc_overclock_shift = 0;" in cycle_source,
+    "the guest CPU divisor must default to faithful timing",
+)
+require(
+    "    if (g_psx_cyc_overclock_shift) {\n"
+    "        const uint32_t total = g_psx_cyc_overclock_carry + cycles;\n"
+    "        g_psx_cyc_overclock_carry =\n"
+    "            total & ((1u << g_psx_cyc_overclock_shift) - 1u);\n"
+    "        cycles = total >> g_psx_cyc_overclock_shift;\n"
+    "        if (cycles == 0u) return;\n"
+    "    }\n" in cycle_header,
+    "the divisor must charge whole cycles and carry the remainder",
+)
+
+present_rate = read("src/disruptor_present_rate.h")
+present_control = read("src/disruptor_present_rate.cpp")
+renderer = read("psxrecomp-overlay/runtime/src/gpu_gl_renderer.c")
+host = read("psxrecomp-overlay/runtime/src/main.cpp")
+require(
+    "add_test(NAME disruptor_present_rate\n" in cmake
+    and "constexpr int kDisruptorPresentRateLowest = 30;" in present_rate
+    and "constexpr int kDisruptorPresentRateLeastTop = 120;" in present_rate,
+    "the in-between frame rate control must run from 30 FPS to at least 120 and keep its unit test",
+)
+require(
+    "    if(DISRUPTOR_FRAME_INTERPOLATION)\n"
+    "        list(APPEND DISRUPTOR_EXTRA_SOURCES\n"
+    '            "${CMAKE_CURRENT_SOURCE_DIR}/src/disruptor_present_rate.cpp")\n'
+    in cmake
+    and "#ifndef PSX_DISABLE_FRAME_INTERPOLATION\n"
+    "    int present_enabled = 0;\n"
+    "    if (disruptor_present_rate_switch(geometry ? 1 : 0, &present_enabled))\n"
+    "        mark_present_enabled(present_enabled != 0);\n"
+    "    int present_rate = 0;\n"
+    "    if (disruptor_present_rate_control(&present_rate)) mark_present_rate(present_rate);\n"
+    "#endif\n"
+    in menu
+    and "#ifndef PSX_DISABLE_FRAME_INTERPOLATION\n"
+    "    if (g_preferences.dirty & PREF_PRESENT_ENABLED)\n"
+    "        (void)disruptor_present_rate_enable(pending.frame_interpolation ? 1 : 0);\n"
+    "    if (g_preferences.dirty & PREF_PRESENT_RATE)\n"
+    "        (void)disruptor_present_rate_apply(pending.frame_interpolation_fps);\n"
+    "#endif\n"
+    in menu,
+    "a build without the frame interpolator must have no rate control, in the menu or in the sources",
+)
+require(
+    'if (ImGui::SliderInt("In-between frame rate", &shown, kDisruptorPresentRateLowest, top, "%d FPS",\n'
+    "                         ImGuiSliderFlags_AlwaysClamp) &&\n"
+    "        disruptor_present_rate_apply(shown)) {\n"
+    "        if (accepted) *accepted = shown;\n"
+    "        changed = 1;\n"
+    in present_control
+    and "const int top = disruptor_present_rate_top(display_hz);" in present_control
+    and "int shown = disruptor_present_rate_shown(target, top);" in present_control,
+    "the control must apply the rate at once and report only a rate the host accepted",
+)
+require(
+    "    return enabled && psx_host_video_set_interpolation(1, frames_per_second, blend) != 0;\n" in present_control,
+    "the rate control must not switch in-between frames on by itself, and must keep their blend mode",
+)
+require(
+    '"Build the experimental presentation-only frame interpolator"\n    ON)' in cmake,
+    "the in-between frames must be built unless a build opts out",
+)
+require(
+    "    return psx_host_video_set_interpolation(enabled ? 1 : 0, target, blend) != 0;\n" in present_control
+    and 'if (ImGui::Checkbox("In-between frames", &checked) &&\n'
+    "        disruptor_present_rate_enable(checked ? 1 : 0)) {\n"
+    "        if (enabled) *enabled = checked ? 1 : 0;\n"
+    in present_control,
+    "the switch must keep the rate and the blend mode and report only a state the host accepted",
+)
+require(
+    "    if (g_preferences.dirty & PREF_PRESENT_ENABLED) {\n"
+    "        settings.has_frame_interpolation = true;\n"
+    "        settings.frame_interpolation = pending.frame_interpolation;\n" in menu,
+    "a changed switch must reach settings.toml",
+)
+require(
+    "    if (!enabled) {\n"
+    "        (void)disruptor_present_rate_enable(0);\n"
+    "        mark_present_enabled(false);\n" in menu,
+    "switching exact geometry off must ask the host to switch the in-between frames off and always save them as off",
+)
+require(
+    "        if (us.has_frame_interpolation)\n"
+    "            g_frame_interpolation = us.frame_interpolation ? 1 : 0;\n"
+    "        if (us.has_frame_interpolation_fps)\n"
+    in host
+    and "    if (g_frame_interpolation_blend == PSX_HOST_FRAME_INTERPOLATION_GEOMETRY &&\n"
+    "        !g_geometry_correction)\n"
+    "        g_frame_interpolation = 0;\n"
+    in host,
+    "the host must restore the saved switch, and geometry in-between frames not without exact geometry",
+)
+require(
+    "    if (g_preferences.dirty & PREF_PRESENT_RATE) {\n"
+    "        settings.has_frame_interpolation_fps = true;\n"
+    "        settings.frame_interpolation_fps = pending.frame_interpolation_fps;\n" in menu,
+    "a changed in-between frame rate must reach settings.toml",
+)
+require(
+    "(target_fps < 30 || target_fps > 1000))" in host
+    and "if (fps == 0 || (fps >= 30 && fps <= 1000)) g_frame_interpolation_fps = fps;" in host
+    and "if (us.has_frame_interpolation_fps)\n            g_frame_interpolation_fps = us.frame_interpolation_fps;"
+    in host,
+    "the host must take a rate from 30 FPS, from the menu, the environment and the saved settings",
+)
+require(
+    ": (target_hz >= 30.0 ? target_hz : host_hz);" in renderer
+    and "(effective_hz < 0.0 || effective_hz >= 30.0)) ? 1 : 0;" in renderer
+    and "            if (hz < 30.0) hz = 60.0;\n" in renderer,
+    "the presenter must run at any rate from 30 FPS",
+)
+require(
+    "(s.frame_interpolation_fps >= 30 && s.frame_interpolation_fps <= 1000))" in settings_loader,
+    "settings.toml must keep an in-between frame rate from 30 FPS",
+)
+
+image_path = ROOT / "input" / "SLUS_002.24.code"
+if image_path.exists():
+    image = image_path.read_bytes()
+    for address, instruction in RETAIL_INSTRUCTIONS.items():
+        offset = ROM_TEXT_OFFSET + address - LOAD_ADDRESS
+        require(0 <= offset <= len(image) - 4, f"retail instruction outside image: 0x{address:08X}")
+        require(
+            struct.unpack_from("<I", image, offset)[0] == instruction,
+            f"retail frame-loop identity changed at 0x{address:08X}",
+        )
+
+generated = list((ROOT / "generated").glob("SLUS_002.24.code_full_*.c"))
+if generated:
+    text = "".join(path.read_text(encoding="utf-8") for path in generated)
+    require(
+        text.count("psx_mod_function_entry(cpu, 0x8004B3D4u)") == 1,
+        "generated guest code must contain exactly one VSync entry hook",
+    )
+    require(
+        text.count("/* 0x80043E90: 0x28420001 */") == 1,
+        "generated guest code must contain the patched frame-floor compare",
+    )
+
+checked = ", ".join(
+    f"{name} {'checked' if present else 'absent'}"
+    for name, present in (("retail image", image_path.exists()), ("generated code", bool(generated)))
+)
+require(
+    "--require-artifacts" not in sys.argv[1:] or (image_path.exists() and bool(generated)),
+    f"the build gate must check the retail image and the generated code: {checked}",
+)
+print(f"Disruptor frame-rate source/codegen contract: PASS ({checked})")
