@@ -1168,7 +1168,15 @@ void draw_system_tab() {
         "Current vertical pitch, menu layout, "
         "and mouse capture are not saved. Cheat controls start "
         "off each launch.");
-    ImGui::SeparatorText("Language");
+    ImGui::SeparatorText("Restart required");
+    ImGui::BulletText("Renderer backend");
+    ImGui::BulletText("Audio backend and buffer configuration");
+    ImGui::BulletText("BIOS, disc and memory-card wiring");
+    ImGui::Separator();
+    if (ImGui::Button("Close menu")) set_menu_open(false);
+}
+
+void draw_language_tab() {
     ImGui::TextWrapped("Disc of another region: %s", g_language_disc.empty() ? "none, the game is in English" : g_language_disc.c_str());
     if (ImGui::Button("Choose a disc image")) (void)psx_host_pick_disc_image_begin();
     ImGui::SameLine();
@@ -1181,12 +1189,6 @@ void draw_system_tab() {
     }
     ImGui::TextDisabled("Movies, speech and words come from that disc at the next start. The French, German and Japanese discs are known.");
     ImGui::TextDisabled("The Japanese disc gives movies, speech and hints: its menus are in English on the disc itself.");
-    ImGui::SeparatorText("Restart required");
-    ImGui::BulletText("Renderer backend");
-    ImGui::BulletText("Audio backend and buffer configuration");
-    ImGui::BulletText("BIOS, disc and memory-card wiring");
-    ImGui::Separator();
-    if (ImGui::Button("Close menu")) set_menu_open(false);
 }
 
 void draw_menu() {
@@ -1211,12 +1213,16 @@ void draw_menu() {
                 draw_enhancements_tab();
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem("Cheats")) {
-                draw_cheats_tab();
+            if (ImGui::BeginTabItem("Language")) {
+                draw_language_tab();
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("System")) {
                 draw_system_tab();
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Cheats")) {
+                draw_cheats_tab();
                 ImGui::EndTabItem();
             }
             ImGui::EndTabBar();

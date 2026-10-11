@@ -86,7 +86,8 @@ enable experimental vertical aim.
 **Alt+Enter** toggles fullscreen. **Shift+F1–F12** saves a state;
 **F1–F12** loads it. Save states require a matching build and supported game.
 
-Controls, Enhancements, Cheats, and System are the available settings tabs.
+Controls, Enhancements, Language, System, and Cheats are the available settings
+tabs.
 Preferences are stored in `settings.toml` beside the executable. Explicit launch
 options override saved preferences for that run. God Mode resets off on launch.
 Granting all weapons and psionics marks the game as cheated and carries that
