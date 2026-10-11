@@ -75,8 +75,9 @@ if [ -n "$WITHOUT_GAME" ]; then
     }
     # The launcher needs nothing of the game, so it is linked where it exists.
     case "$TARGETS" in *"disruptor-launcher: "*) TESTS="$TESTS disruptor-launcher" ;; esac
+    # A command line holds about 32 thousand characters on Windows and the object names alone are more: 100 names a call.
     # shellcheck disable=SC2086
-    ninja -C "$BUILD" $OBJECTS $TESTS
+    printf '%s\n' $OBJECTS $TESTS | xargs -n 100 ninja -C "$BUILD"
     ctest --test-dir "$BUILD" --output-on-failure --no-tests=error -LE retail
     # The retail contracts still check the sources when the image is not asked for.
     for contract in tests/test_*_contract.py; do
