@@ -5000,7 +5000,7 @@ static void sdl_vblank_present(void) {
          * decode; the activity stamp also covers authentic 4:3 configurations. */
         if (g_gl_active)
             gl_renderer_set_interpolation_suspended(
-                fmv_frame || mdec_recently_active(2));
+                fmv_frame || mdec_recently_active(2) || gpu_ws_displayed_menu() != 0);
 
         /* Canonical present width. Native-wide does NOT widen the canonical read
          * (that bled across adjacent framebuffers); it composites into a separate
