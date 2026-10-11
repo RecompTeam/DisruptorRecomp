@@ -86,7 +86,7 @@ if [ -n "$WITHOUT_GAME" ]; then
     printf '%s\n' $OBJECTS $TESTS | xargs -n 100 ninja -C "$BUILD"
     ctest --test-dir "$BUILD" --output-on-failure --no-tests=error -LE retail
     # The retail contracts still check the sources when the image is not asked for.
-    for contract in tests/test_*_contract.py; do
+    for contract in tests/contracts/test_*_contract.py; do
         python3 -B "$contract"
     done
     echo "Built and tested without the game: the runtime was compiled and not linked."

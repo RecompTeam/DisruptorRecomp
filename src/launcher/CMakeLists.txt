@@ -70,7 +70,7 @@ set_property(TARGET disruptor-launcher APPEND PROPERTY LINK_DEPENDS
     "${PROJECT_SOURCE_DIR}/release/windows/settings.toml")
 
 if(BUILD_TESTING)
-    add_executable(disruptor-disc-import-test "${PROJECT_SOURCE_DIR}/tests/disc_import_test.cpp")
+    add_executable(disruptor-disc-import-test "${PROJECT_SOURCE_DIR}/tests/unit/disc_import_test.cpp")
     set_target_properties(disruptor-disc-import-test PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
     target_link_libraries(disruptor-disc-import-test PRIVATE disruptor-disc-import)
@@ -81,18 +81,18 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME disruptor_disc_import COMMAND disruptor-disc-import-test)
 
-    add_executable(disruptor-launcher-settings-test "${PROJECT_SOURCE_DIR}/tests/launcher_settings_test.cpp")
+    add_executable(disruptor-launcher-settings-test "${PROJECT_SOURCE_DIR}/tests/unit/launcher_settings_test.cpp")
     target_link_libraries(disruptor-launcher-settings-test PRIVATE disruptor-launcher-model)
     target_compile_definitions(disruptor-launcher-settings-test PRIVATE "DISRUPTOR_SOURCE_DIR=LR\"(${PROJECT_SOURCE_DIR})\"")
     add_test(NAME disruptor_launcher_settings COMMAND disruptor-launcher-settings-test)
 
-    add_executable(disruptor-launcher-flow-test "${PROJECT_SOURCE_DIR}/tests/launcher_flow_test.cpp")
+    add_executable(disruptor-launcher-flow-test "${PROJECT_SOURCE_DIR}/tests/unit/launcher_flow_test.cpp")
     target_link_libraries(disruptor-launcher-flow-test PRIVATE disruptor-launcher-model)
     add_test(NAME disruptor_launcher_flow COMMAND disruptor-launcher-flow-test)
 
     # The synthetic discs include the layout code whole, so this test takes region_disc.cpp and not the library.
     add_executable(disruptor-region-disc-test
-        "${PROJECT_SOURCE_DIR}/tests/region_disc_test.cpp" region_disc.cpp)
+        "${PROJECT_SOURCE_DIR}/tests/unit/region_disc_test.cpp" region_disc.cpp)
     target_include_directories(disruptor-region-disc-test PRIVATE "${PROJECT_SOURCE_DIR}/src")
     target_link_libraries(disruptor-region-disc-test PRIVATE disruptor-disc-import)
     add_test(NAME disruptor_region_disc COMMAND disruptor-region-disc-test)
