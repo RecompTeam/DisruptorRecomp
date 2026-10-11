@@ -212,6 +212,10 @@ if(BUILD_TESTING)
         COMMAND "${Python3_EXECUTABLE}" -B
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_loaded_state_contract.py")
 
+    add_test(NAME disruptor_save_point_contract
+        COMMAND "${Python3_EXECUTABLE}" -B
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_save_point_contract.py")
+
     add_test(NAME disruptor_cheats_contract
         COMMAND "${Python3_EXECUTABLE}" -B
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_cheats_contract.py")
@@ -588,6 +592,14 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
     target_compile_features(disruptor-gpu-world-depth-test PRIVATE cxx_std_20)
     add_test(NAME disruptor_gpu_world_depth
         COMMAND disruptor-gpu-world-depth-test)
+
+    add_executable(disruptor-save-point-test
+        tests/save_point_test.cpp)
+    target_include_directories(disruptor-save-point-test PRIVATE
+        "${PSXRECOMP_ROOT}/runtime/include")
+    target_compile_features(disruptor-save-point-test PRIVATE cxx_std_20)
+    add_test(NAME disruptor_save_point
+        COMMAND disruptor-save-point-test)
 
     add_executable(disruptor-presentation-yaw-math-test
         tests/presentation_yaw_math_test.cpp)
