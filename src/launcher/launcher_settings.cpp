@@ -70,6 +70,7 @@ constexpr const char* geometry_key = "disruptor.geometry_correction";
 constexpr const char* frames_key = "video.frame_interpolation";
 constexpr const char* rate_key = "video.frame_interpolation_fps";
 constexpr const char* occlusion_key = "disruptor.ambient_occlusion";
+constexpr const char* aim_key = "disruptor.mouse_aim";
 
 template <auto Has, auto Value>
 constexpr Option toggle(const char* key, Page page, const wchar_t* label, int initial, const char* needs = nullptr) {
@@ -131,6 +132,8 @@ constexpr Option option_list[] = {
            set_thousandths<&Settings::has_horizontal_sensitivity, &Settings::horizontal_sensitivity>),
     toggle<&Settings::has_invert_horizontal, &Settings::invert_horizontal>(
         "disruptor.invert_horizontal", Page::controls, L"Invert horizontal mouse", 0),
+    toggle<&Settings::has_high_precision_camera, &Settings::high_precision_camera>(
+        "disruptor.high_precision_camera", Page::controls, L"Smooth mouse turning", 0, aim_key),
     toggle<&Settings::has_vertical_look, &Settings::vertical_look>(
         "disruptor.vertical_look", Page::controls, L"Vertical mouse look", 0),
     slider("disruptor.vertical_sensitivity", Page::controls, L"Vertical sensitivity", 80, 5, 2000, Unit::thousandths,

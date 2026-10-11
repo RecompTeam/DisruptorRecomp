@@ -67,6 +67,7 @@
 #include "gpu_render.h"
 #include "gpu_sw_renderer.h"
 #include "gpu_gl_renderer.h"
+#include "gpu_turned_perspective.h"
 #include "gpu_world_depth.h"
 #include "host_ui.h"
 #include "latency_ring.h"
@@ -658,6 +659,11 @@ static int take_visual_triangle(const int *xs, const int *ys,
     return (world || sprite || unpinned ? 1 : 0) | (exact ? 2 : 0) | (filler ? 4 : 0);
 }
 
+static void turned_perspective(const float px[3], float pq[3], int visual_flags) {
+    if (visual_flags & 2)
+        psx_turned_perspective(px, pq, s_yaw_sin, s_yaw_cos, (float)g_wide_cur_base + s_yaw_center_x, s_yaw_focal_x);
+}
+
 /* ---- dirty-rect helpers ------------------------------------------------- */
 static void rect_clear(DirtyRect *r) { r->set = 0; }
 static void rect_add(DirtyRect *r, int x0, int y0, int x1, int y1) {
@@ -1119,11 +1125,8 @@ static const char *TEX_VS =
     "      if (u_visual_options.y > 0.5) yb = u_camera.w + (yb-u_camera.w)/den;\n"
     "    }\n"
     "  }\n"
-    "  /* Fractional yaw is a separate projective transform. The CPU disables\n"
-    "   * texture perspective for its entire polygon; this uniform check is a\n"
-    "   * redundant primitive-wide guard against mixed zero/nonzero q. */\n"
-    "  float q = (u_visual > 0.5 && a_visual_flags > 1.5 &&\n"
-    "             a_q > 0.0 && abs(u_camera.x) <= 0.0000001) ? a_q : 0.0;\n"
+    "  /* Under a fractional yaw a_q comes divided by the turn's denominator, or 0 for the whole triangle. */\n"
+    "  float q = (u_visual > 0.5 && a_visual_flags > 1.5 && a_q > 0.0) ? a_q : 0.0;\n"
     "  v_uvq = vec3(a_uv*q, q); v_perspective = q > 0.0 ? 1 : 0;\n"
     "  if (u_xscale < 0.0) {\n"
     "    float s = -u_xscale; float h = u_xhalf / s;\n"
@@ -2263,6 +2266,7 @@ static void gpu_textured_triangle(const int *xs, const int *ys,
     float px[3], py[3], pq[3], pz[3];
     uint64_t pid[3];
     const int visual_flags = take_visual_triangle(xs, ys, px, py, pq, pz, pid);
+    turned_perspective(px, pq, visual_flags);
     int lim_buf[4];
     int uv_buf[6];
     if (!lim) {
@@ -5146,6 +5150,11 @@ static int ssao_present(GLuint fbo, GLuint tex, int y, int h, int linear, int lx
 
 void gl_renderer_set_mesh_view(int enabled) { s_mesh_view = enabled != 0; }
 int gl_renderer_mesh_view(void) { return s_mesh_view; }
+void gl_renderer_set_full_yaw(int enabled) {
+    if (s_raster_ok) { flush_flat_batch(); flush_tex_batch(); }
+    if ((enabled != 0) != s_geometry_full_yaw) interp_reset_history();
+    s_geometry_full_yaw = enabled != 0;
+}
 void gl_renderer_set_gap_fill(int enabled) {
     if (s_raster_ok) { flush_flat_batch(); flush_tex_batch(); }
     const float width = enabled ? s_crack_width : 0.0f;

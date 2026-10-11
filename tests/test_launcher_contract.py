@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 NOT_OFFERED = {
     "video.renderer", "video.window_width", "video.antialiasing", "video.texture_filtering", "video.crt_filter",
     "video.auto_skip_fmv", "video.turbo_loads", "video.fast_boot", "video.bios_hle", "video.low_latency_input",
-    "video.frame_interpolation_blend", "audio.spu_hq", "disruptor.high_precision_camera", "disruptor.diagnostic_view",
+    "video.frame_interpolation_blend", "audio.spu_hq", "disruptor.diagnostic_view",
 }
 # Keys written together with a launcher row, or by the language row.
 COVERED = {"video.adaptive_view", "disruptor.language_disc", "disruptor.language_discs"}
@@ -48,7 +48,7 @@ menu = read("src/disruptor_dev_menu.cpp") + read("src/disruptor_present_rate.cpp
 rows = re.findall(r'\b(toggle|choice|slider)(?:<[^>]*>)?\(\s*"([\w.]+)", Page::(\w+), L"([^"]+)", (-?\d+)', table)
 keys = [key for _, key, _, _, _ in rows]
 initial = {key: int(value) for _, key, _, _, value in rows}
-require(len(rows) == 26 and len(set(keys)) == 26, "the launcher's table must hold its 26 rows, each key once")
+require(len(rows) == 27 and len(set(keys)) == 27, "the launcher's table must hold its 27 rows, each key once")
 
 writer = loader[loader.index("bool save_user_settings(") :]
 saved, section = set(), ""

@@ -45,6 +45,7 @@ extern "C" void gte_ws_set_far_threshold(int threshold);
 extern "C" void gte_ws_set_backdrop_repair_enabled(int enabled);
 extern "C" void gl_renderer_set_world_depth(int enabled);
 extern "C" int gl_renderer_world_depth(void);
+extern "C" void gl_renderer_set_full_yaw(int enabled);
 extern "C" void gl_renderer_set_mesh_view(int enabled);
 extern "C" int gl_renderer_mesh_view(void);
 extern "C" int gl_renderer_record_shown(const char *folder, int skip, int count, int width);
@@ -110,6 +111,7 @@ enum PreferenceDirty : uint32_t {
     PREF_GAP_FILLING       = 1u << 27,
     PREF_WORLD_DEPTH       = 1u << 28,
     PREF_DIAGNOSTIC_VIEW   = 1u << 29,
+    PREF_SMOOTH_TURN       = 1u << 30,
 };
 
 struct PreferenceState {
@@ -364,6 +366,18 @@ void mark_diagnostic_view(int value) {
     g_preferences.dirty |= PREF_DIAGNOSTIC_VIEW;
 }
 
+// With the vertical divided too a renderer turn of one step misses the game's next step in a median of 8604 pixels of 307200, without in 24274.
+void apply_smooth_turn(bool enabled) {
+    disruptor_high_precision_camera_set_enabled(enabled ? 1 : 0);
+    if (!env_override_present("PSX_GEOMETRY_FULL_YAW")) gl_renderer_set_full_yaw(enabled ? 1 : 0);
+}
+
+void mark_smooth_turn(bool value) {
+    g_preferences.pending.has_high_precision_camera = true;
+    g_preferences.pending.high_precision_camera = value;
+    g_preferences.dirty |= PREF_SMOOTH_TURN;
+}
+
 void mark_present_rate(int value) {
     g_preferences.pending.has_frame_interpolation_fps = true;
     g_preferences.pending.frame_interpolation_fps = value;
@@ -481,6 +495,10 @@ void merge_dirty_preferences(PSXRecompV4::UserSettings &settings) {
     if (g_preferences.dirty & PREF_DIAGNOSTIC_VIEW) {
         settings.has_diagnostic_view = true;
         settings.diagnostic_view = pending.diagnostic_view;
+    }
+    if (g_preferences.dirty & PREF_SMOOTH_TURN) {
+        settings.has_high_precision_camera = true;
+        settings.high_precision_camera = pending.high_precision_camera;
     }
     if (g_preferences.dirty & PREF_PRESENT_RATE) {
         settings.has_frame_interpolation_fps = true;
@@ -611,6 +629,11 @@ void apply_saved_preferences(const PSXRecompV4::UserSettings &settings) {
         gl_renderer_set_gap_fill(settings.gap_filling ? 1 : 0);
     if (settings.has_depth_sorted_world && !env_override_present("PSX_GL_WORLD_DEPTH"))
         gl_renderer_set_world_depth(settings.depth_sorted_world ? 1 : 0);
+    // The session's start switched it off after the mouse module read its variable, so the variable is applied here too.
+    if (const char *forced = std::getenv("PSX_DISRUPTOR_HIGH_PRECISION_CAMERA"))
+        apply_smooth_turn(forced[0] != '\0' && forced[0] != '0');
+    else if (settings.has_high_precision_camera)
+        apply_smooth_turn(settings.high_precision_camera);
 }
 
 void apply_pending_preferences() {
@@ -677,6 +700,8 @@ void apply_pending_preferences() {
         gl_renderer_set_world_depth(pending.depth_sorted_world ? 1 : 0);
     if (g_preferences.dirty & PREF_DIAGNOSTIC_VIEW)
         apply_diagnostic_view(pending.diagnostic_view);
+    if (g_preferences.dirty & PREF_SMOOTH_TURN)
+        apply_smooth_turn(pending.high_precision_camera);
 #ifndef PSX_DISABLE_FRAME_INTERPOLATION
     if (g_preferences.dirty & PREF_PRESENT_ENABLED)
         (void)disruptor_present_rate_enable(pending.frame_interpolation ? 1 : 0);
@@ -882,6 +907,20 @@ void draw_controls_tab() {
         disruptor_mouse_set_invert_horizontal(invert_x ? 1 : 0);
         mark_invert_x(invert_x);
     }
+
+    const bool turn_applies = mouse_aim && gpu_geometry_correction_enabled() != 0;
+    bool smooth = disruptor_high_precision_camera_enabled() != 0;
+    if (!turn_applies) ImGui::BeginDisabled();
+    if (ImGui::Checkbox("Smooth mouse turning", &smooth)) {
+        apply_smooth_turn(smooth);
+        mark_smooth_turn(smooth);
+    }
+    if (!turn_applies) ImGui::EndDisabled();
+    draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
+    ImGui::TextDisabled(
+        "The game turns in 256 steps of a circle. While the mouse is captured "
+        "the picture is turned by the part of a step in between. Needs mouse aim "
+        "and exact geometry.");
 
     ImGui::SeparatorText("Vertical look");
     bool vertical_look = disruptor_mouse_vertical_look_enabled() != 0;

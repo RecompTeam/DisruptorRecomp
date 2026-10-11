@@ -116,7 +116,6 @@ static int      ws_mode    = 0;
 static int      ws_cfg_num = 4, ws_cfg_den = 3;
 static int      ws_geometry_correction = 0;
 static int      s_texture_correction_enabled = 0;
-static int      s_texture_correction_yaw_active = 0;
 static uint32_t s_texture_correction_triangles = 0;
 static double   s_geometry_camera_yaw_residual = 0.0;
 static int      s_geometry_camera_projection_center_y = 120;
@@ -2824,14 +2823,6 @@ static void geometry_camera_presentation_update(void) {
     double focal = center;
     if (ws_mode == 1 && ws_xden != 0)
         focal = focal * (double)ws_xnum / (double)ws_xden;
-    /* The optional fractional-yaw homography changes effective depth across a
-     * primitive. Until all four vertices can be preflighted against that
-     * renderer-side denominator, keep the whole textured polygon affine. This
-     * avoids a provoking-vertex decision mixing q=0 and q>0 at a screen edge. */
-    s_texture_correction_yaw_active =
-        ws_geometry_correction &&
-        isfinite(s_geometry_camera_yaw_residual) &&
-        s_geometry_camera_yaw_residual != 0.0;
     gr_set_presentation_yaw(ws_geometry_correction &&
                                 isfinite(s_geometry_camera_yaw_residual)
                                 ? s_geometry_camera_yaw_residual : 0.0,
@@ -3891,7 +3882,6 @@ static int prepare_precise_quad_vertices(const int indices[4],
 static int resolve_texture_vertices(int exact, const int *indices, int count,
                                     float *q) {
     if (!exact || !s_texture_correction_enabled ||
-        s_texture_correction_yaw_active ||
         gp0_cmd_source_addr == 0xFFFFFFFFu || count < 3 || count > 4)
         return 0;
     uint16_t z[4];

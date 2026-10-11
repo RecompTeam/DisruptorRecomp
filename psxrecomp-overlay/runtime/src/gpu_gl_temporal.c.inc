@@ -263,7 +263,7 @@ static void temporal_position(float *v, int textured, int gate, int direct) {
             if (s_geometry_full_yaw) y = cy + (y-cy)/den;
         }
     }
-    if (textured && (!corrected || v[flags_at] <= 1.5f || fabsf(s_yaw_sin) > 0.0000001f))
+    if (textured && (!corrected || v[flags_at] <= 1.5f))
         v[22] = 0;
     if (!direct) {
         if (gate && g_ws_bd_stretch_on) {

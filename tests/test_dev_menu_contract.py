@@ -312,7 +312,6 @@ for forbidden in (
     "disruptor_far_rendering_set_depth_fade_mode",
     "PREF_PRECISE_CAMERA",
     "mark_precise_camera",
-    "settings.has_high_precision_camera",
     '"Sub-byte camera presentation"',
     '"Camera presentation"',
     '"Developer build"',

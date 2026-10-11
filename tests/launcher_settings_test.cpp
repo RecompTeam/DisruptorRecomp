@@ -158,10 +158,16 @@ void dependants(const fs::path& folder) {
             "a switched off dependant must be written, its default is on");
     require(settings.set(geometry, 1) && settings.shown(textures) == 0 && settings.applies(textures) &&
             !settings.applies(rate), "switching geometry back on must switch nothing else");
+    const Option& aim = option("disruptor.mouse_aim");
+    const Option& smooth = option("disruptor.high_precision_camera");
     const Option& gaps = option("disruptor.gap_filling");
     const Option& by_depth = option("disruptor.depth_sorted_world");
     const Option& occlusion = option("disruptor.ambient_occlusion");
     const Option& reach = option("disruptor.occlusion_reach");
+    require(settings.set(aim, 1) && settings.set(smooth, 1) && settings.applies(smooth) && settings.set(geometry, 0) &&
+            settings.shown(smooth) == 1 && settings.applies(smooth), "smooth turning needs mouse aim, not geometry");
+    require(settings.set(aim, 0) && settings.shown(smooth) == 0 && !settings.applies(smooth) &&
+            has(file, "high_precision_camera = false"), "and goes off with mouse aim");
     require(settings.shown(gaps) == 0 && has(file, "gap_filling = false"),
             "gap filling, on in a fresh installation, went off with geometry above and was written so");
     require(settings.set(geometry, 1) && settings.set(gaps, 1) && settings.set(by_depth, 1) && settings.set(occlusion, 1) &&
