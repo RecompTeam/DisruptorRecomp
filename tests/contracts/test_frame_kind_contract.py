@@ -48,12 +48,9 @@ CONTRACTS = ["if(BUILD_TESTING)"]
 UNIT_TESTS = ["if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)"]
 REGISTERED = {
     '    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/render_arena.cpp"\n': [],
-    '    add_test(NAME disruptor_frame_kind_contract\n        COMMAND "${Python3_EXECUTABLE}" -B\n'
-    '            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_frame_kind_contract.py")\n': CONTRACTS,
-    "    add_executable(disruptor-gpu-ws-frame-kind-test\n        tests/unit/gpu_ws_frame_kind_test.cpp)\n": UNIT_TESTS,
-    "    add_test(NAME disruptor_gpu_ws_frame_kind\n        COMMAND disruptor-gpu-ws-frame-kind-test)\n": UNIT_TESTS,
-    "    add_executable(disruptor-render-arena-test\n        tests/unit/disruptor_render_arena_test.cpp)\n": UNIT_TESTS,
-    "    add_test(NAME disruptor_render_arena COMMAND disruptor-render-arena-test)\n": UNIT_TESTS,
+    "    disruptor_contract(frame_kind)\n": CONTRACTS,
+    "    disruptor_unit_test(disruptor_gpu_ws_frame_kind tests/unit/gpu_ws_frame_kind_test.cpp RUNTIME_HEADERS)\n": UNIT_TESTS,
+    "    disruptor_unit_test(disruptor_render_arena tests/unit/disruptor_render_arena_test.cpp RUNTIME_HEADERS)\n": UNIT_TESTS,
 }
 for block, conditions in REGISTERED.items():
     require(

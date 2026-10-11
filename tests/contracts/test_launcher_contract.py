@@ -155,7 +155,7 @@ require(
     "add_test(NAME disruptor_launcher_settings COMMAND disruptor-launcher-settings-test)" in launcher_cmake
     and "add_test(NAME disruptor_launcher_flow COMMAND disruptor-launcher-flow-test)" in launcher_cmake
     and "add_test(NAME disruptor_region_disc COMMAND disruptor-region-disc-test)" in launcher_cmake
-    and "add_test(NAME disruptor_launcher_contract" in cmake,
+    and "    disruptor_contract(launcher)\n" in cmake,
     "the launcher's tests must remain registered",
 )
 

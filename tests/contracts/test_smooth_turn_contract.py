@@ -31,9 +31,9 @@ launcher = read("src/launcher/launcher_settings.cpp")
 require(
     overlay.count("+runtime/include/gpu_turned_perspective.h\n") == 1
     and '#include "gpu_turned_perspective.h"\n' in renderer
-    and "    add_executable(disruptor-gpu-turned-perspective-test\n        tests/unit/gpu_turned_perspective_test.cpp)\n" in cmake
-    and "    add_test(NAME disruptor_gpu_turned_perspective\n        COMMAND disruptor-gpu-turned-perspective-test)\n" in cmake
-    and "    add_test(NAME disruptor_smooth_turn_contract\n" in cmake,
+    and "    disruptor_unit_test(disruptor_gpu_turned_perspective tests/unit/gpu_turned_perspective_test.cpp RUNTIME_HEADERS)\n"
+    in cmake
+    and "    disruptor_contract(smooth_turn)\n" in cmake,
     "the turned perspective's header is applied to the framework and its test and this contract are registered",
 )
 

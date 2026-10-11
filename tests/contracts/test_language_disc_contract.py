@@ -82,11 +82,10 @@ reader = read("psxrecomp-overlay/runtime/src/iso_reader_c.cpp")
 require(
     '/src/game/language/language_disc.cpp"' in cmake
     and '/src/game/language/language_source.cpp"' in cmake
-    and "add_test(NAME disruptor_language_disc\n" in cmake
-    and "add_test(NAME disruptor_language_overlay\n" in cmake
+    and "    disruptor_unit_test(disruptor_language_disc " in cmake
+    and "    disruptor_unit_test(disruptor_language_overlay tests/unit/disruptor_language_overlay_test.cpp\n" in cmake
     and "add_test(NAME disruptor_language_overlay_tall\n        COMMAND disruptor-language-overlay-test tall)" in cmake
-    and "        tests/unit/disruptor_language_overlay_test.cpp)" in cmake
-    and 'tests/contracts/test_language_disc_contract.py"\n            --require-artifacts)' in cmake,
+    and "    disruptor_contract(language_disc RETAIL)\n" in cmake,
     "the language disc sources and their three tests must remain registered, the contract with its inputs required",
 )
 require(
@@ -343,7 +342,7 @@ require(
     and "    return s_disc_pick.take(out, size);" in host
     and "        if (state_ != State::kNone) return false;\n        state_ = State::kOpen;" in pick_slot
     and "        if (state_ != State::kClosed) return 0;\n        state_ = State::kNone;" in pick_slot
-    and "add_test(NAME host_pick_slot\n" in cmake
+    and "    disruptor_unit_test(host_pick_slot " in cmake
     and "CLSID_FileOpenDialog" in host
     and "FOS_NOCHANGEDIR" in host
     and "GetOpenFileName" not in host.replace("IFileOpenDialog, not GetOpenFileName:", "")
@@ -354,7 +353,7 @@ require(
     and '    if (ImGui::Button("Restart now") && !psx_netplay_active() && flush_preferences() && disruptor_restart_arm()) {' in menu
     and "        quit.type = SDL_QUIT;\n        SDL_PushEvent(&quit);" in menu
     and '/src/game/session/restart.cpp"' in cmake
-    and "add_test(NAME disruptor_restart\n" in cmake
+    and "    disruptor_unit_test(disruptor_restart " in cmake
     and "    if (!before) return GetLastError() == ERROR_INVALID_PARAMETER;" in restart
     and "    return waited == WAIT_OBJECT_0;" in restart
     and "    if (!earlier_game_ended(std::strtoul(earlier, nullptr, 10), kLongestWait)) {" in restart

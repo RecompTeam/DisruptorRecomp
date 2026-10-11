@@ -26,7 +26,7 @@ menu = read("src/game/ui/dev_menu.cpp")
 launcher = read("src/launcher/launcher_settings.cpp")
 loader = read("psxrecomp-overlay/recompiler/src/config_loader.cpp")
 
-require("    add_test(NAME disruptor_gap_filling_contract\n" in cmake, "this contract is registered")
+require("    disruptor_contract(gap_filling)\n" in cmake, "this contract is registered")
 
 require(
     "    const int filler = s_grown_under && exact && s_next_world == 2;\n" in renderer

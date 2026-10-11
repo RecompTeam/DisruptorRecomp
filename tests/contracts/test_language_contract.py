@@ -94,8 +94,8 @@ hints = read("src/game/language/language_hints.cpp")
 
 require(
     '/src/game/language/language.cpp"' in cmake
-    and "add_test(NAME disruptor_language\n" in cmake
-    and 'tests/contracts/test_language_contract.py"\n            --require-artifacts)' in cmake,
+    and "    disruptor_unit_test(disruptor_language " in cmake
+    and "    disruptor_contract(language RETAIL)\n" in cmake,
     "the language source and both of its tests must remain registered, the contract with its inputs required",
 )
 require(
@@ -193,7 +193,7 @@ require(
 )
 require(
     '/src/game/language/language_hints.cpp"' in cmake
-    and "add_test(NAME disruptor_language_hints\n" in cmake
+    and "    disruptor_unit_test(disruptor_language_hints " in cmake
     and "constexpr uint32_t kRead = 0x80011888u, kLoadImage = 0x8004D348u, kMoveImage = 0x8004D410u;" in hints
     and "constexpr uint32_t kReadReturn = 0x80020928u, kStageReturn = 0x80020954u;" in hints
     and "constexpr std::array<Move, 2> kMoves = {{{0x80043508u, 0xA0u}, {0x80043518u, 0x190u}}};" in hints

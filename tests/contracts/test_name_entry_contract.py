@@ -99,10 +99,8 @@ host = read("psxrecomp-overlay/runtime/src/main.cpp")
 require(
     '    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/name_entry.cpp"\n' in cmake
     and "    PSX_HAS_DISRUPTOR_NAME_ENTRY=1\n" in cmake
-    and "    add_test(NAME disruptor_name_entry COMMAND disruptor-name-entry-test)\n" in cmake
-    and 'tests/contracts/test_name_entry_contract.py"\n            --require-artifacts)\n'
-    "    set_tests_properties(disruptor_name_entry_contract\n        PROPERTIES LABELS retail)\n"
-    in cmake,
+    and "    disruptor_unit_test(disruptor_name_entry " in cmake
+    and "    disruptor_contract(name_entry RETAIL)\n" in cmake,
     "the module, its switch for the host, its unit test and this contract with its input must stay registered",
 )
 require(

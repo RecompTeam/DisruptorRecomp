@@ -60,8 +60,9 @@ require(
 )
 require(
     "+runtime/include/host_borderless.h" in read("PSXRECOMP_OVERLAY_FILES.txt").splitlines()
-    and "    add_test(NAME host_borderless\n        COMMAND host-borderless-test)\n" in cmake
-    and 'tests/contracts/test_borderless_contract.py")' in cmake,
+    and "    disruptor_unit_test(host_borderless " in cmake
+    and "    add_test(NAME host_borderless_contract\n" in cmake
+    and '/tests/contracts/test_borderless_contract.py")' in cmake,
     "the header is part of the overlay and its tests remain registered",
 )
 

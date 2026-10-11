@@ -62,12 +62,12 @@ audit = read("tools/audit_codegen.py")
 
 require(
     "src/game/render/backdrop_tiles.cpp" in cmake
-    and "disruptor_backdrop_tiles_contract" in cmake
-    and "add_test(NAME disruptor_backdrop_tiles\n" in cmake,
+    and "    disruptor_contract(backdrop_tiles RETAIL)\n" in cmake
+    and "    disruptor_unit_test(disruptor_backdrop_tiles " in cmake,
     "backdrop tile source, its unit test and its contract test must remain registered",
 )
 require(
-    'tests/contracts/test_backdrop_tiles_contract.py"\n            --require-artifacts)' in cmake,
+    "    disruptor_contract(backdrop_tiles RETAIL)\n" in cmake,
     "the build gate must run this contract with its inputs required",
 )
 require(

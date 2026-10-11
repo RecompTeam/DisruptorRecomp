@@ -132,8 +132,8 @@ require(
     and "    PSX_HAS_DISRUPTOR_CAPSULE=1\n" in cmake
     and '#define DISRUPTOR_CAPSULE_NO_HOST 1\n#include "../../src/game/session/capsule.cpp"\n'
     in read("tests/unit/disruptor_capsule_test.cpp")
-    and "    add_test(NAME disruptor_capsule\n        COMMAND disruptor-capsule-test)\n" in cmake
-    and 'tests/contracts/test_capsule_contract.py")' in cmake,
+    and "    disruptor_unit_test(disruptor_capsule " in cmake
+    and "    disruptor_contract(capsule)\n" in cmake,
     "the capsule and its tests must remain built and registered",
 )
 require(

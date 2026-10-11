@@ -42,8 +42,8 @@ gpu = read("psxrecomp-overlay/runtime/src/gpu.c")
 require(
     '"${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/grown_quad.cpp"' in cmake
     and "PSX_HAS_DISRUPTOR_GROWN_QUAD=1" in cmake
-    and "add_test(NAME disruptor_grown_quad\n" in cmake
-    and 'tests/contracts/test_grown_quad_contract.py"\n            --require-artifacts)' in cmake,
+    and "    disruptor_unit_test(disruptor_grown_quad " in cmake
+    and "    disruptor_contract(grown_quad RETAIL)\n" in cmake,
     "the grown quad source, its renderer switch, its unit test and this contract with its input must stay registered",
 )
 require(

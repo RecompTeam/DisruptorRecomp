@@ -56,13 +56,13 @@ settings_loader = read("psxrecomp-overlay/recompiler/src/config_loader.cpp")
 require(
     "src/game/session/intro_skip.cpp" in cmake
     and "PSX_HAS_DISRUPTOR_INTRO_SKIP=1" in cmake
-    and "disruptor_intro_skip_contract" in cmake
-    and "add_test(NAME disruptor_intro_skip\n" in cmake,
+    and "    disruptor_contract(intro_skip RETAIL)\n" in cmake
+    and "    disruptor_unit_test(disruptor_intro_skip " in cmake,
     "intro-skip source, its interpreter switch and both tests must remain registered",
 )
 
 require(
-    'tests/contracts/test_intro_skip_contract.py"\n            --require-artifacts)' in cmake,
+    "    disruptor_contract(intro_skip RETAIL)\n" in cmake,
     "the build gate must run this contract with its inputs required",
 )
 for address, word in SEAMS.items():

@@ -26,7 +26,7 @@ menu = read("src/game/ui/dev_menu.cpp")
 loader = read("psxrecomp-overlay/recompiler/src/config_loader.cpp")
 settings = read("psxrecomp-overlay/recompiler/src/config_loader.h")
 
-require("    add_test(NAME disruptor_debug_tab_contract\n" in cmake, "this contract is registered")
+require("    disruptor_contract(debug_tab)\n" in cmake, "this contract is registered")
 
 debug = between(menu, "void draw_debug_tab() {", "void draw_cheats_tab() {")
 require(

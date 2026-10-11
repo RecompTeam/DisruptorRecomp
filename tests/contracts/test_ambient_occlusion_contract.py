@@ -27,7 +27,7 @@ launcher = read("src/launcher/launcher_settings.cpp")
 loader = read("psxrecomp-overlay/recompiler/src/config_loader.cpp")
 settings = read("psxrecomp-overlay/recompiler/src/config_loader.h")
 
-require("    add_test(NAME disruptor_ambient_occlusion_contract\n" in cmake, "this contract is registered")
+require("    disruptor_contract(ambient_occlusion)\n" in cmake, "this contract is registered")
 
 require(
     '"  v_deep = abs(a_camz) > 16.0 ? 1.0 : -1000.0;\\n"' in renderer

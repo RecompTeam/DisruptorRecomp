@@ -38,10 +38,7 @@ cmake = read("CMakeLists.txt")
 gpu = read("psxrecomp-overlay/runtime/src/gpu.c")
 renderer = read("psxrecomp-overlay/runtime/src/gpu_gl_renderer.c")
 
-REGISTRATION = (
-    '    add_test(NAME disruptor_depth24_sync_contract\n        COMMAND "${Python3_EXECUTABLE}" -B\n'
-    '            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_depth24_sync_contract.py")\n'
-)
+REGISTRATION = "    disruptor_contract(depth24_sync)\n"
 require(
     cmake.count(REGISTRATION) == 1 and enclosing(cmake, REGISTRATION) == ["if(BUILD_TESTING)"],
     "this contract must stay registered as written, under the condition every contract of the repository is under",

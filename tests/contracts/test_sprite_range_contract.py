@@ -187,9 +187,8 @@ source = read("src/game/render/sprite_depth.cpp")
 gte = read("psxrecomp-overlay/runtime/src/gte.cpp")
 
 require(
-    'tests/contracts/test_sprite_range_contract.py"\n            --require-artifacts)' in cmake
-    and "    set_tests_properties(disruptor_sprite_range_contract\n        PROPERTIES LABELS retail)\n" in cmake
-    and "    add_test(NAME disruptor_sprite_depth\n" in cmake,
+    "    disruptor_contract(sprite_range RETAIL)\n" in cmake
+    and "    disruptor_unit_test(disruptor_sprite_depth " in cmake,
     "this contract with its input and the unit test of the range must stay registered",
 )
 require(

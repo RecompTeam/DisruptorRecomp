@@ -84,7 +84,7 @@ require("disruptor_vertical_camera_input_allowed()" in mouse,
 require("gpu_geometry_camera_projection_center_y_set" in camera and
         "gpu_geometry_camera_projection_center_y_set" in gpu,
         "guest and presentation horizons must share one renderer setter")
-require("disruptor-vertical-camera-test" in cmake and
+require("    disruptor_unit_test(disruptor_vertical_camera " in cmake and
         "disruptor_vertical_look_registration" in cmake,
         "behavior and vertical-only registration tests must remain enabled")
 require("disruptor_vertical_camera_instruction_hook" in camera_h,
