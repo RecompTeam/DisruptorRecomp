@@ -35,5 +35,5 @@ and public-release validation are incomplete.
   individually exercised live.
 - Live volume adjustment and its relaunch persistence need user validation.
 
-See [build details](docs/BUILD.md) and [disc requirements](DISC.md) before
+See [build details](BUILD.md) and [disc requirements](DISC.md) before
 building or reporting a problem.

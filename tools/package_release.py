@@ -37,7 +37,7 @@ def main() -> None:
         "DisruptorLauncher.exe": build / "DisruptorLauncher.exe",
         "game.toml": ROOT / "game.toml",
         "mouse-aim.ini": ROOT / "mouse-aim.ini",
-        "keybinds.ini": ROOT / "keybinds-modern.ini",
+        "keybinds.ini": ROOT / "config/keybinds-modern.ini",
         "settings.toml": ROOT / "release/windows/settings.toml",
         "Play Disruptor.cmd": ROOT / "release/windows/Play Disruptor.cmd",
         "GETTING_STARTED.md": ROOT / "docs/PLAYING.md",

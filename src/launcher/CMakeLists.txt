@@ -58,15 +58,15 @@ add_custom_command(TARGET disruptor-launcher POST_BUILD
     COMMAND "${CMAKE_COMMAND}"
         "-DSOURCE=${PROJECT_SOURCE_DIR}"
         "-DDESTINATION=$<TARGET_FILE_DIR:disruptor-launcher>"
-        -P "${PROJECT_SOURCE_DIR}/tools/stage_launcher.cmake"
+        -P "${PROJECT_SOURCE_DIR}/cmake/stage_launcher.cmake"
     VERBATIM)
 set_property(TARGET disruptor-launcher APPEND PROPERTY LINK_DEPENDS
-    "${PROJECT_SOURCE_DIR}/tools/stage_launcher.cmake"
+    "${PROJECT_SOURCE_DIR}/cmake/stage_launcher.cmake"
     "${PROJECT_SOURCE_DIR}/game.toml"
     "${PROJECT_SOURCE_DIR}/mouse-aim.ini"
     "${PROJECT_SOURCE_DIR}/docs/PLAYING.md"
     "${PROJECT_SOURCE_DIR}/release/windows/Play Disruptor.cmd"
-    "${PROJECT_SOURCE_DIR}/keybinds-modern.ini"
+    "${PROJECT_SOURCE_DIR}/config/keybinds-modern.ini"
     "${PROJECT_SOURCE_DIR}/release/windows/settings.toml")
 
 if(BUILD_TESTING)

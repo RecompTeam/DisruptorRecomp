@@ -13,7 +13,7 @@ Before submitting a change:
 
 - Run the relevant tests and review both the working diff and staged paths.
 - Keep experimental visual features optional.
-- Update [STATUS.md](STATUS.md) when behavior, verified coverage, or a known
+- Update [STATUS.md](docs/STATUS.md) when behavior, verified coverage, or a known
   limitation changes. Keep it focused on the current build.
 
 For bug reports, include the level, steps to reproduce, render scale/aspect,
