@@ -303,6 +303,10 @@ if(BUILD_TESTING)
         COMMAND "${Python3_EXECUTABLE}" -B
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_world_depth_contract.py")
 
+    add_test(NAME disruptor_smooth_turn_contract
+        COMMAND "${Python3_EXECUTABLE}" -B
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_smooth_turn_contract.py")
+
     add_test(NAME disruptor_ambient_occlusion_contract
         COMMAND "${Python3_EXECUTABLE}" -B
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ambient_occlusion_contract.py")
@@ -568,6 +572,14 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
     target_compile_features(disruptor-gpu-pinned-corner-test PRIVATE cxx_std_20)
     add_test(NAME disruptor_gpu_pinned_corner
         COMMAND disruptor-gpu-pinned-corner-test)
+
+    add_executable(disruptor-gpu-turned-perspective-test
+        tests/gpu_turned_perspective_test.cpp)
+    target_include_directories(disruptor-gpu-turned-perspective-test PRIVATE
+        "${PSXRECOMP_ROOT}/runtime/include")
+    target_compile_features(disruptor-gpu-turned-perspective-test PRIVATE cxx_std_20)
+    add_test(NAME disruptor_gpu_turned_perspective
+        COMMAND disruptor-gpu-turned-perspective-test)
 
     add_executable(disruptor-gpu-world-depth-test
         tests/gpu_world_depth_test.cpp)

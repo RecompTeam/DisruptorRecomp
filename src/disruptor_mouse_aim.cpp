@@ -90,6 +90,7 @@ struct MouseAimState {
     double horizontal_sensitivity = kDefaultHorizontalSensitivity;
     double vertical_sensitivity = kDefaultVerticalSensitivity;
     double fractional_yaw = 0.0;
+    double shown_yaw_fraction = 0.0;  // what fractional_yaw was a frame ago
     double sweep_counts = 0.0;
     double vertical_pitch = 0.0;
     uint64_t frame = 0;
@@ -315,6 +316,7 @@ void set_capture(bool captured, const char *reason) {
 
     g_mouse.captured = captured;
     g_mouse.fractional_yaw = 0.0;
+    g_mouse.shown_yaw_fraction = 0.0;
     gpu_geometry_camera_yaw_residual_set(0.0);
     discard_relative_motion();
     log_event(reason);
@@ -600,10 +602,13 @@ void mouse_aim_frame() {
      * remainder is presentation metadata only, consumed by the independent
      * geometry-correction surface; releasing capture immediately restores the
      * exact retail camera. */
+    // The game draws a written yaw a frame later: handed over at once, a steady turn stepped back 3.2 and forward 5.1 pixels of 960 at every whole step.
+    const double shown = g_mouse.shown_yaw_fraction;
+    g_mouse.shown_yaw_fraction = g_mouse.fractional_yaw;
     gpu_geometry_camera_yaw_residual_set(
         g_mouse.high_precision_camera && g_mouse.captured &&
                 g_mouse.mouse_aim_enabled
-            ? g_mouse.fractional_yaw
+            ? shown
             : 0.0);
 
     if (g_mouse.log && g_mouse.frame % 60u == 0u) {
@@ -689,6 +694,7 @@ namespace {
 
 void reset_presentation_residual() {
     g_mouse.fractional_yaw = 0.0;
+    g_mouse.shown_yaw_fraction = 0.0;
     gpu_geometry_camera_yaw_residual_set(0.0);
 }
 

@@ -167,8 +167,12 @@ def main() -> int:
             "depth lookup must activate only beyond the exact-polygon gate")
     require("qmax" in resolve_texture,
             "perspective q must come from reviewed exact depth provenance")
-    require("s_texture_correction_yaw_active" in resolve_texture,
-            "fractional yaw must disable perspective for the whole polygon")
+    turned = function_body(gl, "turned_perspective")
+    require("s_texture_correction_yaw_active" not in gpu and
+            "    if (visual_flags & 2)\n        psx_turned_perspective(px, pq, s_yaw_sin, s_yaw_cos, "
+            "(float)g_wide_cur_base + s_yaw_center_x, s_yaw_focal_x);" in turned and
+            "    turned_perspective(px, pq, visual_flags);\n" in gl,
+            "under a fractional yaw q must be divided by the turn's denominator for the whole triangle, or dropped for it")
     reset_pos = queue_texture.find("gr_set_perspective_triangle(0")
     accept_pos = queue_texture.find("gr_set_perspective_triangle(1")
     require(0 <= reset_pos < accept_pos,
@@ -312,9 +316,9 @@ def main() -> int:
     for token in ("u_visual > 0.5", "a_visual_flags > 1.5", "a_q > 0.0"):
         require(token in tex_vs,
                 f"visual perspective gate is missing: {token}")
-    require("abs(u_camera.x) <= 0.0000001" in tex_vs and
+    require("abs(u_camera.x) <= 0.0000001" not in tex_vs and
             "a_q/depth_den" not in compact(tex_vs),
-            "fractional yaw must fail the primitive uniformly to affine")
+            "the shader must take q as the renderer prepared it: a division per vertex there could mix zero and nonzero q")
     require("v_uvq" in tex_vs and "v_uvq" in tex_fs and
             re.search(r"a_uv\s*\*\s*q", tex_vs) is not None,
             "visual shader must interpolate uv*q and q separately")

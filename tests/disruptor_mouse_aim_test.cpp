@@ -520,13 +520,16 @@ void test_high_precision_camera_residual() {
     mouse_aim_frame();
     expect(psx_read_byte(kTestYawAddress) == 100,
            "sub-step high-precision motion leaves retail yaw unchanged");
-    expect_close(g_camera_yaw_residual, -0.48,
-                 "sub-step remainder reaches the presentation camera");
+    expect_close(g_camera_yaw_residual, 0.0,
+                 "the remainder reaches the presentation camera a frame after the yaw it belongs to is written");
 
     g_relative_x = 7.0f;
     mouse_aim_frame();
     expect(psx_read_byte(kTestYawAddress) == 99,
            "crossing the byte boundary still advances retail yaw");
+    expect_close(g_camera_yaw_residual, -0.48,
+                 "the frame that still shows the old yaw keeps its own remainder");
+    mouse_aim_frame();
     expect_close(g_camera_yaw_residual, -0.04,
                  "presentation residual is continuous across byte boundary");
 
