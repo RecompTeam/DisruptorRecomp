@@ -32,6 +32,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstdlib>
 #include <cstdint>
 #include <cstdio>
@@ -41,6 +42,15 @@
 
 extern "C" void gte_ws_set_far_threshold(int threshold);
 extern "C" void gte_ws_set_backdrop_repair_enabled(int enabled);
+extern "C" void gl_renderer_set_world_depth(int enabled);
+extern "C" int gl_renderer_world_depth(void);
+extern "C" void gl_renderer_set_gap_fill(int enabled);
+extern "C" int gl_renderer_gap_fill(void);
+extern "C" void gl_renderer_set_ssao(int enabled);
+extern "C" int gl_renderer_ssao(void);
+extern "C" void gl_renderer_set_ssao_shape(float radius, float strength);
+extern "C" float gl_renderer_ssao_radius(void);
+extern "C" float gl_renderer_ssao_strength(void);
 
 namespace {
 
@@ -86,6 +96,10 @@ enum PreferenceDirty : uint32_t {
     PREF_SKIP_INTRO        = 1u << 22,
     PREF_PRESENT_ENABLED   = 1u << 23,
     PREF_LANGUAGE_DISC     = 1u << 24,
+    PREF_OCCLUSION         = 1u << 25,
+    PREF_OCCLUSION_SHAPE   = 1u << 26,
+    PREF_GAP_FILLING       = 1u << 27,
+    PREF_WORLD_DEPTH       = 1u << 28,
 };
 
 struct PreferenceState {
@@ -303,6 +317,31 @@ void mark_shadow_shape(bool improved) {
     g_preferences.dirty |= PREF_SHADOW_SHAPE;
 }
 
+void mark_occlusion(bool value) {
+    g_preferences.pending.has_ambient_occlusion = true;
+    g_preferences.pending.ambient_occlusion = value;
+    g_preferences.dirty |= PREF_OCCLUSION;
+}
+
+void mark_occlusion_shape(int reach, int strength) {
+    g_preferences.pending.has_occlusion_reach = g_preferences.pending.has_occlusion_strength = true;
+    g_preferences.pending.occlusion_reach = reach;
+    g_preferences.pending.occlusion_strength = strength;
+    g_preferences.dirty |= PREF_OCCLUSION_SHAPE;
+}
+
+void mark_gap_filling(bool value) {
+    g_preferences.pending.has_gap_filling = true;
+    g_preferences.pending.gap_filling = value;
+    g_preferences.dirty |= PREF_GAP_FILLING;
+}
+
+void mark_world_depth(bool value) {
+    g_preferences.pending.has_depth_sorted_world = true;
+    g_preferences.pending.depth_sorted_world = value;
+    g_preferences.dirty |= PREF_WORLD_DEPTH;
+}
+
 void mark_present_rate(int value) {
     g_preferences.pending.has_frame_interpolation_fps = true;
     g_preferences.pending.frame_interpolation_fps = value;
@@ -399,6 +438,23 @@ void merge_dirty_preferences(PSXRecompV4::UserSettings &settings) {
     if (g_preferences.dirty & PREF_SHADOW_SHAPE) {
         settings.has_improved_shadows = true;
         settings.improved_shadows = pending.improved_shadows;
+    }
+    if (g_preferences.dirty & PREF_OCCLUSION) {
+        settings.has_ambient_occlusion = true;
+        settings.ambient_occlusion = pending.ambient_occlusion;
+    }
+    if (g_preferences.dirty & PREF_OCCLUSION_SHAPE) {
+        settings.has_occlusion_reach = settings.has_occlusion_strength = true;
+        settings.occlusion_reach = pending.occlusion_reach;
+        settings.occlusion_strength = pending.occlusion_strength;
+    }
+    if (g_preferences.dirty & PREF_GAP_FILLING) {
+        settings.has_gap_filling = true;
+        settings.gap_filling = pending.gap_filling;
+    }
+    if (g_preferences.dirty & PREF_WORLD_DEPTH) {
+        settings.has_depth_sorted_world = true;
+        settings.depth_sorted_world = pending.depth_sorted_world;
     }
     if (g_preferences.dirty & PREF_PRESENT_RATE) {
         settings.has_frame_interpolation_fps = true;
@@ -514,6 +570,18 @@ void apply_saved_preferences(const PSXRecompV4::UserSettings &settings) {
     if (settings.has_language_disc) g_language_disc = settings.language_disc;
     if (settings.has_improved_shadows && !env_override_present("PSX_DISRUPTOR_IMPROVED_SHADOWS"))
         gpu_set_shadow_shape(settings.improved_shadows ? 1 : 0);
+    if (!env_override_present("PSX_GL_SSAO")) {
+        if (settings.has_ambient_occlusion) gl_renderer_set_ssao(settings.ambient_occlusion ? 1 : 0);
+    }
+    gl_renderer_set_ssao_shape(
+        settings.has_occlusion_reach && !env_override_present("PSX_GL_SSAO_RADIUS")
+            ? static_cast<float>(settings.occlusion_reach) : -1.0f,
+        settings.has_occlusion_strength && !env_override_present("PSX_GL_SSAO_STRENGTH")
+            ? settings.occlusion_strength / 100.0f : -1.0f);
+    if (settings.has_gap_filling && !env_override_present("PSX_GL_CRACK_FILL") && !env_override_present("PSX_GL_GROWN_UNDER"))
+        gl_renderer_set_gap_fill(settings.gap_filling ? 1 : 0);
+    if (settings.has_depth_sorted_world && !env_override_present("PSX_GL_WORLD_DEPTH"))
+        gl_renderer_set_world_depth(settings.depth_sorted_world ? 1 : 0);
 }
 
 void apply_pending_preferences() {
@@ -570,6 +638,14 @@ void apply_pending_preferences() {
         disruptor_intro_skip_set_enabled(pending.skip_intro ? 1 : 0);
     if (g_preferences.dirty & PREF_SHADOW_SHAPE)
         gpu_set_shadow_shape(pending.improved_shadows ? 1 : 0);
+    if (g_preferences.dirty & PREF_OCCLUSION)
+        gl_renderer_set_ssao(pending.ambient_occlusion ? 1 : 0);
+    if (g_preferences.dirty & PREF_OCCLUSION_SHAPE)
+        gl_renderer_set_ssao_shape(static_cast<float>(pending.occlusion_reach), pending.occlusion_strength / 100.0f);
+    if (g_preferences.dirty & PREF_GAP_FILLING)
+        gl_renderer_set_gap_fill(pending.gap_filling ? 1 : 0);
+    if (g_preferences.dirty & PREF_WORLD_DEPTH)
+        gl_renderer_set_world_depth(pending.depth_sorted_world ? 1 : 0);
 #ifndef PSX_DISABLE_FRAME_INTERPOLATION
     if (g_preferences.dirty & PREF_PRESENT_ENABLED)
         (void)disruptor_present_rate_enable(pending.frame_interpolation ? 1 : 0);
@@ -967,6 +1043,30 @@ void draw_enhancements_tab() {
     if (!geometry)
         ImGui::TextDisabled("Enable exact geometry before perspective textures.");
 
+    bool gaps = gl_renderer_gap_fill() != 0;
+    if (!geometry) ImGui::BeginDisabled();
+    if (ImGui::Checkbox("Gap filling", &gaps)) {
+        gl_renderer_set_gap_fill(gaps ? 1 : 0);
+        mark_gap_filling(gaps);
+    }
+    if (!geometry) ImGui::EndDisabled();
+    draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
+    ImGui::TextDisabled(
+        "Closes hairline gaps between polygons and keeps the game's own "
+        "patches off their neighbours.");
+
+    bool by_depth = gl_renderer_world_depth() != 0;
+    if (!geometry) ImGui::BeginDisabled();
+    if (ImGui::Checkbox("Depth-sorted world", &by_depth)) {
+        gl_renderer_set_world_depth(by_depth ? 1 : 0);
+        mark_world_depth(by_depth);
+    }
+    if (!geometry) ImGui::EndDisabled();
+    draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
+    ImGui::TextDisabled(
+        "Draws world polygons by their depth where the game's own order puts a "
+        "far one over a near one.");
+
     ImGui::SeparatorText("Synchronisation");
     int vsync = psx_host_video_get_vsync();
     int vsync_index = std::clamp(vsync + 1, 0, 2);
@@ -1025,6 +1125,37 @@ const char *cheat_result_message(int result, const char *success) {
         default:
             return "The cheat request was rejected.";
     }
+}
+
+void draw_experimental_tab() {
+    ImGui::TextDisabled(
+        "Unfinished features of the OpenGL renderer. All of them need geometry "
+        "correction on.");
+    ImGui::Spacing();
+
+    const bool geometry = gpu_geometry_correction_enabled() != 0;
+    bool occlusion = gl_renderer_ssao() != 0;
+    if (!geometry) ImGui::BeginDisabled();
+    if (ImGui::Checkbox("Ambient occlusion", &occlusion)) {
+        gl_renderer_set_ssao(occlusion ? 1 : 0);
+        mark_occlusion(occlusion);
+    }
+    if (!geometry) ImGui::EndDisabled();
+    draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
+    int reach = static_cast<int>(std::lround(gl_renderer_ssao_radius()));
+    int strength = static_cast<int>(std::lround(gl_renderer_ssao_strength() * 100.0f));
+    if (!geometry) ImGui::BeginDisabled();
+    ImGui::SetNextItemWidth(260.0f);
+    const bool reach_moved = ImGui::SliderInt("Occlusion reach", &reach, 50, 800, "%d", ImGuiSliderFlags_AlwaysClamp);
+    ImGui::SetNextItemWidth(260.0f);
+    const bool strength_moved =
+        ImGui::SliderInt("Occlusion strength", &strength, 0, 300, "%d%%", ImGuiSliderFlags_AlwaysClamp);
+    if (!geometry) ImGui::EndDisabled();
+    if (reach_moved || strength_moved) {
+        gl_renderer_set_ssao_shape(static_cast<float>(reach), strength / 100.0f);
+        mark_occlusion_shape(reach, strength);
+    }
+    ImGui::TextDisabled("Shades corners and the floor under things.");
 }
 
 void draw_cheats_tab() {
@@ -1211,6 +1342,10 @@ void draw_menu() {
             }
             if (ImGui::BeginTabItem("Enhancements")) {
                 draw_enhancements_tab();
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Experimental")) {
+                draw_experimental_tab();
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Language")) {

@@ -354,7 +354,7 @@ void create_controls(App& app) {
         item.pszText = const_cast<wchar_t*>(label);
         SendMessageW(app.tabs, TCM_INSERTITEMW, static_cast<WPARAM>(index++), reinterpret_cast<LPARAM>(&item));
     }
-    int rows_on_page[4] = {};
+    std::vector<int> rows_on_page(page_labels().size(), 0);
     index = 0;
     for (const auto& option : options()) {
         const int y = 38 + 28 * rows_on_page[static_cast<int>(option.page)]++;

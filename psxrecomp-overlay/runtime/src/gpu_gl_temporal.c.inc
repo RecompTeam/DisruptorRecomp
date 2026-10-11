@@ -12,6 +12,8 @@
 typedef struct {
     int first, count, first_tri, textured, mode, semi, mask, check, filter;
     int twin[4], sy, sh, texture;
+    int filler;  /* holds grown copies of the game's: they go under it, see s_crack_fill */
+    int world;   /* holds only exact world polygons: drawn by depth when s_world_depth is on */
 } TemporalCommand;
 typedef struct {
     GLuint capture_fbo;
@@ -38,6 +40,11 @@ static int s_temp_last_matched, s_temp_last_world, s_temp_last_ready;
 static GLuint s_temp_geo_prog, s_temp_tex_prog, s_temp_present_prog;
 static GLuint s_temp_vao[2], s_temp_vbo, s_temp_fbo, s_temp_tex, s_temp_rb;
 static int s_temp_width, s_temp_scale;
+static int s_temp_underlaying;  /* departed faces are being drawn: they keep the depth rule of their own pass */
+static int s_temp_marked;       /* the textured program is the one that tells fillers apart */
+static int s_temp_part;         /* what temporal_submit draws of a command: 0 all of it, 1 its fillers alone, 2 its polygons alone */
+static GLint s_temp_uPull=-1;
+static int s_temp_fill;         /* departed faces are leaving their depth where the scene left none, see temporal_submit */
 static float s_temp_scratch[TEXBATCH_MAXV * TEXV], s_temp_under[TEXBATCH_MAXV * TEXV];
 typedef struct {
     GLint shift, xhalf, visual, options, twin, mask, filter, pass, semi;
@@ -304,6 +311,8 @@ static void temporal_draw(const float *vertices, const uint64_t *identities, int
     c->first=s->nv; c->count=n; c->first_tri=s->nt;
     c->textured=textured; c->mode=(int)mode; c->semi=semi;
     c->mask=mask; c->check=s_mask_check; c->filter=filter;
+    c->filler=textured && s_draw_filler;
+    c->world=textured && s_draw_world;
     c->sy=direct ? 0 : s_area_y1; c->sh=direct ? VRAM_H : s_area_y2-s_area_y1+1;
     if (twin) memcpy(c->twin, twin, sizeof(c->twin));
     c->texture=textured ? temporal_texture(s) : -1;
@@ -337,7 +346,7 @@ static void temporal_draw(const float *vertices, const uint64_t *identities, int
         for (int j=0; j<3; ++j) {
             float *v=&s->vertices[(s->nv+i+j)*TEXV];
             t->x[j]=v[0]; t->y[j]=v[1]; t->q[j]=textured ? v[22] : 0;
-            t->depth[j]=v[textured ? 23 : 9];
+            t->depth[j]=v[textured ? 23 : 9]>0.0f ? v[textured ? 23 : 9] : 0.0f;  /* negative: the display mirror's own, see take_visual_triangle */
             if (v[textured ? 19 : 6] <= 0.5f && !sprite && !partial) t->world=0;
             if (textured) {
                 hash=temporal_hash(hash,v+2,2*sizeof(float));
@@ -515,12 +524,27 @@ static int temporal_worker_init(void) {
     char *geo_vs=temporal_ordered_shader(GEO_VS,4), *tex_vs=temporal_ordered_shader(TEX_VS,12);
     s_temp_verify_left=verify && verify[0]=='1' ? 3 : 0;
     s_temp_geo_prog=geo_vs ? build_program(geo_vs,GEO_FS) : 0;
-    s_temp_tex_prog=tex_vs ? build_program_ex(tex_vs,TEX_FS,1) : 0;
+    {   /* As the frame loop's programs: what a fragment is goes into the alpha for the shading to tell sprites and blends by. */
+        char *marked_vs=tex_vs ? shader_variant(tex_vs,"flat out float v_bill; noperspective out float v_deep; uniform float u_pull;\n","a_order, 1.0); }\n",
+            "u_visual_options.w >= 1.0 ? 0.99999 : ((u_visual_options.w > 0.0 && a_order > -0.9999 && a_order < 0.9999) ? "
+            "1.0 - (1.0 - a_order)/(1.0 + u_visual_options.w) : (u_pull > 0.0 && a_order > -0.99999 && a_order < 0.99999) ? "
+            "max(1.0 - (1.0 - a_order)*(1.0 + u_pull), -1.0) : a_order), 1.0);\n"
+            "  bool grown = a_visual_flags > 5.5;\n"
+            "  if (u_visual_options.w == 0.0 ? grown : u_visual_options.w >= 1.0 ? (grown || !(a_visual_flags > 1.5 && a_order > -0.9999 && a_order < 0.9999))\n"
+            "      : (u_visual_options.w > 0.0 && !grown)) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);\n"
+            "  v_deep = (a_order > -0.9999 && a_order < 0.9999) ? 1.0 : -1000.0;\n"
+            "  v_bill = (a_visual_flags < 1.5 && a_order > -0.9999 && a_order < 0.9999) ? 2.0 : 1.0; }\n") : NULL;
+        char *marked_fs=marked_vs ? sprite_marking_shader(TEX_FS) : NULL;
+        s_temp_tex_prog=tex_vs ? build_program_ex(marked_fs ? marked_vs : tex_vs,marked_fs ? marked_fs : TEX_FS,1) : 0;
+        s_temp_marked=marked_fs!=NULL;
+        free(marked_vs); free(marked_fs);
+    }
     free(geo_vs); free(tex_vs);
     s_temp_present_prog=build_program(PRESENT_VS,PRESENT_FS);
     if (!s_temp_geo_prog || !s_temp_tex_prog || !s_temp_present_prog) return 0;
     temporal_uniforms_init(s_temp_geo_prog,&s_temp_uniforms[0]);
     temporal_uniforms_init(s_temp_tex_prog,&s_temp_uniforms[1]);
+    s_temp_uPull=p_glGetUniformLocation(s_temp_tex_prog,"u_pull");
     p_glGenBuffers(1,&s_temp_vbo);
     p_glGenVertexArrays(2,s_temp_vao);
     const int sizes[13]={2,2,4,2,2,1,1,4,1,1,2,1,1};
@@ -552,7 +576,13 @@ static int temporal_target(int width,int scale) {
     s_temp_width=width; s_temp_scale=scale;
     return 1;
 }
+static int s_temp_filling;  /* a filler is being drawn: it obeys the mask and leaves it as it is */
 static void temporal_mask(int check,int value) {
+    if (s_temp_filling) {
+        if (!check) { glDisable(GL_STENCIL_TEST); return; }
+        glEnable(GL_STENCIL_TEST); glStencilMask(0); glStencilFunc(GL_EQUAL,0,1); glStencilOp(GL_KEEP,GL_KEEP,GL_KEEP);
+        return;
+    }
     glEnable(GL_STENCIL_TEST); glStencilMask(1);
     glStencilFunc(check ? GL_EQUAL : GL_ALWAYS,check ? 0 : value,1);
     glStencilOp(GL_KEEP,GL_KEEP,check ? (value ? GL_INVERT : GL_KEEP) : GL_REPLACE);
@@ -570,26 +600,108 @@ static void temporal_submit(const TemporalScene *s,const TemporalCommand *c,int 
     p_glUseProgram(t?s_temp_tex_prog:s_temp_geo_prog);
     p_glUniform1f(u->shift,0.5f/s->scale-1.0f/64.0f);
     p_glUniform1f(u->xhalf,s->width/2.0f); p_glUniform1f(u->visual,1);
-    p_glUniform4f(u->options,0,0,s->tint,0);
+    p_glUniform4f(u->options,0,0,s->tint,s_temp_underlaying ? -1.0f : 0.0f);
     p_glBindVertexArray(s_temp_vao[t]); p_glBindBuffer(PSXGL_ARRAY_BUFFER,s_temp_vbo);
     p_glBufferData(PSXGL_ARRAY_BUFFER,count*TEXV*sizeof(float),vertices,PSXGL_STREAM_DRAW);
+    /* With the shading on, the scene's depth is that of its opaque fragments, as on the real frames. */
+    const int fill=s_temp_marked && s_temp_scene_depth && !s_temp_underlaying && t && c->mode==GL_TRIANGLES && s_temp_part!=2;
+    const int fillers=fill && c->filler;
+    const int shaded_scene=s_ssao && s_temp_scene_depth && !(s_world_depth && s_temp_underlaying);
+    const int by_depth=s_world_depth && c->world && s_temp_marked && s_temp_scene_depth && !s_temp_underlaying &&
+                       t && c->mode==GL_TRIANGLES && s_temp_part!=1;
+    if (s_temp_fill) {
+        /* Under the depth test the departed faces drawn under the world wrote no depth. Where the scene left none either
+         * they leave theirs now: a pass at the far sentinel depth tags those pixels in stencil bit 1, a second writes. The
+         * tag stays to the frame's end: of two faces over one pixel the later drawn, whose colour shows, leaves its depth,
+         * or none when it has none. */
+        if (!t || !s_temp_marked) return;
+        glBindTexture(GL_TEXTURE_2D,s->textures[c->texture]);
+        p_glUniform4i(u->twin,c->twin[0],c->twin[1],c->twin[2],c->twin[3]);
+        p_glUniform1i(u->mask,c->mask); p_glUniform1i(u->filter,c->filter);
+        p_glUniform1i(u->semi,c->semi<0?0:c->semi); p_glUniform1i(u->pass,c->semi<0?3:4);
+        glColorMask(GL_FALSE,GL_FALSE,GL_FALSE,GL_FALSE); glDisable(GL_BLEND);
+        glEnable(GL_STENCIL_TEST); glStencilMask(2);
+        p_glUniform4f(u->options,0,0,s->tint,2.0f);
+        glDepthFunc(GL_LESS); glDepthMask(GL_FALSE);
+        glStencilFunc(GL_ALWAYS,2,2); glStencilOp(GL_KEEP,GL_KEEP,GL_REPLACE);
+        glDrawArrays(GL_TRIANGLES,0,count);
+        p_glUniform4f(u->options,0,0,s->tint,-1.0f);
+        glDepthFunc(GL_ALWAYS); glDepthMask(GL_TRUE);
+        glStencilFunc(GL_EQUAL,2,2); glStencilOp(GL_KEEP,GL_KEEP,GL_KEEP);
+        glDrawArrays(GL_TRIANGLES,0,count);
+        glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE); glStencilMask(1);
+        p_glUniform4f(u->options,0,0,s->tint,0);
+        return;
+    }
     if (!t) {
+        if (s_temp_part==1) return;
         if (c->semi>=0) apply_psx_blend(c->semi); else glDisable(GL_BLEND);
         temporal_mask(c->check,c->mask);
         glLineWidth((float)s->scale);
+        if (shaded_scene && c->semi>=0) glDepthMask(GL_FALSE);
         glDrawArrays((GLenum)c->mode,0,count);
+        if (shaded_scene) glDepthMask(GL_TRUE);
         return;
     }
     glBindTexture(GL_TEXTURE_2D,s->textures[c->texture]);
     p_glUniform4i(u->twin,c->twin[0],c->twin[1],c->twin[2],c->twin[3]);
     p_glUniform1i(u->mask,c->mask); p_glUniform1i(u->filter,c->filter);
     p_glUniform1i(u->semi,c->semi<0?0:c->semi);
+    if (fill && s_crack_fill>0.0f) {  /* the edges of the exact world polygons, see s_crack_fill */
+        p_glUniform4f(u->options,0,0,s->tint,2.0f);
+        glPolygonMode(GL_FRONT_AND_BACK,GL_LINE); glLineWidth(filler_line_width(s->scale));
+        glDepthFunc(GL_LESS); glDepthMask(GL_FALSE); glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_FALSE); glDisable(GL_BLEND);
+        s_temp_filling=1; temporal_mask(c->check,c->mask); s_temp_filling=0;
+        p_glUniform1i(u->pass,c->semi<0?0:4); glDrawArrays(GL_TRIANGLES,0,count);
+        glPolygonMode(GL_FRONT_AND_BACK,GL_FILL); glDepthFunc(GL_ALWAYS); glDepthMask(GL_TRUE);
+        glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE); glStencilMask(1);
+        p_glUniform4f(u->options,0,0,s->tint,0);
+    }
+    for (int round=fillers;round>=(s_temp_part==1);--round) {  /* its grown copies first, then the batch over them */
+    const int shaded=shaded_scene && !round;
+    if (round) {
+        p_glUniform4f(u->options,0,0,s->tint,GROWN_COPY_MARGIN); glDepthFunc(GL_LESS); glDepthMask(GL_FALSE);
+        glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_FALSE); s_temp_filling=1;
+    } else if (fillers) {
+        glDepthFunc(GL_ALWAYS); glDepthMask(GL_TRUE); p_glUniform4f(u->options,0,0,s->tint,0);
+        glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE); glStencilMask(1); s_temp_filling=0;
+    }
+    if (!round && by_depth) {  /* as tex_batch_by_depth: the nearest opaque depth, then the colours within the margin of it */
+        glColorMask(GL_FALSE,GL_FALSE,GL_FALSE,GL_FALSE); glDisable(GL_BLEND); glDisable(GL_STENCIL_TEST);
+        glDepthFunc(GL_LEQUAL); glDepthMask(GL_TRUE);
+        p_glUniform1i(u->pass,c->semi<0?3:4); glDrawArrays(GL_TRIANGLES,0,count);
+        glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE); glDepthMask(GL_FALSE);
+        p_glUniform1f(s_temp_uPull,s_world_margin);
+        if (!c->check && c->semi==4) {
+            glEnable(GL_BLEND);
+            p_glBlendEquationSeparate(PSXGL_FUNC_ADD,PSXGL_FUNC_ADD);
+            p_glBlendFuncSeparate(GL_ONE,PSXGL_SRC1_ALPHA,GL_ONE,GL_ZERO);
+            temporal_mask(0,c->mask);
+            p_glUniform1i(u->pass,0); glDrawArrays(GL_TRIANGLES,0,count);
+        } else if (c->semi<0) {
+            temporal_mask(c->check,c->mask);
+            p_glUniform1i(u->pass,0); glDrawArrays(GL_TRIANGLES,0,count);
+        } else {
+            temporal_mask(c->check,c->mask);
+            p_glUniform1i(u->pass,1); glDrawArrays(GL_TRIANGLES,0,count);
+            apply_psx_blend(c->semi); temporal_mask(c->check,1);
+            p_glUniform1i(u->pass,2); glDrawArrays(GL_TRIANGLES,0,count);
+        }
+        p_glUniform1f(s_temp_uPull,0.0f); glDepthFunc(GL_ALWAYS); glDepthMask(GL_TRUE);
+        continue;
+    }
     if (!c->check && c->semi==4) {
         glEnable(GL_BLEND);
         p_glBlendEquationSeparate(PSXGL_FUNC_ADD,PSXGL_FUNC_ADD);
         p_glBlendFuncSeparate(GL_ONE,PSXGL_SRC1_ALPHA,GL_ONE,GL_ZERO);
         temporal_mask(0,c->mask);
+        if (shaded) glDepthMask(GL_FALSE);
         p_glUniform1i(u->pass,0); glDrawArrays(GL_TRIANGLES,0,count);
+        if (shaded) {
+            glColorMask(GL_FALSE,GL_FALSE,GL_FALSE,GL_FALSE); glDisable(GL_BLEND); glDepthMask(GL_TRUE);
+            p_glUniform1i(u->pass,4); glDrawArrays(GL_TRIANGLES,0,count);
+            glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
+        }
     } else if (c->semi<0) {
         glDisable(GL_BLEND); temporal_mask(c->check,c->mask);
         p_glUniform1i(u->pass,0); glDrawArrays(GL_TRIANGLES,0,count);
@@ -597,7 +709,14 @@ static void temporal_submit(const TemporalScene *s,const TemporalCommand *c,int 
         glDisable(GL_BLEND); temporal_mask(c->check,c->mask);
         p_glUniform1i(u->pass,1); glDrawArrays(GL_TRIANGLES,0,count);
         apply_psx_blend(c->semi); temporal_mask(c->check,1);
+        if (shaded) glDepthMask(GL_FALSE);
         p_glUniform1i(u->pass,2); glDrawArrays(GL_TRIANGLES,0,count);
+        if (shaded) glDepthMask(GL_TRUE);
+    }
+    }
+    if (s_temp_part==1 && fillers) {
+        glDepthFunc(GL_ALWAYS); glDepthMask(GL_TRUE); p_glUniform4f(u->options,0,0,s->tint,0);
+        glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE); glStencilMask(1); s_temp_filling=0;
     }
 }
 /* The game draws back to front and keeps no depth, so nothing says where a
@@ -647,6 +766,8 @@ static void temporal_underlay(float alpha,int covered) {
     const TemporalScene *p=&s_temp_prev, *s=&s_temp_curr;
     if (!s->mesh_stats.departed_faces || p->width!=s->width || p->scale!=s->scale) return;
     glDepthFunc(covered ? GL_LESS : GL_ALWAYS); glDepthMask(covered ? GL_FALSE : GL_TRUE);
+    s_temp_scene_depth=!covered; s_temp_underlaying=1;
+    if (s_world_depth && !covered) glDepthMask(GL_FALSE);  /* last frame's faces must not stand in the way of this frame's */
     for (int i=0;i<p->nc;++i) {
         const TemporalCommand *c=&p->commands[i];
         const int t=c->textured;
@@ -678,13 +799,15 @@ static void temporal_underlay(float alpha,int covered) {
         if (any) temporal_submit(p,c,s->height,s_temp_under,c->count);
     }
     glDepthFunc(GL_ALWAYS); glDepthMask(GL_TRUE);
+    s_temp_scene_depth=1; s_temp_underlaying=0;
 }
 static int temporal_present(float alpha,int lx,int ly,int lw,int lh) {
     TemporalScene *s=&s_temp_curr;
-    int first_world, underlaid=0;
+    int first_world, last_world, underlaid=0;
     if (!s->active || !s->moving ||
         !temporal_target(s->width,s->scale)) return 0;
     for (first_world=0;first_world<s->nt && !s->triangles[first_world].world;++first_world) {}
+    for (last_world=s->nt-1;last_world>=0 && !s->triangles[last_world].world;--last_world) {}
     if (s_interp_fence[s_interp_cur]) p_glWaitSync(s_interp_fence[s_interp_cur],0,PSXGL_TIMEOUT_IGNORED);
     p_glBindFramebuffer(PSXGL_FRAMEBUFFER,s_temp_fbo);
     glViewport(0,0,s->width*s->scale,VRAM_H*s->scale);
@@ -694,6 +817,7 @@ static int temporal_present(float alpha,int lx,int ly,int lw,int lh) {
     glClearColor(s->clear[0],s->clear[1],s->clear[2],s->clear[3]);
     glEnable(GL_DEPTH_TEST); glDepthFunc(GL_ALWAYS); glDepthMask(GL_TRUE); glClearDepth(1.0);
     glClear(GL_COLOR_BUFFER_BIT|GL_STENCIL_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+    s_temp_scene_depth=1;
     p_glActiveTexture(PSXGL_TEXTURE0);
     for (int i=0;i<s->nc;++i) {
         TemporalCommand *c=&s->commands[i];
@@ -708,6 +832,10 @@ static int temporal_present(float alpha,int lx,int ly,int lw,int lh) {
                 s_temp_scratch[(j+k)*TEXV+(t?23:9)]=
                     now->world && now->depth[k]>0.0f ? temporal_order(now->depth[k])
                     : ti<first_world ? TEMP_ORDER_FAR : TEMP_ORDER_NEAR;
+            /* Under the depth test what has no depth is far, as on the real frames, unless nothing of the world follows it. */
+            if (s_world_depth && (now->world || ti<last_world))
+                for (int k=0;k<3;++k)
+                    if (!(now->world && now->depth[k]>0.0f)) s_temp_scratch[(j+k)*TEXV+(t?23:9)]=TEMP_ORDER_FAR;
             if (!now->world) continue;
             GpuTemporalTriangle out;
             gpu_temporal_lerp(&s->from[ti],now,alpha,&out);
@@ -718,19 +846,25 @@ static int temporal_present(float alpha,int lx,int ly,int lw,int lh) {
                 if (t) v[22]=out.q[k];
             }
         } else for (int j=0;j<c->count;++j)
-            s_temp_scratch[j*TEXV+9]=c->first_tri<=first_world ? TEMP_ORDER_FAR : TEMP_ORDER_NEAR;
+            s_temp_scratch[j*TEXV+9]=c->first_tri<=first_world || (s_world_depth && c->first_tri<=last_world)
+                ? TEMP_ORDER_FAR : TEMP_ORDER_NEAR;
         /* Whatever precedes the first world face is the backdrop. */
         if (!underlaid && c->mode==GL_TRIANGLES && c->first_tri<=first_world &&
             first_world<c->first_tri+c->count/3) {
+            /* The fillers of the whole command go under its backdrop part too, as under the frame loop's whole batch. */
+            s_temp_part=1; temporal_submit(s,c,s->height,s_temp_scratch,c->count); s_temp_part=2;
             temporal_submit(s,c,s->height,s_temp_scratch,split);
             temporal_underlay(alpha,0);
             underlaid=1;
             temporal_submit(s,c,s->height,s_temp_scratch+split*TEXV,c->count-split);
+            s_temp_part=0;
             continue;
         }
         temporal_submit(s,c,s->height,s_temp_scratch,c->count);
     }
+    if (underlaid && s_world_depth) { s_temp_fill=1; temporal_underlay(alpha,0); s_temp_fill=0; }
     if (underlaid) temporal_underlay(alpha,1);
+    s_temp_scene_depth=0;
     glDisable(GL_DEPTH_TEST);
 #ifndef PSX_NO_DEBUG_TOOLS
     temporal_dump_frame(0,0,s->width*s->scale,s->height*s->scale,alpha,s->mesh_stats.departed_faces);
@@ -742,6 +876,12 @@ static int temporal_present(float alpha,int lx,int ly,int lw,int lh) {
                 s->mesh_stats.departed_faces,s->mesh_stats.camera_inliers,s->height*s->scale);
 #endif
     glDisable(GL_STENCIL_TEST); glDisable(GL_SCISSOR_TEST); glDisable(GL_BLEND);
+    if (ssao_draw(&s_ssao_thread,s_interp_thread_vao,s_temp_fbo,0,s_temp_tex,s->width*s->scale,VRAM_H*s->scale,
+                  0.5f/s->width,0.5f/VRAM_H,1-0.5f/s->width,(s->height-0.5f)/VRAM_H,
+                  s->scale,s_interp_linear,lx,ly,lw,lh)) {
+        ++s_temp_replays;
+        return 1;
+    }
     p_glBindFramebuffer(PSXGL_FRAMEBUFFER,0); glViewport(lx,ly,lw,lh);
     glBindTexture(GL_TEXTURE_2D,s_temp_tex);
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,s_interp_linear?GL_LINEAR:GL_NEAREST);

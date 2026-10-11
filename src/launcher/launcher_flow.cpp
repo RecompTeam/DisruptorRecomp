@@ -143,6 +143,7 @@ std::wstring value_text(const Option& option, int value) {
     if (option.unit == Unit::percent) swprintf(text, 32, L"%d%%", value);
     else if (option.unit == Unit::frames) swprintf(text, 32, L"%d FPS", value);
     else if (option.unit == Unit::thousandths) swprintf(text, 32, L"%.3f", value / 1000.0);
+    else swprintf(text, 32, L"%d", value);
     return text;
 }
 

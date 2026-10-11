@@ -3620,11 +3620,41 @@ static void geometry_diag_note_accepted(
  * quad use their original indices; shader q remains a separate attribute. */
 #ifndef PSX_DISABLE_FRAME_INTERPOLATION
 static uint16_t s_precise_vertex_depth[4];
+static uint16_t s_precise_vertex_surface[4];  /* the same with a pinned corner's depth kept: for the mirror's depth */
 static uint64_t s_precise_vertex_identity[4];
 static int s_precise_vertex_partial;
 #endif
 /* A polygon that falls back still draws the corners the game pinned where they project: its neighbours do. */
 static PsxPinnedPlaces s_pinned_places;
+/* The polygon resolved last is the game's grown second copy of the one before it. */
+static int s_precise_grown;
+#if defined(PSX_HAS_DISRUPTOR_GROWN_QUAD) && !defined(PSX_DISABLE_FRAME_INTERPOLATION)
+/* A grown corner lies off its source corner, on the same plane: its depth is the plane's there, 1/z being linear on screen. */
+static void grown_corner_depths(const int32_t *source_x, const int32_t *source_y, const int32_t *raw_x, const int32_t *raw_y,
+                                const int *indices) {
+    static const int beside[4][2] = {{1, 2}, {0, 3}, {0, 3}, {1, 2}};
+    uint16_t moved[4];
+    for (int i = 0; i < 4; ++i) {
+        const int j = beside[i][0], k = beside[i][1];
+        const double zi = s_precise_vertex_depth[i], zj = s_precise_vertex_depth[j], zk = s_precise_vertex_depth[k];
+        const double ax = ((double)source_x[j] - source_x[i]) / 65536.0, ay = ((double)source_y[j] - source_y[i]) / 65536.0;
+        const double bx = ((double)source_x[k] - source_x[i]) / 65536.0, by = ((double)source_y[k] - source_y[i]) / 65536.0;
+        const double det = ax * by - bx * ay;
+        int32_t grown_x, grown_y;
+        moved[i] = s_precise_vertex_depth[i];
+        if (zi <= 0.0 || zj <= 0.0 || zk <= 0.0 || (det < 1.0e-6 && det > -1.0e-6)) continue;
+        parse_vertex(gp0_cmd_buf[indices[i]], &grown_x, &grown_y);
+        {
+            const double ga = 1.0 / zj - 1.0 / zi, gb = 1.0 / zk - 1.0 / zi;
+            const double px = (double)grown_x - raw_x[i], py = (double)grown_y - raw_y[i];
+            const double g = 1.0 / zi + ((ga * by - gb * ay) * px + (ax * gb - bx * ga) * py) / det;
+            const double z = g > 1.0 / 65535.0 ? 1.0 / g : 65535.0;
+            if (z >= 17.0) moved[i] = (uint16_t)(z + 0.5);  /* 16 and nearer reads as no depth: the corner keeps its source's */
+        }
+    }
+    memcpy(s_precise_vertex_depth, moved, sizeof(moved));
+}
+#endif
 #ifdef PSX_HAS_DISRUPTOR_GROWN_QUAD
 extern int disruptor_grown_quad_sources(
     uint32_t command_address, const uint32_t *packet,
@@ -3634,8 +3664,10 @@ static int resolve_precise_vertices(const int *indices, int count,
                                     int triangle_count,
                                     const int32_t *vx, const int32_t *vy,
                                     int32_t *fx, int32_t *fy) {
+    s_precise_grown = 0;
 #ifndef PSX_DISABLE_FRAME_INTERPOLATION
     memset(s_precise_vertex_depth, 0, sizeof(s_precise_vertex_depth));
+    memset(s_precise_vertex_surface, 0, sizeof(s_precise_vertex_surface));
     memset(s_precise_vertex_identity, 0, sizeof(s_precise_vertex_identity));
     s_precise_vertex_partial = 0;
 #endif
@@ -3710,6 +3742,7 @@ static int resolve_precise_vertices(const int *indices, int count,
                     ++resolved;
 #ifndef PSX_DISABLE_FRAME_INTERPOLATION
                     s_precise_vertex_depth[i] = psx_pinned_corner_depth(unpin, pinned[i], z[i]);
+                    s_precise_vertex_surface[i] = z[i];
 #endif
                 }
             }
@@ -3755,6 +3788,7 @@ static int resolve_precise_vertices(const int *indices, int count,
     for (int i = 0; i < count; ++i) {
 #ifndef PSX_DISABLE_FRAME_INTERPOLATION
         s_precise_vertex_depth[i] = psx_pinned_corner_depth(unpin, pinned[i], z[i]);
+        s_precise_vertex_surface[i] = z[i];
         {
             uint32_t identity_addr;
             /* A grown corner is off its model point: it gets the depth and no identity. */
@@ -3768,6 +3802,13 @@ static int resolve_precise_vertices(const int *indices, int count,
         fy[i] = (int32_t)((int64_t)precise_y[i] +
                           (int64_t)(vy[i] - raw_y[i]) * 65536);
     }
+    s_precise_grown = grown;
+#if defined(PSX_HAS_DISRUPTOR_GROWN_QUAD) && !defined(PSX_DISABLE_FRAME_INTERPOLATION)
+    if (grown) {
+        grown_corner_depths(precise_x, precise_y, raw_x, raw_y, indices);
+        memcpy(s_precise_vertex_surface, s_precise_vertex_depth, sizeof(s_precise_vertex_surface));
+    }
+#endif
     return 1;
 }
 
@@ -3782,6 +3823,7 @@ static void queue_precise_triangle(int exact,
 #ifndef PSX_DISABLE_FRAME_INTERPOLATION
     gr_set_temporal_depth_triangle(0, 0.0f, 0.0f, 0.0f);
     gr_set_temporal_identity_triangle(0u, 0u, 0u);
+    gr_set_surface_depth_triangle(0.0f, 0.0f, 0.0f);
 #endif
     gr_set_perspective_triangle(0, 0.0f, 0.0f, 0.0f);
     if (geometry_enabled) ++ws_geometry_world_triangles;
@@ -3797,11 +3839,15 @@ static void queue_precise_triangle(int exact,
                                            (float)s_precise_vertex_depth[a],
                                            (float)s_precise_vertex_depth[b],
                                            (float)s_precise_vertex_depth[c]);
+        if (geometry_enabled && s_precise_vertex_partial)
+            gr_set_surface_depth_triangle((float)s_precise_vertex_surface[a], (float)s_precise_vertex_surface[b],
+                                          (float)s_precise_vertex_surface[c]);
 #endif
         return;
     }
     ++ws_geometry_precise_triangles;
     gr_set_world_triangle(1);
+    if (s_precise_grown) gr_set_world_triangle(2);  /* the game's grown second copy */
 #ifndef PSX_DISABLE_FRAME_INTERPOLATION
     gr_set_temporal_depth_triangle(psx_pinned_depth_mode(s_precise_vertex_depth[a], s_precise_vertex_depth[b], s_precise_vertex_depth[c]),
                                    (float)s_precise_vertex_depth[a],
@@ -3810,6 +3856,8 @@ static void queue_precise_triangle(int exact,
     gr_set_temporal_identity_triangle(s_precise_vertex_identity[a],
                                       s_precise_vertex_identity[b],
                                       s_precise_vertex_identity[c]);
+    gr_set_surface_depth_triangle((float)s_precise_vertex_surface[a], (float)s_precise_vertex_surface[b],
+                                  (float)s_precise_vertex_surface[c]);
 #endif
     gr_set_precise_triangle(1,
                             fx[a], fy[a], fx[b], fy[b], fx[c], fy[c]);

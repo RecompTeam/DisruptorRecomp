@@ -18,10 +18,14 @@
 
 #include <cstdint>
 
+extern "C" void gl_renderer_set_ssao_fade(float from, float to);
+
 namespace {
 constexpr uint32_t kRendererEntry = 0x80040E68u;
 constexpr uint32_t kScreen = 0x8007145Cu;  /* gp + 0x310, the renderer skips the world at 0x800410E0 when it is 1 */
 constexpr uint8_t kMapScreen = 1u;
+constexpr uint32_t kFadeStart = 0x800715E0u, kFarDistance = 0x800715ECu;  /* the game's depth fade, as the far rendering module reads it */
+constexpr float kDepthUnit = 4.0f;  /* camera depth the renderer gets for one unit of the game's range */
 constexpr uint32_t kContexts[2] = {0x80074458u, 0x80074E50u};
 constexpr uint32_t kOriginalRoots[2] = {0x800776BCu, 0x800776C0u};
 constexpr uint32_t kArenaOffset = 0x70u;
@@ -33,6 +37,8 @@ void renderer_entry(CPUState *cpu, uint32_t address) {
     if (!cpu || address != kRendererEntry || !psx_mod_game_started()) return;
     const bool map = psx_mod_read_byte(kScreen) == kMapScreen;
     gpu_ws_tell_frame_kind(map);  /* before the margin below is read */
+    gl_renderer_set_ssao_fade(kDepthUnit * static_cast<float>(psx_mod_read_word(kFadeStart)),
+                              kDepthUnit * static_cast<float>(psx_mod_read_word(kFarDistance)));
     unsigned index;
     for (index = 0; index < 2u; ++index)
         if (cpu->gpr[4] == kContexts[index]) break;

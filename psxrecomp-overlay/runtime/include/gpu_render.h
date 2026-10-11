@@ -61,6 +61,9 @@ void gr_set_perspective_triangle(int enabled,
  * whose scale can differ between polygons. Zero means unknown depth. */
 void gr_set_temporal_depth_triangle(int enabled,
                                      float z0, float z1, float z2);
+/* One-shot camera depth of the same corners for the display mirror's own depth: a corner the game pinned has one here,
+ * where the temporal depth above says 0. Zero means unknown. */
+void gr_set_surface_depth_triangle(float z0, float z1, float z2);
 /* One-shot GTE input vertices of the same three corners (zero = unknown). */
 void gr_set_temporal_identity_triangle(uint64_t id0, uint64_t id1, uint64_t id2);
 /* The next textured rectangle is a world sprite at this camera depth (0 = none). */
@@ -161,6 +164,7 @@ typedef struct GpuRenderBackend {
                                      float q0, float q1, float q2);
     void (*set_temporal_depth_triangle)(int enabled,
                                          float z0, float z1, float z2);
+    void (*set_surface_depth_triangle)(float z0, float z1, float z2);
     void (*set_temporal_identity_triangle)(uint64_t id0, uint64_t id1, uint64_t id2);
     void (*set_temporal_sprite)(float depth, const float sides[4]);
     void (*set_presentation_yaw)(double yaw_units, double full_turn,

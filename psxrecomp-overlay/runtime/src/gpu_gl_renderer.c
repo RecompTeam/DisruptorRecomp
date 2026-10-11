@@ -67,6 +67,7 @@
 #include "gpu_render.h"
 #include "gpu_sw_renderer.h"
 #include "gpu_gl_renderer.h"
+#include "gpu_world_depth.h"
 #include "host_ui.h"
 #include "latency_ring.h"
 
@@ -317,6 +318,17 @@ static GLuint        s_present_tex = 0;    /* CPU-readout present path (24bpp) *
 static int           s_present_w = 0, s_present_h = 0;
 static GLuint        s_present_prog = 0, s_present_vao = 0;
 static GLint         s_present_uTex = -1, s_present_uUvRect = -1;
+/* Experimental ambient occlusion: the display mirror keeps the depth the painter's order leaves, the present pass shades by it. */
+static int           s_ssao = 0;
+/* What s_ssao is made of: the player's switch, and a layer shown in the picture's place (1 shading, 2 depth, 3 normals, 4 fade). */
+static int           s_ssao_on = 0, s_ssao_view = 0;
+static float         s_ssao_radius = 160.0f, s_ssao_strength = 0.8f;
+static float         s_ssao_tilt = 0.35f;  /* the sine of the angle under which a joint between two faces is no corner: 20 degrees */
+static GLuint        s_ssao_prog = 0, s_ssao_mix_prog = 0;
+static GLint         s_ssao_uDepth = -1, s_ssao_uTex = -1, s_ssao_uUvRect = -1, s_ssao_uTexel = -1, s_ssao_uProj = -1, s_ssao_uAo = -1,
+                     s_ssao_uFade = -1;
+static float         s_ssao_fade_from = 0.0f, s_ssao_fade_to = 0.0f;
+static GLint         s_ssao_mix_uTex = -1, s_ssao_mix_uShade = -1, s_ssao_mix_uUvRect = -1, s_ssao_mix_uSpan = -1;
 #ifndef PSX_DISABLE_FRAME_INTERPOLATION
 static GLuint        s_interp_prog = 0, s_interp_tex[3];
 static GLsync        s_interp_fence[3];
@@ -384,6 +396,7 @@ static int           s_next_perspective = 0;
 static float         s_next_q[3] = { 0.0f, 0.0f, 0.0f };
 static int           s_next_temporal_depth = 0;
 static float         s_next_z[3] = { 0.0f, 0.0f, 0.0f };
+static float         s_next_surface_z[3] = { 0.0f, 0.0f, 0.0f };  /* see gr_set_surface_depth_triangle */
 static uint64_t      s_next_identity[3] = { 0u, 0u, 0u };
 #define TEMPORAL_SPRITE_IDENTITY UINT64_C(0x4000000000000000)
 #define TEMPORAL_PARTIAL_IDENTITY UINT64_C(0x2000000000000000) /* a world polygon with a corner off its projection */
@@ -537,6 +550,7 @@ static int s_stencil_valid = 1;
 #define WIDE_MAX_SURF 4
 static GLuint s_wide_tex[WIDE_MAX_SURF];     /* color tex per surface (0 = free) */
 static GLuint s_wide_fbo[WIDE_MAX_SURF];     /* FBO per surface */
+static uint32_t s_wide_depth_shown[WIDE_MAX_SURF] = {~0u, ~0u, ~0u, ~0u};  /* rows shown since their depth was last cleared */
 static GLuint s_wide_rb[WIDE_MAX_SURF];      /* depth-stencil RB per surface (mask
                                               * mirror, same as hr). PERF-CRITICAL:
                                               * a stencil-less wide FBO made every
@@ -558,6 +572,33 @@ static int    s_wide_suppress = 0;
  * surface: local_x = vram_x - base_x + OFFSET. Same as SW wide_dx(). */
 static inline int wide_dx(void) { return g_wide_off - g_wide_cur_base; }
 
+/* A filler closes gaps between polygons of a textured batch. It is drawn before its batch, colour only: the batch's opaque
+ * fragments replace it and its blended ones blend over it. Over earlier batches it lands only where their depth is farther:
+ * the game's grown second copy of a near polygon (visual flag 4) by its own depth, and the outline of every exact world
+ * polygon (s_crack_fill native pixels wide, 0 for none) only where no depth was left at all. */
+static float s_crack_fill = 0.5f, s_crack_width = 0.5f;
+static float s_line_width_max = 1.0f;  /* the widest line this context draws */
+static int   s_grown_under = 1;
+static int   s_tb_fillers = 0;   /* grown copies in the open batch */
+static int   s_draw_filler = 0;  /* the batch being recorded for the in-between presenter holds grown copies */
+/* What the mirror draws of a batch: 0 its polygons, between 0 and 1 its grown copies pushed back by that share, 2 the outlines,
+ * -1 all of it as it comes. */
+static float s_fill_pass = 0.0f;
+#define GROWN_COPY_MARGIN 0.03f
+
+/* Experimental: exact world polygons are drawn by depth, not by the game's order alone. A batch of them first writes the
+ * depth of its opaque fragments, then draws its colours in the game's order where they lie within s_world_margin of the
+ * nearest depth: polygons in one plane, whose depths differ by rounding, keep the game's order, and a polygon behind
+ * another by more is not drawn over it. Measured between a coarse wall quad and the pieces the game draws over it: up to
+ * 0.1 percent. The in-between presenter gives a departed face the same clearance (TEMP_ORDER_CLEARANCE). */
+static int   s_world_depth = 0;
+static float s_world_margin = 0.03f;
+static int   s_tb_world = 0;     /* the open batch holds only such polygons */
+static int   s_draw_world = 0;   /* the batch being recorded for the in-between presenter is such a batch */
+static GLint s_tex_uPull = -1;
+
+static int mirror_depth(void) { return s_geometry_correction && (s_ssao || s_grown_under || s_crack_fill > 0.0f || s_world_depth); }
+
 static void geometry_visual_uniforms(GLint visual, GLint camera, GLint options,
                                      int enabled) {
     const float on = enabled && s_geometry_correction ? 1.0f : 0.0f;
@@ -567,14 +608,14 @@ static void geometry_visual_uniforms(GLint visual, GLint camera, GLint options,
                   (float)s_off_y + s_yaw_center_y_relative);
     p_glUniform4f(options, s_yaw_focal_x,
                   s_geometry_full_yaw ? 1.0f : 0.0f,
-                  on && s_geometry_coverage_tint ? 0.55f : 0.0f, 0.0f);
+                  on && s_geometry_coverage_tint ? 0.55f : 0.0f, on > 0.0f ? s_fill_pass : 0.0f);
 }
 
 /* Capture the one-shot metadata queued by gpu.c for the next polygon. `xs/ys`
  * remain the exact GP0 coordinates used for canonical dirty tracking and
  * guest-visible rasterization. The returned floats are consumed only by the
  * presentation mirror when the shader's u_visual switch is set. The returned
- * flags are bit 0 = world and bit 1 = exact precise provenance. */
+ * flags are bit 0 = world, bit 1 = exact precise provenance and bit 2 = the game's grown copy, a filler. */
 static int take_visual_triangle(const int *xs, const int *ys,
                                  float px[3], float py[3], float pq[3],
                                  float pz[3], uint64_t pid[3]) {
@@ -597,17 +638,21 @@ static int take_visual_triangle(const int *xs, const int *ys,
         }
         if (pq) pq[i] = perspective ? s_next_q[i] : 0.0f;
         if (pz) pz[i] = (exact && s_next_temporal_depth) || partial ? s_next_z[i] : s_sprite_depth;
+        /* A corner the presenter has no depth for, the mirror has: negative, so that only the mirror's shaders take it. */
+        if (pz && (exact || partial) && !(pz[i] > 0.0f) && s_next_surface_z[i] > 0.0f) pz[i] = -s_next_surface_z[i];
+        s_next_surface_z[i] = 0.0f;
         if (pid) pid[i] = exact && s_next_temporal_depth ? s_next_identity[i]
                         : partial ? TEMPORAL_PARTIAL_IDENTITY
                         : s_sprite_depth > 0.0f ? TEMPORAL_SPRITE_IDENTITY : 0u;
         s_next_identity[i] = 0u;
     }
+    const int filler = s_grown_under && exact && s_next_world == 2;
     s_next_world = 0;
     s_next_precise = 0;
     s_next_unpinned = 0;
     s_next_perspective = 0;
     s_next_temporal_depth = 0;
-    return (world || sprite || unpinned ? 1 : 0) | (exact ? 2 : 0);
+    return (world || sprite || unpinned ? 1 : 0) | (exact ? 2 : 0) | (filler ? 4 : 0);
 }
 
 /* ---- dirty-rect helpers ------------------------------------------------- */
@@ -856,6 +901,93 @@ static const char *PRESENT_FS =
     "#version 330\n"
     "in vec2 v_uv; uniform sampler2D u_tex; out vec4 frag;\n"
     "void main(){ frag = texture(u_tex, v_uv); }\n";
+/* Scalable ambient obscurance over the mirror's depth, one value a screen pixel. A pixel without camera depth (HUD, backdrop, 2D)
+ * is neither shaded nor an occluder. Red is the light left, green a coarse code of the depth for the blur, 0 for none. */
+static const char *SSAO_FS =
+    "#version 330\n"
+    "in vec2 v_uv; out vec4 frag;\n"
+    "uniform sampler2D u_depth, u_tex;\n"
+    "uniform vec4 u_span;   /* one texel of the surface in x and y, the view asked for */\n"
+    "#define u_texel u_span.xy\n"
+    "uniform vec4 u_proj;   /* focal x, focal y, centre x, centre y, in texels */\n"
+    "uniform vec4 u_ao;     /* radius in depth units, strength, widest reach in texels, one native pixel in texels */\n"
+    "uniform vec4 u_fade;   /* the depths between which the game fades the world into its far colour (0 0 for none), s_ssao_tilt */\n"
+    "float cam(vec2 uv){ float z = texture(u_depth, uv).r; return (z < 0.00002 || z > 0.99998) ? 0.0 : 16.0/(1.0-z); }\n"
+    "/* The depth of a surface to shade by: none where a blended fragment or one without a whole depth is marked. */\n"
+    "float surf(vec2 uv){\n"
+    "  float mark = texelFetch(u_tex, clamp(ivec2(uv*vec2(textureSize(u_tex, 0))), ivec2(0), textureSize(u_tex, 0) - 1), 0).a;\n"
+    "  return (mark > 0.2 && mark < 0.3) ? 0.0 : cam(uv); }\n"
+    "/* The same for a pixel's normal: a sprite beside it, or a sliver of a polygon drawn on the game's own pixels, is not its surface. */\n"
+    "float flat_surf(vec2 uv){\n"
+    "  float mark = texelFetch(u_tex, clamp(ivec2(uv*vec2(textureSize(u_tex, 0))), ivec2(0), textureSize(u_tex, 0) - 1), 0).a;\n"
+    "  return (mark > 0.2 && mark < 0.6) ? 0.0 : cam(uv); }\n"
+    "vec3 at(vec2 uv, float d){ return vec3((uv/u_texel - u_proj.zw)/u_proj.xy*d, d); }\n"
+    "vec3 edge(vec2 step, vec3 p, float d){\n"
+    "  float a = flat_surf(v_uv - step), b = flat_surf(v_uv + step);\n"
+    "  if (a == 0.0 && b == 0.0) return vec3(0.0);\n"
+    "  return (b == 0.0 || (a != 0.0 && abs(a-d) < abs(b-d))) ? p - at(v_uv - step, a) : at(v_uv + step, b) - p; }\n"
+    "/* A hairline between two polygons shows what lies behind them, or a polygon an in-between frame holds in place under them:\n"
+    " * where the depths half a pixel or a pixel to both sides agree and this one does not, it is theirs. */\n"
+    "float mend(float d){\n"
+    "  if (d == 0.0) return d;\n"
+    "  for (int i = 0; i < 4; ++i) {\n"
+    "    vec2 step = (i < 2 ? vec2(u_texel.x, 0.0) : vec2(0.0, u_texel.y))*u_ao.w*((i & 1) == 0 ? 0.5 : 1.0);\n"
+    "    float a = flat_surf(v_uv - step), b = flat_surf(v_uv + step);\n"
+    "    if (a != 0.0 && b != 0.0 && abs(a - b) < 0.03*min(a, b) + 1.0 && abs(d - 0.5*(a + b)) > 0.04*d + 4.0) return 0.5*(a + b);\n"
+    "  }\n"
+    "  return d; }\n"
+    "void main(){\n"
+    "  float d = mend(cam(v_uv));\n"
+    "  frag = vec4(1.0, 0.0, 0.0, 1.0);\n"
+    "  if (d == 0.0) return;\n"
+    "  frag.g = clamp(log2(d)/16.0, 1.0/255.0, 1.0);\n"
+    "  float clear = u_fade.y > u_fade.x ? 1.0 - clamp((d - u_fade.x)/(u_fade.y - u_fade.x), 0.0, 1.0) : 1.0;\n"
+    "  if (u_span.z > 4.5) { frag.rb = vec2(clear); return; }\n"
+    "  if (clear <= 0.0) return;\n"
+    "  if (u_span.z > 2.5 && u_span.z < 3.5) { frag.rb = vec2(fract(d/256.0), d/4096.0); return; }\n"
+    "  vec3 p = at(v_uv, d);\n"
+    "  vec3 n = cross(edge(vec2(0.0, u_ao.w*u_texel.y), p, d), edge(vec2(u_ao.w*u_texel.x, 0.0), p, d));\n"
+    "  if (dot(n, n) < 1e-12) return;\n"
+    "  n = normalize(n); if (dot(n, p) > 0.0) n = -n;\n"
+    "  float mark = texelFetch(u_tex, ivec2(v_uv*vec2(textureSize(u_tex, 0))), 0).a;\n"
+    "  if (mark > 0.2 && mark < 0.6 && u_span.z < 3.5) return;  /* a sprite stands in the floor it is drawn over, and under a blended fragment the depth is not its own */\n"
+    "  if (u_span.z > 3.5) { frag = vec4(n*0.5 + 0.5, 1.0); return; }\n"
+    "  float reach = min(u_ao.x*u_proj.x/d, u_ao.z);\n"
+    "  if (reach < u_ao.w) return;\n"
+    "  float turn = 6.2831853*fract(52.9829189*fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));\n"
+    "  float r2 = u_ao.x*u_ao.x, sum = 0.0;\n"
+    "  for (int i = 0; i < 16; ++i) {\n"
+    "    float f = (float(i)+0.5)/16.0, angle = turn + f*6.2831853*7.0;\n"
+    "    vec2 uv = v_uv + vec2(cos(angle), sin(angle))*sqrt(f)*reach*u_texel;\n"
+    "    float ds = surf(uv);\n"
+    "    if (ds == 0.0) continue;\n"
+    "    vec3 v = at(uv, ds) - p;\n"
+    "    float vv = dot(v, v), fall = max(r2 - vv, 0.0);\n"
+    "    sum += fall*fall*fall*max(((dot(v, n) - u_fade.z*sqrt(vv))/(1.0 - u_fade.z) - 0.012*u_ao.x - 0.0015*d)/(vv + 0.0001*r2), 0.0);\n"
+    "  }\n"
+    "  frag.r = mix(1.0, max(0.4, 1.0 - u_ao.y*5.0*u_ao.x*sum/(r2*r2*r2*16.0)), clear); }\n";
+/* The frame with the shading of the pass above, averaged over the 4x4 pixels around that lie at the pixel's own depth. */
+static const char *SSAO_MIX_FS =
+    "#version 330\n"
+    "in vec2 v_uv; out vec4 frag;\n"
+    "uniform sampler2D u_tex, u_shade;\n"
+    "uniform vec4 u_span;   /* x, y of the picture's corner on screen, the view asked for */\n"
+    "void main(){\n"
+    "  ivec2 at = ivec2(gl_FragCoord.xy - u_span.xy), most = textureSize(u_shade, 0) - 1;\n"
+    "  vec4 here = texelFetch(u_shade, clamp(at, ivec2(0), most), 0);\n"
+    "  vec3 c = texture(u_tex, v_uv).rgb;\n"
+    "  if (u_span.z > 4.5) { frag = vec4(here.g == 0.0 ? vec3(0.0, 0.0, 0.25) : vec3(here.r), 1.0); return; }\n"
+    "  if (u_span.z > 2.5) { frag = vec4(here.g == 0.0 ? vec3(0.0, 0.0, 0.25) : here.rgb, 1.0); return; }\n"
+    "  frag = vec4(u_span.z > 1.5 ? vec3(0.0, 0.0, 0.25) : c, 1.0);\n"
+    "  if (here.g == 0.0) return;\n"
+    "  float lit = 0.0, count = 0.0;\n"
+    "  for (int y = -2; y < 2; ++y) for (int x = -2; x < 2; ++x) {\n"
+    "    vec4 near = texelFetch(u_shade, clamp(at + ivec2(x, y), ivec2(0), most), 0);\n"
+    "    if (near.g == 0.0 || abs(near.g - here.g) > 2.5/255.0) continue;\n"
+    "    lit += near.r; count += 1.0;\n"
+    "  }\n"
+    "  lit = count > 0.0 ? lit/count : here.r;\n"
+    "  frag = vec4(u_span.z > 1.5 ? vec3(lit) : c*lit, 1.0); }\n";
 #ifndef PSX_DISABLE_FRAME_INTERPOLATION
 static const char *INTERP_FS =
     "#version 330\n"
@@ -1169,6 +1301,70 @@ static GLuint build_program_ex(const char *vs, const char *fs, int dual_source) 
         fprintf(stdout, "psxrecomp: GL program link failed: %s\n", log); return 0; }
     return p;
 }
+/* The drawing programs' own copy of a vertex shader: on the mirror the camera depth of slot 9 or 23 becomes the fragment's depth,
+ * and v_bill says what is drawn: 0 off the mirror, 1 on it, 2 there with a depth that is not a world polygon's exact one
+ * (a sprite's one depth, or a clipped polygon's partial one: flags of 1, an exact polygon has 3).
+ * The source strings stay as they are: the in-between presenter makes its own copies of them. */
+/* A copy of a shader with a line after its first one and another end. NULL when it does not end as expected. */
+static char *shader_variant(const char *source, const char *declared, const char *end, const char *ending) {
+    const size_t length = strlen(source), tail = strlen(end), room = length + strlen(declared) + strlen(ending) + 8;
+    const char *body = strchr(source, '\n');
+    char *out;
+    int written;
+    if (!body || length < tail || strcmp(source + length - tail, end)) return NULL;
+    out = (char *)malloc(room);
+    if (!out) return NULL;
+    written = snprintf(out, room, "%.*s%s", (int)(body + 1 - source), source, declared);
+    memcpy(out + written, body + 1, (size_t)(source + length - tail - (body + 1)));
+    strcpy(out + written + (source + length - tail - (body + 1)), ending);
+    return out;
+}
+
+static char *depth_writing_shader(const char *source, int location) {
+    static const char flat[] = "0.0, 1.0); }\n";
+    static const char deep[] = "u_visual_options.w >= 1.0 ? 0.99999 : ((u_visual > 0.5 && abs(a_camz) > 16.0) ? max(1.0 - 32.0*(1.0 + u_pull)/(abs(a_camz)*(1.0 + max(u_visual_options.w, 0.0))), -1.0) : 0.999999), 1.0);\n"
+                               "  bool grown = a_visual_flags > 5.5;\n"
+                               "  if (u_visual > 0.5 && (u_visual_options.w == 0.0 ? grown : u_visual_options.w >= 1.0 ? (grown || a_visual_flags < 1.5) : (u_visual_options.w > 0.0 && !grown)))\n"
+                               "    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);\n"
+                               "  v_deep = abs(a_camz) > 16.0 ? 1.0 : -1000.0;\n"
+                               "  v_bill = u_visual > 0.5 ? ((abs(a_camz) > 16.0 && a_visual_flags < 1.5) ? 2.0 : 1.0) : 0.0; }\n";
+    const size_t length = strlen(source), tail = sizeof(flat) - 1, room = length + sizeof(deep) + 160;
+    const char *body = strchr(source, '\n');
+    char *out;
+    int written;
+    if (!body || length < tail || strcmp(source + length - tail, flat)) return NULL;
+    out = (char *)malloc(room);
+    if (!out) return NULL;
+    written = snprintf(out, room, "%.*slayout(location=%d) in float a_camz; flat out float v_bill; noperspective out float v_deep; uniform float u_pull;\n", (int)(body + 1 - source), source, location);
+    memcpy(out + written, body + 1, (size_t)(source + length - tail - (body + 1)));
+    strcpy(out + written + (source + length - tail - (body + 1)), deep);
+    return out;
+}
+
+/* The textured program's own copy of its fragment shader. Pass 3 and 4 write depth alone, 4 for a batch whose STP texels are blended:
+ * a blended fragment leaves the depth under it. On the mirror, whose alpha nothing reads back, a blended fragment marks it 0.25
+ * and an opaque one of a sprite 0.5. */
+static char *sprite_marking_shader(const char *source) {
+    static const char end[] = "}\n";
+    static const char marked[] =
+        "  bool blended = stp != 0 && (u_semimode == 4 ? v_semi != 0 : (u_semipass == 2 || u_semipass == 4));\n"
+        "  if (u_semipass == 4 && blended) discard;\n"
+        "  if (v_bill > 0.5 && blended) frag.a = 0.25; else if (v_bill > 1.5) frag.a = 0.5;\n"
+        "  if (v_bill > 0.5 && v_deep > -999.5 && v_deep < 0.999) frag.a = 0.25;  /* some corner has no depth (it weighs -1000): its depth is no surface */\n"
+        "}\n";
+    const size_t length = strlen(source), tail = sizeof(end) - 1, room = length + sizeof(marked) + 64;
+    const char *body = strchr(source, '\n');
+    char *out;
+    int written;
+    if (!body || length < tail || strcmp(source + length - tail, end)) return NULL;
+    out = (char *)malloc(room);
+    if (!out) return NULL;
+    written = snprintf(out, room, "%.*sflat in float v_bill; noperspective in float v_deep;\n", (int)(body + 1 - source), source);
+    memcpy(out + written, body + 1, (size_t)(source + length - tail - (body + 1)));
+    strcpy(out + written + (source + length - tail - (body + 1)), marked);
+    return out;
+}
+
 static GLuint build_program(const char *vs, const char *fs) {
     return build_program_ex(vs, fs, 0);
 }
@@ -1188,6 +1384,14 @@ static inline uint32_t conv_1555_to_rgba8(uint16_t p) {
  *              stored value is known to be 0 when the test passed) and a 0
  *              via KEEP. */
 static void mask_stencil(int write_val) {
+    if (s_fill_pass > 0.0f) {  /* a filler obeys the mask and leaves it as it is */
+        if (!s_mask_check) { glDisable(GL_STENCIL_TEST); return; }
+        glEnable(GL_STENCIL_TEST);
+        glStencilMask(0x00);
+        glStencilFunc(GL_EQUAL, 0, 0x01);
+        glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
+        return;
+    }
     glEnable(GL_STENCIL_TEST);
     glStencilMask(0x01);
     if (s_mask_check) {
@@ -1492,9 +1696,43 @@ static void mark_prim_dirty(const int *xs, const int *ys, int n, int textured) {
  * boundary (MMX6: draw area alternates y=0/y=240, both bands in ONE wide
  * surface) bleed into the OTHER band's rows — presented one frame later as
  * top/bottom edge flicker (16:9 GL only). */
+/* Rows y..y+h-1 of a surface as bits, one for every 16 rows. */
+static uint32_t wide_depth_rows(int y, int h) {
+    uint32_t rows = 0;
+    for (int block = y < 0 ? 0 : y / 16; block < 32 && block * 16 < y + h; block++) rows |= 1u << block;
+    return rows;
+}
+
+/* The depth of a frame buffer is one frame's: drawing into rows that have been shown starts from none. The game's frame buffers
+ * share a surface, one above the other, so the rows on screen keep theirs. Polygons the game blends into its far colour write
+ * no depth: without this the last frame's would stay under them. */
+static void wide_depth_shown(GLuint fbo, int y, int h) {
+    for (int i = 0; i < WIDE_MAX_SURF; i++)
+        if (s_wide_fbo[i] == fbo) s_wide_depth_shown[i] |= wide_depth_rows(y, h);
+}
+
+static void wide_depth_begin(void) {
+    int sy = s_area_y1, sh = s_area_y2 - s_area_y1 + 1;
+    if (!mirror_depth()) return;
+    if (sy < 0) { sh += sy; sy = 0; }
+    if (sy + sh > VRAM_H) sh = VRAM_H - sy;
+    if (sh <= 0) return;
+    for (int i = 0; i < WIDE_MAX_SURF; i++) {
+        const uint32_t rows = wide_depth_rows(sy, sh);
+        if (s_wide_fbo[i] != g_wide_cur || !(s_wide_depth_shown[i] & rows)) continue;
+        s_wide_depth_shown[i] &= ~rows;
+        glEnable(GL_SCISSOR_TEST);
+        glScissor(0, sy * s_scale, g_wide_w * s_scale, sh * s_scale);
+        glDepthMask(GL_TRUE);
+        glClearDepth(1.0);
+        glClear(GL_DEPTH_BUFFER_BIT);
+    }
+}
+
 static void wide_target_begin(int dx, GLint uXoff, GLint uXhalf) {
     if (s_ws_ablate != 3)   /* ablate 3: no FBO rebind (draws land in hr — perf probe) */
         p_glBindFramebuffer(PSXGL_FRAMEBUFFER, g_wide_cur);
+    wide_depth_begin();
     glViewport(0, 0, g_wide_w * s_scale, VRAM_H * s_scale);
     glEnable(GL_SCISSOR_TEST);
     {
@@ -1504,10 +1742,12 @@ static void wide_target_begin(int dx, GLint uXoff, GLint uXhalf) {
         if (sh < 0) sh = 0;
         glScissor(0, sy * s_scale, g_wide_w * s_scale, sh * s_scale);
     }
+    if (mirror_depth()) { glEnable(GL_DEPTH_TEST); glDepthFunc(GL_ALWAYS); glDepthMask(GL_FALSE); }
     p_glUniform1f(uXoff, (float)dx);
     p_glUniform1f(uXhalf, (float)g_wide_w / 2.0f);
 }
 static void wide_target_end(GLint uXoff, GLint uXhalf) {
+    if (mirror_depth()) { glDepthMask(GL_TRUE); glDisable(GL_DEPTH_TEST); }
     p_glUniform1f(uXoff, 0.0f);
     p_glUniform1f(uXhalf, 512.0f);
     if (s_ws_ablate != 3)
@@ -1672,7 +1912,7 @@ static void tex_batch_draw_passes(int nverts, int semi) {
         if (s_tb_mask) mask_stencil(1); else glDisable(GL_STENCIL_TEST);
         p_glUniform1i(s_uSemipass, 0);
         glDrawArrays(GL_TRIANGLES, 0, nverts);
-        if (!s_tb_mask) s_stencil_valid = 0;
+        if (!s_tb_mask && s_fill_pass <= 0.0f) s_stencil_valid = 0;
     } else {
         glDisable(GL_BLEND);                           /* Pass 1: STP=0 texels (opaque) */
         mask_stencil(s_tb_mask);
@@ -1715,9 +1955,67 @@ static int mirror_batch_center_only(int nverts) {
     return mirror_x_center_only(lo, hi);
 }
 
+static float filler_line_width(int scale) {
+    const float width = s_crack_fill * (float)scale;
+    return width < 1.0f ? 1.0f : width > s_line_width_max ? s_line_width_max : width;
+}
+
+/* What a filler pass of the mirror leaves as it found it: the mask bit in alpha and stencil, and the depth. */
+static void filler_pass_begin(float pass) {
+    s_fill_pass = pass;
+    geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 1);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
+    glDepthFunc(GL_LESS);
+    glDepthMask(GL_FALSE);
+}
+static void filler_pass_end(void) {
+    s_fill_pass = 0.0f;
+    geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 1);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glStencilMask(0x01);
+    glDepthFunc(GL_ALWAYS);
+}
+
+/* Under a batch, the edges of its exact world polygons: exact corners open the hairline gaps that whole pixels closed. */
+static void tex_batch_outline(int nverts, int semi) {
+    int exact = 0;
+    for (int i = 0; i < nverts && !exact; i += 3) exact = s_tb[i * TEXV + 19] > 1.5f;
+    if (!exact) return;
+    filler_pass_begin(2.0f);
+    glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
+    glLineWidth(filler_line_width(s_scale));
+    glDisable(GL_BLEND);
+    mask_stencil(s_tb_mask);
+    p_glUniform1i(s_uSemimode, semi < 0 ? 0 : semi);
+    p_glUniform1i(s_uSemipass, semi < 0 ? 0 : 4);
+    glDrawArrays(GL_TRIANGLES, 0, nverts);
+    glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
+    filler_pass_end();
+}
+
+/* A batch of exact world polygons by depth, see s_world_depth. */
+static void tex_batch_by_depth(int nverts, int semi) {
+    glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+    glDisable(GL_BLEND);
+    glDisable(GL_STENCIL_TEST);
+    glDepthFunc(GL_LEQUAL);
+    glDepthMask(GL_TRUE);
+    p_glUniform1i(s_uSemimode, semi < 0 ? 0 : semi);
+    p_glUniform1i(s_uSemipass, semi < 0 ? 3 : 4);
+    glDrawArrays(GL_TRIANGLES, 0, nverts);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    glDepthMask(GL_FALSE);
+    p_glUniform1f(s_tex_uPull, s_world_margin);
+    tex_batch_draw_passes(nverts, semi);
+    p_glUniform1f(s_tex_uPull, 0.0f);
+    glDepthFunc(GL_ALWAYS);
+}
+
 static void flush_tex_batch(void) {
     if (s_tb_n == 0) return;
     int nverts = s_tb_n, semi = s_tb_semi;
+    const int fillers = s_tb_fillers;
+    const int world = s_tb_world;
     s_tb_n = 0;                             /* clear first: re-entrancy safe */
     double cw_t0 = cw_ms();
     s_cw_batches++; s_batch_total++; s_cw_flush_depth++;
@@ -1749,9 +2047,30 @@ static void flush_tex_batch(void) {
         wide_target_begin(dx, s_tex_uXoff, s_tex_uXhalf);
         geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 1);
         wide_set_bd_scale(s_tex_uXscale, s_tex_uXcenter);
+        s_draw_filler = mirror_depth() && fillers;
+        s_draw_world = mirror_depth() && world;
         temporal_draw(s_tb, s_tb_identity, nverts, 1, GL_TRIANGLES, semi, s_tb_mask,
                       s_tb_filter, s_tb_twin, s_tb_gate, 0);
-        if (s_ws_ablate != 2) tex_batch_draw_passes(nverts, semi);
+        s_draw_filler = s_draw_world = 0;
+        if (s_ws_ablate != 2) {
+            if (mirror_depth() && s_crack_fill > 0.0f) tex_batch_outline(nverts, semi);
+            if (mirror_depth() && fillers) {  /* in sequence each copy would break the batch: 135 batches a frame against 2 */
+                filler_pass_begin(GROWN_COPY_MARGIN);
+                tex_batch_draw_passes(nverts, semi);
+                filler_pass_end();
+            }
+            if (world && mirror_depth()) tex_batch_by_depth(nverts, semi);
+            else tex_batch_draw_passes(nverts, semi);
+        }
+        if (mirror_depth() && !world && s_ws_ablate != 2) {  /* the depth of the opaque fragments alone */
+            glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+            glDisable(GL_BLEND);
+            glDisable(GL_STENCIL_TEST);
+            glDepthMask(GL_TRUE);
+            p_glUniform1i(s_uSemipass, semi < 0 ? 3 : 4);
+            glDrawArrays(GL_TRIANGLES, 0, nverts);
+            glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+        }
         wide_clear_bd_scale(s_tex_uXscale, s_tex_uXcenter);
         geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 0);
         wide_target_end(s_tex_uXoff, s_tex_uXhalf);
@@ -1807,6 +2126,7 @@ static void flush_flat_batch(void) {
         geometry_visual_uniforms(s_geo_uVisual, s_geo_uCamera, s_geo_uVisualOptions, 1);
         wide_set_bd_scale(s_geo_uXscale, s_geo_uXcenter);
         temporal_draw(s_fb, s_fb_identity, nverts, 0, GL_TRIANGLES, semi, mask, 0, NULL, 0, 0);
+        if (mirror_depth()) glDepthMask(semi < 0 ? GL_TRUE : GL_FALSE);
         if (s_ws_ablate != 2) glDrawArrays(GL_TRIANGLES, 0, nverts);
         wide_clear_bd_scale(s_geo_uXscale, s_geo_uXcenter);
         geometry_visual_uniforms(s_geo_uVisual, s_geo_uCamera, s_geo_uVisualOptions, 0);
@@ -1826,7 +2146,7 @@ static void gpu_geometry(GLenum mode, const int *xs, const int *ys,
     uint64_t pid[3] = {0};
     int visual_flags = 0;
     if (mode == GL_TRIANGLES && n == 3)
-        visual_flags = take_visual_triangle(xs, ys, px, py, NULL, pz, pid);
+        visual_flags = take_visual_triangle(xs, ys, px, py, NULL, pz, pid) & 3;
     else {
         s_next_world = 0;
         s_next_precise = 0;
@@ -1875,6 +2195,7 @@ static void gpu_geometry(GLenum mode, const int *xs, const int *ys,
             geometry_visual_uniforms(s_geo_uVisual, s_geo_uCamera, s_geo_uVisualOptions, 1);
             wide_set_bd_scale(s_geo_uXscale, s_geo_uXcenter);
             temporal_draw(verts, NULL, n, 0, mode, semi, s_mask_set, 0, NULL, s_bd_gate, 0);
+            if (s_ssao) glDepthMask(semi < 0 ? GL_TRUE : GL_FALSE);
             if (s_ws_ablate != 2) glDrawArrays(mode, 0, n);
             wide_clear_bd_scale(s_geo_uXscale, s_geo_uXcenter);
             geometry_visual_uniforms(s_geo_uVisual, s_geo_uCamera, s_geo_uVisualOptions, 0);
@@ -1968,6 +2289,8 @@ static void gpu_textured_triangle(const int *xs, const int *ys,
         flush_flat_batch();   /* painter order: flat GEO before textured */
         int twx = s_tw_mask_x, twy = s_tw_mask_y, tox = s_tw_off_x, toy = s_tw_off_y;
         int gate = bd_prim_gate(xs, 3, 1); /* backdrop-stretch gate is also a batch key */
+        const int world = psx_world_depth_class(s_world_depth, visual_flags, pz, s_world_margin);
+        if (s_tb_n > 0 && world != s_tb_world) flush_tex_batch();
         /* With mask checking off, opaque and mode-0 semi primitives use the
          * same dual-source blend state. The per-vertex a_semi flag selects
          * replace vs half-blend without breaking painter order. */
@@ -2006,6 +2329,8 @@ static void gpu_textured_triangle(const int *xs, const int *ys,
         if (s_tb_n + 3 > TEXBATCH_MAXV) { s_batch_reason[6]++; flush_tex_batch(); }
         if (s_tb_n == 0) {            /* opening a batch: capture its keyed state */
             s_tb_semi = batch_semi; s_tb_mask = s_mask_set; s_tb_filter = s_tex_filter; s_tb_gate = gate;
+            s_tb_fillers = 0;
+            s_tb_world = world;
             s_tb_twin[0] = twx; s_tb_twin[1] = twy; s_tb_twin[2] = tox; s_tb_twin[3] = toy;
         }
         float *vp = &s_tb[s_tb_n * TEXV];
@@ -2027,6 +2352,7 @@ static void gpu_textured_triangle(const int *xs, const int *ys,
             vp[23] = pz[i]; /* temporal identity only; no shader attribute */
             s_tb_identity[s_tb_n + i] = pid[i];
         }
+        if (visual_flags & 4) s_tb_fillers++;
         s_tb_n += 3;
         if (isolate) flush_tex_batch();   /* draw this semi prim alone, in submission order */
     }
@@ -2052,6 +2378,7 @@ static void wide_flat_rect_direct(int wx, int y, int ww, int h, uint16_t c, int 
     /* Wide target: positions already wide-space so u_xoff = 0; full-width
      * scissor; u_xhalf = g_wide_w/2. */
     p_glBindFramebuffer(PSXGL_FRAMEBUFFER, g_wide_cur);
+    wide_depth_begin();
     glViewport(0, 0, g_wide_w * s_scale, VRAM_H * s_scale);
     glEnable(GL_SCISSOR_TEST);
     glScissor(0, 0, g_wide_w * s_scale, VRAM_H * s_scale);  /* full surface (rt_wide) */
@@ -2065,7 +2392,9 @@ static void wide_flat_rect_direct(int wx, int y, int ww, int h, uint16_t c, int 
     p_glBindBuffer(PSXGL_ARRAY_BUFFER, s_geo_vbo);
     p_glBufferData(PSXGL_ARRAY_BUFFER, sizeof verts, verts, PSXGL_STREAM_DRAW);
     temporal_draw(verts, NULL, 6, 0, GL_TRIANGLES, semi, s_mask_set, 0, NULL, 0, 1);
+    if (mirror_depth()) { glEnable(GL_DEPTH_TEST); glDepthFunc(GL_ALWAYS); glDepthMask(semi < 0 ? GL_TRUE : GL_FALSE); }
     glDrawArrays(GL_TRIANGLES, 0, 6);
+    if (mirror_depth()) { glDepthMask(GL_TRUE); glDisable(GL_DEPTH_TEST); }
     p_glUniform1f(s_geo_uXoff, 0.0f);
     p_glUniform1f(s_geo_uXhalf, 512.0f);
     p_glBindFramebuffer(PSXGL_FRAMEBUFFER, s_hr_fbo);
@@ -2269,7 +2598,10 @@ static void glb_set_texture_filter(int b) { s_tex_filter = b ? 1 : 0; sw_set_tex
 static int  glb_texture_filter(void) { return s_tex_filter; }
 
 static void glb_set_geometry_correction(int enabled) {
-    if ((enabled ? 1 : 0) != s_geometry_correction) interp_reset_history();
+    if ((enabled ? 1 : 0) != s_geometry_correction) {
+        interp_reset_history();
+        memset(s_wide_depth_shown, 0xFF, sizeof s_wide_depth_shown);
+    }
     if (s_raster_ok) { flush_flat_batch(); flush_tex_batch(); }
     s_geometry_correction = enabled ? 1 : 0;
     if (!s_geometry_correction) {
@@ -2285,7 +2617,7 @@ static void glb_set_geometry_correction(int enabled) {
 
 static void glb_set_world_triangle(int world) {
     if (!s_raster_ok) return;
-    s_next_world = world ? 1 : 0;
+    s_next_world = world;  /* 2: the game's grown second copy */
     if (!world) s_next_temporal_depth = 0;
 }
 
@@ -2340,6 +2672,12 @@ static void glb_set_temporal_depth_triangle(int enabled,
         return;
     s_next_z[0] = z0; s_next_z[1] = z1; s_next_z[2] = z2;
     s_next_temporal_depth = enabled == 2 ? 2 : 1;
+}
+static void glb_set_surface_depth_triangle(float z0, float z1, float z2) {
+    const int usable = s_raster_ok && isfinite(z0) && isfinite(z1) && isfinite(z2) && z0 >= 0.0f && z1 >= 0.0f && z2 >= 0.0f;
+    s_next_surface_z[0] = usable ? z0 : 0.0f;
+    s_next_surface_z[1] = usable ? z1 : 0.0f;
+    s_next_surface_z[2] = usable ? z2 : 0.0f;
 }
 static void glb_set_temporal_identity_triangle(uint64_t id0, uint64_t id1, uint64_t id2) {
     s_next_identity[0] = id0; s_next_identity[1] = id1; s_next_identity[2] = id2;
@@ -2783,8 +3121,15 @@ static int init_gpu_raster(void) {
                                    coverage_tint[0] != '0';
     }
 
-    s_geo_prog  = build_program(GEO_VS, GEO_FS);
-    s_tex_prog  = build_program_ex(TEX_VS, TEX_FS, 1);
+    {
+        char *geo_vs = depth_writing_shader(GEO_VS, 4), *tex_vs = depth_writing_shader(TEX_VS, 12);
+        char *tex_fs = tex_vs ? sprite_marking_shader(TEX_FS) : NULL;
+        s_geo_prog  = build_program(geo_vs ? geo_vs : GEO_VS, GEO_FS);
+        s_tex_prog  = build_program_ex(tex_fs ? tex_vs : TEX_VS, tex_fs ? tex_fs : TEX_FS, 1);
+        free(geo_vs);
+        free(tex_vs);
+        free(tex_fs);
+    }
     s_blit_prog = build_program(BLIT_VS, BLIT_FS);
     s_pack_prog = build_program(PACK_VS, PACK_FS);
     s_stencil_prog = build_program(PACK_VS, STENCIL_FS);
@@ -2855,6 +3200,7 @@ static int init_gpu_raster(void) {
     s_tex_uVisual = p_glGetUniformLocation(s_tex_prog, "u_visual");
     s_tex_uCamera = p_glGetUniformLocation(s_tex_prog, "u_camera");
     s_tex_uVisualOptions = p_glGetUniformLocation(s_tex_prog, "u_visual_options");
+    s_tex_uPull = p_glGetUniformLocation(s_tex_prog, "u_pull");
     /* Default the new uniforms to the no-op (1.0 scale, 0 centre) -- GLSL would
      * otherwise zero them, collapsing all x to 0. */
     p_glUseProgram(s_geo_prog);
@@ -2902,6 +3248,8 @@ static int init_gpu_raster(void) {
     p_glEnableVertexAttribArray(2);
     p_glVertexAttribPointer(3, 2, GL_FLOAT, GL_FALSE, GEOV * sizeof(float), (void *)(7 * sizeof(float)));
     p_glEnableVertexAttribArray(3);
+    p_glVertexAttribPointer(4, 1, GL_FLOAT, GL_FALSE, GEOV * sizeof(float), (void *)(9 * sizeof(float)));
+    p_glEnableVertexAttribArray(4);
 
     p_glGenVertexArrays(1, &s_tex_vao);
     p_glBindVertexArray(s_tex_vao);
@@ -2921,6 +3269,7 @@ static int init_gpu_raster(void) {
         p_glVertexAttribPointer(9, 1, GL_FLOAT, GL_FALSE, st, (void*)(19*sizeof(float))); p_glEnableVertexAttribArray(9); /* visual flags */
         p_glVertexAttribPointer(10, 2, GL_FLOAT, GL_FALSE, st, (void*)(20*sizeof(float))); p_glEnableVertexAttribArray(10); /* visual pos */
         p_glVertexAttribPointer(11, 1, GL_FLOAT, GL_FALSE, st, (void*)(22*sizeof(float))); p_glEnableVertexAttribArray(11); /* reciprocal depth */
+        p_glVertexAttribPointer(12, 1, GL_FLOAT, GL_FALSE, st, (void*)(23*sizeof(float))); p_glEnableVertexAttribArray(12); /* camera depth */
     }
 
     p_glGenVertexArrays(1, &s_blit_vao);
@@ -3002,6 +3351,45 @@ int gl_renderer_init_context(SDL_Window *win) {
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
         glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
         s_present_prog = build_program(PRESENT_VS, PRESENT_FS);
+        s_ssao_prog = build_program(PRESENT_VS, SSAO_FS);
+        s_ssao_mix_prog = build_program(PRESENT_VS, SSAO_MIX_FS);
+        {
+            const char *fill = getenv("PSX_GL_CRACK_FILL"), *under = getenv("PSX_GL_GROWN_UNDER");
+            GLfloat widths[2] = {1.0f, 1.0f};
+            glGetFloatv(0x846E /* GL_ALIASED_LINE_WIDTH_RANGE */, widths);
+            while (glGetError() != GL_NO_ERROR) {}
+            glLineWidth(2.0f);  /* a forward compatible context refuses any width but 1 */
+            s_line_width_max = glGetError() == GL_NO_ERROR && widths[1] > 1.0f ? widths[1] : 1.0f;
+            glLineWidth(1.0f);
+            if (fill) s_crack_fill = s_crack_width = (float)atof(fill);
+            if (under) s_grown_under = atoi(under) != 0;
+            if (getenv("PSX_GL_WORLD_DEPTH")) s_world_depth = atoi(getenv("PSX_GL_WORLD_DEPTH")) != 0;
+            if (getenv("PSX_GL_WORLD_DEPTH_MARGIN") && atof(getenv("PSX_GL_WORLD_DEPTH_MARGIN")) > 0.0)
+                s_world_margin = (float)atof(getenv("PSX_GL_WORLD_DEPTH_MARGIN"));
+        }
+        if (s_ssao_prog && s_ssao_mix_prog) {
+            const char *on = getenv("PSX_GL_SSAO"), *radius = getenv("PSX_GL_SSAO_RADIUS"), *strength = getenv("PSX_GL_SSAO_STRENGTH");
+            s_ssao_mix_uTex = p_glGetUniformLocation(s_ssao_mix_prog, "u_tex");
+            s_ssao_mix_uShade = p_glGetUniformLocation(s_ssao_mix_prog, "u_shade");
+            s_ssao_mix_uUvRect = p_glGetUniformLocation(s_ssao_mix_prog, "u_uv_rect");
+            s_ssao_mix_uSpan = p_glGetUniformLocation(s_ssao_mix_prog, "u_span");
+            s_ssao_uDepth = p_glGetUniformLocation(s_ssao_prog, "u_depth");
+            s_ssao_uTex = p_glGetUniformLocation(s_ssao_prog, "u_tex");
+            s_ssao_uFade = p_glGetUniformLocation(s_ssao_prog, "u_fade");
+            s_ssao_uUvRect = p_glGetUniformLocation(s_ssao_prog, "u_uv_rect");
+            s_ssao_uTexel = p_glGetUniformLocation(s_ssao_prog, "u_span");
+            s_ssao_uProj = p_glGetUniformLocation(s_ssao_prog, "u_proj");
+            s_ssao_uAo = p_glGetUniformLocation(s_ssao_prog, "u_ao");
+            if (on) {
+                s_ssao = atoi(on);
+                s_ssao_on = s_ssao == 1;
+                s_ssao_view = s_ssao > 1 && s_ssao <= 5 ? s_ssao - 1 : 0;
+            }
+            if (radius && atof(radius) > 0.0) s_ssao_radius = (float)atof(radius);
+            if (strength && atof(strength) > 0.0) s_ssao_strength = (float)atof(strength);
+            if (getenv("PSX_GL_SSAO_TILT") && atof(getenv("PSX_GL_SSAO_TILT")) >= 0.0 && atof(getenv("PSX_GL_SSAO_TILT")) < 0.95)
+                s_ssao_tilt = (float)atof(getenv("PSX_GL_SSAO_TILT"));
+        }
 #ifndef PSX_DISABLE_FRAME_INTERPOLATION
         s_interp_prog = build_program(PRESENT_VS, INTERP_FS);
         if (s_present_prog && s_interp_prog) {
@@ -3439,6 +3827,13 @@ static void glb_wide_clear(int base_x, int y, int h, uint16_t color) {
     glClearColor(r, g, b, a);
     glClearStencil((color >> 15) & 1);   /* stencil mirrors bit15, like the color alpha */
     glStencilMask(0xFF);
+    if (s_world_depth && mirror_depth()) {  /* under the depth test a frame never shown must not leave its depth to the next */
+        glDepthMask(GL_TRUE);
+        glClearDepth(1.0);
+        glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+        for (int i = 0; i < WIDE_MAX_SURF; i++)
+            if (s_wide_fbo[i] == fbo) s_wide_depth_shown[i] &= ~wide_depth_rows(y, h);
+    } else
     glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
     glDisable(GL_SCISSOR_TEST);
     p_glBindFramebuffer(PSXGL_FRAMEBUFFER, 0);
@@ -3831,6 +4226,145 @@ int gl_renderer_perf_aggregate(int wide_filter, double out[18]) {
 void gl_renderer_set_ws_ablate(int mode) { interp_reset_history(); s_ws_ablate = (mode >= 0 && mode <= 3) ? mode : 0; }
 int  gl_renderer_get_ws_ablate(void)     { return s_ws_ablate; }
 
+extern void gte_ws_x_squash(int32_t *num, int32_t *den);
+
+/* What the shading draws through. Frame buffer objects belong to one GL context: the frame loop's and the in-between presenter's. */
+typedef struct {
+    GLuint depth_fbo, depth, shade_fbo, shade;
+    int w, h, shade_w, shade_h;
+} SsaoTargets;
+static SsaoTargets s_ssao_main, s_ssao_thread;
+
+static GLuint ssao_depth_texture(int w, int h) {
+    GLuint made = 0;
+    glGenTextures(1, &made);
+    glBindTexture(GL_TEXTURE_2D, made);
+    glTexImage2D(GL_TEXTURE_2D, 0, PSXGL_DEPTH24_STENCIL8, w, h, 0, 0x84F9 /* GL_DEPTH_STENCIL */, 0x84FA /* GL_UNSIGNED_INT_24_8 */, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    return made;
+}
+
+static int ssao_targets(SsaoTargets *t, int w, int h, int lw, int lh, int copies) {
+    if (copies && (!t->depth_fbo || t->w != w || t->h != h)) {
+        if (t->depth_fbo) p_glDeleteFramebuffers(1, &t->depth_fbo);
+        if (t->depth) glDeleteTextures(1, &t->depth);
+        t->depth_fbo = 0;
+        t->depth = ssao_depth_texture(w, h);
+        p_glGenFramebuffers(1, &t->depth_fbo);
+        p_glBindFramebuffer(PSXGL_FRAMEBUFFER, t->depth_fbo);
+        p_glFramebufferTexture2D(PSXGL_FRAMEBUFFER, PSXGL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, t->depth, 0);
+        glDrawBuffer(GL_NONE);
+        glReadBuffer(GL_NONE);
+        if (p_glCheckFramebufferStatus(PSXGL_FRAMEBUFFER) != PSXGL_FRAMEBUFFER_COMPLETE) return 0;
+        t->w = w;
+        t->h = h;
+    }
+    if (!t->shade_fbo || t->shade_w != lw || t->shade_h != lh) {
+        if (t->shade_fbo) p_glDeleteFramebuffers(1, &t->shade_fbo);
+        if (t->shade) glDeleteTextures(1, &t->shade);
+        t->shade_fbo = 0;
+        t->shade = make_tex(GL_RGBA8, lw, lh, GL_RGBA, GL_UNSIGNED_BYTE);
+        if (!t->shade || !make_fbo(&t->shade_fbo, t->shade, 0)) return 0;
+        t->shade_w = lw;
+        t->shade_h = lh;
+    }
+    return 1;
+}
+
+/* Shades `color` by a depth of the same size and puts it on screen. The depth is `depth`, or with 0 is first copied from the
+ * frame buffer `from`. uv is the part shown. 0: nothing drawn, the caller presents plainly. */
+static int ssao_draw(SsaoTargets *t, GLuint vao, GLuint from, GLuint depth, GLuint color, int w, int h,
+                     float u0, float v0, float u1, float v1, int scale, int linear, int lx, int ly, int lw, int lh) {
+    int32_t num = 1, den = 1;
+    float focal_x, focal_y;
+    if (!s_ssao || !s_geometry_correction || !s_ssao_prog || !s_ssao_mix_prog || lw <= 0 || lh <= 0 || w <= 0 || h <= 0) return 0;
+    if (!ssao_targets(t, w, h, lw, lh, depth == 0)) {
+        fprintf(stdout, "psxrecomp: GL ambient occlusion has no targets, switched off\n");
+        p_glBindFramebuffer(PSXGL_FRAMEBUFFER, 0);
+        s_ssao = s_ssao_on = s_ssao_view = 0;
+        return 0;
+    }
+    glDisable(GL_SCISSOR_TEST);
+    if (!depth) {
+        p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, from);
+        p_glBindFramebuffer(PSXGL_DRAW_FRAMEBUFFER, t->depth_fbo);
+        p_glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+        depth = t->depth;
+    }
+    gte_ws_x_squash(&num, &den);
+    focal_x = s_yaw_focal_x * (float)scale;
+    focal_y = num > 0 && den > 0 ? focal_x * (float)den / (float)num : focal_x;
+    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, t->shade_fbo);
+    glViewport(0, 0, lw, lh);
+    glDisable(GL_BLEND);
+    glDisable(GL_STENCIL_TEST);
+    glDisable(GL_DEPTH_TEST);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    p_glActiveTexture(PSXGL_TEXTURE0 + 1);
+    glBindTexture(GL_TEXTURE_2D, color);
+    p_glActiveTexture(PSXGL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, depth);
+    p_glUseProgram(s_ssao_prog);
+    p_glUniform1i(s_ssao_uDepth, 0);
+    p_glUniform1i(s_ssao_uTex, 1);
+    p_glUniform4f(s_ssao_uUvRect, u0, v0, u1, v1);
+    p_glUniform4f(s_ssao_uTexel, 1.0f / (float)w, 1.0f / (float)h, (float)s_ssao, 0.0f);
+    p_glUniform4f(s_ssao_uProj, focal_x, focal_y, (u0 + u1) * 0.5f * (float)w, (v0 + v1) * 0.5f * (float)h);
+    p_glUniform4f(s_ssao_uAo, s_ssao_radius, s_ssao_strength, 24.0f * (float)scale, (float)scale);
+    p_glUniform4f(s_ssao_uFade, s_ssao_fade_from, s_ssao_fade_to, s_ssao_tilt, 0.0f);
+    p_glBindVertexArray(vao);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+
+    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, 0);
+    glViewport(lx, ly, lw, lh);
+    p_glActiveTexture(PSXGL_TEXTURE0 + 1);
+    glBindTexture(GL_TEXTURE_2D, t->shade);
+    p_glActiveTexture(PSXGL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, color);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, linear ? GL_LINEAR : GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, linear ? GL_LINEAR : GL_NEAREST);
+    p_glUseProgram(s_ssao_mix_prog);
+    p_glUniform1i(s_ssao_mix_uTex, 0);
+    p_glUniform1i(s_ssao_mix_uShade, 1);
+    p_glUniform4f(s_ssao_mix_uUvRect, u0, v0, u1, v1);
+    p_glUniform4f(s_ssao_mix_uSpan, (float)lx, (float)ly, (float)s_ssao, 0.0f);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    p_glBindVertexArray(0);
+    p_glUseProgram(0);
+    return 1;
+}
+
+#ifndef PSX_DISABLE_FRAME_INTERPOLATION
+/* The depth of each captured real frame, for the presenter's thread to shade it by. */
+static GLuint s_interp_depth[3], s_interp_depth_fbo;
+static int s_interp_depth_w, s_interp_depth_h;
+static int s_temp_scene_depth;  /* the replay is drawing its scene, whose opaque fragments alone leave depth while the shading is on */
+
+static void interp_capture_depth(GLuint fbo, int x, int y, int h, int pw, int ph, int dst) {
+    if (!s_ssao || !s_geometry_correction) return;
+    if (!s_interp_depth[0] || s_interp_depth_w != pw || s_interp_depth_h != ph) {
+        for (int i = 0; i < 3; i++) {
+            if (s_interp_depth[i]) glDeleteTextures(1, &s_interp_depth[i]);
+            s_interp_depth[i] = ssao_depth_texture(pw, ph);
+        }
+        s_interp_depth_w = pw;
+        s_interp_depth_h = ph;
+    }
+    if (!s_interp_depth_fbo) p_glGenFramebuffers(1, &s_interp_depth_fbo);
+    p_glBindFramebuffer(PSXGL_DRAW_FRAMEBUFFER, s_interp_depth_fbo);
+    p_glFramebufferTexture2D(PSXGL_DRAW_FRAMEBUFFER, PSXGL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, s_interp_depth[dst], 0);
+    glDrawBuffer(GL_NONE);
+    glDisable(GL_SCISSOR_TEST);
+    p_glBlitFramebuffer(x * s_scale, y * s_scale, x * s_scale + pw, y * s_scale + ph, 0, 0, pw, ph, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
+    p_glBindFramebuffer(PSXGL_DRAW_FRAMEBUFFER, 0);
+    for (int i = 0; i < WIDE_MAX_SURF; i++)
+        if (s_wide_fbo[i] == fbo) s_wide_depth_shown[i] |= wide_depth_rows(y, h);
+}
+#endif
+
 #ifndef PSX_DISABLE_FRAME_INTERPOLATION
 #include "gpu_gl_temporal.c.inc"
 
@@ -4042,6 +4576,8 @@ static int interp_capture(GLuint fbo, int x, int y, int w, int h,
     glBindTexture(GL_TEXTURE_2D, s_interp_tex[dst]);
     glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0,
                         x * s_scale, y * s_scale, pw, ph);
+    wide_depth_shown(fbo, y, h);
+    if (s_interp_blend_mode == 2) interp_capture_depth(fbo, x, y, h, pw, ph, dst);
     if (s_interp_blend_mode == 2) temporal_publish(fbo, y, h);
 #ifndef PSX_NO_DEBUG_TOOLS
     if (s_interp_blend_mode == 2 && s_temp_curr.active)
@@ -4107,6 +4643,13 @@ static float interp_draw_quad(float alpha, int lx, int ly, int lw, int lh) {
         p_glWaitSync(s_interp_fence[prev], 0, PSXGL_TIMEOUT_IGNORED);
     if (s_interp_fence[curr])
         p_glWaitSync(s_interp_fence[curr], 0, PSXGL_TIMEOUT_IGNORED);
+    if (s_interp_blend_mode == 2 && alpha >= 1.0f && s_interp_depth[curr] &&
+        s_interp_depth_w == s_interp_w && s_interp_depth_h == s_interp_h) {
+        const float ix = 0.5f * s_interp_scale / s_interp_w, iy = 0.5f * s_interp_scale / s_interp_h;
+        if (ssao_draw(&s_ssao_thread, s_interp_thread_vao, 0, s_interp_depth[curr], s_interp_tex[curr], s_interp_w, s_interp_h,
+                      ix, iy, 1 - ix, 1 - iy, s_interp_scale, s_interp_linear, lx, ly, lw, lh))
+            return alpha;
+    }
     p_glBindFramebuffer(PSXGL_FRAMEBUFFER, 0);
     glViewport(lx, ly, lw, lh);
     p_glActiveTexture(PSXGL_TEXTURE0);
@@ -4458,6 +5001,64 @@ static void wide_blit_center(GLuint wide_fbo, int base_x, int disp_y, int disp_h
  * disp_y+disp_h] region into the letterbox, V-flipped like present_vram (FBO y
  * bottom-origin → window top). Returns 0 if there's no wide surface for base_x
  * (caller falls back). disp_x is the displayed buffer base (the wide-surface key). */
+/* The wide surface shaded by its own depth. 0: nothing drawn, the plain present follows. */
+static int ssao_present(GLuint fbo, GLuint tex, int y, int h, int linear, int lx, int ly, int lw, int lh) {
+    if (!ssao_draw(&s_ssao_main, s_present_vao, fbo, 0, tex, g_wide_w * s_scale, VRAM_H * s_scale,
+                   0.5f / (float)g_wide_w, ((float)y + 0.5f) / (float)VRAM_H,
+                   ((float)g_wide_w - 0.5f) / (float)g_wide_w, ((float)(y + h) - 0.5f) / (float)VRAM_H,
+                   s_scale, linear, lx, ly, lw, lh))
+        return 0;
+    for (int i = 0; i < WIDE_MAX_SURF; i++)
+        if (s_wide_fbo[i] == fbo) s_wide_depth_shown[i] |= wide_depth_rows(y, h);
+    return 1;
+}
+
+void gl_renderer_set_gap_fill(int enabled) {
+    if (s_raster_ok) { flush_flat_batch(); flush_tex_batch(); }
+    const float width = enabled ? s_crack_width : 0.0f;
+    if ((enabled != 0) != s_grown_under || width != s_crack_fill) interp_reset_history();
+    if (enabled && !mirror_depth()) memset(s_wide_depth_shown, 0xFF, sizeof s_wide_depth_shown);
+    s_grown_under = enabled != 0;
+    s_crack_fill = width;
+}
+int gl_renderer_gap_fill(void) { return s_grown_under || s_crack_fill > 0.0f; }
+
+void gl_renderer_set_world_depth(int enabled) {
+    if (s_raster_ok) { flush_flat_batch(); flush_tex_batch(); }
+    if ((enabled != 0) != s_world_depth) interp_reset_history();
+    if (enabled && !mirror_depth()) memset(s_wide_depth_shown, 0xFF, sizeof s_wide_depth_shown);
+    s_world_depth = enabled != 0;
+}
+int gl_renderer_world_depth(void) { return s_world_depth; }
+
+static void ssao_mode(void) {
+    const int mode = s_ssao_view ? s_ssao_view + 1 : s_ssao_on;
+    if (mode && !s_ssao) memset(s_wide_depth_shown, 0xFF, sizeof s_wide_depth_shown);
+    s_ssao = mode;
+}
+void gl_renderer_set_ssao(int enabled) {
+    s_ssao_on = enabled != 0;
+    ssao_mode();
+}
+void gl_renderer_set_ssao_view(int view) {
+    s_ssao_view = view >= 1 && view <= 4 ? view : 0;
+    ssao_mode();
+}
+int gl_renderer_ssao_view(void) { return s_ssao_view; }
+float gl_renderer_ssao_tilt(void) { return s_ssao_tilt; }
+void gl_renderer_set_ssao_tilt(float tilt) {
+    if (tilt >= 0.0f && tilt < 0.95f) s_ssao_tilt = tilt;
+}
+void gl_renderer_set_ssao_shape(float radius, float strength) {
+    if (radius > 0.0f) s_ssao_radius = radius;
+    if (strength >= 0.0f) s_ssao_strength = strength;
+}
+float gl_renderer_ssao_radius(void) { return s_ssao_radius; }
+/* The camera depths between which the game fades its world out: the shading goes with it. */
+void gl_renderer_set_ssao_fade(float from, float to) { s_ssao_fade_from = from; s_ssao_fade_to = to; }
+float gl_renderer_ssao_strength(void) { return s_ssao_strength; }
+int gl_renderer_ssao(void) { return s_ssao_on; }
+
 int gl_renderer_present_wide_fbo(int disp_x, int disp_y, int disp_h, int linear) {
     if (!s_ctx || !s_raster_ok || g_wide_w <= 0) return 0;
     GLuint fbo = 0, tex = 0;
@@ -4502,8 +5103,10 @@ int gl_renderer_present_wide_fbo(int disp_x, int disp_y, int disp_h, int linear)
         s_last_dw = g_wide_w; s_last_dh = disp_h;
         return 1;
     }
-    present_target_quad(tex, g_wide_w, VRAM_H,
-                        0, disp_y, g_wide_w, disp_h, linear, lx, ly, lw, lh);
+    wide_depth_shown(fbo, disp_y, disp_h);
+    if (!ssao_present(fbo, tex, disp_y, disp_h, linear, lx, ly, lw, lh))
+        present_target_quad(tex, g_wide_w, VRAM_H,
+                            0, disp_y, g_wide_w, disp_h, linear, lx, ly, lw, lh);
     pres_record(GL_PRES_WIDE, disp_x, disp_y, g_wide_w, disp_h, lx, ly, lw, lh);
     render_host_ui_for_swap(ww, wh);
     latency_ring_mark(LAT_SWAP_BEGIN);
@@ -4531,6 +5134,7 @@ static const GpuRenderBackend GL_BACKEND = {
     .set_perspective_triangle = glb_set_perspective_triangle,
 #ifndef PSX_DISABLE_FRAME_INTERPOLATION
     .set_temporal_depth_triangle = glb_set_temporal_depth_triangle,
+    .set_surface_depth_triangle = glb_set_surface_depth_triangle,
     .set_temporal_identity_triangle = glb_set_temporal_identity_triangle,
     .set_temporal_sprite = glb_set_temporal_sprite,
 #else

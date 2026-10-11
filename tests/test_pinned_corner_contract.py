@@ -164,7 +164,7 @@ require(
     "            px[i] = (float)((double)s_next_unpinned_x16[i] / 65536.0);\n"
     "            py[i] = (float)((double)s_next_unpinned_y16[i] / 65536.0);\n"
     "        } else {\n" in take
-    and returns(take) == ["return (world || sprite || unpinned ? 1 : 0) | (exact ? 2 : 0);"],
+    and returns(take) == ["return (world || sprite || unpinned ? 1 : 0) | (exact ? 2 : 0) | (filler ? 4 : 0);"],
     "the queued places must be used only without exact ones and with the correction on, and the shader told to use them",
 )
 setter = body(renderer, "static void glb_set_unpinned_triangle(int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t x2, int32_t y2)")

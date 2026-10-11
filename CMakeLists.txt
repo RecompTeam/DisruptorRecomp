@@ -295,6 +295,18 @@ if(BUILD_TESTING)
         COMMAND "${Python3_EXECUTABLE}" -B
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_capsule_contract.py")
 
+    add_test(NAME disruptor_gap_filling_contract
+        COMMAND "${Python3_EXECUTABLE}" -B
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_gap_filling_contract.py")
+
+    add_test(NAME disruptor_world_depth_contract
+        COMMAND "${Python3_EXECUTABLE}" -B
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_world_depth_contract.py")
+
+    add_test(NAME disruptor_ambient_occlusion_contract
+        COMMAND "${Python3_EXECUTABLE}" -B
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ambient_occlusion_contract.py")
+
     add_test(NAME disruptor_framework_overlay_new_file
         COMMAND "${Python3_EXECUTABLE}" -B
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_framework_overlay_new_file.py")
@@ -552,6 +564,14 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
     target_compile_features(disruptor-gpu-pinned-corner-test PRIVATE cxx_std_20)
     add_test(NAME disruptor_gpu_pinned_corner
         COMMAND disruptor-gpu-pinned-corner-test)
+
+    add_executable(disruptor-gpu-world-depth-test
+        tests/gpu_world_depth_test.cpp)
+    target_include_directories(disruptor-gpu-world-depth-test PRIVATE
+        "${PSXRECOMP_ROOT}/runtime/include")
+    target_compile_features(disruptor-gpu-world-depth-test PRIVATE cxx_std_20)
+    add_test(NAME disruptor_gpu_world_depth
+        COMMAND disruptor-gpu-world-depth-test)
 
     add_executable(disruptor-presentation-yaw-math-test
         tests/presentation_yaw_math_test.cpp)

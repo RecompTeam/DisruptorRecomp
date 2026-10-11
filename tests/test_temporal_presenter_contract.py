@@ -277,7 +277,7 @@ require(
     and "const int sprite = !world && s_geometry_correction && s_sprite_depth > 0.0f;" in take
     and "px[i] = (float)xs[i] + (sprite ? s_sprite_sides[xs[i] == s_sprite_x ? 0 : 2] : 0.0f);" in take
     and "py[i] = (float)ys[i] + (sprite ? s_sprite_sides[ys[i] == s_sprite_y ? 1 : 3] : 0.0f);" in take
-    and "return (world || sprite || unpinned ? 1 : 0) | (exact ? 2 : 0);" in take
+    and "return (world || sprite || unpinned ? 1 : 0) | (exact ? 2 : 0) | (filler ? 4 : 0);" in take
     and "    memcpy(s_sprite_sides, s_next_sprite_sides, sizeof(s_sprite_sides));\n    memset(s_next_sprite_sides, 0, sizeof(s_next_sprite_sides));\n    s_sprite_x = x; s_sprite_y = y;\n" in rect,
     "a sprite's unrounded place must reach the presentation of its own rectangle only, and only with geometry correction",
 )
