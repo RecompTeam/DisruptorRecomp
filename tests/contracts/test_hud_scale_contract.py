@@ -28,7 +28,7 @@ require(
     "overlay manifest must list the HUD scale arithmetic",
 )
 require(
-    "add_test(NAME disruptor_gpu_ws_hud_scale\n" in cmake and "disruptor_hud_scale_contract" in cmake,
+    "    disruptor_unit_test(disruptor_gpu_ws_hud_scale " in cmake and "    disruptor_contract(hud_scale)\n" in cmake,
     "the HUD scale unit test and its contract must remain registered",
 )
 require(

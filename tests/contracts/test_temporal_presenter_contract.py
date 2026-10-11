@@ -42,7 +42,7 @@ gpu = read("psxrecomp-overlay/runtime/src/gpu.c")
 billboards = read("src/game/render/billboard_aspect.cpp")
 
 require(
-    "disruptor_temporal_presenter_contract" in cmake and "PSX_HAS_DISRUPTOR_SPRITE_DEPTH=1" in cmake,
+    "    disruptor_contract(temporal_presenter)\n" in cmake and "PSX_HAS_DISRUPTOR_SPRITE_DEPTH=1" in cmake,
     "the presenter contract and the sprite-depth interpreter switch must remain registered",
 )
 

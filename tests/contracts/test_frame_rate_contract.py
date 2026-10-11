@@ -51,13 +51,13 @@ cycle_header = read("psxrecomp-overlay/runtime/include/psx_cyc.h")
 cycle_source = read("psxrecomp-overlay/runtime/src/psx_cycles.c")
 
 require(
-    'tests/contracts/test_frame_rate_contract.py"\n            --require-artifacts)' in cmake,
+    "    disruptor_contract(frame_rate RETAIL)\n" in cmake,
     "the build gate must run this contract with its inputs required",
 )
 require(
     "src/game/frame/frame_rate.cpp" in cmake
-    and "disruptor_frame_rate_contract" in cmake
-    and "add_test(NAME disruptor_frame_rate\n" in cmake,
+    and "    disruptor_contract(frame_rate RETAIL)\n" in cmake
+    and "    disruptor_unit_test(disruptor_frame_rate " in cmake,
     "frame-rate source, its unit test and its contract test must remain registered",
 )
 
@@ -166,7 +166,7 @@ present_control = read("src/game/frame/present_rate.cpp")
 renderer = read("psxrecomp-overlay/runtime/src/gpu_gl_renderer.c")
 host = read("psxrecomp-overlay/runtime/src/main.cpp")
 require(
-    "add_test(NAME disruptor_present_rate\n" in cmake
+    "    disruptor_unit_test(disruptor_present_rate " in cmake
     and "constexpr int kDisruptorPresentRateLowest = 30;" in present_rate
     and "constexpr int kDisruptorPresentRateLeastTop = 120;" in present_rate,
     "the in-between frame rate control must run from 30 FPS to at least 120 and keep its unit test",

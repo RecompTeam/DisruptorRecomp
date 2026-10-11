@@ -179,465 +179,68 @@ if(WIN32)
 endif()
 if(BUILD_TESTING)
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/DisruptorTests.cmake")
 
-    add_test(NAME disruptor_backdrop_tiles_contract
-        COMMAND "${Python3_EXECUTABLE}" -B
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_backdrop_tiles_contract.py"
-            --require-artifacts)
-
-    add_test(NAME disruptor_depth24_sync_contract
-        COMMAND "${Python3_EXECUTABLE}" -B
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_depth24_sync_contract.py")
-
-    add_test(NAME disruptor_geometry_provenance_contract
-        COMMAND "${Python3_EXECUTABLE}" -B
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_geometry_provenance_contract.py")
-
-    add_test(NAME disruptor_phase_a_contract
-        COMMAND "${Python3_EXECUTABLE}" -B
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_phase_a_contract.py")
-
-    add_test(NAME disruptor_perspective_texture_contract
-        COMMAND "${Python3_EXECUTABLE}" -B
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_perspective_texture_contract.py")
-
-    add_test(NAME disruptor_pinned_corner_contract
-        COMMAND "${Python3_EXECUTABLE}" -B
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_pinned_corner_contract.py")
-
-    add_test(NAME disruptor_dev_menu_contract
-        COMMAND "${Python3_EXECUTABLE}" -B
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_dev_menu_contract.py")
-
-    add_test(NAME disruptor_loaded_state_contract
-        COMMAND "${Python3_EXECUTABLE}" -B
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_loaded_state_contract.py")
-
-    add_test(NAME disruptor_save_point_contract
-        COMMAND "${Python3_EXECUTABLE}" -B
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_save_point_contract.py")
-
-    add_test(NAME disruptor_cheats_contract
-        COMMAND "${Python3_EXECUTABLE}" -B
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_cheats_contract.py")
-
-    add_test(NAME disruptor_vertical_camera_contract
-        COMMAND "${Python3_EXECUTABLE}" -B
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_vertical_camera_contract.py")
-
-    add_test(NAME disruptor_far_rendering_contract
-        COMMAND "${Python3_EXECUTABLE}" -B
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_far_rendering_contract.py")
-
-    add_test(NAME disruptor_frame_kind_contract
-        COMMAND "${Python3_EXECUTABLE}" -B
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_frame_kind_contract.py")
-
-    add_test(NAME disruptor_temporal_presenter_contract
-        COMMAND "${Python3_EXECUTABLE}" -B
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_temporal_presenter_contract.py")
-
-    add_test(NAME disruptor_menu_wide_contract
-        COMMAND "${Python3_EXECUTABLE}" -B
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_menu_wide_contract.py")
-
-    add_test(NAME disruptor_hud_scale_contract
-        COMMAND "${Python3_EXECUTABLE}" -B
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_hud_scale_contract.py")
-
-    add_test(NAME disruptor_hud_widget_contract
-        COMMAND "${Python3_EXECUTABLE}" -B
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_hud_widget_contract.py")
-
-    add_test(NAME disruptor_name_entry_contract
-        COMMAND "${Python3_EXECUTABLE}" -B
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_name_entry_contract.py"
-            --require-artifacts)
-    set_tests_properties(disruptor_name_entry_contract
-        PROPERTIES LABELS retail)
-
-    add_test(NAME disruptor_grown_quad_contract
-        COMMAND "${Python3_EXECUTABLE}" -B
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_grown_quad_contract.py"
-            --require-artifacts)
-
-    add_test(NAME disruptor_sprite_range_contract
-        COMMAND "${Python3_EXECUTABLE}" -B
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_sprite_range_contract.py"
-            --require-artifacts)
-    set_tests_properties(disruptor_sprite_range_contract
-        PROPERTIES LABELS retail)
-
-    add_test(NAME disruptor_intro_skip_contract
-        COMMAND "${Python3_EXECUTABLE}" -B
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_intro_skip_contract.py"
-            --require-artifacts)
-
-    add_test(NAME disruptor_language_contract
-        COMMAND "${Python3_EXECUTABLE}" -B
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_language_contract.py"
-            --require-artifacts)
-
-    add_test(NAME disruptor_language_disc_contract
-        COMMAND "${Python3_EXECUTABLE}" -B
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_language_disc_contract.py"
-            --require-artifacts)
-
-    add_test(NAME disruptor_frame_rate_contract
-        COMMAND "${Python3_EXECUTABLE}" -B
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_frame_rate_contract.py"
-            --require-artifacts)
-
-    add_test(NAME disruptor_billboard_aspect_contract
-        COMMAND "${Python3_EXECUTABLE}" -B
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_billboard_aspect_contract.py")
-
-    add_test(NAME disruptor_launcher_contract
-        COMMAND "${Python3_EXECUTABLE}" -B
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_launcher_contract.py")
-
-    add_test(NAME disruptor_capsule_contract
-        COMMAND "${Python3_EXECUTABLE}" -B
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_capsule_contract.py")
-
-    add_test(NAME disruptor_gap_filling_contract
-        COMMAND "${Python3_EXECUTABLE}" -B
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_gap_filling_contract.py")
-
-    add_test(NAME disruptor_world_depth_contract
-        COMMAND "${Python3_EXECUTABLE}" -B
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_world_depth_contract.py")
-
-    add_test(NAME disruptor_smooth_turn_contract
-        COMMAND "${Python3_EXECUTABLE}" -B
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_smooth_turn_contract.py")
-
-    add_test(NAME disruptor_ambient_occlusion_contract
-        COMMAND "${Python3_EXECUTABLE}" -B
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_ambient_occlusion_contract.py")
-
-    add_test(NAME disruptor_debug_tab_contract
-        COMMAND "${Python3_EXECUTABLE}" -B
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_debug_tab_contract.py")
+    disruptor_contract(backdrop_tiles RETAIL)
+    disruptor_contract(depth24_sync)
+    disruptor_contract(geometry_provenance)
+    disruptor_contract(phase_a)
+    disruptor_contract(perspective_texture)
+    disruptor_contract(pinned_corner)
+    disruptor_contract(dev_menu)
+    disruptor_contract(loaded_state)
+    disruptor_contract(save_point)
+    disruptor_contract(cheats)
+    disruptor_contract(vertical_camera)
+    disruptor_contract(far_rendering)
+    disruptor_contract(frame_kind)
+    disruptor_contract(temporal_presenter)
+    disruptor_contract(menu_wide)
+    disruptor_contract(hud_scale)
+    disruptor_contract(hud_widget)
+    disruptor_contract(name_entry RETAIL)
+    disruptor_contract(grown_quad RETAIL)
+    disruptor_contract(sprite_range RETAIL)
+    disruptor_contract(intro_skip RETAIL)
+    disruptor_contract(language RETAIL)
+    disruptor_contract(language_disc RETAIL)
+    disruptor_contract(frame_rate RETAIL)
+    disruptor_contract(billboard_aspect)
+    disruptor_contract(launcher)
+    disruptor_contract(capsule)
+    disruptor_contract(gap_filling)
+    disruptor_contract(world_depth)
+    disruptor_contract(smooth_turn)
+    disruptor_contract(ambient_occlusion)
+    disruptor_contract(debug_tab)
+    disruptor_contract(test_registration)
 
     add_test(NAME disruptor_framework_overlay_new_file
         COMMAND "${Python3_EXECUTABLE}" -B
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_framework_overlay_new_file.py")
-
-    # These need the retail image or the translated code. A machine without
-    # the game leaves them out with `ctest -LE retail`.
-    set_tests_properties(
-        disruptor_backdrop_tiles_contract disruptor_grown_quad_contract
-        disruptor_intro_skip_contract disruptor_language_contract
-        disruptor_language_disc_contract disruptor_frame_rate_contract
-        PROPERTIES LABELS retail)
 endif()
 
 if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
-    add_executable(disruptor-user-settings-test
-        tests/unit/user_settings_persistence_test.cpp
-        "${PSXRECOMP_ROOT}/recompiler/src/config_loader.cpp"
-        "${PSXRECOMP_ROOT}/recompiler/src/ps1_exe_parser.cpp")
-    target_include_directories(disruptor-user-settings-test PRIVATE
-        "${PSXRECOMP_ROOT}/recompiler/src"
-        "${PSXRECOMP_ROOT}/recompiler/include"
-        "${PSXRECOMP_ROOT}/recompiler/lib/fmt/include"
-        "${PSXRECOMP_ROOT}/recompiler/lib/toml11")
-    target_compile_definitions(disruptor-user-settings-test PRIVATE
-        FMT_HEADER_ONLY=1
-        "$<$<CXX_COMPILER_ID:MSVC>:NOMINMAX>"
-        "$<$<CXX_COMPILER_ID:MSVC>:WIN32_LEAN_AND_MEAN>")
-    target_compile_features(disruptor-user-settings-test PRIVATE cxx_std_20)
-    add_test(NAME disruptor_user_settings_persistence
-        COMMAND disruptor-user-settings-test)
+    disruptor_unit_test(disruptor_user_settings_persistence tests/unit/user_settings_persistence_test.cpp
+        TARGET disruptor-user-settings-test
+        SOURCES
+            "${PSXRECOMP_ROOT}/recompiler/src/config_loader.cpp"
+            "${PSXRECOMP_ROOT}/recompiler/src/ps1_exe_parser.cpp"
+        INCLUDES
+            "${PSXRECOMP_ROOT}/recompiler/src"
+            "${PSXRECOMP_ROOT}/recompiler/include"
+            "${PSXRECOMP_ROOT}/recompiler/lib/fmt/include"
+            "${PSXRECOMP_ROOT}/recompiler/lib/toml11"
+        DEFINITIONS
+            FMT_HEADER_ONLY=1
+            "$<$<CXX_COMPILER_ID:MSVC>:NOMINMAX>"
+            "$<$<CXX_COMPILER_ID:MSVC>:WIN32_LEAN_AND_MEAN>")
 
-    add_executable(disruptor-mouse-aim-test
-        tests/unit/disruptor_mouse_aim_test.cpp)
-    target_include_directories(disruptor-mouse-aim-test PRIVATE
-        tests/support/stubs)
-    target_compile_definitions(disruptor-mouse-aim-test PRIVATE PSX_SDL3=1)
-    target_compile_features(disruptor-mouse-aim-test PRIVATE cxx_std_20)
-
-    add_executable(disruptor-cheats-test
-        tests/unit/disruptor_cheats_test.cpp)
-    target_include_directories(disruptor-cheats-test PRIVATE
-        "${PSXRECOMP_ROOT}/runtime/include")
-    target_compile_features(disruptor-cheats-test PRIVATE cxx_std_20)
-
-    add_executable(disruptor-vertical-camera-test
-        tests/unit/disruptor_vertical_camera_test.cpp)
-    target_include_directories(disruptor-vertical-camera-test PRIVATE
-        "${PSXRECOMP_ROOT}/runtime/include")
-    target_compile_features(disruptor-vertical-camera-test PRIVATE cxx_std_20)
-
-    add_executable(disruptor-far-rendering-test
-        tests/unit/disruptor_far_rendering_test.cpp)
-    target_include_directories(disruptor-far-rendering-test PRIVATE
-        "${PSXRECOMP_ROOT}/runtime/include")
-    target_compile_features(disruptor-far-rendering-test PRIVATE cxx_std_20)
-
-    add_executable(disruptor-render-arena-test
-        tests/unit/disruptor_render_arena_test.cpp)
-    target_include_directories(disruptor-render-arena-test PRIVATE
-        "${PSXRECOMP_ROOT}/runtime/include")
-    target_compile_features(disruptor-render-arena-test PRIVATE cxx_std_20)
-    add_test(NAME disruptor_render_arena COMMAND disruptor-render-arena-test)
-
-    add_executable(disruptor-name-entry-test
-        tests/unit/disruptor_name_entry_test.cpp)
-    target_include_directories(disruptor-name-entry-test PRIVATE
-        "${PSXRECOMP_ROOT}/runtime/include")
-    target_compile_features(disruptor-name-entry-test PRIVATE cxx_std_20)
-    add_test(NAME disruptor_name_entry COMMAND disruptor-name-entry-test)
-
-    add_executable(disruptor-backdrop-tiles-test
-        tests/unit/disruptor_backdrop_tiles_test.cpp)
-    target_include_directories(disruptor-backdrop-tiles-test PRIVATE
-        "${PSXRECOMP_ROOT}/runtime/include")
-    target_compile_features(disruptor-backdrop-tiles-test PRIVATE cxx_std_20)
-    add_test(NAME disruptor_backdrop_tiles
-        COMMAND disruptor-backdrop-tiles-test)
-
-    add_executable(disruptor-gpu-ws-frame-kind-test
-        tests/unit/gpu_ws_frame_kind_test.cpp)
-    target_include_directories(disruptor-gpu-ws-frame-kind-test PRIVATE
-        "${PSXRECOMP_ROOT}/runtime/include")
-    target_compile_features(disruptor-gpu-ws-frame-kind-test PRIVATE cxx_std_20)
-    add_test(NAME disruptor_gpu_ws_frame_kind
-        COMMAND disruptor-gpu-ws-frame-kind-test)
-
-    add_executable(disruptor-gpu-ws-menu-test
-        tests/unit/gpu_ws_menu_test.cpp)
-    target_include_directories(disruptor-gpu-ws-menu-test PRIVATE
-        "${PSXRECOMP_ROOT}/runtime/include")
-    target_compile_features(disruptor-gpu-ws-menu-test PRIVATE cxx_std_20)
-    add_test(NAME disruptor_gpu_ws_menu
-        COMMAND disruptor-gpu-ws-menu-test)
-
-    add_executable(disruptor-gpu-ws-hud-scale-test
-        tests/unit/gpu_ws_hud_scale_test.cpp)
-    target_include_directories(disruptor-gpu-ws-hud-scale-test PRIVATE
-        "${PSXRECOMP_ROOT}/runtime/include")
-    target_compile_features(disruptor-gpu-ws-hud-scale-test PRIVATE cxx_std_20)
-    add_test(NAME disruptor_gpu_ws_hud_scale
-        COMMAND disruptor-gpu-ws-hud-scale-test)
-
-    add_executable(disruptor-gpu-ws-hud-widget-test
-        tests/unit/gpu_ws_hud_widget_test.cpp)
-    target_include_directories(disruptor-gpu-ws-hud-widget-test PRIVATE
-        "${PSXRECOMP_ROOT}/runtime/include")
-    target_compile_features(disruptor-gpu-ws-hud-widget-test PRIVATE cxx_std_20)
-    add_test(NAME disruptor_gpu_ws_hud_widget
-        COMMAND disruptor-gpu-ws-hud-widget-test)
-
-    add_executable(disruptor-intro-skip-test
-        tests/unit/disruptor_intro_skip_test.cpp)
-    target_include_directories(disruptor-intro-skip-test PRIVATE
-        "${PSXRECOMP_ROOT}/runtime/include")
-    target_compile_features(disruptor-intro-skip-test PRIVATE cxx_std_20)
-    add_test(NAME disruptor_intro_skip
-        COMMAND disruptor-intro-skip-test)
-
-    add_executable(disruptor-frame-rate-test
-        tests/unit/disruptor_frame_rate_test.cpp)
-    target_include_directories(disruptor-frame-rate-test PRIVATE
-        "${PSXRECOMP_ROOT}/runtime/include")
-    target_compile_features(disruptor-frame-rate-test PRIVATE cxx_std_20)
-    add_test(NAME disruptor_frame_rate
-        COMMAND disruptor-frame-rate-test)
-
-    add_executable(disruptor-language-test
-        tests/unit/disruptor_language_test.cpp)
-    target_include_directories(disruptor-language-test PRIVATE
-        "${PSXRECOMP_ROOT}/runtime/include")
-    target_compile_features(disruptor-language-test PRIVATE cxx_std_20)
-    add_test(NAME disruptor_language
-        COMMAND disruptor-language-test)
-
-    add_executable(disruptor-language-hints-test
-        tests/unit/disruptor_language_hints_test.cpp)
-    target_include_directories(disruptor-language-hints-test PRIVATE
-        "${PSXRECOMP_ROOT}/runtime/include")
-    target_compile_features(disruptor-language-hints-test PRIVATE cxx_std_20)
-    add_test(NAME disruptor_language_hints
-        COMMAND disruptor-language-hints-test)
-
-    add_executable(disruptor-language-disc-test
-        tests/unit/disruptor_language_disc_test.cpp)
-    target_compile_features(disruptor-language-disc-test PRIVATE cxx_std_20)
-    add_test(NAME disruptor_language_disc
-        COMMAND disruptor-language-disc-test)
-
-    add_executable(disruptor-language-overlay-test
-        tests/unit/disruptor_language_overlay_test.cpp)
-    target_include_directories(disruptor-language-overlay-test PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/psxrecomp-overlay/runtime/include"
-        "${PSXRECOMP_ROOT}/runtime/include"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src")
-    target_compile_features(disruptor-language-overlay-test PRIVATE cxx_std_20)
-    add_test(NAME disruptor_language_overlay
-        COMMAND disruptor-language-overlay-test)
-    add_test(NAME disruptor_language_overlay_tall
-        COMMAND disruptor-language-overlay-test tall)
-
-    add_executable(disruptor-capsule-test
-        tests/unit/disruptor_capsule_test.cpp)
-    target_compile_features(disruptor-capsule-test PRIVATE cxx_std_20)
-    target_include_directories(disruptor-capsule-test PRIVATE src)
-    add_test(NAME disruptor_capsule
-        COMMAND disruptor-capsule-test)
-
-    add_executable(host-pick-slot-test
-        tests/unit/host_pick_slot_test.cpp)
-    target_compile_features(host-pick-slot-test PRIVATE cxx_std_20)
-    add_test(NAME host_pick_slot
-        COMMAND host-pick-slot-test)
-
-    add_executable(host-borderless-test
-        tests/unit/host_borderless_test.cpp)
-    target_compile_features(host-borderless-test PRIVATE cxx_std_20)
-    add_test(NAME host_borderless
-        COMMAND host-borderless-test)
-    add_test(NAME host_borderless_contract
-        COMMAND "${Python3_EXECUTABLE}" -B
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_borderless_contract.py")
-
-    add_executable(disruptor-restart-test
-        tests/unit/disruptor_restart_test.cpp)
-    target_include_directories(disruptor-restart-test PRIVATE
-        "${PSXRECOMP_ROOT}/runtime/include")
-    target_compile_features(disruptor-restart-test PRIVATE cxx_std_20)
-    add_test(NAME disruptor_restart
-        COMMAND disruptor-restart-test run "${CMAKE_CURRENT_BINARY_DIR}/disruptor_restart_test.txt")
-
-    add_executable(disruptor-present-rate-test
-        tests/unit/disruptor_present_rate_test.cpp)
-    target_include_directories(disruptor-present-rate-test PRIVATE
-        "${CMAKE_CURRENT_SOURCE_DIR}/tests/support/present_rate_fakes")
-    target_compile_features(disruptor-present-rate-test PRIVATE cxx_std_20)
-    add_test(NAME disruptor_present_rate
-        COMMAND disruptor-present-rate-test)
-
-    add_executable(disruptor-grown-quad-test
-        tests/unit/disruptor_grown_quad_test.cpp)
-    target_include_directories(disruptor-grown-quad-test PRIVATE
-        "${PSXRECOMP_ROOT}/runtime/include")
-    target_compile_features(disruptor-grown-quad-test PRIVATE cxx_std_20)
-    add_test(NAME disruptor_grown_quad
-        COMMAND disruptor-grown-quad-test)
-
-    add_executable(disruptor-sprite-depth-test
-        tests/unit/disruptor_sprite_depth_test.cpp)
-    target_include_directories(disruptor-sprite-depth-test PRIVATE
-        "${PSXRECOMP_ROOT}/runtime/include")
-    target_compile_features(disruptor-sprite-depth-test PRIVATE cxx_std_20)
-    add_test(NAME disruptor_sprite_depth
-        COMMAND disruptor-sprite-depth-test)
-
-    add_executable(disruptor-billboard-aspect-test
-        tests/unit/disruptor_billboard_aspect_test.cpp)
-    target_include_directories(disruptor-billboard-aspect-test PRIVATE
-        "${PSXRECOMP_ROOT}/runtime/include")
-    target_compile_features(disruptor-billboard-aspect-test PRIVATE cxx_std_20)
-
-    add_executable(disruptor-gpu-temporal-sprite-test
-        tests/unit/gpu_temporal_sprite_test.cpp)
-    target_include_directories(disruptor-gpu-temporal-sprite-test PRIVATE
-        "${PSXRECOMP_ROOT}/runtime/include")
-    target_compile_features(disruptor-gpu-temporal-sprite-test PRIVATE cxx_std_20)
-    add_test(NAME disruptor_gpu_temporal_sprite
-        COMMAND disruptor-gpu-temporal-sprite-test)
-
-    add_executable(disruptor-gpu-ws-tag-match-test
-        tests/unit/gpu_ws_tag_match_test.cpp)
-    target_include_directories(disruptor-gpu-ws-tag-match-test PRIVATE
-        "${PSXRECOMP_ROOT}/runtime/include")
-    target_compile_features(disruptor-gpu-ws-tag-match-test PRIVATE cxx_std_20)
-
-    add_executable(disruptor-gpu-temporal-match-test
-        tests/unit/gpu_temporal_match_test.cpp)
-    target_include_directories(disruptor-gpu-temporal-match-test PRIVATE
-        "${PSXRECOMP_ROOT}/runtime/include")
-    target_compile_features(disruptor-gpu-temporal-match-test PRIVATE cxx_std_20)
-    add_test(NAME disruptor_gpu_temporal_match
-        COMMAND disruptor-gpu-temporal-match-test)
-
-    add_executable(disruptor-gpu-temporal-mesh-test
-        tests/unit/gpu_temporal_mesh_test.cpp)
-    target_include_directories(disruptor-gpu-temporal-mesh-test PRIVATE
-        "${PSXRECOMP_ROOT}/runtime/include")
-    target_compile_features(disruptor-gpu-temporal-mesh-test PRIVATE cxx_std_20)
-    add_test(NAME disruptor_gpu_temporal_mesh
-        COMMAND disruptor-gpu-temporal-mesh-test)
-
-    add_executable(disruptor-gpu-pinned-corner-test
-        tests/unit/gpu_pinned_corner_test.cpp)
-    target_include_directories(disruptor-gpu-pinned-corner-test PRIVATE
-        "${PSXRECOMP_ROOT}/runtime/include")
-    target_compile_features(disruptor-gpu-pinned-corner-test PRIVATE cxx_std_20)
-    add_test(NAME disruptor_gpu_pinned_corner
-        COMMAND disruptor-gpu-pinned-corner-test)
-
-    add_executable(disruptor-gpu-turned-perspective-test
-        tests/unit/gpu_turned_perspective_test.cpp)
-    target_include_directories(disruptor-gpu-turned-perspective-test PRIVATE
-        "${PSXRECOMP_ROOT}/runtime/include")
-    target_compile_features(disruptor-gpu-turned-perspective-test PRIVATE cxx_std_20)
-    add_test(NAME disruptor_gpu_turned_perspective
-        COMMAND disruptor-gpu-turned-perspective-test)
-
-    add_executable(disruptor-gpu-world-depth-test
-        tests/unit/gpu_world_depth_test.cpp)
-    target_include_directories(disruptor-gpu-world-depth-test PRIVATE
-        "${PSXRECOMP_ROOT}/runtime/include")
-    target_compile_features(disruptor-gpu-world-depth-test PRIVATE cxx_std_20)
-    add_test(NAME disruptor_gpu_world_depth
-        COMMAND disruptor-gpu-world-depth-test)
-
-    add_executable(disruptor-save-point-test
-        tests/unit/save_point_test.cpp)
-    target_include_directories(disruptor-save-point-test PRIVATE
-        "${PSXRECOMP_ROOT}/runtime/include")
-    target_compile_features(disruptor-save-point-test PRIVATE cxx_std_20)
-    add_test(NAME disruptor_save_point
-        COMMAND disruptor-save-point-test)
-
-    add_executable(disruptor-presentation-yaw-math-test
-        tests/unit/presentation_yaw_math_test.cpp)
-    target_compile_features(disruptor-presentation-yaw-math-test PRIVATE cxx_std_20)
-
-    add_executable(disruptor-gte-precision-store-pc-test
-        tests/unit/gte_precision_store_pc_test.cpp
-        "${PSXRECOMP_ROOT}/runtime/src/gte.cpp")
-    target_include_directories(disruptor-gte-precision-store-pc-test PRIVATE
-        "${PSXRECOMP_ROOT}/runtime/include")
-    target_compile_definitions(disruptor-gte-precision-store-pc-test PRIVATE
-        PSX_NO_DEBUG_TOOLS=1
-        PSX_GTE_REGISTER_TEST=1
-        PSX_ENABLE_BLOCK_CYCLES=1)
-    target_compile_features(disruptor-gte-precision-store-pc-test PRIVATE
-        cxx_std_20)
-
-    add_test(NAME disruptor_mouse_aim
-        COMMAND disruptor-mouse-aim-test)
-    add_test(NAME disruptor_cheats
-        COMMAND disruptor-cheats-test)
-    add_test(NAME disruptor_vertical_camera
-        COMMAND disruptor-vertical-camera-test)
-    add_test(NAME disruptor_far_rendering
-        COMMAND disruptor-far-rendering-test)
-    add_test(NAME disruptor_billboard_aspect
-        COMMAND disruptor-billboard-aspect-test)
-    add_test(NAME disruptor_gpu_ws_tag_match
-        COMMAND disruptor-gpu-ws-tag-match-test)
+    disruptor_unit_test(disruptor_mouse_aim tests/unit/disruptor_mouse_aim_test.cpp
+        INCLUDES tests/support/stubs
+        DEFINITIONS PSX_SDL3=1)
     set_tests_properties(disruptor_mouse_aim PROPERTIES
         ENVIRONMENT "PSX_DISRUPTOR_MOUSE_AIM=;PSX_DISRUPTOR_VERTICAL_LOOK=;PSX_DISRUPTOR_MODERN_CONTROLS=;PSX_DISRUPTOR_HIGH_PRECISION_CAMERA=")
-
-    add_test(NAME disruptor_presentation_yaw_math
-        COMMAND disruptor-presentation-yaw-math-test)
-
-    add_test(NAME disruptor_gte_precision_store_pc
-        COMMAND disruptor-gte-precision-store-pc-test)
 
     add_test(NAME disruptor_mouse_aim_registration
         COMMAND disruptor-mouse-aim-test --registration)
@@ -658,4 +261,54 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
         COMMAND disruptor-mouse-aim-test --registration)
     set_tests_properties(disruptor_high_precision_camera_registration PROPERTIES
         ENVIRONMENT "PSX_DISRUPTOR_MOUSE_AIM=;PSX_DISRUPTOR_VERTICAL_LOOK=;PSX_DISRUPTOR_MODERN_CONTROLS=;PSX_DISRUPTOR_HIGH_PRECISION_CAMERA=1")
+
+    disruptor_unit_test(disruptor_cheats tests/unit/disruptor_cheats_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_vertical_camera tests/unit/disruptor_vertical_camera_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_far_rendering tests/unit/disruptor_far_rendering_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_render_arena tests/unit/disruptor_render_arena_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_name_entry tests/unit/disruptor_name_entry_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_backdrop_tiles tests/unit/disruptor_backdrop_tiles_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_intro_skip tests/unit/disruptor_intro_skip_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_frame_rate tests/unit/disruptor_frame_rate_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_language tests/unit/disruptor_language_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_language_hints tests/unit/disruptor_language_hints_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_language_disc tests/unit/disruptor_language_disc_test.cpp)
+    disruptor_unit_test(disruptor_language_overlay tests/unit/disruptor_language_overlay_test.cpp
+        INCLUDES
+            "${CMAKE_CURRENT_SOURCE_DIR}/psxrecomp-overlay/runtime/include"
+            "${PSXRECOMP_ROOT}/runtime/include"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    add_test(NAME disruptor_language_overlay_tall
+        COMMAND disruptor-language-overlay-test tall)
+    disruptor_unit_test(disruptor_capsule tests/unit/disruptor_capsule_test.cpp INCLUDES src)
+    disruptor_unit_test(disruptor_restart tests/unit/disruptor_restart_test.cpp RUNTIME_HEADERS
+        ARGUMENTS run "${CMAKE_CURRENT_BINARY_DIR}/disruptor_restart_test.txt")
+    disruptor_unit_test(disruptor_present_rate tests/unit/disruptor_present_rate_test.cpp
+        INCLUDES "${CMAKE_CURRENT_SOURCE_DIR}/tests/support/present_rate_fakes")
+    disruptor_unit_test(disruptor_grown_quad tests/unit/disruptor_grown_quad_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_sprite_depth tests/unit/disruptor_sprite_depth_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_billboard_aspect tests/unit/disruptor_billboard_aspect_test.cpp RUNTIME_HEADERS)
+
+    disruptor_unit_test(disruptor_gpu_ws_frame_kind tests/unit/gpu_ws_frame_kind_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_gpu_ws_menu tests/unit/gpu_ws_menu_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_gpu_ws_hud_scale tests/unit/gpu_ws_hud_scale_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_gpu_ws_hud_widget tests/unit/gpu_ws_hud_widget_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_gpu_ws_tag_match tests/unit/gpu_ws_tag_match_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_gpu_temporal_sprite tests/unit/gpu_temporal_sprite_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_gpu_temporal_match tests/unit/gpu_temporal_match_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_gpu_temporal_mesh tests/unit/gpu_temporal_mesh_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_gpu_pinned_corner tests/unit/gpu_pinned_corner_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_gpu_turned_perspective tests/unit/gpu_turned_perspective_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_gpu_world_depth tests/unit/gpu_world_depth_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_save_point tests/unit/save_point_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_presentation_yaw_math tests/unit/presentation_yaw_math_test.cpp)
+    disruptor_unit_test(disruptor_gte_precision_store_pc tests/unit/gte_precision_store_pc_test.cpp RUNTIME_HEADERS
+        SOURCES "${PSXRECOMP_ROOT}/runtime/src/gte.cpp"
+        DEFINITIONS PSX_NO_DEBUG_TOOLS=1 PSX_GTE_REGISTER_TEST=1 PSX_ENABLE_BLOCK_CYCLES=1)
+
+    disruptor_unit_test(host_pick_slot tests/unit/host_pick_slot_test.cpp)
+    disruptor_unit_test(host_borderless tests/unit/host_borderless_test.cpp)
+    add_test(NAME host_borderless_contract
+        COMMAND "${Python3_EXECUTABLE}" -B
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_borderless_contract.py")
 endif()

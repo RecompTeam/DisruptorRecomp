@@ -50,17 +50,8 @@ renderer = read("psxrecomp-overlay/runtime/src/gpu_gl_renderer.c")
 temporal = read("psxrecomp-overlay/runtime/src/gpu_gl_temporal.c.inc")
 mesh = read("psxrecomp-overlay/runtime/include/gpu_temporal_mesh.h")
 
-REGISTRATION = (
-    '    add_test(NAME disruptor_pinned_corner_contract\n        COMMAND "${Python3_EXECUTABLE}" -B\n'
-    '            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_pinned_corner_contract.py")\n'
-)
-UNIT_TEST = (
-    "    add_executable(disruptor-gpu-pinned-corner-test\n        tests/unit/gpu_pinned_corner_test.cpp)\n"
-    "    target_include_directories(disruptor-gpu-pinned-corner-test PRIVATE\n"
-    '        "${PSXRECOMP_ROOT}/runtime/include")\n'
-    "    target_compile_features(disruptor-gpu-pinned-corner-test PRIVATE cxx_std_20)\n"
-    "    add_test(NAME disruptor_gpu_pinned_corner\n        COMMAND disruptor-gpu-pinned-corner-test)\n"
-)
+REGISTRATION = "    disruptor_contract(pinned_corner)\n"
+UNIT_TEST = "    disruptor_unit_test(disruptor_gpu_pinned_corner tests/unit/gpu_pinned_corner_test.cpp RUNTIME_HEADERS)\n"
 require(
     cmake.count(REGISTRATION) == 1 and enclosing(cmake, REGISTRATION) == ["if(BUILD_TESTING)"],
     "this contract must stay registered as written, under the condition every contract of the repository is under",

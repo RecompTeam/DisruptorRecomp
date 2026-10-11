@@ -29,7 +29,7 @@ game = read("game.toml")
 wide = read("game-widescreen.toml")
 
 require("disruptor_cheats_test.cpp" in cmake and
-        "add_test(NAME disruptor_cheats" in cmake,
+        "    disruptor_unit_test(disruptor_cheats " in cmake,
         "behavioral cheat test must remain registered")
 for config, name in ((game, "game.toml"), (wide, "game-widescreen.toml")):
     entry_match = re.search(

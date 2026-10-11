@@ -30,7 +30,7 @@ configs = read("game.toml") + read("game-widescreen.toml")
 
 require("src/game/render/far_rendering.cpp" in cmake and
         "tests/unit/disruptor_far_rendering_test.cpp" in cmake and
-        "add_test(NAME disruptor_far_rendering" in cmake,
+        "    disruptor_unit_test(disruptor_far_rendering " in cmake,
         "runtime source and focused behavior test must remain enabled")
 require("PSX_HAS_DISRUPTOR_FAR_RENDERING=1" in cmake,
         "the Disruptor target must opt into dirty-interpreter far hooks")

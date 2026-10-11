@@ -37,8 +37,8 @@ interrupts = read("psxrecomp-overlay/runtime/src/interrupts.c")
 rule = read("psxrecomp-overlay/runtime/include/save_point.h")
 
 require(
-    "    add_test(NAME disruptor_save_point_contract\n" in cmake
-    and "    add_test(NAME disruptor_save_point\n        COMMAND disruptor-save-point-test)\n" in cmake,
+    "    disruptor_contract(save_point)\n" in cmake
+    and "    disruptor_unit_test(disruptor_save_point " in cmake,
     "this contract and the rule's unit test are registered",
 )
 require(

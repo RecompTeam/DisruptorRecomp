@@ -33,9 +33,8 @@ loader = read("psxrecomp-overlay/recompiler/src/config_loader.cpp")
 require(
     overlay.count("+runtime/include/gpu_world_depth.h\n") == 1
     and '#include "gpu_world_depth.h"\n' in renderer
-    and "    add_executable(disruptor-gpu-world-depth-test\n        tests/unit/gpu_world_depth_test.cpp)\n" in cmake
-    and "    add_test(NAME disruptor_gpu_world_depth\n        COMMAND disruptor-gpu-world-depth-test)\n" in cmake
-    and "    add_test(NAME disruptor_world_depth_contract\n" in cmake,
+    and "    disruptor_unit_test(disruptor_gpu_world_depth tests/unit/gpu_world_depth_test.cpp RUNTIME_HEADERS)\n" in cmake
+    and "    disruptor_contract(world_depth)\n" in cmake,
     "the rule's header is applied to the framework and its test and this contract are registered",
 )
 

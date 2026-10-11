@@ -31,10 +31,8 @@ require(
     "overlay manifest must list the HUD widget arithmetic",
 )
 require(
-    "    add_executable(disruptor-gpu-ws-hud-widget-test\n        tests/unit/gpu_ws_hud_widget_test.cpp)\n" in cmake
-    and "    add_test(NAME disruptor_gpu_ws_hud_widget\n        COMMAND disruptor-gpu-ws-hud-widget-test)\n" in cmake
-    and '    add_test(NAME disruptor_hud_widget_contract\n        COMMAND "${Python3_EXECUTABLE}" -B\n'
-    '            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_hud_widget_contract.py")\n' in cmake
+    "    disruptor_unit_test(disruptor_gpu_ws_hud_widget tests/unit/gpu_ws_hud_widget_test.cpp RUNTIME_HEADERS)\n" in cmake
+    and "    disruptor_contract(hud_widget)\n" in cmake
     and '"${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/hud_widgets.cpp"' in cmake,
     "the widget unit test, its contract and the game's widget list must remain in the build",
 )

@@ -194,8 +194,8 @@ require(
 )
 require(
     "+runtime/include/gpu_ws_menu.h" in read("PSXRECOMP_OVERLAY_FILES.txt").splitlines()
-    and "    add_test(NAME disruptor_gpu_ws_menu\n        COMMAND disruptor-gpu-ws-menu-test)\n" in cmake
-    and 'tests/contracts/test_menu_wide_contract.py")' in cmake,
+    and "    disruptor_unit_test(disruptor_gpu_ws_menu " in cmake
+    and "    disruptor_contract(menu_wide)\n" in cmake,
     "the header is part of the overlay and its tests remain registered",
 )
 
