@@ -149,8 +149,8 @@ constexpr Option option_list[] = {
 
     toggle<&Settings::has_mouse_aim, &Settings::mouse_aim>(
         "disruptor.mouse_aim", "Horizontal mouse aim", 1,
-        "Turns the view with the mouse. In the game a middle-click captures the mouse, and a middle- "
-        "click or Escape releases it."),
+        "Turns the view with the mouse. In the game a middle-click captures the mouse, and a "
+        "middle-click or Escape releases it."),
     toggle<&Settings::has_modern_controls, &Settings::modern_controls>(
         "disruptor.modern_controls", "Modern keyboard and mouse controls", 1,
         "WASD moves, the left mouse button fires, the right one uses psionics, Space jumps and E "
