@@ -61,7 +61,7 @@ Place these files from your own supported disc in `input/`:
 - `SLUS_002.24`
 - `Disruptor (USA).cue` and the `.bin` track it references
 
-Check the required hashes and disc format in [DISC.md](DISC.md). Then run from
+Check the required hashes and disc format in [DISC.md](docs/DISC.md). Then run from
 an x64 developer PowerShell:
 
 ```powershell
@@ -105,8 +105,8 @@ retest and save-state restart check passed after fixing an ultrawide rendering
 buffer overflow. Full campaign and release validation remain incomplete; minor
 geometry and texture artifacts can remain.
 
-- [Current status and known limits](STATUS.md)
+- [Current status and known limits](docs/STATUS.md)
 - [Build details](docs/BUILD.md)
-- [Supported disc revision](DISC.md)
+- [Supported disc revision](docs/DISC.md)
 - [Contributing](CONTRIBUTING.md)
 - [Third-party notices](THIRD_PARTY_NOTICES.md)

@@ -3,7 +3,7 @@
 ## Requirements
 
 - The verified Disruptor USA executable and BIN/CUE files in `input/`; see
-  [DISC.md](../DISC.md).
+  [DISC.md](DISC.md).
 - Git, Python 3, CMake 3.20+, and a C++20 toolchain.
 - Windows x64: Visual Studio with **Desktop development with C++**, or
   MSYS2 MinGW-w64. Ninja is recommended.
