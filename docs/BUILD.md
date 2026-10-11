@@ -133,7 +133,7 @@ directories are ignored by Git.
 
 | Folder | Holds |
 | --- | --- |
-| `src/game/` | The game's own module by area: `input`, `render`, `frame`, `language`, `session`, `ui` |
+| `src/game/` | The game's own module by area: `input`, `render`, `frame`, `language`, `session`, `settings`, `ui` |
 | `src/launcher/` | The Windows launcher |
 | `psxrecomp-overlay/` | The framework files this project replaces or adds |
 | `tests/unit/` | Unit tests, one executable each |

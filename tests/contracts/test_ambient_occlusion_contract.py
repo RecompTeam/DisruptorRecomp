@@ -24,6 +24,7 @@ cmake = read("CMakeLists.txt")
 renderer = read("psxrecomp-overlay/runtime/src/gpu_gl_renderer.c")
 menu = read("src/game/ui/dev_menu.cpp")
 launcher = read("src/launcher/launcher_settings.cpp")
+options = read("src/game/settings/options.cpp")
 loader = read("psxrecomp-overlay/recompiler/src/config_loader.cpp")
 settings = read("psxrecomp-overlay/recompiler/src/config_loader.h")
 
@@ -155,16 +156,19 @@ require(
     "the settings file keeps the switch, off until made, and a reach and a strength only inside the sliders' bounds",
 )
 
-switch = between(launcher, '"disruptor.ambient_occlusion", Page::experimental, L"Ambient occlusion", 0,', "),\n")
-reach = between(launcher, 'slider("disruptor.occlusion_reach", Page::experimental, L"Occlusion reach", 160,', "),\n")
-strength = between(launcher, 'slider("disruptor.occlusion_strength", Page::experimental, L"Occlusion strength", 80,', "),\n")
+switch = between(options, '"disruptor.ambient_occlusion", "Ambient occlusion", 0,', "),\n")
+reach = between(options, 'slider("disruptor.occlusion_reach", "Occlusion reach", 160,', "),\n")
+strength = between(options, 'slider("disruptor.occlusion_strength", "Occlusion strength", 80,', "),\n")
 require(
     switch.endswith("geometry_key")
     and "50, 800, Unit::none," in reach
     and reach.endswith("occlusion_key")
     and "0, 300, Unit::percent," in strength
     and strength.endswith("occlusion_key")
-    and 'constexpr const char* occlusion_key = "disruptor.ambient_occlusion";\n' in launcher
+    and 'constexpr const char* occlusion_key = "disruptor.ambient_occlusion";\n' in options
+    and '    {"disruptor.ambient_occlusion", Page::experimental},\n'
+    '    {"disruptor.occlusion_reach", Page::experimental},\n'
+    '    {"disruptor.occlusion_strength", Page::experimental},\n' in launcher
     and launcher.count("Page::experimental") == 3,
     "the launcher's Experimental page holds these three rows: the switch needs geometry correction, the sliders the switch, "
     "with the menu's own bounds",
