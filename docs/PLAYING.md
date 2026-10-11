@@ -101,7 +101,7 @@ added: choose one of them or **English** before **Play game**. **Remove**
 takes a disc off the list and leaves the file alone. The US disc is still
 required and stays the game disc.
 
-The same choice is in the game: open **Settings → System**, press **Choose a
+The same choice is in the game: open **Settings → Language**, press **Choose a
 disc image**, then press **Restart now**. **English** there removes the
 second disc again.
 

@@ -384,6 +384,21 @@ if image_path.exists():
             f"the retail code the disc layout relies on changed at 0x{address:08X}",
         )
 
+system_tab = menu[menu.index("void draw_system_tab() {") : menu.index("void draw_language_tab() {")]
+language_tab = menu[menu.index("void draw_language_tab() {") : menu.index("void draw_menu() {")]
+require(
+    '    if (ImGui::Button("Choose a disc image")) (void)psx_host_pick_disc_image_begin();' in language_tab
+    and '    if (ImGui::Button("English") && !g_language_disc.empty()) mark_language_disc(std::string());' in language_tab
+    and '    if (ImGui::Button("Restart now") && !psx_netplay_active() && flush_preferences() && disruptor_restart_arm()) {'
+    in language_tab
+    and "g_language_disc" not in system_tab
+    and "disc image" not in system_tab
+    and "Restart now" not in system_tab
+    and '            if (ImGui::BeginTabItem("Language")) {\n                draw_language_tab();\n' in menu
+    and "open **Settings → Language**, press **Choose a\ndisc image**, then press **Restart now**." in read("docs/PLAYING.md"),
+    "the language of the game is chosen on a tab of its own, which the guide names, and the System tab holds none of it",
+)
+
 require(
     "--require-artifacts" not in sys.argv[1:] or image_path.exists(),
     "the build gate must check the retail image",
