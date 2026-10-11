@@ -30,6 +30,7 @@ struct Option {
     std::span<const wchar_t* const> choices;
     const char* needs; // the toggle that must be on for this row to apply
     Unit unit;
+    const wchar_t* hint; // shown when the pointer rests on the row
 };
 
 struct PresetValue { const char* key; int value; };

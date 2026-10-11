@@ -297,6 +297,13 @@ void test_the_sliders() {
                 value_text(*volume, 55) == L"55%" && value_text(*rate, 120) == L"120 FPS" && value_text(*reach, 240) == L"240",
             "a value is shown in its unit");
 }
+
+void test_a_long_page_scrolls() {
+    require(scrolled_to(0, 1, 9) == 1 && scrolled_to(1, 5, 9) == 2 && scrolled_to(2, -1, 9) == 1 && scrolled_to(1, -9, 9) == 0,
+            "a page of nine rows moves between its first row and its third");
+    require(scrolled_to(0, 1, page_slots) == 0 && scrolled_to(0, 3, 2) == 0 && scrolled_to(4, 0, 3) == 0,
+            "a page that fits stays where it is");
+}
 } // namespace
 
 int main() {
@@ -309,6 +316,7 @@ int main() {
         test_the_language_box();
         test_the_command_line();
         test_the_sliders();
+        test_a_long_page_scrolls();
     } catch (const std::exception& error) {
         std::cerr << "FAIL: " << error.what() << '\n';
         return 1;
