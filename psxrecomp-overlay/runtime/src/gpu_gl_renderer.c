@@ -359,6 +359,8 @@ static void interp_reset_history_unlocked(void);
 static void interp_reset_history(void);
 static int interp_thread_main(void *opaque);
 static int interp_present(void);
+static void shown_capture(int kind, float alpha);
+int gl_renderer_record_shown(const char *folder, int skip, int count, int width);
 static float interp_draw_quad(float alpha, int lx, int ly, int lw, int lh);
 static uint64_t s_temporal_raw_generation = 1;
 static void temporal_reset(void);
@@ -578,6 +580,7 @@ static inline int wide_dx(void) { return g_wide_off - g_wide_cur_base; }
  * polygon (s_crack_fill native pixels wide, 0 for none) only where no depth was left at all. */
 static float s_crack_fill = 0.5f, s_crack_width = 0.5f;
 static float s_line_width_max = 1.0f;  /* the widest line this context draws */
+static int   s_mesh_view = 0;          /* diagnostic: in-between frames draw their triangles' edges over the picture */
 static int   s_grown_under = 1;
 static int   s_tb_fillers = 0;   /* grown copies in the open batch */
 static int   s_draw_filler = 0;  /* the batch being recorded for the in-between presenter holds grown copies */
@@ -3364,6 +3367,11 @@ int gl_renderer_init_context(SDL_Window *win) {
             if (fill) s_crack_fill = s_crack_width = (float)atof(fill);
             if (under) s_grown_under = atoi(under) != 0;
             if (getenv("PSX_GL_WORLD_DEPTH")) s_world_depth = atoi(getenv("PSX_GL_WORLD_DEPTH")) != 0;
+            if (getenv("PSX_GL_SHOWN_DUMP"))
+                gl_renderer_record_shown(getenv("PSX_GL_SHOWN_DUMP"),
+                                         getenv("PSX_GL_SHOWN_DUMP_SKIP") ? atoi(getenv("PSX_GL_SHOWN_DUMP_SKIP")) : 0,
+                                         getenv("PSX_GL_SHOWN_DUMP_COUNT") ? atoi(getenv("PSX_GL_SHOWN_DUMP_COUNT")) : 240,
+                                         getenv("PSX_GL_SHOWN_DUMP_WIDTH") ? atoi(getenv("PSX_GL_SHOWN_DUMP_WIDTH")) : 640);
             if (getenv("PSX_GL_WORLD_DEPTH_MARGIN") && atof(getenv("PSX_GL_WORLD_DEPTH_MARGIN")) > 0.0)
                 s_world_margin = (float)atof(getenv("PSX_GL_WORLD_DEPTH_MARGIN"));
         }
@@ -3579,6 +3587,7 @@ void gl_renderer_present(const uint32_t *pixels, int src_w, int src_h, int linea
     p_glBindVertexArray(0); p_glUseProgram(0);
     pres_record(GL_PRES_CPU, 0, 0, src_w, src_h, lx, ly, lw, lh);
     render_host_ui_for_swap(ww, wh);
+    shown_capture(0, 1.0f);
     latency_ring_mark(LAT_SWAP_BEGIN);
     SDL_GL_SwapWindow(s_win);
     latency_ring_mark(LAT_SWAP_END);
@@ -3594,6 +3603,7 @@ void gl_renderer_present_blank(void) {
     glViewport(0, 0, ww, wh); glClearColor(0.f,0.f,0.f,1.f); glClear(GL_COLOR_BUFFER_BIT);
     pres_record(GL_PRES_BLANK, 0, 0, 0, 0, 0, 0, ww, wh);
     render_host_ui_for_swap(ww, wh);
+    shown_capture(0, 1.0f);
     latency_ring_mark(LAT_SWAP_BEGIN);
     SDL_GL_SwapWindow(s_win);
     latency_ring_mark(LAT_SWAP_END);
@@ -4677,6 +4687,125 @@ static float interp_draw_quad(float alpha, int lx, int ly, int lw, int lh) {
     return alpha;
 }
 
+/* What reaches the screen, for a report: each swapped picture is read back at the asked width (the window's at most) with
+ * its time and kept in memory, then written as PPM files and a list when the count is reached. Returns 0 when refused. */
+static char     s_shown_dir[512];
+static int      s_shown_skip = 0, s_shown_left = 0, s_shown_count = 0, s_shown_w = 0, s_shown_h = 0, s_shown_width = 640;
+static uint8_t *s_shown_pixels = NULL;
+static struct ShownMeta { uint64_t tick; float alpha; int kind; int placed[7]; } *s_shown_meta = NULL;
+
+int gl_renderer_record_shown(const char *folder, int skip, int count, int width) {
+    if (!folder || !folder[0] || strlen(folder) >= sizeof s_shown_dir || count <= 0 || count > 2000 || width < 160 ||
+        width > 3840 || s_shown_left > 0) return 0;
+    snprintf(s_shown_dir, sizeof s_shown_dir, "%s", folder);
+    s_shown_width = width;
+    s_shown_skip = skip > 0 ? skip : 0;
+    s_shown_count = 0;
+    s_shown_w = s_shown_h = 0;
+    s_shown_left = count;
+    return 1;
+}
+int gl_renderer_recording_shown(void) { return s_shown_left > 0; }
+
+static void shown_write(void) {
+    char path[640];
+    FILE *list;
+    snprintf(path, sizeof path, "%s/shown.csv", s_shown_dir);
+    list = fopen(path, "wb");
+    if (list) fprintf(list, "index,kind,alpha,microseconds,faces,camera_samples,camera_inliers,carried,held,conflicting,departed\n");
+    for (int i = 0; i < s_shown_count; ++i) {
+        FILE *file;
+        snprintf(path, sizeof path, "%s/shown_%04d.ppm", s_shown_dir, i);
+        file = fopen(path, "wb");
+        if (file) {
+            fprintf(file, "P6\n%d %d\n255\n", s_shown_w, s_shown_h);
+            for (int y = s_shown_h - 1; y >= 0; --y)
+                fwrite(s_shown_pixels + ((size_t)i * s_shown_h + y) * s_shown_w * 3, 1, (size_t)s_shown_w * 3, file);
+            fclose(file);
+        }
+        if (list)
+            fprintf(list, "%d,%s,%.3f,%.0f,%d,%d,%d,%d,%d,%d,%d\n", i, s_shown_meta[i].kind ? "between" : "frame", s_shown_meta[i].alpha,
+                    (double)(s_shown_meta[i].tick - s_shown_meta[0].tick) * 1e6 / (double)SDL_GetPerformanceFrequency(),
+                    s_shown_meta[i].placed[0], s_shown_meta[i].placed[1], s_shown_meta[i].placed[2], s_shown_meta[i].placed[3],
+                    s_shown_meta[i].placed[4], s_shown_meta[i].placed[5], s_shown_meta[i].placed[6]);
+    }
+    if (list) fclose(list);
+    free(s_shown_pixels);
+    free(s_shown_meta);
+    s_shown_pixels = NULL;
+    s_shown_meta = NULL;
+}
+
+/* Called with the finished picture in the back buffer, right before its swap. kind: 0 a game frame's own swap, 1 the
+ * in-between presenter's, whose alpha is the picture's place between the last two game frames (1 is the later one). */
+static void shown_capture(int kind, float alpha) {
+    int ww = 0, wh = 0;
+    GLint bound = 0;
+    GLuint fbo = 0, texture = 0;
+    const GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
+    if (s_shown_left <= 0) return;
+    if (s_shown_skip > 0) { --s_shown_skip; return; }
+    gl_visible_size(&ww, &wh);
+    if (ww <= 0 || wh <= 0) return;
+    if (!s_shown_pixels) {
+        s_shown_w = s_shown_width < ww ? s_shown_width : ww;
+        s_shown_h = s_shown_w * wh / ww > 0 ? s_shown_w * wh / ww : 1;
+        if (s_shown_h > 0) {
+            s_shown_pixels = (uint8_t *)malloc((size_t)s_shown_left * s_shown_w * s_shown_h * 3);
+            s_shown_meta = (struct ShownMeta *)malloc((size_t)s_shown_left * sizeof *s_shown_meta);
+        }
+        if (!s_shown_pixels || !s_shown_meta) {
+            free(s_shown_pixels);
+            free(s_shown_meta);
+            s_shown_pixels = NULL;
+            s_shown_meta = NULL;
+            s_shown_left = 0;
+            return;
+        }
+    }
+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &bound);
+    glGenTextures(1, &texture);
+    glBindTexture(GL_TEXTURE_2D, texture);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, s_shown_w, s_shown_h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    p_glGenFramebuffers(1, &fbo);
+    p_glBindFramebuffer(PSXGL_DRAW_FRAMEBUFFER, fbo);
+    p_glFramebufferTexture2D(PSXGL_DRAW_FRAMEBUFFER, PSXGL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
+    p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, 0);
+    glReadBuffer(GL_BACK);
+    glDisable(GL_SCISSOR_TEST);
+    p_glBlitFramebuffer(0, 0, ww, wh, 0, 0, s_shown_w, s_shown_h, GL_COLOR_BUFFER_BIT, GL_LINEAR);
+    p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, fbo);
+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
+    glReadPixels(0, 0, s_shown_w, s_shown_h, GL_RGB, GL_UNSIGNED_BYTE,
+                 s_shown_pixels + (size_t)s_shown_count * s_shown_w * s_shown_h * 3);
+    glPixelStorei(GL_PACK_ALIGNMENT, 4);
+    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, 0);
+    p_glDeleteFramebuffers(1, &fbo);
+    glBindTexture(GL_TEXTURE_2D, (GLuint)bound);
+    glDeleteTextures(1, &texture);
+    if (scissor) glEnable(GL_SCISSOR_TEST);
+    s_shown_meta[s_shown_count].tick = SDL_GetPerformanceCounter();
+    s_shown_meta[s_shown_count].alpha = alpha;
+    s_shown_meta[s_shown_count].kind = kind;
+    memset(s_shown_meta[s_shown_count].placed, 0, sizeof s_shown_meta[s_shown_count].placed);
+#ifndef PSX_DISABLE_FRAME_INTERPOLATION
+    if (kind) {
+        int *placed = s_shown_meta[s_shown_count].placed;
+        placed[0] = s_temp_shown_faces;
+        placed[1] = s_temp_shown_stats.camera_samples;
+        placed[2] = s_temp_shown_stats.camera_inliers;
+        placed[3] = s_temp_shown_stats.reprojected_vertices;
+        placed[4] = s_temp_shown_stats.held_vertices;
+        placed[5] = s_temp_shown_stats.conflicting_vertices;
+        placed[6] = s_temp_shown_stats.departed_faces;
+    }
+#endif
+    ++s_shown_count;
+    if (--s_shown_left == 0) shown_write();
+}
+
 static int interp_present(void) {
     if (!s_ctx || !s_interp_enabled || s_interp_suspended || s_interp_valid < 2) return 0;
     uint64_t now = SDL_GetPerformanceCounter();
@@ -4707,6 +4836,7 @@ static int interp_present(void) {
     glFlush();
     pres_record(GL_PRES_INTERP, 0, 0, s_interp_w, s_interp_h,
                 lx, ly, lw, lh);
+    shown_capture(1, shown);
     SDL_GL_SwapWindow(s_win);
     s_interp_swaps++;
     if (s_interp_diag) {
@@ -4949,6 +5079,7 @@ void gl_renderer_present_vram(int disp_x, int disp_y, int w, int h, int linear,
                         disp_x, disp_y, w, h, linear, lx, ly, lw, lh);
     pres_record(GL_PRES_VRAM, disp_x, disp_y, w, h, lx, ly, lw, lh);
     render_host_ui_for_swap(ww, wh);
+    shown_capture(0, 1.0f);
     latency_ring_mark(LAT_SWAP_BEGIN);
     SDL_GL_SwapWindow(s_win);
     latency_ring_mark(LAT_SWAP_END);
@@ -5013,6 +5144,8 @@ static int ssao_present(GLuint fbo, GLuint tex, int y, int h, int linear, int lx
     return 1;
 }
 
+void gl_renderer_set_mesh_view(int enabled) { s_mesh_view = enabled != 0; }
+int gl_renderer_mesh_view(void) { return s_mesh_view; }
 void gl_renderer_set_gap_fill(int enabled) {
     if (s_raster_ok) { flush_flat_batch(); flush_tex_batch(); }
     const float width = enabled ? s_crack_width : 0.0f;
@@ -5109,6 +5242,7 @@ int gl_renderer_present_wide_fbo(int disp_x, int disp_y, int disp_h, int linear)
                             0, disp_y, g_wide_w, disp_h, linear, lx, ly, lw, lh);
     pres_record(GL_PRES_WIDE, disp_x, disp_y, g_wide_w, disp_h, lx, ly, lw, lh);
     render_host_ui_for_swap(ww, wh);
+    shown_capture(0, 1.0f);
     latency_ring_mark(LAT_SWAP_BEGIN);
     SDL_GL_SwapWindow(s_win);
     latency_ring_mark(LAT_SWAP_END);

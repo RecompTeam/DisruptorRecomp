@@ -2509,6 +2509,15 @@ UserSettings load_user_settings(const fs::path& path) {
             s.depth_sorted_world = toml::find<bool>(d, "depth_sorted_world");
             s.has_depth_sorted_world = true;
         });
+        if (d.contains("diagnostic_view")) try_get([&]{
+            const std::string view = toml::find<std::string>(d, "diagnostic_view");
+            for (int index = 0; index < kDisruptorDiagnosticViewCount; ++index) {
+                if (view == kDisruptorDiagnosticViews[index]) {
+                    s.diagnostic_view = index;
+                    s.has_diagnostic_view = true;
+                }
+            }
+        });
     }
     return s;
 }
@@ -2715,7 +2724,7 @@ bool save_user_settings(const fs::path& path, const UserSettings& s) {
         s.has_high_precision_camera || s.has_geometry_correction ||
         s.has_perspective_textures || s.has_frame_unlock || s.has_improved_shadows ||
         s.has_ambient_occlusion || s.has_occlusion_reach || s.has_occlusion_strength ||
-        s.has_gap_filling || s.has_depth_sorted_world ||
+        s.has_gap_filling || s.has_depth_sorted_world || s.has_diagnostic_view ||
         s.has_language_discs ||
         s.has_language_disc || s.has_skip_intro ||
         s.has_hud_scale) {
@@ -2778,6 +2787,8 @@ bool save_user_settings(const fs::path& path, const UserSettings& s) {
             f << "gap_filling = " << (s.gap_filling ? "true" : "false") << "\n";
         if (s.has_depth_sorted_world)
             f << "depth_sorted_world = " << (s.depth_sorted_world ? "true" : "false") << "\n";
+        if (s.has_diagnostic_view && s.diagnostic_view >= 0 && s.diagnostic_view < kDisruptorDiagnosticViewCount)
+            f << "diagnostic_view = " << quoted(kDisruptorDiagnosticViews[s.diagnostic_view]) << "\n";
     }
 
     f.flush();

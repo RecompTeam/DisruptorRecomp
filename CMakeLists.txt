@@ -307,6 +307,10 @@ if(BUILD_TESTING)
         COMMAND "${Python3_EXECUTABLE}" -B
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ambient_occlusion_contract.py")
 
+    add_test(NAME disruptor_debug_tab_contract
+        COMMAND "${Python3_EXECUTABLE}" -B
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_debug_tab_contract.py")
+
     add_test(NAME disruptor_framework_overlay_new_file
         COMMAND "${Python3_EXECUTABLE}" -B
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/test_framework_overlay_new_file.py")
