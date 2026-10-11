@@ -361,8 +361,8 @@ require(
     and "    if (program.empty() || !CreateProcessW(program.c_str(), command.data(), nullptr, nullptr, FALSE, 0, nullptr, nullptr, &startup, &started)) {" in restart
     and "    program.resize(GetModuleFileNameW(nullptr, program.data(), static_cast<DWORD>(program.size())));" in restart
     and '    if (ImGui::Button("English") && !g_language_disc.empty()) mark_language_disc(std::string());' in menu
-    and "    g_preferences.pending.has_language_disc = true;\n    g_preferences.pending.language_disc = path;\n    g_preferences.dirty |= PREF_LANGUAGE_DISC;" in menu
-    and "    if (g_preferences.dirty & PREF_LANGUAGE_DISC) {\n        settings.has_language_disc = true;\n        settings.language_disc = pending.language_disc;" in menu
+    and "    g_preferences.pending.has_language_disc = true;\n    g_preferences.pending.language_disc = path;\n    g_preferences.language_disc_changed = true;" in menu
+    and "    if (g_preferences.language_disc_changed) {\n        settings.has_language_disc = true;\n        settings.language_disc = pending.language_disc;" in menu
     and "    if (settings.has_language_disc) g_language_disc = settings.language_disc;" in menu,
     "the menu must show the saved disc, take a new one from a file dialog that neither stops the game nor moves its "
     "working directory, or none, stage it for saving, and offer a restart that saves first and is refused under netplay",

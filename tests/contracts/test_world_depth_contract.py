@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 """Source contract for the depth-sorted world: its rule's header, the renderer's two passes and the setting."""
 
-import re
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -29,6 +28,17 @@ presenter = read("psxrecomp-overlay/runtime/src/gpu_gl_temporal.c.inc")
 menu = read("src/game/ui/dev_menu.cpp")
 launcher = read("src/launcher/launcher_settings.cpp")
 options = read("src/game/settings/options.cpp")
+STAGED = (
+    "void mark(const char *key, int value) {\n"
+    "    const Option *option = find_option(key);\n"
+    "    option->set(g_preferences.pending, value);\n"
+    "    g_preferences.changed.insert(option);\n"
+    "}\n"
+)
+MERGED = (
+    "    for (const Option *option : g_preferences.changed)\n"
+    "        option->set(settings, option->get(pending));\n"
+)
 loader = read("psxrecomp-overlay/recompiler/src/config_loader.cpp")
 
 require(
@@ -123,27 +133,19 @@ require(
     "the setting is on the Enhancements tab alone, greyed without geometry correction, applied and staged when changed",
 )
 
-bits = re.findall(r"PREF_(\w+)\s*= 1u << (\d+),", menu)
 require(
-    len({number for _, number in bits}) == len(bits)
-    and """void mark_world_depth(bool value) {
-    g_preferences.pending.has_depth_sorted_world = true;
-    g_preferences.pending.depth_sorted_world = value;
-    g_preferences.dirty |= PREF_WORLD_DEPTH;
-}
-""" in menu
-    and """    if (g_preferences.dirty & PREF_WORLD_DEPTH) {
-        settings.has_depth_sorted_world = true;
-        settings.depth_sorted_world = pending.depth_sorted_world;
-    }
-""" in menu
+    "    std::set<const Option *> changed;\n" in menu
+    and 'void mark_world_depth(bool value) { mark("disruptor.depth_sorted_world", value); }\n' in menu
+    and STAGED in menu
+    and MERGED in menu
+    and '    toggle<&Settings::has_depth_sorted_world, &Settings::depth_sorted_world>(\n        "disruptor.depth_sorted_world",' in options
     and """    if (settings.has_depth_sorted_world && !env_override_present("PSX_GL_WORLD_DEPTH"))
         gl_renderer_set_world_depth(settings.depth_sorted_world ? 1 : 0);
 """ in menu
-    and """    if (g_preferences.dirty & PREF_WORLD_DEPTH)
+    and """    if (changed("disruptor.depth_sorted_world"))
         gl_renderer_set_world_depth(pending.depth_sorted_world ? 1 : 0);
 """ in menu,
-    "a change is staged under a bit of its own, merged into the file's settings, applied at the next start unless the "
+    "a change is staged as an option of the shared table, merged into the file's settings, applied at the next start unless the "
     "environment decides, and applied when another run saved it",
 )
 

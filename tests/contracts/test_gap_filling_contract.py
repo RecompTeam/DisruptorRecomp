@@ -25,6 +25,17 @@ renderer = read("psxrecomp-overlay/runtime/src/gpu_gl_renderer.c")
 menu = read("src/game/ui/dev_menu.cpp")
 launcher = read("src/launcher/launcher_settings.cpp")
 options = read("src/game/settings/options.cpp")
+STAGED = (
+    "void mark(const char *key, int value) {\n"
+    "    const Option *option = find_option(key);\n"
+    "    option->set(g_preferences.pending, value);\n"
+    "    g_preferences.changed.insert(option);\n"
+    "}\n"
+)
+MERGED = (
+    "    for (const Option *option : g_preferences.changed)\n"
+    "        option->set(settings, option->get(pending));\n"
+)
 loader = read("psxrecomp-overlay/recompiler/src/config_loader.cpp")
 
 require("    disruptor_contract(gap_filling)\n" in cmake, "this contract is registered")
@@ -144,24 +155,17 @@ require(
 )
 
 require(
-    """void mark_gap_filling(bool value) {
-    g_preferences.pending.has_gap_filling = true;
-    g_preferences.pending.gap_filling = value;
-    g_preferences.dirty |= PREF_GAP_FILLING;
-}
-""" in menu
-    and """    if (g_preferences.dirty & PREF_GAP_FILLING) {
-        settings.has_gap_filling = true;
-        settings.gap_filling = pending.gap_filling;
-    }
-""" in menu
+    'void mark_gap_filling(bool value) { mark("disruptor.gap_filling", value); }\n' in menu
+    and STAGED in menu
+    and MERGED in menu
+    and '    toggle<&Settings::has_gap_filling, &Settings::gap_filling>(\n        "disruptor.gap_filling",' in options
     and """    if (settings.has_gap_filling && !env_override_present("PSX_GL_CRACK_FILL") && !env_override_present("PSX_GL_GROWN_UNDER"))
         gl_renderer_set_gap_fill(settings.gap_filling ? 1 : 0);
 """ in menu
-    and """    if (g_preferences.dirty & PREF_GAP_FILLING)
+    and """    if (changed("disruptor.gap_filling"))
         gl_renderer_set_gap_fill(pending.gap_filling ? 1 : 0);
 """ in menu,
-    "a change is staged under a bit of its own, merged into the file's settings, applied at the next start unless the "
+    "a change is staged as an option of the shared table, merged into the file's settings, applied at the next start unless the "
     "environment decides either filler, and applied when another run saved it",
 )
 

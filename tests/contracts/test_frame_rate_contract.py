@@ -46,6 +46,18 @@ cmake = read("CMakeLists.txt")
 source = read("src/game/frame/frame_rate.cpp")
 header = read("src/game/frame/frame_rate.h")
 menu = read("src/game/ui/dev_menu.cpp")
+options = read("src/game/settings/options.cpp")
+STAGED = (
+    "void mark(const char *key, int value) {\n"
+    "    const Option *option = find_option(key);\n"
+    "    option->set(g_preferences.pending, value);\n"
+    "    g_preferences.changed.insert(option);\n"
+    "}\n"
+)
+MERGED = (
+    "    for (const Option *option : g_preferences.changed)\n"
+    "        option->set(settings, option->get(pending));\n"
+)
 manifest = read("PSXRECOMP_OVERLAY_FILES.txt")
 cycle_header = read("psxrecomp-overlay/runtime/include/psx_cyc.h")
 cycle_source = read("psxrecomp-overlay/runtime/src/psx_cycles.c")
@@ -125,9 +137,10 @@ require(
     "the settings menu must apply the switch live and stage it for saving",
 )
 require(
-    "if (g_preferences.dirty & PREF_FRAME_UNLOCK) {\n"
-    "        settings.has_frame_unlock = true;\n"
-    "        settings.frame_unlock = pending.frame_unlock;" in menu,
+    'void mark_frame_unlock(bool value) { mark("disruptor.frame_unlock", value); }\n' in menu
+    and STAGED in menu
+    and MERGED in menu
+    and '    toggle<&Settings::has_frame_unlock, &Settings::frame_unlock>(\n        "disruptor.frame_unlock",' in options,
     "a changed switch must reach settings.toml",
 )
 require(
@@ -185,9 +198,9 @@ require(
     "#endif\n"
     in menu
     and "#ifndef PSX_DISABLE_FRAME_INTERPOLATION\n"
-    "    if (g_preferences.dirty & PREF_PRESENT_ENABLED)\n"
+    '    if (changed("video.frame_interpolation"))\n'
     "        (void)disruptor_present_rate_enable(pending.frame_interpolation ? 1 : 0);\n"
-    "    if (g_preferences.dirty & PREF_PRESENT_RATE)\n"
+    '    if (changed("video.frame_interpolation_fps"))\n'
     "        (void)disruptor_present_rate_apply(pending.frame_interpolation_fps);\n"
     "#endif\n"
     in menu,
@@ -221,9 +234,9 @@ require(
     "the switch must keep the rate and the blend mode and report only a state the host accepted",
 )
 require(
-    "    if (g_preferences.dirty & PREF_PRESENT_ENABLED) {\n"
-    "        settings.has_frame_interpolation = true;\n"
-    "        settings.frame_interpolation = pending.frame_interpolation;\n" in menu,
+    'void mark_present_enabled(bool value) { mark("video.frame_interpolation", value); }\n' in menu
+    and MERGED in menu
+    and '    toggle<&Settings::has_frame_interpolation, &Settings::frame_interpolation>(\n        "video.frame_interpolation",' in options,
     "a changed switch must reach settings.toml",
 )
 require(
@@ -244,9 +257,9 @@ require(
     "the host must restore the saved switch, and geometry in-between frames not without exact geometry",
 )
 require(
-    "    if (g_preferences.dirty & PREF_PRESENT_RATE) {\n"
-    "        settings.has_frame_interpolation_fps = true;\n"
-    "        settings.frame_interpolation_fps = pending.frame_interpolation_fps;\n" in menu,
+    'void mark_present_rate(int value) { mark("video.frame_interpolation_fps", value); }\n' in menu
+    and MERGED in menu
+    and "write<&Settings::has_frame_interpolation_fps, &Settings::frame_interpolation_fps>, frames_key)" in options,
     "a changed in-between frame rate must reach settings.toml",
 )
 require(

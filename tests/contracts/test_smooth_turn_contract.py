@@ -28,6 +28,17 @@ mouse = read("src/game/input/mouse_aim.cpp")
 menu = read("src/game/ui/dev_menu.cpp")
 launcher = read("src/launcher/launcher_settings.cpp")
 options = read("src/game/settings/options.cpp")
+STAGED = (
+    "void mark(const char *key, int value) {\n"
+    "    const Option *option = find_option(key);\n"
+    "    option->set(g_preferences.pending, value);\n"
+    "    g_preferences.changed.insert(option);\n"
+    "}\n"
+)
+MERGED = (
+    "    for (const Option *option : g_preferences.changed)\n"
+    "        option->set(settings, option->get(pending));\n"
+)
 
 require(
     overlay.count("+runtime/include/gpu_turned_perspective.h\n") == 1
@@ -95,26 +106,19 @@ require(
     if (!env_override_present("PSX_GEOMETRY_FULL_YAW")) gl_renderer_set_full_yaw(enabled ? 1 : 0);
 }
 """ in menu
-    and """void mark_smooth_turn(bool value) {
-    g_preferences.pending.has_high_precision_camera = true;
-    g_preferences.pending.high_precision_camera = value;
-    g_preferences.dirty |= PREF_SMOOTH_TURN;
-}
-""" in menu
-    and """    if (g_preferences.dirty & PREF_SMOOTH_TURN) {
-        settings.has_high_precision_camera = true;
-        settings.high_precision_camera = pending.high_precision_camera;
-    }
-""" in menu
+    and 'void mark_smooth_turn(bool value) { mark("disruptor.high_precision_camera", value); }\n' in menu
+    and STAGED in menu
+    and MERGED in menu
+    and '    toggle<&Settings::has_high_precision_camera, &Settings::high_precision_camera>(\n        "disruptor.high_precision_camera",' in options
     and """    if (const char *forced = std::getenv("PSX_DISRUPTOR_HIGH_PRECISION_CAMERA"))
         apply_smooth_turn(forced[0] != '\\0' && forced[0] != '0');
     else if (settings.has_high_precision_camera)
         apply_smooth_turn(settings.high_precision_camera);
 """ in menu
-    and """    if (g_preferences.dirty & PREF_SMOOTH_TURN)
+    and """    if (changed("disruptor.high_precision_camera"))
         apply_smooth_turn(pending.high_precision_camera);
 """ in menu,
-    "a change switches the mouse module and the renderer's full turn together, is staged under a bit of its own, merged "
+    "a change switches the mouse module and the renderer's full turn together, is staged as an option of the shared table, merged "
     "into the file's settings, applied at the next start with the environment first, and applied when another run saved it",
 )
 

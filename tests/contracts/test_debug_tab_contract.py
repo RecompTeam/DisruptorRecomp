@@ -61,10 +61,10 @@ require(
     """void mark_diagnostic_view(int value) {
     g_preferences.pending.has_diagnostic_view = true;
     g_preferences.pending.diagnostic_view = value;
-    g_preferences.dirty |= PREF_DIAGNOSTIC_VIEW;
+    g_preferences.diagnostic_view_changed = true;
 }
 """ in menu
-    and """    if (g_preferences.dirty & PREF_DIAGNOSTIC_VIEW) {
+    and """    if (g_preferences.diagnostic_view_changed) {
         settings.has_diagnostic_view = true;
         settings.diagnostic_view = pending.diagnostic_view;
     }
@@ -72,7 +72,7 @@ require(
     and """        apply_diagnostic_view(settings.has_diagnostic_view && env_override_present("PSX_DISRUPTOR_CAPSULE_REPLAY")
                                   ? settings.diagnostic_view : 0);
 """ in menu
-    and """    if (g_preferences.dirty & PREF_DIAGNOSTIC_VIEW)
+    and """    if (g_preferences.diagnostic_view_changed)
         apply_diagnostic_view(pending.diagnostic_view);
 """ in menu,
     "a view is written to the file so that a capsule carries it, and at a start only a capsule's replay takes it from there",

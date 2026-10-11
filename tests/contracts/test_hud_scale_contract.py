@@ -21,6 +21,18 @@ scale_header = read("psxrecomp-overlay/runtime/include/gpu_ws_hud_scale.h")
 gpu = read("psxrecomp-overlay/runtime/src/gpu.c")
 header = read("psxrecomp-overlay/runtime/include/gpu.h")
 menu = read("src/game/ui/dev_menu.cpp")
+options = read("src/game/settings/options.cpp")
+STAGED = (
+    "void mark(const char *key, int value) {\n"
+    "    const Option *option = find_option(key);\n"
+    "    option->set(g_preferences.pending, value);\n"
+    "    g_preferences.changed.insert(option);\n"
+    "}\n"
+)
+MERGED = (
+    "    for (const Option *option : g_preferences.changed)\n"
+    "        option->set(settings, option->get(pending));\n"
+)
 settings_loader = read("psxrecomp-overlay/recompiler/src/config_loader.cpp")
 
 require(
@@ -104,9 +116,10 @@ require(
     "the settings menu must apply the size live and stage it for saving",
 )
 require(
-    "    if (g_preferences.dirty & PREF_HUD_SCALE) {\n"
-    "        settings.has_hud_scale = true;\n"
-    "        settings.hud_scale = pending.hud_scale;" in menu,
+    'void mark_hud_scale(int value) { mark("disruptor.hud_scale", value); }\n' in menu
+    and STAGED in menu
+    and MERGED in menu
+    and "write<&Settings::has_hud_scale, &Settings::hud_scale>)" in options,
     "a changed size must reach settings.toml",
 )
 require(
