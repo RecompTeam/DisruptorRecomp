@@ -500,6 +500,122 @@ void test_capture_release_and_frame_motion() {
            "focus loss releases a captured mouse");
 }
 
+void test_focus_return_restores_a_capture_lost_to_focus() {
+    reset_state();
+    g_mouse.enabled = true;
+    g_mouse.mouse_aim_enabled = true;
+    g_mouse.configured = true;
+    g_mouse.log = std::tmpfile();
+    const auto frame = [](SDL_WindowFlags focus, std::uint32_t buttons, bool escape = false) {
+        g_window_flags = focus;
+        g_buttons = buttons;
+        g_keys[SDL_SCANCODE_ESCAPE] = escape ? 1 : 0;
+        mouse_aim_frame();
+    };
+    const auto capture = [&frame] {
+        frame(SDL_WINDOW_INPUT_FOCUS, SDL_BUTTON_MMASK);
+        frame(SDL_WINDOW_INPUT_FOCUS, 0);
+    };
+
+    frame(0, 0);
+    frame(SDL_WINDOW_INPUT_FOCUS, 0);
+    expect(!g_mouse.captured && !g_relative_mode,
+           "focus coming back captures nothing that was not captured");
+
+    capture();
+    frame(0, 0);
+    expect(!g_mouse.captured && !g_relative_mode, "focus loss releases the mouse");
+    frame(0, 0);
+    expect(!g_mouse.captured, "the mouse stays free while the window has no focus");
+    frame(SDL_WINDOW_INPUT_FOCUS, 0);
+    expect(g_mouse.captured && g_relative_mode,
+           "focus coming back takes the mouse again");
+
+    frame(SDL_WINDOW_INPUT_FOCUS, SDL_BUTTON_MMASK);
+    expect(!g_mouse.captured, "a middle click gives the mouse up");
+    frame(SDL_WINDOW_INPUT_FOCUS, 0);
+    frame(0, 0);
+    frame(SDL_WINDOW_INPUT_FOCUS, 0);
+    expect(!g_mouse.captured && !g_relative_mode,
+           "a mouse given up by a middle click stays free when focus comes back");
+
+    capture();
+    frame(SDL_WINDOW_INPUT_FOCUS, 0, true);
+    expect(!g_mouse.captured, "Escape gives the mouse up");
+    frame(SDL_WINDOW_INPUT_FOCUS, 0);
+    frame(0, 0);
+    frame(SDL_WINDOW_INPUT_FOCUS, 0);
+    expect(!g_mouse.captured && !g_relative_mode,
+           "a mouse given up by Escape stays free when focus comes back");
+
+    capture();
+    frame(0, 0);
+    frame(SDL_WINDOW_INPUT_FOCUS, SDL_BUTTON_MMASK);
+    expect(!g_mouse.captured && !g_relative_mode,
+           "a middle click as focus comes back gives up the capture that waited for it");
+    frame(SDL_WINDOW_INPUT_FOCUS, SDL_BUTTON_MMASK);
+    expect(!g_mouse.captured, "the held button toggles nothing on the next frame");
+    frame(SDL_WINDOW_INPUT_FOCUS, 0);
+    expect(!g_mouse.captured, "and nothing waits for focus any more");
+
+    capture();
+    frame(0, 0);
+    frame(0, SDL_BUTTON_MMASK);
+    expect(!g_mouse.captured, "a middle click seen while the capture waits gives it up too");
+    frame(0, 0);
+    frame(SDL_WINDOW_INPUT_FOCUS, 0);
+    expect(!g_mouse.captured && !g_relative_mode, "and focus coming back takes nothing");
+
+    capture();
+    frame(0, SDL_BUTTON_MMASK);
+    expect(!g_mouse.captured, "a middle click on the frame focus goes releases the mouse");
+    frame(0, 0);
+    frame(SDL_WINDOW_INPUT_FOCUS, 0);
+    expect(!g_mouse.captured && !g_relative_mode,
+           "and that was the player giving it up, not the focus taking it");
+
+    capture();
+    frame(0, 0, true);
+    expect(!g_mouse.captured, "Escape on the frame focus goes releases the mouse");
+    frame(SDL_WINDOW_INPUT_FOCUS, 0);
+    expect(!g_mouse.captured && !g_relative_mode,
+           "and that was the player giving it up as well");
+
+    capture();
+    frame(0, 0);
+    frame(SDL_WINDOW_INPUT_FOCUS, 0, true);
+    expect(!g_mouse.captured && !g_relative_mode,
+           "Escape on the frame focus comes back keeps a waiting capture from returning");
+    frame(SDL_WINDOW_INPUT_FOCUS, 0);
+    expect(!g_mouse.captured, "and it does not return on the next frame either");
+
+    capture();
+    frame(0, 0);
+    frame(0, 0, true);
+    frame(0, 0);
+    frame(SDL_WINDOW_INPUT_FOCUS, 0);
+    expect(!g_mouse.captured && !g_relative_mode,
+           "Escape seen while the capture waits for focus gives it up as well");
+
+    capture();
+    frame(0, 0);
+    g_relative_mode_succeeds = false;
+    frame(SDL_WINDOW_INPUT_FOCUS, 0);
+    expect(!g_mouse.captured, "a capture the host refuses is not claimed");
+    g_relative_mode_succeeds = true;
+    frame(SDL_WINDOW_INPUT_FOCUS, 0);
+    expect(!g_mouse.captured, "and it is not tried again on every frame");
+
+    capture();
+    g_relative_mode_succeeds = false;
+    frame(0, 0);
+    expect(g_mouse.captured, "a release the host refuses leaves the mouse captured");
+    g_relative_mode_succeeds = true;
+    frame(SDL_WINDOW_INPUT_FOCUS, SDL_BUTTON_MMASK);
+    expect(!g_mouse.captured, "and the next middle click still gives it up");
+    frame(SDL_WINDOW_INPUT_FOCUS, 0);
+}
+
 void test_high_precision_camera_residual() {
     reset_state();
     g_mouse.enabled = true;
@@ -817,6 +933,7 @@ int main(int argc, char **argv) {
         test_vertical_direction_inversion_and_clamp();
         test_simultaneous_relative_axes_sample();
         test_capture_release_and_frame_motion();
+    test_focus_return_restores_a_capture_lost_to_focus();
         test_high_precision_camera_residual();
         test_modern_keyboard_mapping_and_merge();
         test_modern_mouse_buttons_require_capture();
