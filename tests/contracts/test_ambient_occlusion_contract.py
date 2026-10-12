@@ -84,24 +84,25 @@ require(
     """    const bool geometry = gpu_geometry_correction_enabled() != 0;
     bool occlusion = gl_renderer_ssao() != 0;
     if (!geometry) ImGui::BeginDisabled();
-    if (ImGui::Checkbox("Ambient occlusion", &occlusion)) {
+    if (option_toggle("disruptor.ambient_occlusion", &occlusion)) {
         gl_renderer_set_ssao(occlusion ? 1 : 0);
         mark_occlusion(occlusion);
     }
     if (!geometry) ImGui::EndDisabled();
 """ in experimental
-    and """    const bool reach_moved = ImGui::SliderInt("Occlusion reach", &reach, 50, 800, "%d", ImGuiSliderFlags_AlwaysClamp);
+    and """    const bool reach_moved = option_slider("disruptor.occlusion_reach", &reach);
 """ in experimental
-    and """        ImGui::SliderInt("Occlusion strength", &strength, 0, 300, "%d%%", ImGuiSliderFlags_AlwaysClamp);
+    and """        option_slider("disruptor.occlusion_strength", &strength);
     if (!geometry) ImGui::EndDisabled();
     if (reach_moved || strength_moved) {
         gl_renderer_set_ssao_shape(static_cast<float>(reach), strength / 100.0f);
         mark_occlusion_shape(reach, strength);
     }
 """ in experimental
-    and menu.count('"Ambient occlusion"') == 1
+    and menu.count('option_toggle("disruptor.ambient_occlusion"') == 1
     and experimental.count("ImGui::BeginDisabled()") == experimental.count("ImGui::EndDisabled()") == 2
-    and experimental.count("ImGui::Checkbox(") == 1
+    and experimental.count("option_toggle(") == 1
+    and "ImGui::Checkbox(" not in experimental
     and '            if (ImGui::BeginTabItem("Experimental")) {\n                draw_experimental_tab();\n' in menu,
     "the Experimental tab holds the occlusion alone: a switch and two bounded sliders, greyed without geometry correction",
 )

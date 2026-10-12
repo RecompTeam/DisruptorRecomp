@@ -89,13 +89,13 @@ require(
     """    const bool turn_applies = mouse_aim && gpu_geometry_correction_enabled() != 0;
     bool smooth = disruptor_high_precision_camera_enabled() != 0;
     if (!turn_applies) ImGui::BeginDisabled();
-    if (ImGui::Checkbox("Smooth mouse turning", &smooth)) {
+    if (option_toggle("disruptor.high_precision_camera", &smooth)) {
         apply_smooth_turn(smooth);
         mark_smooth_turn(smooth);
     }
     if (!turn_applies) ImGui::EndDisabled();
 """ in controls
-    and menu.count('"Smooth mouse turning"') == 1
+    and menu.count('option_toggle("disruptor.high_precision_camera"') == 1
     and controls.count("ImGui::BeginDisabled()") == controls.count("ImGui::EndDisabled()"),
     "the setting is on the Controls tab alone, greyed without mouse aim or geometry correction, applied and staged when changed",
 )

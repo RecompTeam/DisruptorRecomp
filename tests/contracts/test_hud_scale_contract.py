@@ -109,10 +109,11 @@ require(
 )
 
 require(
-    '    if (ImGui::SliderInt("HUD size", &hud_scale, 50, 100, "%d%%",\n'
-    "                         ImGuiSliderFlags_AlwaysClamp)) {\n"
+    '    if (option_slider("disruptor.hud_scale", &hud_scale)) {\n'
     "        gpu_ws_set_hud_scale(hud_scale);\n"
-    "        mark_hud_scale(hud_scale);" in menu,
+    "        mark_hud_scale(hud_scale);" in menu
+    and 'slider("disruptor.hud_scale", "HUD size", 100,' in options
+    and '"The weapon keeps its size.", 50, 100, Unit::percent,' in options,
     "the settings menu must apply the size live and stage it for saving",
 )
 require(

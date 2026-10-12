@@ -143,13 +143,13 @@ enhancements = between(menu, "void draw_enhancements_tab() {", "const char *chea
 require(
     """    bool gaps = gl_renderer_gap_fill() != 0;
     if (!geometry) ImGui::BeginDisabled();
-    if (ImGui::Checkbox("Gap filling", &gaps)) {
+    if (option_toggle("disruptor.gap_filling", &gaps)) {
         gl_renderer_set_gap_fill(gaps ? 1 : 0);
         mark_gap_filling(gaps);
     }
     if (!geometry) ImGui::EndDisabled();
 """ in enhancements
-    and menu.count('"Gap filling"') == 1
+    and menu.count('option_toggle("disruptor.gap_filling"') == 1
     and enhancements.count("ImGui::BeginDisabled()") == enhancements.count("ImGui::EndDisabled()"),
     "the setting is on the Enhancements tab alone, greyed without geometry correction, applied and staged when changed",
 )

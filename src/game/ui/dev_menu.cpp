@@ -86,6 +86,7 @@ DevMenuState g_menu;
 namespace fs = std::filesystem;
 using disruptor::settings::find_option;
 using disruptor::settings::Option;
+using disruptor::settings::Unit;
 
 struct PreferenceState {
     fs::path path;
@@ -195,6 +196,32 @@ void mark(const char *key, int value) {
 
 bool changed(const char *key) {
     return g_preferences.changed.contains(find_option(key));
+}
+
+bool option_toggle(const char *key, bool *value) {
+    return ImGui::Checkbox(find_option(key)->label, value);
+}
+
+bool option_slider(const char *key, int *value) {
+    const Option &option = *find_option(key);
+    const char *format = option.unit == Unit::percent ? "%d%%" : "%d";
+    return ImGui::SliderInt(option.label, value, option.lowest,
+                            option.highest, format,
+                            ImGuiSliderFlags_AlwaysClamp);
+}
+
+bool option_slider(const char *key, float *value) {
+    const Option &option = *find_option(key);
+    return ImGui::SliderFloat(option.label, value, option.lowest / 1000.0f,
+                              option.highest / 1000.0f, "%.3f",
+                              ImGuiSliderFlags_Logarithmic);
+}
+
+bool option_list(const char *key, int *index, size_t skipped = 0) {
+    const Option &option = *find_option(key);
+    const auto shown = option.choices.subspan(skipped);
+    return ImGui::Combo(option.label, index, shown.data(),
+                        static_cast<int>(shown.size()));
 }
 
 void mark_mouse_aim(bool value) { mark("disruptor.mouse_aim", value); }
@@ -680,14 +707,14 @@ void draw_status_badge(const char *label, const ImVec4 &colour) {
 
 void draw_controls_tab() {
     bool mouse_aim = disruptor_mouse_aim_enabled() != 0;
-    if (ImGui::Checkbox("Horizontal mouse aim", &mouse_aim)) {
+    if (option_toggle("disruptor.mouse_aim", &mouse_aim)) {
         disruptor_mouse_aim_set_enabled(mouse_aim ? 1 : 0);
         mark_mouse_aim(mouse_aim);
     }
     draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
 
     bool modern = disruptor_modern_controls_enabled() != 0;
-    if (ImGui::Checkbox("Modern keyboard and mouse controls", &modern)) {
+    if (option_toggle("disruptor.modern_controls", &modern)) {
         set_modern_controls_live(modern);
         mark_modern_controls(modern);
     }
@@ -695,16 +722,14 @@ void draw_controls_tab() {
 
     float sensitivity =
         static_cast<float>(disruptor_mouse_horizontal_sensitivity());
-    if (ImGui::SliderFloat("Horizontal sensitivity", &sensitivity,
-                           0.005f, 2.0f, "%.3f",
-                           ImGuiSliderFlags_Logarithmic)) {
+    if (option_slider("disruptor.horizontal_sensitivity", &sensitivity)) {
         const double applied =
             disruptor_mouse_set_horizontal_sensitivity(sensitivity);
         mark_sensitivity(applied);
     }
 
     bool invert_x = disruptor_mouse_invert_horizontal() != 0;
-    if (ImGui::Checkbox("Invert horizontal mouse", &invert_x)) {
+    if (option_toggle("disruptor.invert_horizontal", &invert_x)) {
         disruptor_mouse_set_invert_horizontal(invert_x ? 1 : 0);
         mark_invert_x(invert_x);
     }
@@ -712,7 +737,7 @@ void draw_controls_tab() {
     const bool turn_applies = mouse_aim && gpu_geometry_correction_enabled() != 0;
     bool smooth = disruptor_high_precision_camera_enabled() != 0;
     if (!turn_applies) ImGui::BeginDisabled();
-    if (ImGui::Checkbox("Smooth mouse turning", &smooth)) {
+    if (option_toggle("disruptor.high_precision_camera", &smooth)) {
         apply_smooth_turn(smooth);
         mark_smooth_turn(smooth);
     }
@@ -725,7 +750,7 @@ void draw_controls_tab() {
 
     ImGui::SeparatorText("Vertical look");
     bool vertical_look = disruptor_mouse_vertical_look_enabled() != 0;
-    if (ImGui::Checkbox("Vertical mouse look", &vertical_look)) {
+    if (option_toggle("disruptor.vertical_look", &vertical_look)) {
         disruptor_mouse_set_vertical_look_enabled(vertical_look ? 1 : 0);
         mark_vertical_look(vertical_look);
     }
@@ -733,16 +758,14 @@ void draw_controls_tab() {
 
     float vertical_sensitivity =
         static_cast<float>(disruptor_mouse_vertical_sensitivity());
-    if (ImGui::SliderFloat("Vertical sensitivity", &vertical_sensitivity,
-                           0.005f, 2.0f, "%.3f",
-                           ImGuiSliderFlags_Logarithmic)) {
+    if (option_slider("disruptor.vertical_sensitivity", &vertical_sensitivity)) {
         const double applied =
             disruptor_mouse_set_vertical_sensitivity(vertical_sensitivity);
         mark_vertical_sensitivity(applied);
     }
 
     bool invert_y = disruptor_mouse_invert_vertical() != 0;
-    if (ImGui::Checkbox("Invert vertical mouse", &invert_y)) {
+    if (option_toggle("disruptor.invert_vertical", &invert_y)) {
         disruptor_mouse_set_invert_vertical(invert_y ? 1 : 0);
         mark_invert_y(invert_y);
     }
@@ -783,8 +806,6 @@ void apply_geometry_enabled(bool enabled) {
 void draw_aspect_controls() {
     static constexpr int kAspectNumerators[] = {16, 21, 32, 32};
     static constexpr int kAspectDenominators[] = {9, 9, 9, 9};
-    static const char *kAspectLabels[] = {
-        "16:9", "21:9", "32:9", "Match window (up to 32:9)"};
     static constexpr int kFixedWideAspectCount = 3;
     static constexpr int kAdaptiveAspectIndex = 3;
     static constexpr int kAspectCount = 4;
@@ -831,8 +852,7 @@ void draw_aspect_controls() {
     draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
 
     int selected = g_menu.selected_wide_aspect;
-    if (ImGui::Combo("Aspect ratio", &selected, kAspectLabels,
-                     kAspectCount)) {
+    if (option_list("video.aspect_ratio", &selected, 1)) {
         g_menu.selected_wide_aspect = selected;
         if (widescreen) {
             if (selected == kAdaptiveAspectIndex) {
@@ -864,7 +884,7 @@ void draw_aspect_controls() {
     if (gpu_sprite_placement_available()) {
         int shadow_shape = gpu_shadow_shape();
         ImGui::SetNextItemWidth(260.0f);
-        if (ImGui::Combo("Shadows", &shadow_shape, "Vanilla\0Improved\0")) {
+        if (option_list("disruptor.improved_shadows", &shadow_shape)) {
             gpu_set_shadow_shape(shadow_shape);
             mark_shadow_shape(shadow_shape != 0);
         }
@@ -876,8 +896,7 @@ void draw_aspect_controls() {
 
     int hud_scale = gpu_ws_hud_scale();
     ImGui::SetNextItemWidth(260.0f);
-    if (ImGui::SliderInt("HUD size", &hud_scale, 50, 100, "%d%%",
-                         ImGuiSliderFlags_AlwaysClamp)) {
+    if (option_slider("disruptor.hud_scale", &hud_scale)) {
         gpu_ws_set_hud_scale(hud_scale);
         mark_hud_scale(hud_scale);
     }
@@ -888,15 +907,12 @@ void draw_aspect_controls() {
 }
 
 void draw_internal_resolution_controls() {
-    static const char *kScaleLabels[] = {
-        "1x (native)", "2x", "3x", "4x", "5x", "6x", "7x", "8x"};
     static constexpr int kScaleCount = 8;
     int selected = std::clamp(
         psx_host_video_get_internal_scale(), 1, kScaleCount) - 1;
 
     ImGui::SeparatorText("Rendering resolution");
-    if (ImGui::Combo("Internal resolution scale", &selected,
-                     kScaleLabels, kScaleCount)) {
+    if (option_list("video.supersampling", &selected)) {
         const int requested = selected + 1;
         g_menu.internal_scale_apply_failed =
             psx_host_video_set_internal_scale(requested) == 0;
@@ -920,13 +936,13 @@ void draw_enhancements_tab() {
     draw_internal_resolution_controls();
 
     bool geometry = gpu_geometry_correction_enabled() != 0;
-    if (ImGui::Checkbox("Exact-provenance geometry", &geometry))
+    if (option_toggle("disruptor.geometry_correction", &geometry))
         apply_geometry_enabled(geometry);
     draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
 
     bool textures = gpu_texture_correction_enabled() != 0;
     if (!geometry) ImGui::BeginDisabled();
-    if (ImGui::Checkbox("Perspective-correct world textures", &textures)) {
+    if (option_toggle("disruptor.perspective_textures", &textures)) {
         gpu_texture_correction_set(textures ? 1 : 0);
         mark_textures(textures);
     }
@@ -937,7 +953,7 @@ void draw_enhancements_tab() {
 
     bool gaps = gl_renderer_gap_fill() != 0;
     if (!geometry) ImGui::BeginDisabled();
-    if (ImGui::Checkbox("Gap filling", &gaps)) {
+    if (option_toggle("disruptor.gap_filling", &gaps)) {
         gl_renderer_set_gap_fill(gaps ? 1 : 0);
         mark_gap_filling(gaps);
     }
@@ -949,7 +965,7 @@ void draw_enhancements_tab() {
 
     bool by_depth = gl_renderer_world_depth() != 0;
     if (!geometry) ImGui::BeginDisabled();
-    if (ImGui::Checkbox("Depth-sorted world", &by_depth)) {
+    if (option_toggle("disruptor.depth_sorted_world", &by_depth)) {
         gl_renderer_set_world_depth(by_depth ? 1 : 0);
         mark_world_depth(by_depth);
     }
@@ -962,15 +978,13 @@ void draw_enhancements_tab() {
     ImGui::SeparatorText("Synchronisation");
     int vsync = psx_host_video_get_vsync();
     int vsync_index = std::clamp(vsync + 1, 0, 2);
-    static const char *kVsyncLabels[] = {
-        "Adaptive", "Immediate", "Synchronised"};
-    if (ImGui::Combo("VSync", &vsync_index, kVsyncLabels, 3)) {
+    if (option_list("video.vsync", &vsync_index)) {
         const int requested = vsync_index - 1;
         if (psx_host_video_set_vsync(requested)) mark_vsync(requested);
     }
 
     bool unlocked = disruptor_frame_rate_unlocked() != 0;
-    if (ImGui::Checkbox("60 FPS gameplay", &unlocked)) {
+    if (option_toggle("disruptor.frame_unlock", &unlocked)) {
         disruptor_frame_rate_set_unlocked(unlocked ? 1 : 0);
         mark_frame_unlock(unlocked);
     }
@@ -988,15 +1002,19 @@ void draw_enhancements_tab() {
 
 #ifndef PSX_DISABLE_FRAME_INTERPOLATION
     int present_enabled = 0;
-    if (disruptor_present_rate_switch(geometry ? 1 : 0, &present_enabled))
+    if (disruptor_present_rate_switch(
+            find_option("video.frame_interpolation")->label, geometry ? 1 : 0,
+            &present_enabled))
         mark_present_enabled(present_enabled != 0);
     int present_rate = 0;
-    if (disruptor_present_rate_control(&present_rate)) mark_present_rate(present_rate);
+    if (disruptor_present_rate_control(
+            find_option("video.frame_interpolation_fps")->label, &present_rate))
+        mark_present_rate(present_rate);
 #endif
 
     ImGui::SeparatorText("Startup");
     bool skip_intro = disruptor_intro_skip_enabled() != 0;
-    if (ImGui::Checkbox("Skip the logos and the title movie", &skip_intro)) {
+    if (option_toggle("disruptor.skip_intro", &skip_intro)) {
         disruptor_intro_skip_set_enabled(skip_intro ? 1 : 0);
         mark_skip_intro(skip_intro);
     }
@@ -1028,7 +1046,7 @@ void draw_experimental_tab() {
     const bool geometry = gpu_geometry_correction_enabled() != 0;
     bool occlusion = gl_renderer_ssao() != 0;
     if (!geometry) ImGui::BeginDisabled();
-    if (ImGui::Checkbox("Ambient occlusion", &occlusion)) {
+    if (option_toggle("disruptor.ambient_occlusion", &occlusion)) {
         gl_renderer_set_ssao(occlusion ? 1 : 0);
         mark_occlusion(occlusion);
     }
@@ -1038,10 +1056,10 @@ void draw_experimental_tab() {
     int strength = static_cast<int>(std::lround(gl_renderer_ssao_strength() * 100.0f));
     if (!geometry) ImGui::BeginDisabled();
     ImGui::SetNextItemWidth(260.0f);
-    const bool reach_moved = ImGui::SliderInt("Occlusion reach", &reach, 50, 800, "%d", ImGuiSliderFlags_AlwaysClamp);
+    const bool reach_moved = option_slider("disruptor.occlusion_reach", &reach);
     ImGui::SetNextItemWidth(260.0f);
     const bool strength_moved =
-        ImGui::SliderInt("Occlusion strength", &strength, 0, 300, "%d%%", ImGuiSliderFlags_AlwaysClamp);
+        option_slider("disruptor.occlusion_strength", &strength);
     if (!geometry) ImGui::EndDisabled();
     if (reach_moved || strength_moved) {
         gl_renderer_set_ssao_shape(static_cast<float>(reach), strength / 100.0f);
@@ -1145,12 +1163,10 @@ void draw_cheats_tab() {
 }
 
 void draw_fullscreen_controls() {
-    static const char *kFullscreenLabels[] = {
-        "Windowed", "Borderless fullscreen", "Exclusive fullscreen"};
     int mode = std::clamp(psx_host_video_get_fullscreen_mode(), 0, 2);
 
     ImGui::SeparatorText("Window presentation");
-    if (ImGui::Combo("Display mode", &mode, kFullscreenLabels, 3)) {
+    if (option_list("video.fullscreen", &mode)) {
         g_menu.fullscreen_apply_failed =
             psx_host_video_set_fullscreen_mode(mode) == 0;
         if (!g_menu.fullscreen_apply_failed)
@@ -1172,15 +1188,14 @@ void draw_audio_controls() {
     ImGui::SeparatorText("Audio output");
     int volume = psx_host_audio_get_master_volume();
     ImGui::SetNextItemWidth(260.0f);
-    if (ImGui::SliderInt("Master volume", &volume, 0, 100, "%d%%",
-                         ImGuiSliderFlags_AlwaysClamp) &&
+    if (option_slider("audio.master_volume", &volume) &&
         psx_host_audio_set_master_volume(volume)) {
         mark_master_volume(volume);
     }
     draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
 
     bool muted = psx_host_audio_get_muted() != 0;
-    if (ImGui::Checkbox("Mute all audio", &muted) &&
+    if (option_toggle("audio.muted", &muted) &&
         psx_host_audio_set_muted(muted ? 1 : 0)) {
         mark_audio_muted(muted);
     }

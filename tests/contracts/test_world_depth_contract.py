@@ -122,13 +122,13 @@ enhancements = between(menu, "void draw_enhancements_tab() {", "const char *chea
 require(
     """    bool by_depth = gl_renderer_world_depth() != 0;
     if (!geometry) ImGui::BeginDisabled();
-    if (ImGui::Checkbox("Depth-sorted world", &by_depth)) {
+    if (option_toggle("disruptor.depth_sorted_world", &by_depth)) {
         gl_renderer_set_world_depth(by_depth ? 1 : 0);
         mark_world_depth(by_depth);
     }
     if (!geometry) ImGui::EndDisabled();
 """ in enhancements
-    and menu.count('"Depth-sorted world"') == 1
+    and menu.count('option_toggle("disruptor.depth_sorted_world"') == 1
     and enhancements.count("ImGui::BeginDisabled()") == enhancements.count("ImGui::EndDisabled()"),
     "the setting is on the Enhancements tab alone, greyed without geometry correction, applied and staged when changed",
 )

@@ -76,14 +76,11 @@ require(
     f"keys listed here are no longer saved: {sorted((NOT_OFFERED | COVERED) - saved)}",
 )
 
+drawn = set(re.findall(r'\boption_(?:toggle|slider|list)\("([\w.]+)"', menu)) | set(
+    re.findall(r'find_option\("([\w.]+)"\)->label', menu))
+require(drawn == set(keys), f"the in-game menu must draw every row by its key: {sorted(set(keys) ^ drawn)}")
 for kind, key, label, _ in rows:
-    require(f'"{label}"' in menu, f"the row {key} must be named as the in-game menu names it: {label}")
-for label in (
-    "Windowed", "Borderless fullscreen", "Exclusive fullscreen", "16:9", "21:9", "32:9", "Match window (up to 32:9)",
-    "1x (native)", "8x", "Adaptive", "Immediate", "Synchronised",
-):
-    require(f'"{label}"' in options and f'"{label}"' in menu, f"the choice {label} must read as in the in-game menu")
-require('"Vanilla", "Improved"' in options and '"Vanilla\\0Improved\\0"' in menu, "the shadow choices must match")
+    require(f'"{label}"' not in menu, f"the in-game menu must take the name of {key} from the shared table")
 
 shipped = plain_values(read("release/windows/settings.toml"))
 require(not set(shipped) - set(keys), f"the shipped settings.toml sets keys the launcher does not show: {sorted(set(shipped) - set(keys))}")
