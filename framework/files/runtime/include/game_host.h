@@ -25,6 +25,9 @@ void psx_game_states_configured(void);
 void psx_game_state_loaded(void);
 /* A key went down or up. `plain` is set for a press without Ctrl, Alt or the system key and for every release. Nonzero when the game took a press. */
 int psx_game_key(int scancode, uint32_t keycode, int down, int plain);
+/* The keyboard's state as a pad may read it: `count` keys, nonzero for down, copied from `keys` to `kept` with the keys
+ * the game is typing with shown as up. Called at every reading, which can be several a frame. */
+void psx_game_keys_for_pad(const uint8_t *keys, uint8_t *kept, int count);
 /* Called around the sampling of the pad, outside netplay. */
 void psx_game_before_input(void);
 void psx_game_after_input(void);

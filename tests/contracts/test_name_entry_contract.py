@@ -118,9 +118,8 @@ require(
     and "constexpr uint32_t kLength = 8u;" in module
     and "constexpr uint8_t kDigits = 26u, kBlank = 36u;" in module
     and '    psx_mod_register_function_entry_plugin("disruptor.name_entry", kSaveScreen, save_screen_entry);\n'
-    in module
-    and '    psx_mod_register_vblank_plugin("disruptor.name_entry.vblank", vblank);\n' in module,
-    "the module must name the routine, the row, the cursor and the name as the game has them, and hook the routine and the VBlank",
+    in module,
+    "the module must name the routine, the row, the cursor and the name as the game has them, and hook the routine",
 )
 require(
     "    g_on = row >= kLettersRow && row <= kLastNameRow && !g_ls_mode && !g_ls_replay_active && !psx_netplay_active();\n"
@@ -131,8 +130,15 @@ require(
     and module.count("psx_mod_write_") == 3
     and "        psx_mod_write_byte(kName + cursor, typed.code);\n" in module
     and "    psx_mod_write_word(kCursor, cursor);\n    psx_mod_write_word(kRow, kLettersRow);\n" in module
-    and "    if (!g_on || !plain) return 0;\n" in module,
-    "keys are text only on the name rows and outside lockstep and net games, the frame's presses are the one register changed, "
+    and "    if (!g_on || !plain) return 0;\n" in module
+    and "    if (!typed || !in_typing_block(scancode)) return 0;" in module
+    and "    if (left_screen() || run_in_step()) return false;\n"
+    "    const uint32_t row = psx_mod_read_word(kRow);\n"
+    "    return row >= kLettersRow && row <= kLastNameRow;\n" in module
+    and "[[nodiscard]] bool run_in_step() { return g_ls_mode || g_ls_replay_active || psx_netplay_active() != 0; }\n" in module,
+    "keys are text only from the typing block, on the name rows as the routine last found them, and outside "
+    "lockstep and net games, "
+    "the frame's presses are the one register changed, "
     "and the name, the cursor and the row the only memory written",
 )
 require(
@@ -160,6 +166,72 @@ require(
     and host.index('netplay_soft_exit("netplay_escape");', keydown)
     < host.index("if (psx_game_key((int)scancode"),
     "a taken key must be taken before the host's own keys are looked at, and after a net game's Escape",
+)
+sources = [found for found in (ROOT / "src").rglob("*") if found.suffix in {".cpp", ".h"}]
+require(
+    "    return !g_entered_once || psx_get_cycle_count() - g_entered >= kLeftScreen * kVBlankCycles;\n" in module
+    and "    if (left_screen()) forget();\n    g_entered = psx_get_cycle_count();\n    g_entered_once = true;\n" in module
+    and "    if (left_screen()) {\n        g_on = g_letters = false;\n        forget();\n    }\n" in module
+    and "    if (g_held.any() && g_entered - g_keyed >= kLetGo * kVBlankCycles) g_held.reset();\n" in module
+    and "    g_keyed = psx_get_cycle_count();\n" in module
+    and "constexpr uint64_t kVBlankCycles = 564480u;" in module
+    and "#define VBLANK_CYCLES   564480u" in read("psxrecomp/runtime/src/interrupts.c")
+    and "constexpr unsigned kLeftScreen = 8u;" in module
+    and "constexpr unsigned kLetGo = 120u;" in module
+    and 'extern "C" void disruptor_name_entry_state_loaded(void) {\n'
+    "    g_on = g_letters = g_entered_once = false;\n    forget();\n}\n" in module
+    and "    disruptor_capsule_state_loaded();\n    disruptor_name_entry_state_loaded();\n" in game_side,
+    "the screen counts as left, and a held key as let go, by the game's own clock in the framework's VBlanks, "
+    "and a loaded save state, whose clock may lie anywhere, resets it all",
+)
+require(
+    "    for (const ModResolution::Plugin& plugin : s.plan.plugins)\n        mod_invoke_vblank_plugin(plugin.id);\n"
+    in read("psxrecomp/runtime/src/mod_runtime.cpp")
+    and not [
+        found.name
+        for found in sources
+        if "psx_mod_register_vblank_plugin" in found.read_text(encoding="utf-8")
+        or "psx_mod_register_activation_plugin" in found.read_text(encoding="utf-8")
+    ],
+    "the framework calls a VBlank or an activation plugin for a mod package only, never for the game itself: "
+    "no source of the game may count on one",
+)
+controls = read("src/game/input/mouse_aim.cpp")
+require(
+    "static const Uint8* pad_keys(void) {\n"
+    "    int count = 0;\n"
+    "    const Uint8* keys = SDL_GetKeyboardState(&count);\n"
+    "#ifdef PSX_HAS_GAME_HOST\n"
+    "    static Uint8 kept[512];\n"
+    "    if (!keys || count <= 0 || count > (int)sizeof(kept)) return keys;\n"
+    "    psx_game_keys_for_pad(keys, kept, count);\n"
+    "    return kept;\n" in host
+    and host.count("const Uint8* keys = pad_keys();\n") == 4
+    and all(
+        host.count(f"{reader}(keys, ") == uses
+        for reader, uses in (("psx_keybinds_pad_word", 1), ("psx_keybinds_sticks", 2), ("psx_keybinds_dpad_active", 1))
+    )
+    and "void psx_game_keys_for_pad(const uint8_t *keys, uint8_t *kept, int count) {\n"
+    "    disruptor_name_entry_keys_for_pad(keys, kept, count);\n}\n" in game_side,
+    "every reading of the keyboard for a pad must go through the game, which holds back the keys it is typing with",
+)
+require(
+    "        disruptor_name_entry_keys_for_pad(keys, pad_keys.data(), static_cast<int>(pad_keys.size()));\n"
+    "        keys = pad_keys.data();\n" in controls
+    and controls.index("disruptor_name_entry_keys_for_pad(keys, pad_keys.data()")
+    < controls.index("    if (key_down(keys, SDL_SCANCODE_W)")
+    and "    const bool taking = taking_text();\n    if (run_in_step()) g_withheld.reset();\n" in module
+    and "        if (keys[scancode] == 0) g_withheld.reset(key);\n"
+    "        else if (taking && in_typing_block(scancode)) g_withheld.set(key);\n"
+    "        kept[scancode] = g_withheld.test(key) ? uint8_t{0} : keys[scancode];\n" in module
+    and module.count("g_withheld.reset(") == 2
+    and "    return (scancode >= kKeyA && scancode <= kKey0) || (scancode >= kSpace && scancode <= kSlash) || "
+    "scancode == kSecondBackslash ||\n"
+    "           (scancode >= kPad1 && scancode <= kPad0) || scancode == kBackspace || scancode == kDelete;\n" in module
+    and "kEnter = 40, kPadEnter = 88, kSlash = 56, kSecondBackslash = 100;\n" in module,
+    "on the name rows a key of the typing block is no button, in the modern controls as well, from the moment the "
+    "keyboard shows it down, which can be a frame before its event, until it is let go and not merely until the rows "
+    "are left, and a run in step with another gets the keyboard whole",
 )
 
 image_path = ROOT / "input" / "SLUS_002.24.code"

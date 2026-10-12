@@ -1,6 +1,8 @@
 #include "cpu_state.h"
 #include "mod_plugins.h"
 
+#include <array>
+#include <cstddef>
 #include <cstdint>
 #include <initializer_list>
 #include <iostream>
@@ -16,7 +18,7 @@ constexpr char kTable[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ";  /* the game'
 std::map<std::uint32_t, std::uint8_t> g_memory;
 std::uint32_t g_entry_address = 0;
 PSXModFunctionEntryCallback g_entry = nullptr;
-PSXModVBlankCallback g_tick = nullptr;
+std::uint64_t g_cycles = 1000;  /* the game's clock */
 int g_netplay = 0;
 int g_strays = 0;
 int g_failures = 0;
@@ -26,6 +28,9 @@ void expect(bool condition, const char *message) {
     ++g_failures;
     std::cerr << "FAIL: " << message << '\n';
 }
+
+/* A VBlank of the game passes. */
+void g_tick() { g_cycles += 564480u; }
 
 bool ours(std::uint32_t address, std::uint32_t bytes) {
     return (address == kTestRow && bytes == 4u) || (address == kTestCursor && bytes == 4u) ||
@@ -56,10 +61,7 @@ int psx_mod_register_function_entry_plugin(const char *, std::uint32_t address, 
     g_entry = callback;
     return 1;
 }
-int psx_mod_register_vblank_plugin(const char *, PSXModVBlankCallback callback) {
-    g_tick = callback;
-    return 1;
-}
+std::uint64_t psx_get_cycle_count(void) { return g_cycles; }
 }
 
 #include "../../src/game/input/name_entry.cpp"
@@ -107,7 +109,7 @@ void fresh(std::uint32_t at_row, std::uint32_t at_cursor, const std::string &tex
 }
 
 void test_keys_become_the_name() {
-    expect(g_entry_address == 0x8001C484u && g_entry && g_tick, "the module must hook the save screen's routine and the VBlank");
+    expect(g_entry_address == 0x8001C484u && g_entry, "the module must hook the save screen's routine");
     fresh(5, 0);
     expect(strike(4, 'a') && name() == "A       " && cursor() == 1u && row() == 5u, "a letter goes where the cursor is and the cursor moves on");
     expect(strike(5, 'B') && strike(38, '9') && strike(39, '0') && strike(44, 0xA0u) && strike(29, 'z'),
@@ -268,6 +270,136 @@ void test_a_letter_key_is_no_button_that_frame() {
     expect(frame() == 0u && name() == "AAAAAAAA" && cursor() == 8u, "more keys than a frame can hold are dropped, not written past the name");
 }
 
+/* Whether the pad sees this key when it and the others named are down. */
+bool reaches_pad(int scancode, std::initializer_list<int> others = {}) {
+    std::array<std::uint8_t, 512> keys{}, kept{};
+    keys[static_cast<std::size_t>(scancode)] = 1;
+    for (const int other : others) keys[static_cast<std::size_t>(other)] = 1;
+    disruptor_name_entry_keys_for_pad(keys.data(), kept.data(), static_cast<int>(keys.size()));
+    for (std::size_t key = 0; key < keys.size(); ++key) expect(kept[key] == 0 || keys[key] != 0, "the pad is never shown a key that is up");
+    return kept[static_cast<std::size_t>(scancode)] != 0;
+}
+
+void let_go() {
+    const std::array<std::uint8_t, 512> keys{};
+    std::array<std::uint8_t, 512> kept{};
+    disruptor_name_entry_keys_for_pad(keys.data(), kept.data(), static_cast<int>(keys.size()));
+}
+
+void test_a_typing_key_stays_off_the_pad() {
+    fresh(0, 0);
+    expect(reaches_pad(8) && reaches_pad(42) && reaches_pad(44) && reaches_pad(30) && reaches_pad(51), "off the name rows every key is the pad's");
+    let_go();
+
+    fresh(5, 0);
+    expect(!reaches_pad(8), "on the name rows a letter key is no button, and that before its event has come");
+    expect(frame() == kPressed && name() == "        ", "which leaves the pad's own presses alone and types nothing by itself");
+    expect(!reaches_pad(4) && !reaches_pad(29) && !reaches_pad(30) && !reaches_pad(39) && !reaches_pad(89) && !reaches_pad(98),
+           "nor is any letter, a key of the digit row or a digit of the keypad");
+    expect(!reaches_pad(44) && !reaches_pad(42) && !reaches_pad(76), "nor the space bar or either eraser");
+    expect(!reaches_pad(45) && !reaches_pad(51) && !reaches_pad(56) && !reaches_pad(100),
+           "nor a sign's key: a French board has M on one, a Dvorak board most of its letters");
+    expect(reaches_pad(40) && reaches_pad(88) && reaches_pad(82) && reaches_pad(81) && reaches_pad(43) && reaches_pad(41) && reaches_pad(58) &&
+               reaches_pad(225),
+           "Enter, the arrows, Tab, Escape, a function key and Shift stay buttons");
+    expect(reaches_pad(82, {8}) && !reaches_pad(8, {82}), "one key held back does not hold back another");
+    let_go();
+    for (std::uint32_t at = 6; at <= 7; ++at) {
+        fresh(at, 8);
+        expect(!reaches_pad(8), "the rows under the letters hold a letter key back as well");
+        let_go();
+    }
+
+    fresh(0, 0);
+    screen(5, 0);
+    expect(!reaches_pad(8), "a key that goes down between the routine's putting the rows up and its next entry is held back already");
+    expect(disruptor_name_entry_key(8, 'e', 1, 1) == 0, "and is no text yet");
+    expect(frame() == kPressed && name() == "        ", "so it does nothing at all");
+    disruptor_name_entry_key(8, 'e', 0, 1);
+    let_go();
+
+    fresh(4, 0);
+    expect(reaches_pad(9), "on the row before, F is a button and can confirm it");
+    screen(5, 0);
+    expect(disruptor_name_entry_key(9, 'f', 1, 1) == 0, "its event, which comes after the pad showed it, is not typed into the name it brought up");
+    expect(!reaches_pad(9), "and the key, still down, is a button no more");
+    expect(frame() == kPressed && name() == "        ", "the name stays empty");
+    disruptor_name_entry_key(9, 'f', 0, 1);
+    let_go();
+
+    fresh(5, 0);
+    screen(0, 0);
+    expect(reaches_pad(9), "a key that goes down once the routine has left the rows is a button");
+    disruptor_name_entry_key(9, 'f', 1, 1);
+    expect(frame() == kPressed && name() == "        ", "and what its event queued is dropped at the routine's next entry");
+    disruptor_name_entry_key(9, 'f', 0, 1);
+    let_go();
+    fresh(5, 0);
+    for (int tick = 0; tick < 8; ++tick) g_tick();
+    expect(reaches_pad(9) && disruptor_name_entry_key(9, 'f', 1, 1) == 0, "and so is one that comes when the routine has stopped running");
+    disruptor_name_entry_key(9, 'f', 0, 1);
+    let_go();
+
+    fresh(5, 0);
+    expect(!reaches_pad(8), "a key held on the name rows");
+    screen(0, 0);
+    expect(!reaches_pad(8), "stays held back when the rows are left: the next screen must not take it for a fresh press");
+    let_go();
+    expect(reaches_pad(8), "and is a button again once it has been let go");
+    let_go();
+
+    fresh(5, 0);
+    expect(disruptor_name_entry_key(99, 'x', 1, 1) == 0 && reaches_pad(99) && frame() == kPressed && name() == "        ",
+           "a key outside the typing block types nothing whatever a layout calls it, and stays a button");
+    disruptor_name_entry_key(99, 'x', 0, 1);
+    let_go();
+
+    fresh(5, 0);
+    expect(!reaches_pad(8), "a key held back on the name rows");
+    g_netplay = 1;
+    expect(reaches_pad(8), "is given to a network game at once: nothing is typed there");
+    g_netplay = 0;
+    let_go();
+    fresh(5, 0);
+    expect(!reaches_pad(8), "and one held back");
+    g_ls_mode = 1;
+    expect(reaches_pad(8), "to a lockstep run");
+    g_ls_mode = 0;
+    let_go();
+
+    fresh(5, 0);
+    expect(disruptor_name_entry_key(4, 'a', 1, 1) == 1 && !reaches_pad(4), "a letter queued and its key held back");
+    disruptor_name_entry_state_loaded();
+    expect(disruptor_name_entry_key(5, 'b', 1, 1) == 0, "a save state loaded: no key is text until the routine runs again");
+    expect(reaches_pad(9), "a key that goes down now is a button, though the clock has not moved");
+    expect(frame() == kPressed && name() == "        ", "and what was typed before the load is not put into the name it restored");
+    disruptor_name_entry_key(4, 'a', 0, 1);
+    disruptor_name_entry_key(5, 'b', 0, 1);
+    let_go();
+
+    int typed_and_pressed = 0, typing = 0;
+    for (int scancode = 0; scancode < 512; ++scancode) {
+        for (const std::uint32_t keycode : {std::uint32_t{'a'}, std::uint32_t{'Z'}, std::uint32_t{'7'}, std::uint32_t{' '}, 0xE9u, 0x444u, 0x40000059u}) {
+            fresh(5, 0);
+            const bool on_pad = reaches_pad(scancode);
+            const bool text = disruptor_name_entry_key(scancode, keycode, 1, 1) == 1;
+            disruptor_name_entry_key(scancode, keycode, 0, 1);
+            let_go();
+            typing += text;
+            typed_and_pressed += text && on_pad;
+        }
+    }
+    expect(typing > 300 && typed_and_pressed == 0, "no key of the board, whatever a layout calls it, both types on the name rows and presses a button");
+
+    fresh(5, 0);
+    std::array<std::uint8_t, 600> wide{}, kept{};
+    wide[8] = wide[599] = 1;
+    kept[599] = 7;
+    disruptor_name_entry_keys_for_pad(wide.data(), kept.data(), 600);
+    expect(kept[8] == 0 && kept[599] == 1, "a key past the last one known is passed on as it is");
+    let_go();
+}
+
 }  // namespace
 
 int main() {
@@ -276,6 +408,7 @@ int main() {
     test_enter_ends_the_typing();
     test_only_on_the_name_rows();
     test_a_letter_key_is_no_button_that_frame();
+    test_a_typing_key_stays_off_the_pad();
     expect(g_strays == 0, "nothing but the row, the cursor and the name's eight codes may be read or written");
     if (g_failures) return 1;
     std::cout << "Disruptor name entry tests passed\n";

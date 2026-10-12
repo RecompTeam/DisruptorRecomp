@@ -24,6 +24,7 @@
 #include "../../../psxrecomp/runtime/include/gpu.h"
 
 #include <algorithm>
+#include <array>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -45,6 +46,7 @@ extern "C" void gpu_geometry_camera_yaw_residual_set(double yaw_units);
 extern "C" SDL_Window *sdl_window;
 extern "C" int psx_host_ui_game_input_captured(void);
 extern "C" int psx_netplay_active(void);
+extern "C" void disruptor_name_entry_keys_for_pad(const uint8_t *keys, uint8_t *kept, int count);
 
 namespace {
 
@@ -341,6 +343,12 @@ bool key_down(const Uint8 *keys, int scancode) {
  * desktop click cannot fire into gameplay accidentally. */
 void apply_modern_controls(const Uint8 *keys, uint32_t mouse_buttons) {
     if (!g_mouse.modern_controls_enabled) return;
+
+    std::array<Uint8, 512> pad_keys{};  /* SDL's scancode count, in 2 and 3 alike */
+    if (keys) {
+        disruptor_name_entry_keys_for_pad(keys, pad_keys.data(), static_cast<int>(pad_keys.size()));
+        keys = pad_keys.data();
+    }
 
     uint16_t press = 0;
     if (key_down(keys, SDL_SCANCODE_W) || key_down(keys, SDL_SCANCODE_UP))

@@ -18,6 +18,7 @@ namespace {
 SDL_Window g_window;
 std::array<std::uint8_t, 2 * 1024 * 1024> g_ram{};
 std::array<Uint8, 512> g_keys{};
+std::array<bool, 512> g_typed_with{};  /* keys the name entry holds back from the pad */
 void (*g_registered_hook)(void) = nullptr;
 std::uint32_t g_noted_at = 0;
 std::uint8_t g_noted = 0;
@@ -60,6 +61,10 @@ void disruptor_capsule_note_byte(std::uint32_t address, std::uint8_t value) {
     g_noted_at = address;
     g_noted = value;
     ++g_notes;
+}
+
+void disruptor_name_entry_keys_for_pad(const std::uint8_t *keys, std::uint8_t *kept, int count) {
+    for (int key = 0; key < count; ++key) kept[key] = g_typed_with[static_cast<std::size_t>(key)] ? std::uint8_t{0} : keys[key];
 }
 
 int psx_host_ui_game_input_captured(void) {
@@ -203,6 +208,7 @@ void reset_state() {
     g_mouse = MouseAimState{};
     g_ram.fill(0);
     g_keys.fill(0);
+    g_typed_with.fill(false);
     g_buttons = 0;
     g_pad_buttons = 0xFFFFu;
     g_relative_x = 0.0f;
@@ -710,6 +716,18 @@ void test_modern_keyboard_mapping_and_merge() {
     expect_pressed(kPadLeft, "Left arrow retains original turn/menu behavior");
     expect_pressed(kPadRight, "Right arrow retains original turn/menu behavior");
     expect_pressed(kPadSelect, "Tab maps to the automap");
+
+    reset_state();
+    g_mouse.modern_controls_enabled = true;
+    g_typed_with[SDL_SCANCODE_E] = true;
+    g_keys[SDL_SCANCODE_E] = 1;
+    g_keys[SDL_SCANCODE_F] = 1;
+    g_keys[SDL_SCANCODE_RETURN] = 1;
+    apply_modern_controls(g_keys.data(), 0);
+    expect_released(kPadTriangle, "a key a name is being typed with is no button");
+    expect_pressed(kPadSquare, "the keys beside it still are");
+    expect_pressed(kPadCross, "and so is Return");
+    expect(g_keys[SDL_SCANCODE_E] == 1, "the keyboard's own state is left as it was");
 }
 
 void test_modern_mouse_buttons_require_capture() {
