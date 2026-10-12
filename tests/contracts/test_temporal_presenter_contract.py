@@ -42,8 +42,12 @@ gpu = read("psxrecomp/runtime/src/gpu.c")
 billboards = read("src/game/render/billboard_aspect.cpp")
 
 require(
-    "    disruptor_contract(temporal_presenter)\n" in cmake and "PSX_HAS_DISRUPTOR_SPRITE_DEPTH=1" in cmake,
-    "the presenter contract and the sprite-depth interpreter switch must remain registered",
+    "    disruptor_contract(temporal_presenter)\n" in cmake
+    and (read("game.toml") + read("game-widescreen.toml")).count(
+        'callback = "disruptor_sprite_depth_instruction_hook"\n'
+    )
+    == 2,
+    "the presenter contract and the sprite depth hook for code that runs from RAM must remain registered",
 )
 
 underlay = function_body(temporal, "static void temporal_underlay(float alpha,int covered)")

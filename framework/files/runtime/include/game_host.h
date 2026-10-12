@@ -6,6 +6,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+typedef struct CPUState CPUState;
+
 #ifdef __cplusplus
 namespace PSXRecompV4 { struct UserSettings; }
 /* Called when the user's settings are read, before the drive first reads the disc. True asks for a boot without the BIOS animation. */
@@ -26,6 +28,8 @@ int psx_game_key(int scancode, uint32_t keycode, int down, int plain);
 /* Called around the sampling of the pad, outside netplay. */
 void psx_game_before_input(void);
 void psx_game_after_input(void);
+/* Supplied by the generated code, from [[recompiler.instruction_hook]]: the game's calls for an instruction that ran from RAM. */
+void psx_game_instruction_ran(CPUState *cpu, uint32_t address, uint32_t instruction);
 
 #ifdef __cplusplus
 }

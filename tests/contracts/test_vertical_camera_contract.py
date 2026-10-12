@@ -23,7 +23,6 @@ camera = read("src/game/input/vertical_camera.cpp")
 camera_h = read("src/game/input/vertical_camera.h")
 mouse = read("src/game/input/mouse_aim.cpp")
 codegen = read("psxrecomp/recompiler/src/code_generator.cpp")
-dirty = read("psxrecomp/runtime/src/dirty_ram_interp.c")
 gpu = read("psxrecomp/runtime/src/gpu.c")
 cmake = read("CMakeLists.txt")
 configs = read("game.toml") + read("game-widescreen.toml")
@@ -63,11 +62,12 @@ require("disruptor_vertical_camera_instruction_hook(cpu" in codegen and
         "addr, instr);" not in codegen_table,
         "generated sites must call the guarded camera dispatcher")
 
-require("#ifdef PSX_HAS_DISRUPTOR_VERTICAL_CAMERA" in dirty and
-        "disruptor_vertical_camera_instruction_hook(cpu, pc, insn, 1)" in dirty,
-        "dirty interpreter parity must be project-gated and post-instruction")
-require("PSX_HAS_DISRUPTOR_VERTICAL_CAMERA=1" in cmake,
-        "the Disruptor target must opt into dirty-interpreter camera hooks")
+listed_start = configs.index('callback = "disruptor_vertical_camera_instruction_hook"\n')
+listed_table = configs[listed_start:configs.index("[[recompiler.instruction_hook]]", listed_start)]
+require(configs.count('callback = "disruptor_vertical_camera_instruction_hook"\n') == 2 and
+        all(f'["0x{pc:08X}", "0x{word:08X}"],' in listed_table
+            for pc, word in expected_sites.items()),
+        "both game configurations must list the camera hooks for code that runs from RAM")
 
 require("g_ls_mode != 0 || g_ls_replay_active != 0" in camera,
         "record and replay halves of the lockstep comparator must be neutral")

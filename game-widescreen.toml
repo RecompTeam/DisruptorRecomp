@@ -23,6 +23,153 @@ address = "0x80043E90"
 expected = "0x28420002"
 replacement = "0x28420001"
 
+# Calls made after an instruction of the game that ran from RAM. A site is an address and the whole
+# instruction word expected there. Native code gets the same calls from the generator's own lists, which
+# a contract keeps equal to these.
+
+# Disruptor has no architectural pitch state.  The project implements its
+# opt-in vertical camera at a deliberately finite set of resident instruction
+# sites: CPU-projected screen-Y centres, proven vertical participation tests,
+# the two projectile-construction convergence points, and the common renderer
+# epilogue.  Every complete instruction word is pinned so a different retail
+# revision fails generation instead of silently modifying unrelated code.
+#
+# The generated callback is appended after the vanilla instruction.  At zero
+# pitch it is an exact no-op; the runtime callback decodes the pinned word to
+# identify the destination register or the required post-instruction action.
+[[recompiler.instruction_hook]]
+callback = "disruptor_vertical_camera_instruction_hook"
+sites = [
+    # CPU world projection centres (ORI rt,zero,120).
+    ["0x8003AD54", "0x34020078"],
+    ["0x8003ADE4", "0x34020078"],
+    ["0x8003B140", "0x34020078"],
+    ["0x8003B1EC", "0x34020078"],
+    ["0x8003B764", "0x34020078"],
+    ["0x8003B990", "0x34020078"],
+    ["0x8003BDA4", "0x34020078"],
+    ["0x8003C4B4", "0x34020078"],
+    ["0x8003C99C", "0x34020078"],
+    ["0x8003D07C", "0x34020078"],
+    ["0x8003D398", "0x34030078"],
+    ["0x8003F6B0", "0x34020078"],
+    # Proven camera-vertical object participation pairs.
+    ["0x8003B900", "0x0205102A"],
+    ["0x8003B90C", "0x0202102A"],
+    ["0x8003BD14", "0x0206102A"],
+    ["0x8003BD20", "0x0202102A"],
+    ["0x8003CDB8", "0x0065102A"],
+    ["0x8003CDC4", "0x0062102A"],
+    # Normal-weapon and psionic construction convergence loads.
+    ["0x8002E4B8", "0x92640022"],
+    ["0x8002EAF0", "0x92430020"],
+    # Common renderer epilogue: restore the neutral projection horizon.
+    ["0x8004279C", "0x8FBF016C"],
+]
+
+# Disruptor's experimental far-rendering override is host-only: reviewed
+# loads of the retail far/fade globals are substituted after the original LW,
+# leaving guest RAM untouched.  Additional reviewed portal, object-decision,
+# and packet-boundary instructions feed read-only diagnostics through the same
+# callback.  The renderer entry starts a measurement span and the reviewed
+# common epilogue closes it.  Keep this callback independent from the
+# vertical-camera dispatcher so either enhancement can be built and tested in
+# isolation.
+[[recompiler.instruction_hook]]
+callback = "disruptor_far_rendering_instruction_hook"
+sites = [
+    # Portal traversal diagnostics: recursion depth, unique-room completion,
+    # and the three candidate-distance values before their branch tests.
+    ["0x8003A0F8", "0x93B300C0"],
+    ["0x8003A390", "0xA082001F"],
+    ["0x8003A92C", "0x00005812"],
+    ["0x8003A964", "0x00681021"],
+    ["0x8003AA74", "0x00AC1021"],
+    # Far-distance loads from $gp + 0x4A0.
+    ["0x8003A914", "0x8F8C04A0"],
+    ["0x8003B8C8", "0x8F8304A0"],
+    ["0x8003BCE0", "0x8F8204A0"],
+    ["0x8003C168", "0x8F8304A0"],
+    ["0x8003CD64", "0x8F8304A0"],
+    # Object distance-decision results.
+    ["0x8003B8D8", "0x0072182A"],
+    ["0x8003BCEC", "0x0053102A"],
+    ["0x8003C178", "0x0077182A"],
+    ["0x8003CD70", "0x0077182A"],
+    # Fade-start loads from $gp + 0x494.
+    ["0x8003B2CC", "0x8F820494"],
+    ["0x8003BA30", "0x8F820494"],
+    ["0x8003BE40", "0x8F820494"],
+    ["0x8003C628", "0x8F820494"],
+    ["0x8003C878", "0x8F820494"],
+    ["0x8003D28C", "0x8F820494"],
+    ["0x8003FB0C", "0x8F840494"],
+    # Billboard post-pass CLUT-row selection.
+    ["0x80043184", "0x8F820494"],
+    # Main-renderer visible-list and packet boundaries.
+    ["0x800410E0", "0x93830310"],
+    ["0x800410F8", "0x8F820680"],
+    ["0x800411D8", "0x8F8301D4"],
+    # Common renderer epilogue.
+    ["0x8004279C", "0x8FBF016C"],
+]
+
+# Disruptor's world actors and pickups are CPU-built POLY_FT4 billboards.
+# Their projected centre goes through the reviewed classic-wide X squash, but
+# their retail pixel width does not.  These are five final packet writes plus
+# the deferred base-actor submission seam; the host callback tags only a
+# completed, shape-validated packet for proportion repair.
+[[recompiler.instruction_hook]]
+callback = "disruptor_billboard_aspect_instruction_hook"
+sites = [
+    ["0x8003BB88", "0xA6030016"],
+    ["0x8003BFB0", "0xA6030016"],
+    ["0x8003C848", "0xA6030016"],
+    ["0x8003CAD4", "0xA6020016"],
+    ["0x8003D488", "0xA2060025"],
+    ["0x800433A0", "0x02A02821"],
+]
+
+# Disruptor's sky backdrop routine lays SPRT tiles over the opening it has
+# already clamped to the 320-pixel frame.  These four seams hand the host the
+# left edge, the panorama scroll and the right edge before the tile loop reads
+# them, so classic widescreen can ask for the columns a wider view needs.
+[[recompiler.instruction_hook]]
+callback = "disruptor_backdrop_tiles_instruction_hook"
+sites = [
+    ["0x8003B328", "0x8FB80040"],
+    ["0x8003B338", "0x00621821"],
+    ["0x8003B348", "0x8FB80028"],
+    ["0x8003B5A8", "0x8F8205B8"],
+    ["0x8003B638", "0x8FB80040"],
+]
+
+# Disruptor's sky backdrop routine lays SPRT tiles over the opening it has
+# already clamped to the 320-pixel frame.  These four seams hand the host the
+# left edge, the panorama scroll and the right edge before the tile loop reads
+# them, so classic widescreen can ask for the columns a wider view needs.
+[[recompiler.instruction_hook]]
+callback = "disruptor_sprite_depth_instruction_hook"
+sites = [
+    ["0x8003B98C", "0xAFA20010"],
+    ["0x8003BDA0", "0xAFA20010"],
+    ["0x8003C4B0", "0xAFA20010"],
+    ["0x8003D078", "0xAFA20010"],
+    ["0x8003D1B4", "0xA4379EA0"],
+]
+
+# Disruptor's sky backdrop routine lays SPRT tiles over the opening it has
+# already clamped to the 320-pixel frame.  These four seams hand the host the
+# left edge, the panorama scroll and the right edge before the tile loop reads
+# them, so classic widescreen can ask for the columns a wider view needs.
+[[recompiler.instruction_hook]]
+callback = "disruptor_intro_skip_instruction_hook"
+sites = [
+    ["0x800147B0", "0x2A820003"],
+    ["0x80020A80", "0x2A02005E"],
+    ["0x80048678", "0x30420940"],
+]
+
 [runtime]
 debug_port = 4624
 window_title = "Disruptor Recompiled"

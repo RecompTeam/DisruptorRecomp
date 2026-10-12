@@ -1,5 +1,5 @@
 diff --git a/recompiler/src/config_loader.cpp b/recompiler/src/config_loader.cpp
-index 246483fe90be378f8baf3e85671b692986823a8e..5f99a3341d999703606af51594b351e0b23a24d3 100644
+index 246483fe90be378f8baf3e85671b692986823a8e..98a404f8bff2b3fc666007ae4a50cc1028726852 100644
 --- a/recompiler/src/config_loader.cpp
 +++ b/recompiler/src/config_loader.cpp
 @@ -3,12 +3,26 @@
@@ -89,7 +89,49 @@ index 246483fe90be378f8baf3e85671b692986823a8e..5f99a3341d999703606af51594b351e0
              }
              rt.video_supersampling = static_cast<int>(n);
          }
-@@ -1451,6 +1499,10 @@
+@@ -1264,6 +1312,41 @@
+         for (const auto& a : arr)
+             mod_function_entry_funcs.push_back(
+                 parse_hex(a, "recompiler.mod_function_entry_funcs"));
++    }
++    std::vector<InstructionHook> instruction_hooks;
++    if (recomp.contains("instruction_hook")) {
++        for (const auto& item :
++             toml::find<toml::array>(recomp, "instruction_hook")) {
++            InstructionHook hook;
++            hook.callback = toml::find<std::string>(item, "callback");
++            const bool named = !hook.callback.empty() &&
++                !std::isdigit((unsigned char)hook.callback[0]) &&
++                std::all_of(hook.callback.begin(), hook.callback.end(),
++                    [](unsigned char c) { return std::isalnum(c) || c == '_'; });
++            if (!named)
++                throw std::runtime_error(fmt::format(
++                    "{}: [[recompiler.instruction_hook]] callback must be a "
++                    "C identifier", config_path.string()));
++            for (const auto& pair : toml::find<std::vector<std::vector<
++                     std::string>>>(item, "sites")) {
++                if (pair.size() != 2)
++                    throw std::runtime_error(fmt::format(
++                        "{}: [[recompiler.instruction_hook]] a site is an "
++                        "address and a word", config_path.string()));
++                InstructionHookSite site;
++                site.address = parse_hex(
++                    pair[0], "recompiler.instruction_hook.sites");
++                site.expected = parse_hex(
++                    pair[1], "recompiler.instruction_hook.sites");
++                if ((site.address & 3u) != 0)
++                    throw std::runtime_error(fmt::format(
++                        "{}: instruction hook address 0x{:08X} is not "
++                        "instruction-aligned",
++                        config_path.string(), site.address));
++                hook.sites.push_back(site);
++            }
++            instruction_hooks.push_back(std::move(hook));
++        }
+     }
+     std::vector<uint32_t> hot_funcs;
+     if (recomp.contains("hot_funcs")) {
+@@ -1451,6 +1534,10 @@
      std::vector<uint32_t> ws_cull_screen_x_sites;
      std::vector<uint32_t> ws_cull_slti_sites;
      std::vector<uint32_t> ws_cull_slti_lower_sites;
@@ -100,7 +142,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..5f99a3341d999703606af51594b351e0
      std::vector<uint32_t> ws_cull_bltz_sites;
      std::vector<uint32_t> ws_cull_negsub_sites;
      std::vector<uint32_t> ws_cull_vxrange_sites;
-@@ -1459,6 +1511,9 @@
+@@ -1459,6 +1546,9 @@
      std::vector<uint32_t> ws_cull_xclip_load_sites;
      std::vector<WidescreenCullKeepSite> ws_cull_keep_sites;
      std::vector<WidescreenAngleSite> ws_cull_angle_sites;
@@ -110,7 +152,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..5f99a3341d999703606af51594b351e0
      WidescreenAspectConeConfig ws_aspect_cone;
      int ws_cull_guard_pixels = 0;
      int ws_cull_activation_guard_pixels = 0;
-@@ -1484,6 +1539,10 @@
+@@ -1484,6 +1574,10 @@
              load_sites("screen_x_sites", ws_cull_screen_x_sites);
              load_sites("slti_sites",  ws_cull_slti_sites);
              load_sites("slti_lower_sites", ws_cull_slti_lower_sites);
@@ -121,7 +163,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..5f99a3341d999703606af51594b351e0
              load_sites("bltz_sites",  ws_cull_bltz_sites);
              load_sites("negsub_sites", ws_cull_negsub_sites);
              load_sites("vxrange_sites", ws_cull_vxrange_sites);
-@@ -1552,6 +1611,85 @@
+@@ -1552,6 +1646,85 @@
                              "{}: duplicate cull-angle address 0x{:08X}",
                              config_path.string(), site.address));
                      ws_cull_angle_sites.push_back(site);
@@ -207,7 +249,15 @@ index 246483fe90be378f8baf3e85671b692986823a8e..5f99a3341d999703606af51594b351e0
                  }
              }
              if (cull.contains("aspect_cone")) {
-@@ -1901,6 +2039,10 @@
+@@ -1886,6 +2059,7 @@
+         /*ws_auto_ui_squash*/      ws_auto_ui_squash,
+         /*data_shard_funcs*/      data_shard_funcs,
+         /*mod_function_entry_funcs*/ mod_function_entry_funcs,
++        /*instruction_hooks*/     instruction_hooks,
+         /*hot_funcs*/             hot_funcs,
+         /*vsync_query_func*/      vsync_query_func,
+         /*vsync_counter_addr*/    vsync_counter_addr,
+@@ -1901,6 +2075,10 @@
          /*ws_cull_screen_x_sites*/ ws_cull_screen_x_sites,
          /*ws_cull_slti_sites*/    ws_cull_slti_sites,
          /*ws_cull_slti_lower_sites*/ ws_cull_slti_lower_sites,
@@ -218,7 +268,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..5f99a3341d999703606af51594b351e0
          /*ws_cull_bltz_sites*/    ws_cull_bltz_sites,
          /*ws_cull_negsub_sites*/  ws_cull_negsub_sites,
          /*ws_cull_vxrange_sites*/ ws_cull_vxrange_sites,
-@@ -1909,6 +2051,8 @@
+@@ -1909,6 +2087,8 @@
          /*ws_cull_xclip_load_sites*/ ws_cull_xclip_load_sites,
          /*ws_cull_keep_sites*/    ws_cull_keep_sites,
          /*ws_cull_angle_sites*/   ws_cull_angle_sites,
@@ -227,7 +277,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..5f99a3341d999703606af51594b351e0
          /*ws_aspect_cone*/         ws_aspect_cone,
          /*ws_cull_guard_pixels*/  ws_cull_guard_pixels,
          /*ws_cull_activation_guard_pixels*/ ws_cull_activation_guard_pixels,
-@@ -1995,7 +2139,7 @@
+@@ -1995,7 +2175,7 @@
      return go;
  }
  
@@ -236,7 +286,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..5f99a3341d999703606af51594b351e0
  
  UserSettings load_user_settings(const fs::path& path) {
      UserSettings s;
-@@ -2004,7 +2148,10 @@
+@@ -2004,7 +2184,10 @@
  
      toml::value doc;
      try {
@@ -248,7 +298,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..5f99a3341d999703606af51594b351e0
      } catch (const std::exception&) {
          // Malformed file: fall back to all-defaults rather than refuse to boot,
          // but tell the caller so the user hears about it (and so the file can
-@@ -2026,7 +2173,7 @@
+@@ -2026,7 +2209,7 @@
          });
          if (v.contains("supersampling")) try_get([&]{
              const auto n = toml::find<int64_t>(v, "supersampling");
@@ -257,7 +307,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..5f99a3341d999703606af51594b351e0
          });
          if (v.contains("window_width")) try_get([&]{
              const auto n = toml::find<int64_t>(v, "window_width");
-@@ -2087,8 +2234,16 @@
+@@ -2087,8 +2270,16 @@
          });
          if (v.contains("frame_interpolation_fps")) try_get([&]{
              s.frame_interpolation_fps = toml::find<int>(v, "frame_interpolation_fps");
@@ -275,7 +325,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..5f99a3341d999703606af51594b351e0
          });
          if (v.contains("aspect_ratio")) try_get([&]{
              const auto m = toml::find<std::string>(v, "aspect_ratio");
-@@ -2106,6 +2261,17 @@
+@@ -2106,6 +2297,17 @@
          const toml::value& a = toml::find(doc, "audio");
          if (a.contains("spu_hq")) try_get([&]{
              s.spu_hq = toml::find<bool>(a, "spu_hq"); s.has_spu_hq = true;
@@ -293,7 +343,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..5f99a3341d999703606af51594b351e0
          });
      }
      if (doc.contains("launcher")) {
-@@ -2230,15 +2396,190 @@
+@@ -2230,15 +2432,190 @@
              if (n >= 0 && n <= 32767) { s.deadzone = (int)n; s.has_deadzone = true; }
          });
      }
@@ -485,7 +535,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..5f99a3341d999703606af51594b351e0
      if (!f.is_open()) return false;
  
      // TOML strings use forward slashes so backslash escaping is never an issue.
-@@ -2247,7 +2588,21 @@
+@@ -2247,7 +2624,21 @@
          return str;
      };
  
@@ -508,7 +558,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..5f99a3341d999703606af51594b351e0
      f << "# Overrides the bundled game.toml; the command line overrides this file.\n\n";
  
      f << "[video]\n";
-@@ -2287,6 +2642,11 @@
+@@ -2287,6 +2678,11 @@
          f << "frame_interpolation = " << (s.frame_interpolation ? "true" : "false") << "\n";
      if (s.has_frame_interpolation_fps)
          f << "frame_interpolation_fps = " << s.frame_interpolation_fps << "\n";
@@ -520,7 +570,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..5f99a3341d999703606af51594b351e0
      if (s.has_aspect_ratio)
          f << "aspect_ratio      = \"" << s.aspect_num << ":" << s.aspect_den << "\"\n";
      if (s.has_adaptive_view)
-@@ -2294,6 +2654,10 @@
+@@ -2294,6 +2690,10 @@
      f << "\n[audio]\n";
      if (s.has_spu_hq)
          f << "spu_hq = " << (s.spu_hq ? "true" : "false") << "\n";
@@ -531,7 +581,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..5f99a3341d999703606af51594b351e0
      if (s.has_skip_launcher)
          f << "\n[launcher]\nskip_launcher = " << (s.skip_launcher ? "true" : "false") << "\n";
      if ((s.has_netplay_player_name && !s.netplay_player_name.empty()) ||
-@@ -2353,7 +2717,98 @@
+@@ -2353,7 +2753,98 @@
              f << "extra_late = " << s.parappa_timing_extra_late << "\n";
      }
  

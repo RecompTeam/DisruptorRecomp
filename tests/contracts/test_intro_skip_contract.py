@@ -61,16 +61,16 @@ MERGED = (
     "        option->set(settings, option->get(pending));\n"
 )
 generator = read("psxrecomp/recompiler/src/code_generator.cpp")
-interpreter = read("psxrecomp/runtime/src/dirty_ram_interp.c")
+configs = read("game.toml") + read("game-widescreen.toml")
 audit = read("tools/audit_codegen.py")
 settings_loader = read("psxrecomp/recompiler/src/config_loader.cpp")
 
 require(
     "src/game/session/intro_skip.cpp" in cmake
-    and "PSX_HAS_DISRUPTOR_INTRO_SKIP=1" in cmake
+    and configs.count('callback = "disruptor_intro_skip_instruction_hook"\n') == 2
     and "    disruptor_contract(intro_skip RETAIL)\n" in cmake
     and "    disruptor_unit_test(disruptor_intro_skip " in cmake,
-    "intro-skip source, its interpreter switch and both tests must remain registered",
+    "intro-skip source, its hook for code that runs from RAM and both tests must remain registered",
 )
 
 require(
@@ -83,8 +83,8 @@ for address, word in SEAMS.items():
         f"the generator must pin the intro-skip seam at 0x{address:08X}",
     )
     require(
-        f"(pc == 0x{address:08X}u && insn == 0x{word:08X}u)" in interpreter,
-        f"the dirty-RAM interpreter must pin the intro-skip seam at 0x{address:08X}",
+        configs.count(f'["0x{address:08X}", "0x{word:08X}"],') == 2,
+        f"code that runs from RAM must be hooked at the intro-skip seam 0x{address:08X}",
     )
     require(f"0x{address:08X}: 0x{word:08X}," in audit, f"the codegen audit must expect the seam at 0x{address:08X}")
     require(f"0x{address:08X}u" in source and f"0x{word:08X}u" in source, f"the hook must check 0x{address:08X}")

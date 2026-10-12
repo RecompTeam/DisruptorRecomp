@@ -22,7 +22,7 @@ def require(condition: bool, message: str) -> None:
 source = read("src/game/render/billboard_aspect.cpp")
 header = read("src/game/render/billboard_aspect.h")
 codegen = read("psxrecomp/recompiler/src/code_generator.cpp")
-dirty = read("psxrecomp/runtime/src/dirty_ram_interp.c")
+configs = read("game.toml") + read("game-widescreen.toml")
 gpu = read("psxrecomp/runtime/src/gpu.c")
 gpu_h = read("psxrecomp/runtime/include/gpu.h")
 tag_match_h = read("psxrecomp/runtime/include/gpu_ws_tag_match.h")
@@ -59,19 +59,17 @@ for pc, word in expected_sites.items():
     require(f"0x{pc:08X}u" in source_table and
             f"0x{word:08X}u" in source_table,
             f"host hook table is missing 0x{pc:08X}")
-    require(f"0x{pc:08X}u" in dirty and f"0x{word:08X}u" in dirty,
-            f"dirty interpreter is missing 0x{pc:08X}")
+    require(configs.count(f'["0x{pc:08X}", "0x{word:08X}"],') == 2,
+            f"code that runs from RAM is not hooked at 0x{pc:08X}")
 
 require("disruptor_billboard_aspect_instruction_hook(cpu" in codegen and
         '"\\n{}disruptor_billboard_aspect_instruction_hook(cpu, "' in codegen,
         "compiled hooks must be separate post-instruction statements")
-require("#ifdef PSX_HAS_DISRUPTOR_BILLBOARD_ASPECT" in dirty and
-        "disruptor_billboard_aspect_instruction_hook(cpu, pc, insn, 1)" in dirty,
-        "dirty-interpreter parity must be project-gated and post-instruction")
-require("PSX_HAS_DISRUPTOR_BILLBOARD_ASPECT=1" in cmake and
-        "src/game/render/billboard_aspect.cpp" in cmake and
+require(configs.count('callback = "disruptor_billboard_aspect_instruction_hook"\n') == 2,
+        "both game configurations must list the hook for code that runs from RAM")
+require("src/game/render/billboard_aspect.cpp" in cmake and
         "tests/unit/disruptor_billboard_aspect_test.cpp" in cmake,
-        "runtime source, dirty seam, and focused behavior test must be enabled")
+        "runtime source and focused behavior test must be enabled")
 
 require("gpu_ws_tag_primitive" in gpu_h and
         "void gpu_ws_tag_primitive" in gpu and

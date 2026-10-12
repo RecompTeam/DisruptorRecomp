@@ -139,6 +139,17 @@ python tools/framework.py apply
 `settings.toml` beside the executable; game files, generated code, and build
 directories are ignored by Git.
 
+The framework reaches the game through one header, `runtime/include/game_host.h`,
+which `src/game/host.cpp` answers. The instructions the game hooks are listed in
+`game.toml` under `[[recompiler.instruction_hook]]` for code that runs from RAM.
+The code generator holds its own copy for native code, and a contract keeps the
+two equal.
+
+A save state carries a key made of the code generator's sources, listed in
+`psxrecomp/runtime/codegen_hash_sources.cmake`. Any edit to one of them, a
+comment included, makes every earlier save state and capsule unloadable. Those
+files change only together with the pin.
+
 ## Layout
 
 | Folder | Holds |

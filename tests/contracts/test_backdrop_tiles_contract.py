@@ -57,7 +57,7 @@ source = read("src/game/render/backdrop_tiles.cpp")
 gpu = read("psxrecomp/runtime/src/gpu.c")
 gpu_header = read("psxrecomp/runtime/include/gpu.h")
 codegen = read("psxrecomp/recompiler/src/code_generator.cpp")
-interpreter = read("psxrecomp/runtime/src/dirty_ram_interp.c")
+configs = read("game.toml") + read("game-widescreen.toml")
 audit = read("tools/audit_codegen.py")
 
 require(
@@ -71,15 +71,11 @@ require(
     "the build gate must run this contract with its inputs required",
 )
 require(
-    "PSX_HAS_DISRUPTOR_BACKDROP_TILES=1" in cmake,
-    "the Disruptor target must opt into the dirty-interpreter backdrop seams",
-)
-require(
     "+runtime/include/gpu_ws_screen_tile.h" in read("framework/FILES.txt").splitlines(),
     "the tile header must be applied to the framework checkout",
 )
 
-for text, name in ((source, "host hook"), (codegen, "code generator"), (interpreter, "dirty interpreter"), (audit, "codegen audit")):
+for text, name in ((source, "host hook"), (codegen, "code generator"), (configs, "game configuration"), (audit, "codegen audit")):
     upper = text.upper()
     require(
         all(f"0X{address:08X}" in upper and f"0X{word:08X}" in upper for address, word in TILE_SITES.items()),
@@ -87,7 +83,7 @@ for text, name in ((source, "host hook"), (codegen, "code generator"), (interpre
     )
 require(
     "disruptor_backdrop_tiles_instruction_hook(cpu, " in codegen
-    and "disruptor_backdrop_tiles_instruction_hook(cpu, pc, insn, 1);" in interpreter,
+    and configs.count('callback = "disruptor_backdrop_tiles_instruction_hook"\n') == 2,
     "compiled and interpreted code must reach the same host hook",
 )
 require(

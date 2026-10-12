@@ -1,5 +1,5 @@
 diff --git a/recompiler/src/main_psx.cpp b/recompiler/src/main_psx.cpp
-index 9979abe18ed351391f95e5009189c84ce7cbec7e..b508c97cd3f4f737e960e10c3540b7bebbb4215a 100644
+index 9979abe18ed351391f95e5009189c84ce7cbec7e..f79e0dcc50a18d4cdb7e1f5c9c1770ff8b78cde7 100644
 --- a/recompiler/src/main_psx.cpp
 +++ b/recompiler/src/main_psx.cpp
 @@ -169,6 +169,10 @@
@@ -13,17 +13,26 @@ index 9979abe18ed351391f95e5009189c84ce7cbec7e..b508c97cd3f4f737e960e10c3540b7be
      std::set<uint32_t>    ws_cull_bltz;         // [widescreen.cull] bltz_sites
      std::set<uint32_t>    ws_cull_negsub;       // [widescreen.cull] negsub_sites
      std::set<uint32_t>    ws_cull_vxrange;      // [widescreen.cull] vxrange_sites
-@@ -177,6 +181,9 @@
+@@ -177,6 +181,10 @@
      std::set<uint32_t>    ws_cull_xclip_load;   // [widescreen.cull] xclip_load_sites
      std::vector<PSXRecompV4::WidescreenCullKeepSite> ws_cull_keep;
      std::vector<PSXRecompV4::WidescreenAngleSite> ws_cull_angle;
 +    std::vector<PSXRecompV4::WidescreenYawConeSite> ws_cull_yaw_cone;
++    std::vector<PSXRecompV4::InstructionHook> instruction_hooks;
 +    std::vector<PSXRecompV4::WidescreenHorizontalSltSite>
 +        ws_cull_horizontal_slt;
      PSXRecompV4::WidescreenAspectConeConfig ws_aspect_cone;
      int                   ws_cull_activation_guard_pixels = 0;
      std::vector<uint32_t> ws_cull_w_imms = { 0x140, 0x141 }; // [widescreen.cull] screen_w_imms
-@@ -226,6 +233,14 @@
+@@ -214,6 +222,7 @@
+         ds_funcs.insert(cfg.data_shard_funcs.begin(), cfg.data_shard_funcs.end());
+         mod_entry_funcs.insert(cfg.mod_function_entry_funcs.begin(),
+                                cfg.mod_function_entry_funcs.end());
++        instruction_hooks = cfg.instruction_hooks;
+         hot_funcs.insert(cfg.hot_funcs.begin(), cfg.hot_funcs.end());
+         if (cfg.vsync_query_func)
+             vsync_query_hle_funcs[cfg.vsync_query_func] = {
+@@ -226,6 +235,14 @@
          ws_cull_slti.insert(cfg.ws_cull_slti_sites.begin(), cfg.ws_cull_slti_sites.end());
          ws_cull_slti_lower.insert(cfg.ws_cull_slti_lower_sites.begin(),
                                    cfg.ws_cull_slti_lower_sites.end());
@@ -38,7 +47,7 @@ index 9979abe18ed351391f95e5009189c84ce7cbec7e..b508c97cd3f4f737e960e10c3540b7be
          ws_cull_bltz.insert(cfg.ws_cull_bltz_sites.begin(), cfg.ws_cull_bltz_sites.end());
          ws_cull_negsub.insert(cfg.ws_cull_negsub_sites.begin(), cfg.ws_cull_negsub_sites.end());
          ws_cull_vxrange.insert(cfg.ws_cull_vxrange_sites.begin(), cfg.ws_cull_vxrange_sites.end());
-@@ -234,6 +249,8 @@
+@@ -234,6 +251,8 @@
          ws_cull_xclip_load.insert(cfg.ws_cull_xclip_load_sites.begin(), cfg.ws_cull_xclip_load_sites.end());
          ws_cull_keep = cfg.ws_cull_keep_sites;
          ws_cull_angle = cfg.ws_cull_angle_sites;
@@ -47,7 +56,16 @@ index 9979abe18ed351391f95e5009189c84ce7cbec7e..b508c97cd3f4f737e960e10c3540b7be
          ws_aspect_cone = cfg.ws_aspect_cone;
          ws_cull_activation_guard_pixels =
              cfg.ws_cull_activation_guard_pixels;
-@@ -314,6 +331,14 @@
+@@ -307,6 +326,8 @@
+         ws_tag_funcs.insert(wscfg.ws_sprite_tag_funcs.begin(), wscfg.ws_sprite_tag_funcs.end());
+         mod_entry_funcs.insert(wscfg.mod_function_entry_funcs.begin(),
+                                wscfg.mod_function_entry_funcs.end());
++        if (instruction_hooks.empty())
++            instruction_hooks = wscfg.instruction_hooks;
+         ws_cull_bias.insert(wscfg.ws_cull_bias_sites.begin(), wscfg.ws_cull_bias_sites.end());
+         ws_cull_range.insert(wscfg.ws_cull_range_sites.begin(), wscfg.ws_cull_range_sites.end());
+         ws_cull_a1.insert(wscfg.ws_cull_a1_sites.begin(), wscfg.ws_cull_a1_sites.end());
+@@ -314,6 +335,14 @@
          ws_cull_slti.insert(wscfg.ws_cull_slti_sites.begin(), wscfg.ws_cull_slti_sites.end());
          ws_cull_slti_lower.insert(wscfg.ws_cull_slti_lower_sites.begin(),
                                    wscfg.ws_cull_slti_lower_sites.end());
@@ -62,7 +80,7 @@ index 9979abe18ed351391f95e5009189c84ce7cbec7e..b508c97cd3f4f737e960e10c3540b7be
          ws_cull_bltz.insert(wscfg.ws_cull_bltz_sites.begin(), wscfg.ws_cull_bltz_sites.end());
          ws_cull_negsub.insert(wscfg.ws_cull_negsub_sites.begin(), wscfg.ws_cull_negsub_sites.end());
          ws_cull_vxrange.insert(wscfg.ws_cull_vxrange_sites.begin(), wscfg.ws_cull_vxrange_sites.end());
-@@ -322,6 +347,11 @@
+@@ -322,6 +351,11 @@
          ws_cull_xclip_load.insert(wscfg.ws_cull_xclip_load_sites.begin(), wscfg.ws_cull_xclip_load_sites.end());
          if (ws_cull_keep.empty()) ws_cull_keep = wscfg.ws_cull_keep_sites;
          if (ws_cull_angle.empty()) ws_cull_angle = wscfg.ws_cull_angle_sites;
@@ -74,7 +92,7 @@ index 9979abe18ed351391f95e5009189c84ce7cbec7e..b508c97cd3f4f737e960e10c3540b7be
          if (ws_aspect_cone.sites.empty())
              ws_aspect_cone = wscfg.ws_aspect_cone;
          ws_cull_activation_guard_pixels =
-@@ -1152,6 +1182,10 @@
+@@ -1152,6 +1186,10 @@
          ws_cull_activation_guard_pixels;
      codegen_config.ws_cull_slti_sites  = ws_cull_slti;
      codegen_config.ws_cull_slti_lower_sites = ws_cull_slti_lower;
@@ -85,7 +103,7 @@ index 9979abe18ed351391f95e5009189c84ce7cbec7e..b508c97cd3f4f737e960e10c3540b7be
      codegen_config.ws_cull_bltz_sites  = ws_cull_bltz;
      codegen_config.ws_cull_negsub_sites = ws_cull_negsub;
      codegen_config.ws_cull_vxrange_sites = ws_cull_vxrange;
-@@ -1160,6 +1194,9 @@
+@@ -1160,6 +1198,9 @@
      codegen_config.ws_cull_xclip_load_sites = ws_cull_xclip_load;
      codegen_config.ws_cull_keep_sites = ws_cull_keep;
      codegen_config.ws_cull_angle_sites = ws_cull_angle;
@@ -95,3 +113,39 @@ index 9979abe18ed351391f95e5009189c84ce7cbec7e..b508c97cd3f4f737e960e10c3540b7be
      codegen_config.ws_aspect_cone = ws_aspect_cone;
      codegen_config.ws_cull_w_imms      = ws_cull_w_imms;
      codegen_config.ws_cull_h_imms      = ws_cull_h_imms;
+@@ -1584,6 +1625,35 @@
+             ds << "#endif\n";
+         }
+ 
++        {
++            // [[recompiler.instruction_hook]]: the calls the RAM interpreter makes
++            // after an instruction, the ones native code has from the generator.
++            // Written with no hook too: the interpreter of a host project calls it.
++            std::map<uint32_t, std::vector<std::pair<uint32_t, std::string>>> hooked;
++            for (const auto& hook : instruction_hooks)
++                for (const auto& site : hook.sites)
++                    hooked[site.address].emplace_back(site.expected, hook.callback);
++            ds << "\n/* The game's hooks after an instruction that ran from RAM. */\n";
++            for (const auto& hook : instruction_hooks)
++                ds << "extern void " << hook.callback
++                   << "(CPUState* cpu, uint32_t address, uint32_t instruction, int phase);\n";
++            ds << "void psx_game_instruction_ran(CPUState* cpu, uint32_t address, uint32_t instruction) {\n";
++            if (hooked.empty())
++                ds << "    (void)cpu; (void)address; (void)instruction;\n}\n";
++            else
++                ds << "    switch (address) {\n";
++            for (const auto& [address, calls] : hooked) {
++                ds << fmt::format("    case 0x{:08X}u:\n", address);
++                for (const auto& [expected, callback] : calls)
++                    ds << fmt::format(
++                        "        if (instruction == 0x{:08X}u) {}(cpu, address, instruction, 1);\n",
++                        expected, callback);
++                ds << "        break;\n";
++            }
++            if (!hooked.empty())
++                ds << "    default:\n        break;\n    }\n}\n";
++        }
++
+         std::ofstream dispatch_file(dispatch_filename);
+         if (dispatch_file.is_open()) {
+             dispatch_file << ds.str();

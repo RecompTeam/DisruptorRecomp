@@ -135,13 +135,7 @@ psxrecomp_add_runtime_target(psx-runtime
 )
 target_compile_definitions(psx-runtime PRIVATE
     PSX_HAS_GAME_HOST=1
-    PSX_HAS_DISRUPTOR_BACKDROP_TILES=1
-    PSX_HAS_DISRUPTOR_BILLBOARD_ASPECT=1
-    PSX_HAS_DISRUPTOR_FAR_RENDERING=1
-    PSX_HAS_DISRUPTOR_INTRO_SKIP=1
-    PSX_HAS_DISRUPTOR_SPRITE_DEPTH=1
-    PSX_HAS_DISRUPTOR_GROWN_QUAD=1
-    PSX_HAS_DISRUPTOR_VERTICAL_CAMERA=1)
+    PSX_HAS_DISRUPTOR_GROWN_QUAD=1)
 if(NOT DISRUPTOR_FRAME_INTERPOLATION)
     target_compile_definitions(psx-runtime PRIVATE
         # Keep the experimental sources available, but compile out frame
@@ -214,6 +208,8 @@ if(BUILD_TESTING)
     disruptor_contract(smooth_turn)
     disruptor_contract(ambient_occlusion)
     disruptor_contract(debug_tab)
+    disruptor_contract(instruction_hooks)
+    disruptor_contract(state_key)
     disruptor_contract(test_registration)
 
     add_test(NAME disruptor_framework_tool

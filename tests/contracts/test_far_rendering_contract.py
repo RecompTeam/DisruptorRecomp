@@ -22,7 +22,6 @@ def require(condition: bool, message: str) -> None:
 source = read("src/game/render/far_rendering.cpp")
 header = read("src/game/render/far_rendering.h")
 codegen = read("psxrecomp/recompiler/src/code_generator.cpp")
-dirty = read("psxrecomp/runtime/src/dirty_ram_interp.c")
 main = read("psxrecomp/runtime/src/main.cpp")
 audit = read("tools/audit_codegen.py")
 cmake = read("CMakeLists.txt")
@@ -32,8 +31,8 @@ require("src/game/render/far_rendering.cpp" in cmake and
         "tests/unit/disruptor_far_rendering_test.cpp" in cmake and
         "    disruptor_unit_test(disruptor_far_rendering " in cmake,
         "runtime source and focused behavior test must remain enabled")
-require("PSX_HAS_DISRUPTOR_FAR_RENDERING=1" in cmake,
-        "the Disruptor target must opt into dirty-interpreter far hooks")
+require(configs.count('callback = "disruptor_far_rendering_instruction_hook"\n') == 2,
+        "both game configurations must list the far hooks for code that runs from RAM")
 
 # The far renderer shares the already-generated renderer-entry fan-out.  A
 # second config entry would emit a duplicate guest callback.
@@ -116,22 +115,18 @@ require('"\\n{}disruptor_far_rendering_instruction_hook(cpu, "' in codegen and
         "config_.indent, addr, instr" in codegen,
         "compiled AFTER hooks must begin a separately indented statement line")
 
-require("#ifdef PSX_HAS_DISRUPTOR_FAR_RENDERING" in dirty and
-        "disruptor_far_rendering_instruction_hook(cpu, pc, insn, 1)" in dirty,
-        "dirty interpreter parity must be project-gated and opcode-pinned")
+listed_start = configs.index('callback = "disruptor_far_rendering_instruction_hook"\n')
+listed_table = configs[listed_start:configs.index("[[recompiler.instruction_hook]]", listed_start)]
 for pc, instruction in expected_sites.items():
-    require(f"0x{pc:08X}u" in dirty and f"0x{instruction:08X}u" in dirty,
-            f"dirty interpreter is missing reviewed site 0x{pc:08X}")
-require("disruptor_far_rendering_instruction_hook(cpu, pc, insn, 1)" in dirty and
-        '"0x{:08X}u, 0x{:08X}u, 1);"' in codegen,
+    require(f'["0x{pc:08X}", "0x{instruction:08X}"],' in listed_table,
+            f"code that runs from RAM is not hooked at reviewed site 0x{pc:08X}")
+require('"0x{:08X}u, 0x{:08X}u, 1);"' in codegen,
         "all reviewed diagnostic sites must remain AFTER-instruction")
-dirty_table_start = dirty.index("static int disruptor_far_rendering_site")
-dirty_table = dirty[dirty_table_start:dirty.index("#endif", dirty_table_start)]
 audit_table_start = audit.index("FAR_RENDERING_SITES")
 audit_table = audit[audit_table_start:audit.index("# Tests 4-6", audit_table_start)]
 for pc in excluded_sites:
     token = f"0x{pc:08X}"
-    require(token not in codegen_table and token not in dirty_table and
+    require(token not in codegen_table and token not in listed_table and
             token not in audit_table and token not in source_table,
             f"excluded far-rendering site leaked into hook tables: {token}")
 require("FAR_RENDERING_SITES" in audit and

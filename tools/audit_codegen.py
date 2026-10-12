@@ -220,6 +220,23 @@ BILLBOARD_ASPECT_SITES = {
     0x800433A0: 0x02A02821,
 }
 
+# Code that runs from RAM gets the same calls from one function of the dispatch file.
+INTERPRETED_HOOKS = {
+    "disruptor_vertical_camera_instruction_hook": VERTICAL_CAMERA_SITES,
+    "disruptor_far_rendering_instruction_hook": FAR_RENDERING_SITES,
+    "disruptor_billboard_aspect_instruction_hook": BILLBOARD_ASPECT_SITES,
+    "disruptor_backdrop_tiles_instruction_hook": BACKDROP_TILE_SITES,
+    "disruptor_sprite_depth_instruction_hook": SPRITE_DEPTH_SITES,
+    "disruptor_intro_skip_instruction_hook": INTRO_SKIP_SITES,
+}
+INTERPRETED_CASE = re.compile(
+    r"    case 0x([0-9A-F]{8})u:\n((?:        if \(instruction == 0x[0-9A-F]{8}u\) \w+\(cpu, address, instruction, 1\);\n)+)"
+    r"        break;\n"
+)
+INTERPRETED_CALL = re.compile(
+    r"        if \(instruction == 0x([0-9A-F]{8})u\) (\w+)\(cpu, address, instruction, 1\);\n"
+)
+
 # Tests 4-6 widened Disruptor's portal spans into negative X.  Its static-world
 # renderer was authored around unsigned 0..320 spans, and yaw-dependent portal
 # selection became unstable.  Test 7 instead keeps every portal/outcode bound
@@ -253,6 +270,31 @@ def billboard_seam_precedes_texture_stores(shard_text: str) -> bool:
     if seam < 0 or any(shard_text.count(comment) != 1 for comment in late):
         return False
     return seam < shard_text.index(late[0]) < shard_text.index(late[1])
+
+
+def interpreted_hooks(dispatch_text: str) -> dict[str, dict[int, int]] | None:
+    """The calls the dispatch file makes after an instruction that ran from RAM, or None when it has no such list."""
+    opening = "void psx_game_instruction_ran(CPUState* cpu, uint32_t address, uint32_t instruction) {\n    switch (address) {\n"
+    closing = "    default:\n        break;\n    }\n}\n"
+    if dispatch_text.count(opening) != 1:
+        return None
+    body = dispatch_text[dispatch_text.index(opening) + len(opening) :]
+    if closing not in body:
+        return None
+    body = body[: body.index(closing)]
+    cases = INTERPRETED_CASE.findall(body)
+    if "".join(f"    case 0x{address}u:\n{calls}        break;\n" for address, calls in cases) != body:
+        return None
+    hooks: dict[str, dict[int, int]] = {}
+    for address, calls in cases:
+        called = [callback for _, callback in INTERPRETED_CALL.findall(calls)]
+        if called != [callback for callback in INTERPRETED_HOOKS if callback in called]:
+            return None
+        for word, callback in INTERPRETED_CALL.findall(calls):
+            if int(address, 16) in hooks.setdefault(callback, {}):
+                return None
+            hooks[callback][int(address, 16)] = int(word, 16)
+    return hooks
 
 
 def format_addresses(addresses: set[int]) -> str:
@@ -701,6 +743,12 @@ def main() -> int:
             + str(PRECISION_COPY_STORE_SITES)
             + ", found "
             + str(generated_precision_copy_stores)
+        )
+
+    if interpreted_hooks(dispatch_text) != INTERPRETED_HOOKS:
+        failures.append(
+            "the dispatch file must give code that runs from RAM the calls native code has: "
+            + str(interpreted_hooks(dispatch_text))
         )
 
     for site in VANILLA_PORTAL_AND_POINT_SITES:
