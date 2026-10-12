@@ -82,8 +82,11 @@ run_sh = read("run.sh")
 game_toml = read("game.toml")
 game_wide_toml = read("game-widescreen.toml")
 
-require("option(DISRUPTOR_DEV_MENU" in cmake,
-        "developer menu must remain independently build-selectable")
+require("option(DISRUPTOR_DEV_MENU" in cmake and
+        "if(DISRUPTOR_DEV_MENU)\n    target_compile_definitions(psx-runtime PRIVATE PSX_FRAME_INTERPOLATION_GEOMETRY_DEFAULT=1)\n" in cmake and
+        read("psxrecomp/runtime/src/main.cpp").count("#if defined(PSX_FRAME_INTERPOLATION_GEOMETRY_DEFAULT)\n") == 2 and
+        "DISRUPTOR_DEV_MENU" not in read("psxrecomp/runtime/src/main.cpp"),
+        "developer menu must remain independently build-selectable, and with it in-between frames start in the geometry mode")
 require("v1.92.6.tar.gz" in cmake and
         "5b17c01f69545bde732b14936d89ce0f508adb83e8b56fa82448371845172bc3"
         in cmake.lower(),

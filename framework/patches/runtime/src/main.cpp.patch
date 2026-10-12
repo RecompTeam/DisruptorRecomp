@@ -1,5 +1,5 @@
 diff --git a/runtime/src/main.cpp b/runtime/src/main.cpp
-index 81e048307ec9dd9fc7234a1e6285042ffab16457..721138eab4af70a7a7a35b3235af0ba6235a527f 100644
+index 81e048307ec9dd9fc7234a1e6285042ffab16457..bb8b7276d85ec6ed3ff60d86eb3e46ca71f0f85f 100644
 --- a/runtime/src/main.cpp
 +++ b/runtime/src/main.cpp
 @@ -1,9 +1,16 @@
@@ -395,7 +395,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..721138eab4af70a7a7a35b3235af0ba6
  static int           g_video_vsync        = 1;
  static int           g_frame_interpolation = 0;
  static int           g_frame_interpolation_fps = 0;
-+#if defined(DISRUPTOR_DEV_MENU)
++#if defined(PSX_FRAME_INTERPOLATION_GEOMETRY_DEFAULT)
 +static int           g_frame_interpolation_blend =
 +    PSX_HOST_FRAME_INTERPOLATION_GEOMETRY;
 +static int           g_frame_interpolation_blend_default =
@@ -1839,7 +1839,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..721138eab4af70a7a7a35b3235af0ba6
              g_frame_interpolation = us.frame_interpolation ? 1 : 0;
          if (us.has_frame_interpolation_fps)
              g_frame_interpolation_fps = us.frame_interpolation_fps;
-+#if defined(DISRUPTOR_DEV_MENU)
++#if defined(PSX_FRAME_INTERPOLATION_GEOMETRY_DEFAULT)
 +        /* Migrate legacy image-blend preferences to geometry at startup.
 +         * Explicit environment selection below can still opt into legacy
 +         * modes for one-run comparisons. */
