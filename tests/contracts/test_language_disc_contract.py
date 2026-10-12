@@ -296,11 +296,12 @@ require(
     "    if (void *game = iso_game_disc(); game && !g_path.empty()) (void)laid_out(game);" in source
     and "        savestate_configure(memcard_dir.string().c_str(),\n"
     "                            memory_get_bios_checksum(), game_entry_pc);\n"
-    "#ifdef PSX_HAS_DISRUPTOR_LANGUAGE\n"
-    "        /* Before any state can be asked for: a language disc's states have a folder of their own. */\n"
-    "        disruptor_language_settle();\n"
+    "#ifdef PSX_HAS_GAME_HOST\n"
+    "        /* Before any state can be asked for. */\n"
+    "        psx_game_states_configured();\n"
     "#endif" in host
-    and host.index("    cdrom_init(disc_path_str.empty()") < host.index("        disruptor_language_settle();")
+    and "void psx_game_states_configured(void) { disruptor_language_settle(); }\n" in read("src/game/host.cpp")
+    and host.index("    cdrom_init(disc_path_str.empty()") < host.index("        psx_game_states_configured();")
     < host.index('        if (const char *ls = std::getenv("PSX_LOAD_SLOT")) {')
     and "    language_ = language->name;\n    tall_hints_ = language->hints == Hints::kTall && hints != 0;\n    return true;" in disc
     and '    tall_hints_ = false;\n    language_ = "";' in disc,
@@ -317,12 +318,11 @@ require(
     "settings.toml must read and write [disruptor] language_disc whole: backslashes, quotes and control characters",
 )
 require(
-    "PSX_HAS_DISRUPTOR_LANGUAGE=1" in cmake
-    and '#ifdef PSX_HAS_DISRUPTOR_LANGUAGE\nextern "C" void disruptor_language_set_disc(const char* path);\n'
-    'extern "C" void disruptor_language_settle(void);\n#endif' in host
-    and '        if (us.has_language_disc && !std::getenv("PSX_DISRUPTOR_LANGUAGE_DISC"))\n'
-    "            disruptor_language_set_disc(us.language_disc.c_str());" in host
-    and host.index("disruptor_language_set_disc(us.language_disc.c_str());") < host.index("if (us.has_bios_hle)       bios_hle_requested = us.bios_hle;"),
+    "PSX_HAS_GAME_HOST=1" in cmake
+    and '    if (settings.has_language_disc && !std::getenv("PSX_DISRUPTOR_LANGUAGE_DISC"))\n'
+    "        disruptor_language_set_disc(settings.language_disc.c_str());" in read("src/game/host.cpp")
+    and "        if (psx_game_settings_loaded(us)) fast_boot = true;\n" in host
+    and host.index("if (psx_game_settings_loaded(us)) fast_boot = true;") < host.index("if (us.has_bios_hle)       bios_hle_requested = us.bios_hle;"),
     "the saved language disc must be named while the settings are read, before anything boots, unless the environment names one",
 )
 require(

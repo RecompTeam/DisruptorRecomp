@@ -245,7 +245,7 @@ require(
     and "pinned.packed = packed;\n        pinned.clamped = 1;\n        precision_store_projection(physical, pinned);" in scratch_store
     and "if (x < route.low_x) x = route.low_x;" in band and "if (x > route.high_x) x = route.high_x;" in band
     and "if (y < route.low_y) y = route.low_y;" in band and "if (y > route.high_y) y = route.high_y;" in band
-    and "0x80047A0Cu, 0xACAA0004u, -0x100, 0x240, -0x100, 0x1F0)) {" in runtime_main
+    and "0x80047A0Cu, 0xACAA0004u, -0x100, 0x240, -0x100, 0x1F0)) {" in read("src/game/render/precision_routes.cpp")
     and '"cpu->gpr[11] = -256;  /* 0x8004798C: 0x200BFF00 */", "cpu->gpr[11] = 576;  /* 0x800479A8: 0x200B0240 */",' in audit
     and '"cpu->gpr[12] = -256;  /* 0x800479C4: 0x200CFF00 */", "cpu->gpr[12] = 496;  /* 0x800479E0: 0x200C01F0 */"):' in audit,
     "a corner the game pins to its guard band must keep its projection only when the stored word is that projection pinned to the retail band",

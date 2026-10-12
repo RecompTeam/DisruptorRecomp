@@ -9,6 +9,7 @@ recompiler/tests/recompiler_patch_test.cpp
 recompiler/tests/test_reachable_discovery_codegen.py
 runtime/CMakeLists.txt
 runtime/include/dirty_ram_interp.h
++runtime/include/game_host.h
 +runtime/include/gte_precision.h
 runtime/include/gpu.h
 +runtime/include/gpu_ws_hud_scale.h

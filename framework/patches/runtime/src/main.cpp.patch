@@ -1,5 +1,5 @@
 diff --git a/runtime/src/main.cpp b/runtime/src/main.cpp
-index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1fa9a3548 100644
+index 81e048307ec9dd9fc7234a1e6285042ffab16457..721138eab4af70a7a7a35b3235af0ba6235a527f 100644
 --- a/runtime/src/main.cpp
 +++ b/runtime/src/main.cpp
 @@ -1,9 +1,16 @@
@@ -32,29 +32,17 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
  #include "frame_pacing.h"
  #include "latency_ring.h"
  #include "sio.h"
-@@ -59,6 +71,21 @@
+@@ -59,6 +71,9 @@
  #include "game_options.h"
  #include "mod_plugins.h"
  #include "mod_runtime.h"
-+#ifdef PSX_HAS_DISRUPTOR_CAPSULE
-+extern "C" void disruptor_capsule_before_input(void);
-+extern "C" void disruptor_capsule_after_input(void);
-+extern "C" void disruptor_capsule_state_loaded(void);
-+#endif
-+#ifdef PSX_HAS_DISRUPTOR_FAR_RENDERING
-+extern "C" void disruptor_far_rendering_abandon_metrics(void);
-+#ifdef PSX_HAS_DISRUPTOR_LANGUAGE
-+extern "C" void disruptor_language_set_disc(const char* path);
-+extern "C" void disruptor_language_settle(void);
-+#endif
-+#endif
-+#ifdef PSX_HAS_DISRUPTOR_NAME_ENTRY
-+extern "C" int disruptor_name_entry_key(int scancode, uint32_t keycode, int down, int plain);
++#ifdef PSX_HAS_GAME_HOST
++#include "game_host.h"
 +#endif
  #include "dirty_ram_interp.h"
  #include "crc32.h"
  #include "disc_identity.h"
-@@ -87,6 +114,9 @@
+@@ -87,6 +102,9 @@
  #endif
  #include <algorithm>
  #include <atomic>
@@ -64,7 +52,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
  #include <cctype>
  #include <cmath>
  #include <cstdio>
-@@ -100,6 +130,11 @@
+@@ -100,6 +118,11 @@
  #include <string>
  #include <vector>
  
@@ -76,7 +64,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
  #ifdef _WIN32
  #ifndef WIN32_LEAN_AND_MEAN
  #define WIN32_LEAN_AND_MEAN
-@@ -108,7 +143,7 @@
+@@ -108,7 +131,7 @@
  #include <ws2tcpip.h>
  #include <iphlpapi.h>
  #include <windows.h>
@@ -85,16 +73,17 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
  #else
  #include <arpa/inet.h>
  #include <ifaddrs.h>
-@@ -132,7 +167,131 @@
+@@ -131,6 +154,20 @@
+ #ifndef DEFAULT_DEBUG_PORT
  #error DEFAULT_DEBUG_PORT must be defined by the runtime target.
  #endif
- 
++
 +/* SDL_RenderSetVSync was added in SDL 2.0.18. Keep the explicitly supported
 + * SDL2 fallback buildable against older distro/toolchain copies; its OpenGL
 + * renderer can still release the swap interval through the public GL API.
 + * Use a project-local name because SDL3's psx_sdl.h already defines its own
 + * psx_sdl_render_set_vsync compatibility helper. */
-+static int disruptor_sdl_render_set_vsync_compat(SDL_Renderer *renderer, int enabled) {
++static int sdl_render_set_vsync_compat(SDL_Renderer *renderer, int enabled) {
 +#if defined(PSX_SDL3) || SDL_VERSION_ATLEAST(2, 0, 18)
 +    return SDL_RenderSetVSync(renderer, enabled);
 +#else
@@ -102,122 +91,10 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
 +    return SDL_GL_SetSwapInterval(enabled ? 1 : 0);
 +#endif
 +}
-+
- extern "C" uint64_t gte_get_exec_count(void);
-+
-+/* Disruptor does not use SWC2 for its resident world-projection loops. These
-+ * two reviewed MFC2 sites snapshot SXY2. Six ordinary SW sites publish into
-+ * main RAM and one publishes into nine exact scratchpad slots, each only after
-+ * an exact instruction and committed-word check. Twenty-four reviewed LW/SW
-+ * pairs then carry those proven words into GP0 packets. Keeping every route
-+ * behind the game serial prevents another title at the same PCs from
-+ * inheriting it. */
-+static int configure_disruptor_precision_store_routes(
-+        const std::string& game_id) {
-+    gte_precision_store_pc_routes_reset();
-+    if (game_id != "SLUS-00224") return 1;
-+    static const uint32_t mfc2_pcs[] = {
-+        0x8004633Cu,
-+        0x8004795Cu,
-+    };
-+    static const uint32_t store_pcs[] = {
-+        0x8004641Cu,
-+        0x800464BCu,
-+        0x80046524u,
-+        0x80046540u,
-+        0x80046594u,
-+        0x800465D8u,
-+    };
-+    struct PrecisionCopyRoute {
-+        uint32_t load_pc;
-+        uint32_t load_instruction;
-+        uint32_t store_pc;
-+        uint32_t store_instruction;
-+        uint8_t gpr;
-+    };
-+    static const PrecisionCopyRoute copy_routes[] = {
-+        {0x80046C4Cu, 0x8D0C0004u, 0x80046D04u, 0xAF2C0008u, 12u},
-+        {0x80046C50u, 0x8D2D0004u, 0x80046D08u, 0xAF2D0014u, 13u},
-+        {0x80046C54u, 0x8D4E0004u, 0x80046D10u, 0xAF2E002Cu, 14u},
-+        {0x80046C60u, 0x8D6F0004u, 0x80046D0Cu, 0xAF2F0020u, 15u},
-+        {0x80047A80u, 0x8CA80084u, 0x80047A90u, 0xAF280008u, 8u},
-+        {0x80047A84u, 0x8CA900A4u, 0x80047A94u, 0xAF290014u, 9u},
-+        {0x80047A88u, 0x8CAA00C4u, 0x80047A9Cu, 0xAF2A002Cu, 10u},
-+        {0x80047A8Cu, 0x8CAB00BCu, 0x80047A98u, 0xAF2B0020u, 11u},
-+        {0x80047B40u, 0x8CA800A4u, 0x80047B50u, 0xAF280008u, 8u},
-+        {0x80047B44u, 0x8CA9008Cu, 0x80047B54u, 0xAF290014u, 9u},
-+        {0x80047B48u, 0x8CAA00ACu, 0x80047B5Cu, 0xAF2A002Cu, 10u},
-+        {0x80047B4Cu, 0x8CAB00C4u, 0x80047B58u, 0xAF2B0020u, 11u},
-+        {0x80047C00u, 0x8CA800C4u, 0x80047C10u, 0xAF280008u, 8u},
-+        {0x80047C04u, 0x8CA900ACu, 0x80047C14u, 0xAF290014u, 9u},
-+        {0x80047C08u, 0x8CAA0094u, 0x80047C1Cu, 0xAF2A002Cu, 10u},
-+        {0x80047C0Cu, 0x8CAB00B4u, 0x80047C18u, 0xAF2B0020u, 11u},
-+        {0x80047CC4u, 0x8CA800BCu, 0x80047CD4u, 0xAF280008u, 8u},
-+        {0x80047CC8u, 0x8CA900C4u, 0x80047CD8u, 0xAF290014u, 9u},
-+        {0x80047CCCu, 0x8CAA00B4u, 0x80047CE0u, 0xAF2A002Cu, 10u},
-+        {0x80047CD0u, 0x8CAB009Cu, 0x80047CDCu, 0xAF2B0020u, 11u},
-+        {0x80047D6Cu, 0x8CA80084u, 0x80047D7Cu, 0xAF280008u, 8u},
-+        {0x80047D70u, 0x8CA9008Cu, 0x80047D80u, 0xAF290014u, 9u},
-+        {0x80047D74u, 0x8CAA0094u, 0x80047D88u, 0xAF2A002Cu, 10u},
-+        {0x80047D78u, 0x8CAB009Cu, 0x80047D84u, 0xAF2B0020u, 11u},
-+    };
-+    for (uint32_t pc : mfc2_pcs) {
-+        if (!gte_precision_mfc2_pc_route_add(
-+                pc, 0x480A7000u, 14u)) {
-+            std::fprintf(stderr,
-+                "psxrecomp: failed to register Disruptor SXY2 MFC2 PC "
-+                "0x%08X\n", pc);
-+            return 0;
-+        }
-+    }
-+    for (uint32_t pc : store_pcs) {
-+        if (!gte_precision_store_pc_route_add(
-+                pc, 0xACAA0004u, 14u)) {
-+            std::fprintf(stderr,
-+                "psxrecomp: failed to register Disruptor SXY2 store PC "
-+                "0x%08X\n", pc);
-+            return 0;
-+        }
-+    }
-+    if (!gte_precision_scratch_store_pc_route_add(
-+            0x80047A0Cu, 0xACAA0004u, 14u,
-+            0x1F800084u, 8u, 9u)) {
-+        std::fprintf(stderr,
-+            "psxrecomp: failed to register Disruptor scratchpad SXY2 "
-+            "store route 0x80047A0C\n");
-+        return 0;
-+    }
-+    /* 0x80047980..0x800479E0 pin x to -256..576 and y to -256..496 before that store. */
-+    if (!gte_precision_scratch_store_pc_route_clamp(
-+            0x80047A0Cu, 0xACAA0004u, -0x100, 0x240, -0x100, 0x1F0)) {
-+        std::fprintf(stderr,
-+            "psxrecomp: failed to register the guard band of Disruptor's "
-+            "scratchpad SXY2 store route 0x80047A0C\n");
-+        return 0;
-+    }
-+    for (const PrecisionCopyRoute& route : copy_routes) {
-+        if (!gte_precision_copy_pc_route_add(
-+                route.load_pc, route.load_instruction,
-+                route.store_pc, route.store_instruction, route.gpr)) {
-+            std::fprintf(stderr,
-+                "psxrecomp: failed to register Disruptor projection-copy "
-+                "route 0x%08X -> 0x%08X\n",
-+                route.load_pc, route.store_pc);
-+            return 0;
-+        }
-+    }
-+    std::fprintf(stdout,
-+        "psxrecomp: registered %zu MFC2 captures, %zu main-RAM projection "
-+        "stores, 1 scratchpad projection store and %zu packet-copy routes\n",
-+        sizeof(mfc2_pcs) / sizeof(mfc2_pcs[0]),
-+        sizeof(store_pcs) / sizeof(store_pcs[0]),
-+        sizeof(copy_routes) / sizeof(copy_routes[0]));
-+    return 1;
-+}
  
- /* Cross-language globals defined in C translation units. Declared extern "C" at
-  * file scope so MSVC gives them C linkage (matching the C definitions); without
-@@ -164,11 +323,12 @@
+ extern "C" uint64_t gte_get_exec_count(void);
+ 
+@@ -164,11 +201,12 @@
   * every install must arm it — not just repo checkouts that happen to carry a
   * loose EXE copy next to game.toml. Source order:
   *   1. The local EXE file from game.toml (dev checkouts; recompiler input).
@@ -232,7 +109,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
                                   const std::string &disc_path) {
      const uint32_t phys_lo = load_address & 0x1FFFFFFFu;
      /* 1. Local EXE file (skip the 2048-byte PS-X EXE header). */
-@@ -177,9 +337,12 @@
+@@ -177,9 +215,12 @@
          if (ef) {
              std::streamsize sz = ef.tellg();
              if (sz > 2048) {
@@ -248,7 +125,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
                      ef.seekg(2048, std::ios::beg);
                      if (ef.read((char *)img, img_len)) {
                          dirty_ram_register_text_image(phys_lo, img, img_len);
-@@ -193,7 +356,10 @@
+@@ -193,7 +234,10 @@
              }
          }
      }
@@ -260,7 +137,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
      if (!disc_path.empty()) {
          PS1::ISOReader iso;
          if (iso.Open(disc_path)) {
-@@ -239,17 +405,38 @@
+@@ -239,17 +283,38 @@
                  uint8_t *file = (uint8_t *)std::malloc(ent.size);
                  if (file) {
                      size_t got = iso.ReadFile(boot_name, file, ent.size);
@@ -306,7 +183,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
                              return;
                          }
                      }
-@@ -317,6 +504,10 @@
+@@ -317,6 +382,10 @@
   * 640*scale x 512*scale. Allocated once the supersampling scale is known
   * (sized for the native 640x512 when supersampling is off). */
  static uint32_t*     sdl_pixel_buf = nullptr;
@@ -317,7 +194,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
  
  typedef void (*ModFrameHook)(void);
  
-@@ -337,8 +528,118 @@
+@@ -337,8 +406,118 @@
      for (size_t i = 0; i < count; i++) hooks[i]();
  }
  
@@ -436,7 +313,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
  static std::atomic<int> g_smooth_60fps{0};
  
  struct Smooth60State {
-@@ -352,6 +653,7 @@
+@@ -352,6 +531,7 @@
  };
  
  static Smooth60State g_smooth_60_state;
@@ -444,7 +321,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
  
  /* Present-path session state — must reset on rematch (function-local statics
   * survive soft-return and poison FMV/FPS after session_reboot). */
-@@ -379,12 +681,14 @@
+@@ -379,12 +559,14 @@
  }
  
  static void smooth_60_reset(void) {
@@ -459,7 +336,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
  }
  
  static void present_session_reset(void) {
-@@ -402,10 +706,21 @@
+@@ -402,10 +584,18 @@
      smooth_60_reset();
  }
  
@@ -472,16 +349,13 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
   * longjmp). Clears present latches and forces the next vblank to show the
   * restored VRAM — including a blank if display was disabled in the snapshot. */
  extern "C" void psx_frontend_on_savestate_loaded(void) {
-+#ifdef PSX_HAS_DISRUPTOR_CAPSULE
-+    disruptor_capsule_state_loaded();
-+#endif
-+#ifdef PSX_HAS_DISRUPTOR_FAR_RENDERING
-+    disruptor_far_rendering_abandon_metrics();
++#ifdef PSX_HAS_GAME_HOST
++    psx_game_state_loaded();
 +#endif
      s_disabled_frame_presented = false;
      s_force_present_after_load = true;
      smooth_60_reset();
-@@ -419,8 +734,10 @@
+@@ -419,8 +609,10 @@
       * tiles + force several swaps so the window actually updates. Safe no-op
       * when the GL pipeline was never brought up. */
      gl_renderer_invalidate_present();
@@ -494,7 +368,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
  static uint64_t smooth_60_frame_hash(const uint32_t* pixels, size_t count) {
      uint64_t hash = 1469598103934665603ull;
      const size_t step = std::max<size_t>(1, count / 4096u);
-@@ -504,6 +821,13 @@
+@@ -504,6 +696,13 @@
  extern "C" void psx_smooth_60fps_set(int enabled) {
      g_smooth_60fps.store(enabled ? 1 : 0, std::memory_order_release);
  }
@@ -508,7 +382,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
  #if defined(PSX_WEB)
  extern "C" EMSCRIPTEN_KEEPALIVE void psx_web_set_smooth_60fps(int enabled) {
      psx_smooth_60fps_set(enabled);
-@@ -515,6 +839,8 @@
+@@ -515,6 +714,8 @@
  static bool          g_video_aa    = true;  /* linear present filtering */
  static int           g_video_texfilter = 0; /* 0=nearest, 1=bilinear */
  static int           g_video_renderer = PSXRecompV4::DEFAULT_VIDEO_RENDERER;
@@ -517,7 +391,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
  static int           g_fullscreen     = 0;  /* tri-state: 0 windowed, 1 borderless (desktop)
                                                * fullscreen, 2 exclusive fullscreen */
  static int           g_video_screen   = 0;  /* 0=raw,1=crt,2=composite,3=trinitron */
-@@ -599,10 +925,17 @@
+@@ -599,10 +800,17 @@
  static int           g_video_vsync        = 1;
  static int           g_frame_interpolation = 0;
  static int           g_frame_interpolation_fps = 0;
@@ -535,7 +409,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
  static int           g_mod_controller_mode_override[2] = { -1, -1 };
  static_assert((int)PSX_MOD_CONTROLLER_HYBRID ==
                (int)PSXRecompV4::PAD_MODE_HYBRID);
-@@ -630,6 +963,111 @@
+@@ -630,6 +838,111 @@
      return 0;                                            /* windowed */
  }
  
@@ -647,7 +521,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
  /* FMV auto-skip detection hooks (cdrom.c / mdec.c). */
  extern "C" int      cdrom_xa_stream_active(void);
  extern "C" uint32_t mdec_get_decode_count(void);
-@@ -655,12 +1093,105 @@
+@@ -655,12 +968,105 @@
   * in config_loader.h). */
  static int           g_video_aspect_num = 4;
  static int           g_video_aspect_den = 3;
@@ -753,7 +627,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
  
  extern "C" int psx_mod_set_fixed_display_aspect(
      uint32_t numerator, uint32_t denominator) {
-@@ -738,6 +1269,10 @@
+@@ -738,6 +1144,10 @@
  
  extern "C" int psx_mod_set_frame_interpolation(
      uint32_t frames_per_second) {
@@ -764,7 +638,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
      if (frames_per_second != 0 &&
          (frames_per_second < 60 || frames_per_second > 1000)) {
          std::fprintf(stderr,
-@@ -768,10 +1303,15 @@
+@@ -768,10 +1178,15 @@
              "interpolation; guest timing remains stock\n");
      }
      return 1;
@@ -780,7 +654,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
      if (blend_mode != PSX_MOD_FRAME_INTERPOLATION_LINEAR &&
          blend_mode != PSX_MOD_FRAME_INTERPOLATION_MOTION_ADAPTIVE) {
          std::fprintf(stderr,
-@@ -784,6 +1324,7 @@
+@@ -784,6 +1199,7 @@
          blend_mode == PSX_MOD_FRAME_INTERPOLATION_MOTION_ADAPTIVE
              ? "motion-adaptive clarity" : "linear crossfade");
      return 1;
@@ -788,7 +662,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
  }
  
  extern "C" int psx_mod_set_auto_skip_fmv(int enabled) {
-@@ -867,6 +1408,8 @@
+@@ -867,6 +1283,8 @@
   * 4:3, wider for wide aspects. Height is always 480*scale. Set at window
   * creation alongside SDL_RenderSetLogicalSize. */
  static int           g_logical_w = 640;
@@ -797,7 +671,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
  
  /* Clamp a requested window width to the primary display's usable area so an
   * oversized choice (e.g. 1920 on a 1080p panel) still fits on screen. Keeps
-@@ -886,6 +1429,103 @@
+@@ -886,6 +1304,103 @@
  static int aspect_gcd(int a, int b) {
      while (b) { int t = a % b; a = b; b = t; }
      return a > 0 ? a : 1;
@@ -901,7 +775,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
  }
  
  /* Follow the host window without feeding its absolute pixel size into guest
-@@ -911,23 +1551,7 @@
+@@ -911,23 +1426,7 @@
          den /= divisor;
      }
      if (num == g_video_aspect_num && den == g_video_aspect_den) return;
@@ -926,7 +800,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
  }
  
  /* SDL GL attributes are global inputs to the next context creation.  Set the
-@@ -955,8 +1579,107 @@
+@@ -955,8 +1454,107 @@
  }
  extern "C" int psx_ws_get_native_wide(void) { return g_ws_native_wide; }
  
@@ -1036,7 +910,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
  /* Present straight from the FBO (fast, no readback). Set PSX_GL_FORCE_CPU_PRESENT=1
   * to force the software readout path instead — a diagnostic/fallback that also
   * keeps CPU VRAM current every frame (so screenshots reflect the screen). */
-@@ -994,6 +1717,16 @@
+@@ -994,6 +1592,16 @@
  static int g_turbo_load_release_frames = TURBO_LOADS_RELEASE_FRAMES;
  static SDL_AudioDeviceID sdl_audio_device;
  static int16_t       sdl_audio_buf[2048 * 2];
@@ -1053,7 +927,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
  
  /* DRC bridge. Producer (sdl_audio_pump) runs on the main loop thread under
   * SDL_LockAudioDevice; consumer (sdl_drc_callback) runs on the SDL audio
-@@ -1026,10 +1759,36 @@
+@@ -1026,10 +1634,36 @@
  int g_audio_host_rate = 44100;
  }
  
@@ -1090,7 +964,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
      /* T3 tap in bridge mode: the exact device-rate bytes the host consumes.
       * This callback is the tap's single writer while the bridge is active. */
      audio_trace_pcm(AUDIO_TAP_HOST, reinterpret_cast<const int16_t*>(stream),
-@@ -1174,22 +1933,40 @@
+@@ -1174,22 +1808,40 @@
          return false;
      }
  #ifdef _WIN32
@@ -1147,7 +1021,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
  #else
      (void)filter;
      (void)out;
-@@ -1205,6 +1982,46 @@
+@@ -1205,6 +1857,46 @@
          title, cli_flag);
      return false;
  #endif
@@ -1194,7 +1068,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
  }
  
  static std::string uppercase_ascii(std::string s) {
-@@ -1590,6 +2407,9 @@
+@@ -1590,6 +2282,9 @@
  }
  
  static void shutdown_runtime(void) {
@@ -1204,7 +1078,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
      /* (sljit removed 2026-07-15: overlay_compile_worker_stop joined the
       * off-thread JIT worker here; the worker no longer exists.) */
      psx_netplay_shutdown();
-@@ -1607,6 +2427,8 @@
+@@ -1607,6 +2302,8 @@
          psx_sdl_audio_close(sdl_audio_device);   /* stops the pull callback */
          sdl_audio_device = 0;
      }
@@ -1213,7 +1087,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
      if (s_drc_ready) { rab_free(&s_drc); s_drc_ready = false; }
      close_controller();
      debug_server_shutdown();
-@@ -1615,6 +2437,7 @@
+@@ -1615,6 +2312,7 @@
  /* Tear down the game window/GL/audio after a lobby soft-return. Leaves SDL
   * subsystems and the lobby WebSocket intact for the next launcher session. */
  static void teardown_game_session_keep_lobby(void) {
@@ -1221,7 +1095,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
      netplay_host_present_restore();
      psx_netplay_shutdown();
      memcard_flush_all();
-@@ -1623,6 +2446,8 @@
+@@ -1623,6 +2321,8 @@
          psx_sdl_audio_close(sdl_audio_device);
          sdl_audio_device = 0;
      }
@@ -1230,7 +1104,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
      if (s_drc_ready) { rab_free(&s_drc); s_drc_ready = false; }
      close_controller();
      if (g_vk_active) {
-@@ -1637,6 +2462,7 @@
+@@ -1637,6 +2337,7 @@
      if (sdl_renderer) { SDL_DestroyRenderer(sdl_renderer); sdl_renderer = nullptr; }
      if (sdl_window) { SDL_DestroyWindow(sdl_window); sdl_window = nullptr; }
      if (sdl_pixel_buf) { std::free(sdl_pixel_buf); sdl_pixel_buf = nullptr; }
@@ -1238,7 +1112,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
      psx_lobby_set_ready(0);
      psx_lobby_clear_launch_pending();
      psx_clear_return_to_lobby();
-@@ -1653,6 +2479,24 @@
+@@ -1653,6 +2354,24 @@
      }
  }
  
@@ -1263,7 +1137,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
  /* Fade-in state: samples of rising ramp still to apply after an unmute.
   * Consumed by sdl_audio_pump across however many pump calls it spans.
   * MUST fit sdl_audio_buf (2048 frames): the fade-out tail renders this many
-@@ -1661,7 +2505,7 @@
+@@ -1661,7 +2380,7 @@
  static int       sdl_audio_fadein_left  = 0;
  
  static void sdl_audio_pump(bool discard_output = false) {
@@ -1272,7 +1146,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
  
      const uint32_t bytes_per_frame = sizeof(int16_t) * 2u;
      const bool legacy = audio_legacy_mode();
-@@ -1751,6 +2595,8 @@
+@@ -1751,6 +2470,8 @@
          sdl_audio_fadein_left -= ramp;
      }
      if (legacy) {
@@ -1281,7 +1155,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
          /* T3 tap: the exact post-fade bytes handed to the host audio queue. */
          audio_trace_pcm(AUDIO_TAP_HOST, sdl_audio_buf, frames);
          psx_sdl_audio_queue(sdl_audio_device, sdl_audio_buf,
-@@ -1883,6 +2729,7 @@
+@@ -1883,6 +2604,7 @@
  
      g_runtime_perf.frequency = SDL_GetPerformanceFrequency();
      if (!g_runtime_perf.frequency) g_runtime_perf.frequency = 1;
@@ -1289,7 +1163,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
      if (const char *interval = std::getenv("PSX_RUNTIME_PERF_DIAG_MS")) {
          char *tail = nullptr;
          long requested = std::strtol(interval, &tail, 10);
-@@ -2026,12 +2873,32 @@
+@@ -2026,12 +2748,32 @@
      if (end >= start) *total += end - start;
  }
  
@@ -1322,7 +1196,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
      if (!g_runtime_perf.enabled) return;
  
      uint64_t now = SDL_GetPerformanceCounter();
-@@ -2052,12 +2919,31 @@
+@@ -2052,12 +2794,31 @@
      uint64_t overlay_load_us = 0, overlay_load_max_us = 0, overlay_load_last_us = 0;
      overlay_loader_get_load_timing(&overlay_load_us, &overlay_load_max_us,
                                     &overlay_load_last_us);
@@ -1354,7 +1228,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
          for (int i = 0; i < 6; i++) last_up[i] = up[i];
          have_last = true;
          return;
-@@ -2072,6 +2958,14 @@
+@@ -2072,6 +2833,14 @@
          "cpu=%.1f tex=%.1f draw=%.1f ms/s; "
          "work guest=%.1f pacer=%.1f autocapture=%.1f provider_poll=%.1f ms/s, "
          "dirty=%.0f insn/s %.0f dispatch/s; "
@@ -1369,7 +1243,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
          "overlay native=+%llu interp=+%llu hot_native=0x%08X/+%llu "
          "shadow=+%llu div=+%llu first_div=0x%08X "
          "loads=+%u revalidations=+%u "
-@@ -2096,6 +2990,26 @@
+@@ -2096,6 +2865,26 @@
          runtime_perf_ticks_ms(current.provider_poll_ticks - last.provider_poll_ticks) / dt,
          (double)(current.dirty_insns - last.dirty_insns) / dt,
          (double)(current.dirty_dispatches - last.dirty_dispatches) / dt,
@@ -1396,7 +1270,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
          (unsigned long long)(current.overlay_native - last.overlay_native),
          (unsigned long long)(current.overlay_interp - last.overlay_interp),
          current.overlay_hot_native_pc,
-@@ -2118,11 +3032,13 @@
+@@ -2118,11 +2907,13 @@
      last_underruns = underruns;
      last_overflows = overflows;
      last_overlay_load_us = overlay_load_us;
@@ -1411,7 +1285,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
      {   /* Tag audio events with the vblank frame counter. */
          extern uint64_t s_frame_count;
          audio_trace_note_frame((uint32_t)s_frame_count);
-@@ -2145,11 +3061,14 @@
+@@ -2145,11 +2936,14 @@
              spu_render(sdl_audio_buf, tail);
              sdl_audio_gain_ramp(sdl_audio_buf, tail, g0, 0.0f);
              audio_trace_event(AUDIO_EV_MUTE, (uint32_t)tail, 0);
@@ -1428,7 +1302,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
                  psx_sdl_audio_lock(sdl_audio_device);
                  rab_push(&s_drc, sdl_audio_buf, tail);
                  psx_sdl_audio_unlock(sdl_audio_device);
-@@ -2506,6 +3425,13 @@
+@@ -2506,6 +3300,13 @@
  static void load_input_config(const char* argv0) {
      set_default_controller_mapping();
  
@@ -1442,7 +1316,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
      namespace fs = std::filesystem;
      fs::path config_path = exe_dir_from_argv(argv0) / "input.ini";
      std::error_code ec;
-@@ -2557,11 +3483,6 @@
+@@ -2557,11 +3358,6 @@
          for (auto& entry : controller_map) entry.sources.clear();
      }
  
@@ -1454,7 +1328,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
  }
  
  static void close_player(PlayerInput& p) {
-@@ -3095,6 +4016,16 @@
+@@ -3095,6 +3891,16 @@
   * onto local_slot (host→sim P1, guest→sim P2). Never writes SIO. Exclusive
   * capture — no keyboard-all / all-controllers merge — so peers hash-agree. */
  static void capture_local_human_pad(PsxNetPad* out) {
@@ -1471,7 +1345,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
      int idx = psx_netplay_input_player();
      if (idx < 0 || idx > 1) idx = 0;
      if (!capture_pad_slot_exclusive(idx, out)) {
-@@ -3228,11 +4159,12 @@
+@@ -3228,11 +4034,12 @@
          if (!g_headless) {
              SDL_Event ev;
              while (SDL_PollEvent(&ev)) {
@@ -1485,7 +1359,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
  #if defined(PSX_SDL3)
                      ev.key.key == SDLK_ESCAPE) {
  #else
-@@ -3261,6 +4193,24 @@
+@@ -3261,6 +4068,24 @@
  static void sample_pad_into_sio(int override) {
      if (override >= 0) {
          apply_input_override_to_sio(override);
@@ -1510,7 +1384,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
          return;
      }
      for (int s = 0; s < 2; s++) {
-@@ -3482,8 +4432,51 @@
+@@ -3482,8 +4307,51 @@
      }
  }
  
@@ -1562,7 +1436,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
  #ifndef PSX_NO_DEBUG_TOOLS
      debug_server_set_fmv_quiet(mdec_recently_active(2));
      /* Debug server: pause gate, poll commands, record frame, check watchpoints. */
-@@ -3582,6 +4575,7 @@
+@@ -3582,6 +4450,7 @@
          /* Pump SDL events to prevent window freeze. */
          SDL_Event ev;
          while (SDL_PollEvent(&ev)) {
@@ -1570,17 +1444,17 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
              if (ev.type == SDL_QUIT) {
                  if (psx_netplay_active()) {
                      netplay_soft_exit("sdl_window_close");
-@@ -3603,18 +4597,34 @@
+@@ -3603,18 +4472,34 @@
                      close_controller();
                      refresh_player_devices();
                  }
 -            } else if (ev.type == SDL_KEYDOWN) {
-+#ifdef PSX_HAS_DISRUPTOR_NAME_ENTRY
++#ifdef PSX_HAS_GAME_HOST
 +            } else if (ev.type == SDL_KEYUP) {
 +#if defined(PSX_SDL3)
-+                (void)disruptor_name_entry_key((int)ev.key.scancode, (uint32_t)ev.key.key, 0, 1);
++                (void)psx_game_key((int)ev.key.scancode, (uint32_t)ev.key.key, 0, 1);
 +#else
-+                (void)disruptor_name_entry_key((int)ev.key.keysym.scancode, (uint32_t)ev.key.keysym.sym, 0, 1);
++                (void)psx_game_key((int)ev.key.keysym.scancode, (uint32_t)ev.key.keysym.sym, 0, 1);
 +#endif
 +#endif
 +            } else if (!ui_consumed && ev.type == SDL_KEYDOWN) {
@@ -1597,16 +1471,16 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
                      netplay_soft_exit("netplay_escape");
                      return;
                  }
-+#ifdef PSX_HAS_DISRUPTOR_NAME_ENTRY
-+                if (disruptor_name_entry_key((int)scancode, (uint32_t)key, 1, !(mod & (KMOD_CTRL | KMOD_ALT | KMOD_GUI))))
-+                    continue; /* the key is a letter of a save's name */
++#ifdef PSX_HAS_GAME_HOST
++                if (psx_game_key((int)scancode, (uint32_t)key, 1, !(mod & (KMOD_CTRL | KMOD_ALT | KMOD_GUI))))
++                    continue; /* the game took the key */
 +#else
 +                (void)scancode;
 +#endif
                  /* Save states: Shift+F1-F12 = save slot 0-11, F1-F12 = load.
                   * (F11 is a save slot per the user's spec, so fullscreen is
                   * Alt+Enter / Cmd+Ctrl+F only — no F11.) */
-@@ -3649,21 +4659,34 @@
+@@ -3649,21 +4534,34 @@
                   * detects "currently fullscreen, either mode". */
                  else if ((key == SDLK_RETURN && (mod & KMOD_ALT)) ||
                           (key == SDLK_f && (mod & (KMOD_GUI | KMOD_CTRL)))) {
@@ -1652,27 +1526,27 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
      }
  
      /* Sample each player's device and feed the matching SIO pad slot.
-@@ -3697,6 +4720,9 @@
+@@ -3697,6 +4595,9 @@
          }
      } netplay_tail(override);
  
-+#ifdef PSX_HAS_DISRUPTOR_CAPSULE
-+    if (!psx_netplay_active()) disruptor_capsule_before_input();
++#ifdef PSX_HAS_GAME_HOST
++    if (!psx_netplay_active()) psx_game_before_input();
 +#endif
      if (psx_netplay_active()) {
          psx_netplay_finish_frame();
      } else if (g_headless) {
-@@ -3704,6 +4730,9 @@
+@@ -3704,6 +4605,9 @@
      } else {
          sample_pad_into_sio(override);
      }
-+#ifdef PSX_HAS_DISRUPTOR_CAPSULE
-+    if (!psx_netplay_active()) disruptor_capsule_after_input();
++#ifdef PSX_HAS_GAME_HOST
++    if (!psx_netplay_active()) psx_game_after_input();
 +#endif
  
      /* Latency ring: open this present cycle's slot, stamping when input was
       * sampled into SIO.  Always-on; queried via the debug server "latency". */
-@@ -3789,16 +4818,21 @@
+@@ -3789,16 +4693,21 @@
          }
      }
  
@@ -1698,7 +1572,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
          netplay_tail.skip_pace();
          return;
      }
-@@ -3813,7 +4847,7 @@
+@@ -3813,7 +4722,7 @@
      }
  #endif
  
@@ -1707,7 +1581,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
       * SDL_RenderPresent. The recompiled BIOS still advances simulated
       * cycles every vblank, so the BIOS proceeds at whatever rate the host
       * CPU sustains without graphics-driver vsync overhead. Present once
-@@ -3822,7 +4856,8 @@
+@@ -3822,7 +4731,8 @@
          const Uint8* keys = SDL_GetKeyboardState(NULL);
          static int turbo_skip = 0;
          const int TURBO_PRESENT_EVERY = 30;
@@ -1717,7 +1591,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
              turbo_skip = (turbo_skip + 1) % TURBO_PRESENT_EVERY;
              if (turbo_skip != 0) {
                  netplay_tail.skip_pace();
-@@ -3916,30 +4951,12 @@
+@@ -3916,30 +4826,12 @@
      /* Mod hooks. Run after all normal input sampling. */
      mod_call_frame_hooks();
  
@@ -1749,7 +1623,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
  
      /* ---- Display from our VRAM ---- */
      uint32_t w = 0, h = 0;
-@@ -3963,7 +4980,8 @@
+@@ -3963,7 +4855,8 @@
              /* After savestate load, always restage once even if we blanked
               * earlier in the session — otherwise the window keeps a stale
               * pre-load frame while vblanks (and FPS) keep advancing. */
@@ -1759,7 +1633,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
                  s_disabled_frame_presented = true;
                  s_force_present_after_load = false;
                  if (g_gl_active) {
-@@ -3988,7 +5006,7 @@
+@@ -3988,7 +4881,7 @@
           * of truth, shared with the GTE/GPU squash so content and present stay
           * locked: we squash IFF we stretch. depth24 always classifies as FMV
           * even if the ws layer is not engaged yet (4:3 titles). */
@@ -1768,7 +1642,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
          /* MDEC movies are already decoded at their authored cadence and are
           * CPU/upload heavy. High-refresh crossfades only contend with decoding
           * and can starve audio, so present native-4:3/MDEC phases directly.
-@@ -3996,19 +5014,25 @@
+@@ -3996,19 +4889,25 @@
           * decode; the activity stamp also covers authentic 4:3 configurations. */
          if (g_gl_active)
              gl_renderer_set_interpolation_suspended(
@@ -1800,7 +1674,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
  
          /* Native-wide invariant: canonical (320-wide) content is NEVER
           * stretched across the wide window — a game frame that cannot present
-@@ -4045,6 +5069,22 @@
+@@ -4045,6 +4944,22 @@
                  if (gl_renderer_present_wide_fbo((int)di.display_x, (int)di.display_y,
                                                   (int)h, g_video_aa ? 1 : 0))
                      return;
@@ -1823,7 +1697,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
              } else {
                  gl_renderer_present_vram((int)di.display_x, (int)di.display_y,
                                           (int)present_w, (int)h, g_video_aa ? 1 : 0,
-@@ -4142,6 +5182,7 @@
+@@ -4142,6 +5057,7 @@
                            h * (uint32_t)active_scale,
                            !g_gl_active && !g_vk_active && !di.depth24 && !fmv_frame);
  
@@ -1831,7 +1705,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
          /* Frame blending (CRT-persistence masker for 30fps double-buffered
           * content). Some games (e.g. Crash Bash menus/characters) leave a
           * dynamic object in only one of the two display buffers per 30fps cycle,
-@@ -4183,6 +5224,7 @@
+@@ -4183,6 +5099,7 @@
                  }
              }
          }
@@ -1839,16 +1713,16 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
      }
  
      /* Update only the active display rectangle. The backing texture is sized
-@@ -4245,7 +5287,7 @@
+@@ -4245,7 +5162,7 @@
          if (!g_present_vsync_disabled && present_ms > 250) {
              g_present_slow_count++;
              if (g_present_slow_count >= 3 &&
 -                SDL_RenderSetVSync(sdl_renderer, 0) == 0) {
-+                disruptor_sdl_render_set_vsync_compat(sdl_renderer, 0) == 0) {
++                sdl_render_set_vsync_compat(sdl_renderer, 0) == 0) {
                  g_present_vsync_disabled = 1;
              }
          }
-@@ -4867,9 +5909,11 @@
+@@ -4867,9 +5784,11 @@
  #endif
  
  int main(int argc, char** argv) {
@@ -1863,7 +1737,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
      std::fprintf(stderr, "psxrecomp: main() entered\n");
      std::fflush(stderr);
  
-@@ -5047,7 +6091,11 @@
+@@ -5047,7 +5966,11 @@
      bool ws_offered = true; /* game.toml [widescreen] offer; false hides the launcher toggle + clamps 4:3 */
      bool ws_ultrawide_offered = false;
      bool ws_adaptive_view_supported = false;
@@ -1875,7 +1749,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
      bool skip_fmv_offered = true;
      bool turbo_loads_offered = true;
      bool vulkan_offered = false; /* game.toml [video] offer_vulkan; developer opt-in for launcher visibility */
-@@ -5084,6 +6132,7 @@
+@@ -5084,6 +6007,7 @@
       * path is resolved (arm_text_image_guard). */
      std::string text_guard_exe_path;
      uint32_t    text_guard_load_addr = 0;
@@ -1883,7 +1757,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
  
      if (game_config_path) {
          try {
-@@ -5143,8 +6192,10 @@
+@@ -5143,8 +6067,10 @@
              g_video_aspect_den = gc.runtime.video_aspect_den;
              g_low_latency_input = gc.runtime.video_low_latency_input ? 1 : 0;
              g_video_vsync       = gc.runtime.video_vsync;
@@ -1894,7 +1768,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
              g_fmv_skip_total_table = gc.runtime.video_fmv_skip_total_table;
              g_fmv_skip_movie_id    = gc.runtime.video_fmv_skip_movie_id;
              if (gc.runtime.video_fmv_skip_end_total)
-@@ -5308,8 +6359,10 @@
+@@ -5308,8 +6234,10 @@
              ws_offered = gc.ws_offered;
              ws_ultrawide_offered = gc.ws_ultrawide_offered;
              ws_adaptive_view_supported = gc.ws_adaptive_view;
@@ -1905,7 +1779,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
              skip_fmv_offered = gc.runtime.video_offer_skip_fmv;
              turbo_loads_offered = gc.runtime.offer_turbo_loads;
              vulkan_offered = gc.vulkan_offered;
-@@ -5363,6 +6416,7 @@
+@@ -5363,6 +6291,7 @@
               * user's disc image instead. */
              text_guard_exe_path  = gc.exe_path.string();
              text_guard_load_addr = gc.load_address;
@@ -1913,16 +1787,18 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
              /* HLE-tier scheduler subsystem replacement default (env
               * PSX_HLE_SCHEDULER still wins; latched at first dispatch). */
              psx_hle_scheduler_set_default(gc.runtime.hle_scheduler ? 1 : 0);
-@@ -5567,6 +6621,8 @@
+@@ -5567,6 +6496,10 @@
          }
      }
  
-+    if (!configure_disruptor_precision_store_routes(game_id)) return 1;
++#ifdef PSX_HAS_GAME_HOST
++    if (!psx_game_configure(game_id.data(), game_id.size())) return 1;
++#endif
 +
      if (!game_name.empty()) s_picker_game_name = game_name;
  
      /* Layer the launcher-written settings.toml (next to the exe) over the
-@@ -5580,6 +6636,9 @@
+@@ -5580,6 +6513,9 @@
      {
          std::filesystem::path settings_path =
              exe_dir_from_argv(argv[0]) / "settings.toml";
@@ -1932,25 +1808,18 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
  #if defined(RECOMP_LAUNCHER)
          g_lnch_settings_path = settings_path;
  #endif
-@@ -5640,6 +6699,17 @@
+@@ -5640,6 +6576,10 @@
           * Config + env own it until a launcher toggle exists; if one is
           * added, restore this line together with the UI. The seed write
           * below still persists the effective value for inspection. */
-+#ifdef PSX_HAS_DISRUPTOR_INTRO_SKIP
-+        /* Disruptor's intro switch has a control and covers the BIOS animation too. */
-+        if (us.has_skip_intro && us.skip_intro &&
-+            !std::getenv("PSX_DISRUPTOR_SKIP_INTRO"))
-+            fast_boot = true;
-+#endif
-+#ifdef PSX_HAS_DISRUPTOR_LANGUAGE
-+        /* Named before the drive first reads the game disc. */
-+        if (us.has_language_disc && !std::getenv("PSX_DISRUPTOR_LANGUAGE_DISC"))
-+            disruptor_language_set_disc(us.language_disc.c_str());
++#ifdef PSX_HAS_GAME_HOST
++        /* Before the drive first reads the game disc. */
++        if (psx_game_settings_loaded(us)) fast_boot = true;
 +#endif
          if (us.has_bios_hle)       bios_hle_requested = us.bios_hle;
          if (us.has_fullscreen)     g_fullscreen      = us.fullscreen;
          if (us.has_aspect_ratio) {
-@@ -5648,6 +6718,10 @@
+@@ -5648,6 +6588,10 @@
          }
          if (us.has_adaptive_view) g_ws_adaptive_view = us.adaptive_view;
          if (us.has_spu_hq)         g_audio_spu_hq    = us.spu_hq;
@@ -1961,7 +1830,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
          /* Bundled BIOS: ignore any persisted bios_path (same clamp-as-well-
           * as-hide treatment as lock_mode / ws_offered below) so a stale
           * settings.toml or launcher-less build can never point a bundled
-@@ -5682,10 +6756,30 @@
+@@ -5682,10 +6626,30 @@
          if (us.has_deadzone)  resolved_deadzone = us.deadzone;
          if (us.has_low_latency_input) g_low_latency_input = us.low_latency_input ? 1 : 0;
          if (us.has_vsync)             g_video_vsync       = us.vsync;
@@ -1992,7 +1861,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
          if (us.has_parappa_timing_mode || us.has_parappa_timing_extra_early ||
              us.has_parappa_timing_extra_late) {
              parappa_apply_timing_setting(
-@@ -5782,25 +6876,65 @@
+@@ -5782,25 +6746,65 @@
          g_video_aspect_den = ws_offered ? 9 : 3;
      }
      if (!ws_adaptive_view_supported) g_ws_adaptive_view = false;
@@ -2063,7 +1932,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
              strcmp(e, "1") == 0) {
              g_frame_interpolation_blend_default =
                  PSX_MOD_FRAME_INTERPOLATION_MOTION_ADAPTIVE;
-@@ -5810,6 +6944,11 @@
+@@ -5810,6 +6814,11 @@
          }
          g_frame_interpolation_blend = g_frame_interpolation_blend_default;
      }
@@ -2075,7 +1944,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
      {
          const char *mode_env = std::getenv("PSX_PARAPPA_TIMING_MODE");
          const char *early_env = std::getenv("PSX_PARAPPA_TIMING_EXTRA_EARLY");
-@@ -5916,7 +7055,14 @@
+@@ -5916,7 +6925,14 @@
      if (want_launcher) {
          if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) == 0) {
              int lr = 2; /* 0 = launch, 1 = quit, 2 = unavailable */
@@ -2091,7 +1960,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
              seed.renderer = g_video_renderer;             seed.has_renderer = true;
              seed.supersampling = g_video_scale;           seed.has_supersampling = true;
              seed.antialiasing = g_video_aa;               seed.has_antialiasing = true;
-@@ -6415,6 +7561,12 @@
+@@ -6415,6 +7431,12 @@
      g_turbo_load_release_frames = TURBO_LOADS_RELEASE_FRAMES;
      if (!turbo_loads_offered)
          g_turbo_loads_enabled = 0;
@@ -2104,7 +1973,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
      g_frame_interpolation_blend = g_frame_interpolation_blend_default;
      mod_runtime_activate_plugins();
      if (g_mod_controller_mode_override[0] >= 0)
-@@ -6527,6 +7679,22 @@
+@@ -6527,6 +7549,22 @@
      gr_set_scale(g_video_scale);
      g_video_scale = gr_scale(); /* reflect any clamp / alloc fallback */
      gr_set_texture_filter(g_video_texfilter);
@@ -2127,7 +1996,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
      /* Display aspect. Identity at the default 4:3. The present letterbox uses
       * this aspect; native-wide fills it with a genuinely wider frame (no
       * stretch), squash mode stretches the 4:3 frame into it. */
-@@ -6633,6 +7801,7 @@
+@@ -6633,6 +7671,7 @@
       * the local EXE file (dev checkouts) and the disc image (every install). */
      if (game_config_path)
          arm_text_image_guard(text_guard_exe_path, text_guard_load_addr,
@@ -2135,7 +2004,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
                               disc_path_str);
      mod_runtime_enable_disc_patches();
      {
-@@ -6691,6 +7860,7 @@
+@@ -6691,6 +7730,7 @@
  
    if (g_headless) {
      std::fprintf(stdout, "psxrecomp: headless frontend enabled\n");
@@ -2143,7 +2012,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
    } else {
      /* ---- SDL init ---- */
      /* Scale quality governs SDL's logical-size -> window scaling. Linear when
-@@ -6780,6 +7950,17 @@
+@@ -6780,6 +7820,17 @@
          std::fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
          return 1;
      }
@@ -2161,7 +2030,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
  
      /* Sync-to-host-refresh: with SDL PRESENTVSYNC on, a fixed 59.94 Hz wall-clock
       * pacer fights a 60.00 Hz panel — rendered frames slip onto an uneven vblank
-@@ -6909,6 +8090,7 @@
+@@ -6909,6 +7960,7 @@
          std::fprintf(stderr, "failed to allocate %dx staging buffer\n", g_video_scale);
          return 1;
      }
@@ -2169,7 +2038,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
  
    if (!g_gl_active && !g_vk_active) {
      sdl_texture = SDL_CreateTexture(
-@@ -6924,6 +8106,12 @@
+@@ -6924,6 +7976,12 @@
      SDL_SetTextureScaleMode(sdl_texture,
                              g_video_aa ? SDL_ScaleModeLinear : SDL_ScaleModeNearest);
    }
@@ -2182,24 +2051,23 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..975e230515281eaf1cbf5f878abc65e1
    }
  
      /* Register vblank presentation callback. */
-@@ -7012,6 +8200,10 @@
+@@ -7012,6 +8070,9 @@
              bios_hle_requested = (e[0] && e[0] != '0');
          if (const char* e = std::getenv("PSX_BIOS_HLE_KEEP_INTRO"))
              bios_hle_keep_intro = (e[0] && e[0] != '0');
-+#ifdef PSX_HAS_DISRUPTOR_INTRO_SKIP
-+        if (const char* e = std::getenv("PSX_DISRUPTOR_SKIP_INTRO"))
-+            if (e[0] && e[0] != '0') fast_boot = true;
++#ifdef PSX_HAS_GAME_HOST
++        if (psx_game_fast_boot_forced()) fast_boot = true;
 +#endif
  
          PsxBiosHleRequest req;
          req.bios_hle               = bios_hle_requested ? 1 : 0;
-@@ -7062,6 +8254,10 @@
+@@ -7062,6 +8123,10 @@
      if (game_entry_pc != 0) {
          savestate_configure(memcard_dir.string().c_str(),
                              memory_get_bios_checksum(), game_entry_pc);
-+#ifdef PSX_HAS_DISRUPTOR_LANGUAGE
-+        /* Before any state can be asked for: a language disc's states have a folder of their own. */
-+        disruptor_language_settle();
++#ifdef PSX_HAS_GAME_HOST
++        /* Before any state can be asked for. */
++        psx_game_states_configured();
 +#endif
          /* Headless / agent load: PSX_LOAD_SLOT=N stages F1..F12 load (0..11)
           * at the next safe block boundary after boot. */

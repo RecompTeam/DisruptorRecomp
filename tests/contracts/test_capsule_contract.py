@@ -16,14 +16,15 @@ def require(condition: bool, message: str) -> None:
 
 
 host = read("psxrecomp/runtime/src/main.cpp")
+game_side = read("src/game/host.cpp")
 capsule = read("src/game/session/capsule.cpp")
 mouse = read("src/game/input/mouse_aim.cpp")
 menu = read("src/game/ui/dev_menu.cpp")
 cmake = read("CMakeLists.txt")
 
 require(
-    "#ifdef PSX_HAS_DISRUPTOR_CAPSULE\n"
-    "    if (!psx_netplay_active()) disruptor_capsule_before_input();\n"
+    "#ifdef PSX_HAS_GAME_HOST\n"
+    "    if (!psx_netplay_active()) psx_game_before_input();\n"
     "#endif\n"
     "    if (psx_netplay_active()) {\n"
     "        psx_netplay_finish_frame();\n"
@@ -32,14 +33,19 @@ require(
     "    } else {\n"
     "        sample_pad_into_sio(override);\n"
     "    }\n"
-    "#ifdef PSX_HAS_DISRUPTOR_CAPSULE\n"
-    "    if (!psx_netplay_active()) disruptor_capsule_after_input();\n"
+    "#ifdef PSX_HAS_GAME_HOST\n"
+    "    if (!psx_netplay_active()) psx_game_after_input();\n"
     "#endif\n"
     in host
-    and host.count("disruptor_capsule_before_input();") == host.count("disruptor_capsule_after_input();") == 1,
+    and host.count("psx_game_before_input();") == host.count("psx_game_after_input();") == 1
+    and "void psx_game_before_input(void) { disruptor_capsule_before_input(); }\n" in game_side
+    and "void psx_game_after_input(void) { disruptor_capsule_after_input(); }\n" in game_side
+    and game_side.count("disruptor_capsule_before_input();") == game_side.count("disruptor_capsule_after_input();") == 1
+    and game_side.count("disruptor_capsule_state_loaded();") == 1
+    and "disruptor_capsule_" not in host,
     "the capsule is called once on either side of the pad sampling of every VBlank, and never in a network game",
 )
-sampling = host.index("    if (!psx_netplay_active()) disruptor_capsule_after_input();")
+sampling = host.index("    if (!psx_netplay_active()) psx_game_after_input();")
 require(
     sampling < host.index("    if (g_headless || module_fast_forward) {")
     and sampling < host.index("    mod_call_frame_hooks();"),
@@ -47,9 +53,10 @@ require(
 )
 require(
     'extern "C" void psx_frontend_on_savestate_loaded(void) {\n'
-    "#ifdef PSX_HAS_DISRUPTOR_CAPSULE\n"
-    "    disruptor_capsule_state_loaded();\n"
-    "#endif\n" in host,
+    "#ifdef PSX_HAS_GAME_HOST\n"
+    "    psx_game_state_loaded();\n"
+    "#endif\n" in host
+    and "void psx_game_state_loaded(void) {\n    disruptor_capsule_state_loaded();\n" in game_side,
     "the capsule must hear of a loaded state before the game runs on from it",
 )
 require(
@@ -129,7 +136,8 @@ require(
 )
 require(
     '    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/capsule.cpp"\n' in cmake
-    and "    PSX_HAS_DISRUPTOR_CAPSULE=1\n" in cmake
+    and "    PSX_HAS_GAME_HOST=1\n" in cmake
+    and '    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/host.cpp"\n' in cmake
     and '#define DISRUPTOR_CAPSULE_NO_HOST 1\n#include "../../src/game/session/capsule.cpp"\n'
     in read("tests/unit/disruptor_capsule_test.cpp")
     and "    disruptor_unit_test(disruptor_capsule " in cmake

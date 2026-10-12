@@ -199,13 +199,12 @@ require(
 
 runtime_main = read("psxrecomp/runtime/src/main.cpp")
 require(
-    "        if (us.has_skip_intro && us.skip_intro &&\n"
-    '            !std::getenv("PSX_DISRUPTOR_SKIP_INTRO"))\n'
-    "            fast_boot = true;"
-    in runtime_main
-    and '        if (const char* e = std::getenv("PSX_DISRUPTOR_SKIP_INTRO"))\n'
-    "            if (e[0] && e[0] != '0') fast_boot = true;"
-    in runtime_main,
+    "        if (psx_game_settings_loaded(us)) fast_boot = true;\n" in runtime_main
+    and "        if (psx_game_fast_boot_forced()) fast_boot = true;\n" in runtime_main
+    and '    return settings.has_skip_intro && settings.skip_intro && !std::getenv("PSX_DISRUPTOR_SKIP_INTRO");\n'
+    in read("src/game/host.cpp")
+    and '    const char *forced = std::getenv("PSX_DISRUPTOR_SKIP_INTRO");\n'
+    "    return forced && forced[0] && forced[0] != '0';\n" in read("src/game/host.cpp"),
     "the saved switch, or the environment in its place, must also skip the BIOS animation",
 )
 

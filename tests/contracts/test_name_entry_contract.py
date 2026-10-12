@@ -95,10 +95,12 @@ def require(condition: bool, message: str) -> None:
 cmake = read("CMakeLists.txt")
 module = read("src/game/input/name_entry.cpp")
 host = read("psxrecomp/runtime/src/main.cpp")
+game_side = read("src/game/host.cpp")
 
 require(
     '    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/name_entry.cpp"\n' in cmake
-    and "    PSX_HAS_DISRUPTOR_NAME_ENTRY=1\n" in cmake
+    and "    PSX_HAS_GAME_HOST=1\n" in cmake
+    and '    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/host.cpp"\n' in cmake
     and "    disruptor_unit_test(disruptor_name_entry " in cmake
     and "    disruptor_contract(name_entry RETAIL)\n" in cmake,
     "the module, its switch for the host, its unit test and this contract with its input must stay registered",
@@ -134,28 +136,29 @@ require(
     "and the name, the cursor and the row the only memory written",
 )
 require(
-    "#ifdef PSX_HAS_DISRUPTOR_NAME_ENTRY\n"
-    'extern "C" int disruptor_name_entry_key(int scancode, uint32_t keycode, int down, int plain);\n#endif\n'
+    '#ifdef PSX_HAS_GAME_HOST\n#include "game_host.h"\n#endif\n'
     in host
-    and "#ifdef PSX_HAS_DISRUPTOR_NAME_ENTRY\n            } else if (ev.type == SDL_KEYUP) {\n#if defined(PSX_SDL3)\n"
-    "                (void)disruptor_name_entry_key((int)ev.key.scancode, (uint32_t)ev.key.key, 0, 1);\n#else\n"
-    "                (void)disruptor_name_entry_key((int)ev.key.keysym.scancode, (uint32_t)ev.key.keysym.sym, 0, 1);\n"
+    and "int psx_game_key(int scancode, uint32_t keycode, int down, int plain) {\n"
+    "    return disruptor_name_entry_key(scancode, keycode, down, plain);\n}\n" in game_side
+    and "#ifdef PSX_HAS_GAME_HOST\n            } else if (ev.type == SDL_KEYUP) {\n#if defined(PSX_SDL3)\n"
+    "                (void)psx_game_key((int)ev.key.scancode, (uint32_t)ev.key.key, 0, 1);\n#else\n"
+    "                (void)psx_game_key((int)ev.key.keysym.scancode, (uint32_t)ev.key.keysym.sym, 0, 1);\n"
     "#endif\n#endif\n            } else if (!ui_consumed && ev.type == SDL_KEYDOWN) {\n"
     in host
-    and "#ifdef PSX_HAS_DISRUPTOR_NAME_ENTRY\n"
-    "                if (disruptor_name_entry_key((int)scancode, (uint32_t)key, 1, !(mod & (KMOD_CTRL | KMOD_ALT | KMOD_GUI))))\n"
-    "                    continue; /* the key is a letter of a save's name */\n"
+    and "#ifdef PSX_HAS_GAME_HOST\n"
+    "                if (psx_game_key((int)scancode, (uint32_t)key, 1, !(mod & (KMOD_CTRL | KMOD_ALT | KMOD_GUI))))\n"
+    "                    continue; /* the game took the key */\n"
     in host
-    and host.count("disruptor_name_entry_key(") == 4,
+    and host.count("psx_game_key(") == 3,
     "the host must hand every key it did not use itself to the module, a release whoever used the press, and leave a taken key alone",
 )
 keydown = host.index("            } else if (!ui_consumed && ev.type == SDL_KEYDOWN) {\n")
 require(
     keydown
-    < host.index("if (disruptor_name_entry_key((int)scancode")
+    < host.index("if (psx_game_key((int)scancode")
     < host.index("if (key >= SDLK_F1 && key <= SDLK_F12) {", keydown)
     and host.index('netplay_soft_exit("netplay_escape");', keydown)
-    < host.index("if (disruptor_name_entry_key((int)scancode"),
+    < host.index("if (psx_game_key((int)scancode"),
     "a taken key must be taken before the host's own keys are looked at, and after a net game's Escape",
 )
 

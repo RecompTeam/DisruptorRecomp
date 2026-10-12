@@ -172,8 +172,8 @@ for token in (
 require("disruptor_far_rendering_abandon_metrics" in header and
         "disruptor_far_rendering_abandon_metrics" in source,
         "the module must expose savestate-abandon cleanup")
-require("#ifdef PSX_HAS_DISRUPTOR_FAR_RENDERING" in main and
-        "disruptor_far_rendering_abandon_metrics();" in main,
+require("#ifdef PSX_HAS_GAME_HOST\n    psx_game_state_loaded();\n#endif\n" in main and
+        "    disruptor_far_rendering_abandon_metrics();\n}\n" in read("src/game/host.cpp"),
         "successful savestate loads must abandon host measurement spans")
 
 for token in (

@@ -32,6 +32,7 @@ set(DISRUPTOR_EXTRA_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/control_probe.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/far_rendering.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/frame/frame_rate.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/host.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/intro_skip.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/language.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/language_disc.cpp"
@@ -40,6 +41,7 @@ set(DISRUPTOR_EXTRA_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/restart.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/mouse_aim.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/name_entry.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/precision_routes.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/render_arena.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/grown_quad.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/hud_widgets.cpp"
@@ -132,13 +134,11 @@ psxrecomp_add_runtime_target(psx-runtime
     EXE_NAME "DisruptorRecompiled"
 )
 target_compile_definitions(psx-runtime PRIVATE
+    PSX_HAS_GAME_HOST=1
     PSX_HAS_DISRUPTOR_BACKDROP_TILES=1
     PSX_HAS_DISRUPTOR_BILLBOARD_ASPECT=1
-    PSX_HAS_DISRUPTOR_CAPSULE=1
     PSX_HAS_DISRUPTOR_FAR_RENDERING=1
     PSX_HAS_DISRUPTOR_INTRO_SKIP=1
-    PSX_HAS_DISRUPTOR_LANGUAGE=1
-    PSX_HAS_DISRUPTOR_NAME_ENTRY=1
     PSX_HAS_DISRUPTOR_SPRITE_DEPTH=1
     PSX_HAS_DISRUPTOR_GROWN_QUAD=1
     PSX_HAS_DISRUPTOR_VERTICAL_CAMERA=1)
