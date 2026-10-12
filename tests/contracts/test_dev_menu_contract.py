@@ -813,4 +813,72 @@ require(HELPERS in menu and len(shared_labels) == 27 and drawn_keys == shared_ke
         '"The loudness of everything the game plays.", 0, 100, Unit::percent,' in options,
         "the menu must draw every shared option by its key, with the table's label, bounds and choices and none of its own")
 
+RULE = (
+    "bool applies(const Option& option, const std::function<bool(const Option&)>& on) {\n"
+    "    return std::all_of(option.needs.begin(), option.needs.end(), [&](const char* key) {\n"
+    "        const Option* needed = find_option(key);\n"
+    "        return needed && on(*needed) && applies(*needed, on);\n"
+    "    });\n"
+    "}\n"
+)
+LIVE = (
+    "bool prerequisite_on(const Option &option) {\n"
+    "    const std::string_view key(option.key);\n"
+    '    if (key == "disruptor.geometry_correction")\n'
+    "        return gpu_geometry_correction_enabled() != 0;\n"
+    '    if (key == "disruptor.mouse_aim") return disruptor_mouse_aim_enabled() != 0;\n'
+    '    if (key == "disruptor.ambient_occlusion") return gl_renderer_ssao() != 0;\n'
+    "    return false;\n"
+    "}\n"
+    "\n"
+    "bool applies(const char *key) {\n"
+    "    return disruptor::settings::applies(*find_option(key), prerequisite_on);\n"
+    "}\n"
+)
+key_names = dict(re.findall(r'constexpr const char\* (\w+_key) = "([\w.]+)";', options))
+needs_lists = {
+    name: [key_names[word.strip()] for word in words.split(",")]
+    for name, words in re.findall(r"constexpr const char\* (needs_\w+)\[\] = \{([^}]*)\};", options)
+}
+table_rows = re.split(r"\n    (?=toggle<|choice\(|slider\()", options[options.index("constexpr Option option_list[]") :])[1:]
+needing = {}
+for row in table_rows:
+    row = row.split("\n};")[0]
+    ending = re.search(r"\b(needs_\w+)\),?\s*$", row)
+    if ending:
+        needing[re.search(r'"([\w.]+)"', row)[1]] = needs_lists[ending[1]]
+asked = set(re.findall(r'\bapplies\("([\w.]+)"\)', menu))
+told = set(re.findall(r'key == "([\w.]+)"', function_body(menu, "prerequisite_on")))
+require(RULE in options and LIVE in menu and len(needing) == 9 and
+        needing["disruptor.high_precision_camera"] == ["disruptor.mouse_aim", "disruptor.geometry_correction"] and
+        asked == set(needing) - {"video.frame_interpolation_fps"} and
+        told == {key for keys in needing.values() for key in keys} - {"video.frame_interpolation"} and
+        "    if (!enabled) ImGui::BeginDisabled();\n" in function_body(present, "disruptor_present_rate_control") and
+        "if (!geometry)" not in menu and "turn_applies = mouse_aim" not in menu,
+        "the menu must grey a control by the shared table's rule alone, asked of the running game, and the "
+        "rate control must grey itself while in-between frames are off")
+
+
+def greyed_by_own_rule(source: str, key: str) -> bool:
+    rule = re.search(r'const bool (\w+) =[^;]*\bapplies\("' + re.escape(key) + r'"\)[^;]*;\n', source)
+    if rule is None:
+        return False
+    begin, end = f"    if (!{rule[1]}) ImGui::BeginDisabled();\n", f"    if (!{rule[1]}) ImGui::EndDisabled();\n"
+    control = re.search(r'\boption_(?:toggle|slider|list)\("' + re.escape(key) + '"', source)
+    if control is None or source.count(begin) != 1 or source.count(end) != 1:
+        return False
+    opened, closed = source.index(begin), source.index(end)
+    return (rule.end() <= opened < control.start() < closed and
+            "Disabled()" not in source[opened + len(begin):control.start()] and
+            "BeginDisabled()" not in source[control.start():closed])
+
+
+greyed = asked - {"video.frame_interpolation"}
+require(len(greyed) == 7 and all(greyed_by_own_rule(menu, key) for key in greyed) and
+        not greyed_by_own_rule(menu.replace("    if (!textures_apply) ImGui::BeginDisabled();\n",
+                                            "    if (false) ImGui::BeginDisabled();\n"), "disruptor.perspective_textures") and
+        not greyed_by_own_rule(menu.replace('applies("disruptor.gap_filling")', 'applies("disruptor.vsync")'),
+                               "disruptor.gap_filling"),
+        "each control that needs something must be drawn inside a disabled block opened by its own rule")
+
 print("developer menu contract: PASS")

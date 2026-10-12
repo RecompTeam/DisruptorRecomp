@@ -86,7 +86,7 @@ require(
 
 controls = between(menu, "void draw_controls_tab() {", "void apply_geometry_enabled(")
 require(
-    """    const bool turn_applies = mouse_aim && gpu_geometry_correction_enabled() != 0;
+    """    const bool turn_applies = applies("disruptor.high_precision_camera");
     bool smooth = disruptor_high_precision_camera_enabled() != 0;
     if (!turn_applies) ImGui::BeginDisabled();
     if (option_toggle("disruptor.high_precision_camera", &smooth)) {
@@ -124,11 +124,12 @@ require(
 
 row = between(options, '"disruptor.high_precision_camera", "Smooth mouse turning", 0,', "),\n")
 require(
-    row.endswith("aim_key")
+    row.endswith("needs_aim_and_geometry")
+    and "constexpr const char* needs_aim_and_geometry[] = {aim_key, geometry_key};\n" in options
     and 'constexpr const char* aim_key = "disruptor.mouse_aim";\n' in options
     and options.count('"disruptor.high_precision_camera"') == launcher.count('"disruptor.high_precision_camera"') == 1
     and '    {"disruptor.high_precision_camera", Page::controls},\n' in launcher,
-    "the launcher offers it on the Controls page, off at first and only with mouse aim",
+    "the launcher offers it on the Controls page, off at first and only with mouse aim and geometry correction",
 )
 
 print("Disruptor smooth mouse turning source contract: PASS")

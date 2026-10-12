@@ -65,10 +65,14 @@ constexpr const char* frames_key = "video.frame_interpolation";
 constexpr const char* rate_key = "video.frame_interpolation_fps";
 constexpr const char* occlusion_key = "disruptor.ambient_occlusion";
 constexpr const char* aim_key = "disruptor.mouse_aim";
+constexpr const char* needs_geometry[] = {geometry_key};
+constexpr const char* needs_frames[] = {frames_key};
+constexpr const char* needs_occlusion[] = {occlusion_key};
+constexpr const char* needs_aim_and_geometry[] = {aim_key, geometry_key};
 
 template <auto Has, auto Value>
 constexpr Option toggle(const char* key, const char* label, int initial, const char* hint,
-                        const char* needs = nullptr) {
+                        std::span<const char* const> needs = {}) {
     return {key, Kind::toggle, label, saved<Has>, read<Value>, write<Has, Value>, initial, 0, 1, {}, needs,
             Unit::none, hint};
 }
@@ -76,12 +80,12 @@ constexpr Option toggle(const char* key, const char* label, int initial, const c
 constexpr Option choice(const char* key, const char* label, int initial, const char* hint,
                         std::span<const char* const> choices, Saved saved, Get get, Set set) {
     return {key, Kind::choice, label, saved, get, set, initial, 0, static_cast<int>(choices.size()) - 1,
-            choices, nullptr, Unit::none, hint};
+            choices, {}, Unit::none, hint};
 }
 
 constexpr Option slider(const char* key, const char* label, int initial, const char* hint,
                         int lowest, int highest, Unit unit, Saved saved, Get get, Set set,
-                        const char* needs = nullptr) {
+                        std::span<const char* const> needs = {}) {
     return {key, Kind::slider, label, saved, get, set, initial, lowest, highest, {}, needs, unit, hint};
 }
 
@@ -116,14 +120,14 @@ constexpr Option option_list[] = {
     toggle<&Settings::has_perspective_textures, &Settings::perspective_textures>(
         "disruptor.perspective_textures", "Perspective-correct world textures", 1,
         "Draws wall and floor textures in true perspective. The PlayStation's own way bends them near "
-        "the viewer.", geometry_key),
+        "the viewer.", needs_geometry),
     toggle<&Settings::has_gap_filling, &Settings::gap_filling>(
         "disruptor.gap_filling", "Gap filling", 1,
-        "Closes hairline gaps between polygons and keeps the game's own patches off their neighbours.", geometry_key),
+        "Closes hairline gaps between polygons and keeps the game's own patches off their neighbours.", needs_geometry),
     toggle<&Settings::has_depth_sorted_world, &Settings::depth_sorted_world>(
         "disruptor.depth_sorted_world", "Depth-sorted world", 0,
         "Draws world polygons by their depth where the game's own order puts a far one over a near "
-        "one.", geometry_key),
+        "one.", needs_geometry),
     choice("disruptor.improved_shadows", "Shadows", 0,
            "Vanilla is the game's own shape. Improved lays a shadow flat on the floor: as wide as the "
            "game makes it and as tall as the floor's perspective gives. Improved needs exact "
@@ -136,12 +140,12 @@ constexpr Option option_list[] = {
     toggle<&Settings::has_frame_interpolation, &Settings::frame_interpolation>(
         "video.frame_interpolation", "In-between frames", 0,
         "Shows extra pictures between the game's frames, built from the game's own geometry, for "
-        "smoother motion.", geometry_key),
+        "smoother motion.", needs_geometry),
     slider("video.frame_interpolation_fps", "In-between frame rate", 0,
            "Pictures shown per second while in-between frames are on.",
            kDisruptorPresentRateLowest, kDisruptorPresentRateHighest, Unit::frames,
            saved<&Settings::has_frame_interpolation_fps>, read<&Settings::frame_interpolation_fps>,
-           write<&Settings::has_frame_interpolation_fps, &Settings::frame_interpolation_fps>, frames_key),
+           write<&Settings::has_frame_interpolation_fps, &Settings::frame_interpolation_fps>, needs_frames),
     toggle<&Settings::has_skip_intro, &Settings::skip_intro>(
         "disruptor.skip_intro", "Skip the logos and the title movie", 0,
         "Starts at the main menu without the logos and the title movie. Escape skips a logo or a "
@@ -165,7 +169,7 @@ constexpr Option option_list[] = {
     toggle<&Settings::has_high_precision_camera, &Settings::high_precision_camera>(
         "disruptor.high_precision_camera", "Smooth mouse turning", 0,
         "The game turns in 256 steps of a circle. With this on, the picture also turns by the part of "
-        "a step in between. Needs exact geometry.", aim_key),
+        "a step in between. Needs exact geometry.", needs_aim_and_geometry),
     toggle<&Settings::has_vertical_look, &Settings::vertical_look>(
         "disruptor.vertical_look", "Vertical mouse look", 0,
         "Looks up and down with the mouse, to about 31 degrees each way. The original game has no "
@@ -187,15 +191,15 @@ constexpr Option option_list[] = {
 
     toggle<&Settings::has_ambient_occlusion, &Settings::ambient_occlusion>(
         "disruptor.ambient_occlusion", "Ambient occlusion", 0,
-        "Shades corners and the floor under things. Unfinished.", geometry_key),
+        "Shades corners and the floor under things. Unfinished.", needs_geometry),
     slider("disruptor.occlusion_reach", "Occlusion reach", 160,
            "How far from a corner or an object the shade spreads.", 50, 800, Unit::none,
            saved<&Settings::has_occlusion_reach>, read<&Settings::occlusion_reach>,
-           write<&Settings::has_occlusion_reach, &Settings::occlusion_reach>, occlusion_key),
+           write<&Settings::has_occlusion_reach, &Settings::occlusion_reach>, needs_occlusion),
     slider("disruptor.occlusion_strength", "Occlusion strength", 80,
            "How dark the shade is.", 0, 300, Unit::percent,
            saved<&Settings::has_occlusion_strength>, read<&Settings::occlusion_strength>,
-           write<&Settings::has_occlusion_strength, &Settings::occlusion_strength>, occlusion_key),
+           write<&Settings::has_occlusion_strength, &Settings::occlusion_strength>, needs_occlusion),
 };
 } // namespace
 
@@ -205,6 +209,13 @@ const Option* find_option(const char* key) {
     for (const auto& option : option_list)
         if (std::string_view(option.key) == key) return &option;
     return nullptr;
+}
+
+bool applies(const Option& option, const std::function<bool(const Option&)>& on) {
+    return std::all_of(option.needs.begin(), option.needs.end(), [&](const char* key) {
+        const Option* needed = find_option(key);
+        return needed && on(*needed) && applies(*needed, on);
+    });
 }
 
 } // namespace disruptor::settings

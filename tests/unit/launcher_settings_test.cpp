@@ -13,6 +13,7 @@
 #include <stdexcept>
 #include <string>
 #include <string_view>
+#include <utility>
 
 namespace fs = std::filesystem;
 using namespace disruptor::launcher;
@@ -54,7 +55,8 @@ void table() {
             require(!one.choices.empty() && one.initial >= 0 && one.initial < static_cast<int>(one.choices.size()) &&
                     one.highest == static_cast<int>(one.choices.size()) - 1, "a choice starts outside its list");
         if (one.kind == Kind::toggle) require(one.initial == 0 || one.initial == 1, "a toggle starts as neither");
-        if (one.needs) require(option(one.needs).kind == Kind::toggle && &option(one.needs) != &one, "a row needs no toggle");
+        for (const char* need : one.needs)
+            require(option(need).kind == Kind::toggle && &option(need) != &one, "a row needs no toggle");
         require(one.hint && std::strlen(one.hint) >= 20 && std::strlen(one.hint) <= 240, "a row has no hint to show");
     }
     require(presets().size() == 2, "the two presets are expected");
@@ -102,6 +104,24 @@ void carried() {
     turn.set(written, turn.get(typed));
     require(written.has_horizontal_sensitivity && written.horizontal_sensitivity == 0.083,
             "a sensitivity is not written in whole thousandths");
+}
+
+// The rule both front ends ask: every toggle an option needs is on, and so is what those need.
+void needed() {
+    const auto on = [](std::set<std::string> keys) {
+        return [keys = std::move(keys)](const Option& toggle) { return keys.contains(toggle.key); };
+    };
+    const Option& smooth = option("disruptor.high_precision_camera");
+    const Option& reach = option("disruptor.occlusion_reach");
+    require(disruptor::settings::applies(option("video.vsync"), on({})), "an option that needs nothing always applies");
+    require(disruptor::settings::applies(smooth, on({"disruptor.mouse_aim", "disruptor.geometry_correction"})) &&
+            !disruptor::settings::applies(smooth, on({"disruptor.mouse_aim"})) &&
+            !disruptor::settings::applies(smooth, on({"disruptor.geometry_correction"})),
+            "an option applies only with every toggle it needs");
+    require(disruptor::settings::applies(reach, on({"disruptor.ambient_occlusion", "disruptor.geometry_correction"})) &&
+            !disruptor::settings::applies(reach, on({"disruptor.ambient_occlusion"})) &&
+            !disruptor::settings::applies(reach, on({"disruptor.geometry_correction"})),
+            "and only when what it needs applies itself");
 }
 
 void placements() {
@@ -218,10 +238,13 @@ void dependants(const fs::path& folder) {
     const Option& by_depth = option("disruptor.depth_sorted_world");
     const Option& occlusion = option("disruptor.ambient_occlusion");
     const Option& reach = option("disruptor.occlusion_reach");
-    require(settings.set(aim, 1) && settings.set(smooth, 1) && settings.applies(smooth) && settings.set(geometry, 0) &&
-            settings.shown(smooth) == 1 && settings.applies(smooth), "smooth turning needs mouse aim, not geometry");
-    require(settings.set(aim, 0) && settings.shown(smooth) == 0 && !settings.applies(smooth) &&
-            has(file, "high_precision_camera = false"), "and goes off with mouse aim");
+    require(settings.set(aim, 1) && settings.set(smooth, 1) && settings.applies(smooth) && settings.set(aim, 0) &&
+            settings.shown(smooth) == 0 && !settings.applies(smooth) && has(file, "high_precision_camera = false"),
+            "smooth turning needs mouse aim and goes off with it");
+    require(settings.set(aim, 1) && settings.applies(smooth) && settings.set(smooth, 1) &&
+            has(file, "high_precision_camera = true") && settings.set(geometry, 0) && settings.shown(smooth) == 0 &&
+            !settings.applies(smooth) && has(file, "high_precision_camera = false") && settings.set(aim, 0),
+            "and geometry, and goes off with that too");
     require(settings.shown(gaps) == 0 && has(file, "gap_filling = false"),
             "gap filling, on in a fresh installation, went off with geometry above and was written so");
     require(settings.set(geometry, 1) && settings.set(gaps, 1) && settings.set(by_depth, 1) && settings.set(occlusion, 1) &&
@@ -468,6 +491,7 @@ int main() {
         fs::create_directories(folder);
         table();
         carried();
+        needed();
         placements();
         absent(folder);
         one_change(folder);

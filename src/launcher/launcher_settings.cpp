@@ -121,15 +121,15 @@ int SettingsFile::shown(const Option& option) const {
 }
 
 bool SettingsFile::applies(const Option& option) const {
-    const Option* needed = option.needs ? find_option(option.needs) : nullptr;
-    return !needed || (shown(*needed) != 0 && applies(*needed));
+    return settings::applies(option, [this](const Option& needed) { return shown(needed) != 0; });
 }
 
 void SettingsFile::put(Settings& settings, const Option& option, int value) {
     option.set(settings, value);
     if (option.kind != Kind::toggle || value != 0) return;
+    const auto named = [&](const char* key) { return std::string_view(key) == option.key; };
     for (const auto& other : options()) {
-        if (other.kind == Kind::toggle && other.needs && std::string_view(other.needs) == option.key &&
+        if (other.kind == Kind::toggle && std::any_of(other.needs.begin(), other.needs.end(), named) &&
             stored(settings, other) != 0)
             put(settings, other, 0);
     }

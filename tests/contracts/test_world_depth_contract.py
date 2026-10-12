@@ -121,12 +121,13 @@ require(
 enhancements = between(menu, "void draw_enhancements_tab() {", "const char *cheat_result_message(")
 require(
     """    bool by_depth = gl_renderer_world_depth() != 0;
-    if (!geometry) ImGui::BeginDisabled();
+    const bool depth_applies = applies("disruptor.depth_sorted_world");
+    if (!depth_applies) ImGui::BeginDisabled();
     if (option_toggle("disruptor.depth_sorted_world", &by_depth)) {
         gl_renderer_set_world_depth(by_depth ? 1 : 0);
         mark_world_depth(by_depth);
     }
-    if (!geometry) ImGui::EndDisabled();
+    if (!depth_applies) ImGui::EndDisabled();
 """ in enhancements
     and menu.count('option_toggle("disruptor.depth_sorted_world"') == 1
     and enhancements.count("ImGui::BeginDisabled()") == enhancements.count("ImGui::EndDisabled()"),
@@ -165,7 +166,8 @@ require(
 
 row = between(options, '"disruptor.depth_sorted_world", "Depth-sorted world", 0,', "),\n")
 require(
-    row.endswith("geometry_key")
+    row.endswith("needs_geometry")
+    and "constexpr const char* needs_geometry[] = {geometry_key};\n" in options
     and options.count('"disruptor.depth_sorted_world"') == launcher.count('"disruptor.depth_sorted_world"') == 1
     and '    {"disruptor.depth_sorted_world", Page::enhancements},\n' in launcher,
     "the launcher offers it on the Enhancements page, off at first and only with geometry correction",

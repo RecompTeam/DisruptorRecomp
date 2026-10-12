@@ -60,6 +60,11 @@ require(
     and "    for (const auto& placement : layout()) {\n        const Option& option = *find_option(placement.key);\n" in window,
     "the launcher puts each shared option on one page and describes none itself",
 )
+require(
+    "    return settings::applies(option, [this](const Option& needed) { return shown(needed) != 0; });\n" in table
+    and "std::any_of(other.needs.begin(), other.needs.end(), named)" in table,
+    "the launcher greys a row by the shared rule asked of its file, and a toggle switched off takes with it the toggles that need it",
+)
 
 writer = loader[loader.index("bool save_user_settings(") :]
 saved, section = set(), ""

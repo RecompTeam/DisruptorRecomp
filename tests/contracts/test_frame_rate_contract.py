@@ -193,7 +193,8 @@ require(
     and "#ifndef PSX_DISABLE_FRAME_INTERPOLATION\n"
     "    int present_enabled = 0;\n"
     "    if (disruptor_present_rate_switch(\n"
-    '            find_option("video.frame_interpolation")->label, geometry ? 1 : 0,\n'
+    '            find_option("video.frame_interpolation")->label,\n'
+    '            applies("video.frame_interpolation") ? 1 : 0,\n'
     "            &present_enabled))\n"
     "        mark_present_enabled(present_enabled != 0);\n"
     "    int present_rate = 0;\n"
@@ -268,7 +269,7 @@ require(
 require(
     'void mark_present_rate(int value) { mark("video.frame_interpolation_fps", value); }\n' in menu
     and MERGED in menu
-    and "write<&Settings::has_frame_interpolation_fps, &Settings::frame_interpolation_fps>, frames_key)" in options,
+    and "write<&Settings::has_frame_interpolation_fps, &Settings::frame_interpolation_fps>, needs_frames)" in options,
     "a changed in-between frame rate must reach settings.toml",
 )
 require(

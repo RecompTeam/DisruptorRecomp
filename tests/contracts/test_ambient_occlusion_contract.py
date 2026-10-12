@@ -81,19 +81,23 @@ void gl_renderer_set_ssao_shape(float radius, float strength) {
 
 experimental = between(menu, "void draw_experimental_tab() {", "\n}\n")
 require(
-    """    const bool geometry = gpu_geometry_correction_enabled() != 0;
-    bool occlusion = gl_renderer_ssao() != 0;
-    if (!geometry) ImGui::BeginDisabled();
+    """    bool occlusion = gl_renderer_ssao() != 0;
+    const bool occlusion_applies = applies("disruptor.ambient_occlusion");
+    if (!occlusion_applies) ImGui::BeginDisabled();
     if (option_toggle("disruptor.ambient_occlusion", &occlusion)) {
         gl_renderer_set_ssao(occlusion ? 1 : 0);
         mark_occlusion(occlusion);
     }
-    if (!geometry) ImGui::EndDisabled();
+    if (!occlusion_applies) ImGui::EndDisabled();
 """ in experimental
-    and """    const bool reach_moved = option_slider("disruptor.occlusion_reach", &reach);
+    and """    const bool shape_applies = applies("disruptor.occlusion_reach") &&
+                               applies("disruptor.occlusion_strength");
+    if (!shape_applies) ImGui::BeginDisabled();
+    ImGui::SetNextItemWidth(260.0f);
+    const bool reach_moved = option_slider("disruptor.occlusion_reach", &reach);
 """ in experimental
     and """        option_slider("disruptor.occlusion_strength", &strength);
-    if (!geometry) ImGui::EndDisabled();
+    if (!shape_applies) ImGui::EndDisabled();
     if (reach_moved || strength_moved) {
         gl_renderer_set_ssao_shape(static_cast<float>(reach), strength / 100.0f);
         mark_occlusion_shape(reach, strength);
@@ -104,7 +108,7 @@ require(
     and experimental.count("option_toggle(") == 1
     and "ImGui::Checkbox(" not in experimental
     and '            if (ImGui::BeginTabItem("Experimental")) {\n                draw_experimental_tab();\n' in menu,
-    "the Experimental tab holds the occlusion alone: a switch and two bounded sliders, greyed without geometry correction",
+    "the Experimental tab holds the occlusion alone: a switch greyed without geometry correction and two bounded sliders greyed without the switch",
 )
 
 require(
@@ -118,8 +122,8 @@ void mark_occlusion_shape(int reach, int strength) {
     and STAGED in menu
     and MERGED in menu
     and '    toggle<&Settings::has_ambient_occlusion, &Settings::ambient_occlusion>(\n        "disruptor.ambient_occlusion",' in options
-    and "write<&Settings::has_occlusion_reach, &Settings::occlusion_reach>, occlusion_key)" in options
-    and "write<&Settings::has_occlusion_strength, &Settings::occlusion_strength>, occlusion_key)" in options
+    and "write<&Settings::has_occlusion_reach, &Settings::occlusion_reach>, needs_occlusion)" in options
+    and "write<&Settings::has_occlusion_strength, &Settings::occlusion_strength>, needs_occlusion)" in options
     and """    if (!env_override_present("PSX_GL_SSAO")) {
         if (settings.has_ambient_occlusion) gl_renderer_set_ssao(settings.ambient_occlusion ? 1 : 0);
 """ in menu
@@ -162,11 +166,12 @@ switch = between(options, '"disruptor.ambient_occlusion", "Ambient occlusion", 0
 reach = between(options, 'slider("disruptor.occlusion_reach", "Occlusion reach", 160,', "),\n")
 strength = between(options, 'slider("disruptor.occlusion_strength", "Occlusion strength", 80,', "),\n")
 require(
-    switch.endswith("geometry_key")
+    switch.endswith("needs_geometry")
     and "50, 800, Unit::none," in reach
-    and reach.endswith("occlusion_key")
+    and reach.endswith("needs_occlusion")
     and "0, 300, Unit::percent," in strength
-    and strength.endswith("occlusion_key")
+    and strength.endswith("needs_occlusion")
+    and "constexpr const char* needs_occlusion[] = {occlusion_key};\n" in options
     and 'constexpr const char* occlusion_key = "disruptor.ambient_occlusion";\n' in options
     and '    {"disruptor.ambient_occlusion", Page::experimental},\n'
     '    {"disruptor.occlusion_reach", Page::experimental},\n'
