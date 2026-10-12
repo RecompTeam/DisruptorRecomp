@@ -136,7 +136,7 @@ require(
 )
 require(
     '    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/capsule.cpp"\n' in cmake
-    and "    PSX_HAS_GAME_HOST=1\n" in cmake
+    and "    PSX_HAS_GAME_HOST=1" in cmake
     and '    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/host.cpp"\n' in cmake
     and '#define DISRUPTOR_CAPSULE_NO_HOST 1\n#include "../../src/game/session/capsule.cpp"\n'
     in read("tests/unit/disruptor_capsule_test.cpp")

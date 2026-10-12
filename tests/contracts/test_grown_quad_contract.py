@@ -38,10 +38,12 @@ def require(condition: bool, message: str) -> None:
 cmake = read("CMakeLists.txt")
 source = read("src/game/render/grown_quad.cpp")
 gpu = read("psxrecomp/runtime/src/gpu.c")
+host = read("src/game/host.cpp")
 
 require(
     '"${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/grown_quad.cpp"' in cmake
-    and "PSX_HAS_DISRUPTOR_GROWN_QUAD=1" in cmake
+    and "    PSX_HAS_GAME_HOST=1)\n" in cmake
+    and "    return disruptor_grown_quad_sources(command_address, packet, source_address, source_word);\n" in host
     and "    disruptor_unit_test(disruptor_grown_quad " in cmake
     and "    disruptor_contract(grown_quad RETAIL)\n" in cmake,
     "the grown quad source, its renderer switch, its unit test and this contract with its input must stay registered",
@@ -57,8 +59,19 @@ require(
     "recognising a grown quad must not write guest memory",
 )
 require(
-    "    const int grown = count == 4 && disruptor_grown_quad_sources(\n"
-    "        gp0_cmd_source_addr, gp0_cmd_buf, grown_addr, grown_word);\n" in gpu
+    "#ifdef PSX_HAS_GAME_HOST\n"
+    "    /* The game's second, grown copy of a world quad stands on the first packet's corners. */\n"
+    "    const int grown = count == 4 && psx_game_grown_quad_sources(\n"
+    "        gp0_cmd_source_addr, gp0_cmd_buf, grown_addr, grown_word);\n"
+    "#else\n"
+    "    const int grown = 0;\n"
+    "#endif\n" in gpu
+    and "#if defined(PSX_HAS_GAME_HOST) && !defined(PSX_DISABLE_FRAME_INTERPOLATION)\n"
+    "    if (grown) {\n"
+    "        grown_corner_depths(precise_x, precise_y, raw_x, raw_y, indices);\n" in gpu
+    and "#if defined(PSX_HAS_GAME_HOST) && !defined(PSX_DISABLE_FRAME_INTERPOLATION)\n"
+    "/* A grown corner lies off its source corner, on the same plane" in gpu
+    and "disruptor" not in gpu.lower()
     and "        const uint32_t word = grown ? grown_word[i] : gp0_cmd_buf[indices[i]];\n"
     "        uint32_t addr = grown_addr[i];\n" in gpu
     and "        if (!grown && !gp0_source_word_address(indices[i], &addr)) {\n" in gpu,

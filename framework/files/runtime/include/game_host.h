@@ -28,6 +28,10 @@ int psx_game_key(int scancode, uint32_t keycode, int down, int plain);
 /* Called around the sampling of the pad, outside netplay. */
 void psx_game_before_input(void);
 void psx_game_after_input(void);
+/* Nonzero when the four-cornered polygon whose command sits at `command_address` is the game's second copy of the one
+ * before it, grown outwards. Then each corner's source address and source word are those of the first copy's corner. */
+int psx_game_grown_quad_sources(uint32_t command_address, const uint32_t *packet, uint32_t source_address[4],
+                                uint32_t source_word[4]);
 /* Supplied by the generated code, from [[recompiler.instruction_hook]]: the game's calls for an instruction that ran from RAM. */
 void psx_game_instruction_ran(CPUState *cpu, uint32_t address, uint32_t instruction);
 

@@ -377,8 +377,9 @@ def main() -> int:
         (ROOT / "src/game/render/precision_routes.cpp").read_text(encoding="utf-8"),
         "disruptor_precision_routes_configure")
     require("#ifdef PSX_HAS_GAME_HOST\n    if (!psx_game_configure(game_id.data(), game_id.size())) return 1;\n#endif\n" in main_source and
-            "int psx_game_configure(const char *game_id, size_t length) {\n"
             "    return disruptor_precision_routes_configure(game_id, length);\n}\n" in
+            function_body((ROOT / "src/game/host.cpp").read_text(encoding="utf-8"), "psx_game_configure") + "}\n" and
+            "int psx_game_configure(const char *game_id, size_t length) {\n" in
             (ROOT / "src/game/host.cpp").read_text(encoding="utf-8"),
             "the host must ask the game for its routes once the serial is known, and stop when one is refused")
     require('std::string_view(game_id, length) != "SLUS-00224"' in route_config,

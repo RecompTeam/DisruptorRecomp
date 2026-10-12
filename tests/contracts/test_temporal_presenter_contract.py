@@ -223,6 +223,27 @@ require(
     and quad.index("const int raw_w = abs(vx[1] - vx[0]) + 1, raw_h = abs(vy[2] - vy[0]) + 1;") < quad.index("if (ws_tagged_anchor(&ws_ax)) {"),
     "the depth and the sides must be announced right before the rectangle they belong to, from the packet's size before the squash",
 )
+require(
+    "static int s_shadow_shape;\n"
+    "void gpu_set_shadow_shape(int improved) { s_shadow_shape = improved != 0; }\n"
+    "int gpu_shadow_shape(void) { return s_shadow_shape; }\n" in gpu
+    and "int psx_game_configure(const char *game_id, size_t length) {\n"
+    '    if (const char *asked = std::getenv("PSX_DISRUPTOR_IMPROVED_SHADOWS")) gpu_set_shadow_shape(asked[0] == \'1\');\n'
+    in read("src/game/host.cpp")
+    and '    if (settings.has_improved_shadows && !env_override_present("PSX_DISRUPTOR_IMPROVED_SHADOWS"))\n'
+    "        gpu_set_shadow_shape(settings.improved_shadows ? 1 : 0);\n" in read("src/game/ui/dev_menu.cpp"),
+    "the renderer holds the shadow switch and reads no environment: the game sets it at the start, "
+    "and a saved setting gives way to the environment",
+)
+host_loop = read("psxrecomp/runtime/src/main.cpp")
+require(
+    host_loop.count("psx_game_configure(") == host_loop.count("    gpu_init();\n") == 1
+    and host_loop.index("int main(int argc, char** argv) {")
+    < host_loop.index("psx_game_configure(")
+    < host_loop.index("    gpu_init();\n")
+    < host_loop.index("    sdl_window = SDL_CreateWindow("),
+    "the game is configured before the GPU starts and a window opens: nothing can ask for the shadow switch sooner",
+)
 sides = function_body(gpu, "static float temporal_sprite_sides(int x, int y, int w, int h, int raw_w, int raw_h, int squashed, float sides[4])")
 sizer = function_body(gpu, "void gpu_temporal_size_sprite(uint32_t primitive_addr, int32_t row16, int32_t width16, int32_t height16,")
 sprite_header = read("psxrecomp/runtime/include/gpu_temporal_sprite.h")

@@ -99,7 +99,7 @@ game_side = read("src/game/host.cpp")
 
 require(
     '    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/name_entry.cpp"\n' in cmake
-    and "    PSX_HAS_GAME_HOST=1\n" in cmake
+    and "    PSX_HAS_GAME_HOST=1" in cmake
     and '    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/host.cpp"\n' in cmake
     and "    disruptor_unit_test(disruptor_name_entry " in cmake
     and "    disruptor_contract(name_entry RETAIL)\n" in cmake,

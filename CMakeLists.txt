@@ -134,8 +134,7 @@ psxrecomp_add_runtime_target(psx-runtime
     EXE_NAME "DisruptorRecompiled"
 )
 target_compile_definitions(psx-runtime PRIVATE
-    PSX_HAS_GAME_HOST=1
-    PSX_HAS_DISRUPTOR_GROWN_QUAD=1)
+    PSX_HAS_GAME_HOST=1)
 if(NOT DISRUPTOR_FRAME_INTERPOLATION)
     target_compile_definitions(psx-runtime PRIVATE
         # Keep the experimental sources available, but compile out frame
