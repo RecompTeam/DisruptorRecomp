@@ -28,7 +28,28 @@ cycles = read("psxrecomp/runtime/include/psx_cyc.h")
 latch = read("psxrecomp/runtime/src/fntrace.c")
 menu = menu_text(ROOT)
 rate = read("src/game/frame/frame_rate.cpp")
+interrupts = read("psxrecomp/runtime/src/interrupts.c")
+hashed = read("psxrecomp/runtime/codegen_hash_sources.cmake")
+changed = read("framework/FILES.txt").split()
 
+require(
+    "void interrupts_resync_after_restore(void) {\n    post_exception_cooldown_until = 0;\n}\n" in interrupts
+    and "        psx_mod_gpu_dma_memory_restore(NULL, 0u);\n"
+    "    interrupts_resync_after_restore();\n"
+    "    cpu->muldiv_ts_done = cpu->gte_ts_done = psx_cycle_count; /*" in state
+    and state.count("interrupts_resync_after_restore();") == 1
+    and state.index("        psx_cycle_count = cyc;")
+    < state.index("    if (!ok || (seen & required) != required)\n        return 0;\n")
+    < state.index("    interrupts_resync_after_restore();\n"),
+    "a state loaded into a running game puts the clock back: the delivery deadline and the two stall deadlines of the old "
+    "clock are dropped, or no interrupt arrives until the clock is there again",
+)
+require(
+    all(name not in hashed for name in ("runtime/include/interrupts.h", "runtime/src/interrupts.c", "runtime/src/boot_state.c"))
+    and "runtime/include/psx_cycles.h" in hashed
+    and "runtime/include/psx_cycles.h" not in changed,
+    "the resets live outside the files that key save states: the scheduler's header is one of those, so its resync keeps its signature",
+)
 require(
     "static void engage_widescreen_at_game_entry(void) {\n"
     "    extern int fntrace_is_game_started(void);\n"

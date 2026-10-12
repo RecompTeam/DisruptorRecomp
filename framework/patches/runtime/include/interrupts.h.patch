@@ -1,0 +1,13 @@
+diff --git a/runtime/include/interrupts.h b/runtime/include/interrupts.h
+index 362664c2f735191220b6da3fe283eca20b94a6c0..8cfb608cffe6bbae1a9fff1e3d3487822a0cf455 100644
+--- a/runtime/include/interrupts.h
++++ b/runtime/include/interrupts.h
+@@ -23,6 +23,8 @@
+ #define IRQ_PIO     10
+ 
+ void interrupts_init(void);
++/* After a save state put the cycle clock back: the delivery deadline was taken on the old clock and would hold every interrupt until the new one reaches it. */
++void interrupts_resync_after_restore(void);
+ 
+ /* Central IRQ-raise choke point: sets the I_STAT bit AND records the raise edge
+  * into the always-on device-event ring (device_trace) with the guest cycle.

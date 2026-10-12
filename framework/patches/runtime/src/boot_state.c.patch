@@ -1,8 +1,8 @@
 diff --git a/runtime/src/boot_state.c b/runtime/src/boot_state.c
-index b4acb4175df98cced308fbcc84e64d56a9b98c0c..7ba1437dbe6da8fdb8da74faa40b5e4bc4efaa5b 100644
+index b4acb4175df98cced308fbcc84e64d56a9b98c0c..df1dcc273b2c16aff2485ada8fb66dc5e9b9ae37 100644
 --- a/runtime/src/boot_state.c
 +++ b/runtime/src/boot_state.c
-@@ -1,4 +1,10 @@
+@@ -1,6 +1,13 @@
  #include "boot_state.h"
 +#include "mod_memory.h"
 +
@@ -12,8 +12,11 @@ index b4acb4175df98cced308fbcc84e64d56a9b98c0c..7ba1437dbe6da8fdb8da74faa40b5e4b
 +#define BS_SEC_CPU_COST 0x10u
  #include "overlay_api.h"   /* PSX_OVERLAY_CODEGEN_HASH / _ABI_TAG / _CODEGEN_VER */
  #include "gpu_render.h"    /* gr_vram_transfer_in / gr_vram_transfer_out          */
++#include "interrupts.h"
  #include "psx_cycles.h"
-@@ -22,6 +28,8 @@
+ #include "pst_wire.h"
+ #include <stdio.h>
+@@ -22,6 +29,8 @@
  extern uint32_t  i_stat;
  extern uint32_t  i_mask;
  extern uint64_t  psx_cycle_count;
@@ -22,7 +25,7 @@ index b4acb4175df98cced308fbcc84e64d56a9b98c0c..7ba1437dbe6da8fdb8da74faa40b5e4b
  extern void timers_get_snapshot(uint16_t counter[3], uint32_t mode[3],
                                  uint16_t target[3], int32_t irq_line[3],
                                  uint32_t frac[3]);
-@@ -178,7 +186,7 @@
+@@ -178,7 +187,7 @@
      h.codegen_hash  = (uint32_t)PSX_OVERLAY_CODEGEN_HASH;
      h.abi_tag       = (int32_t)PSX_OVERLAY_ABI_TAG;
      h.codegen_ver   = (uint32_t)PSX_OVERLAY_CODEGEN_VER;
@@ -31,7 +34,7 @@ index b4acb4175df98cced308fbcc84e64d56a9b98c0c..7ba1437dbe6da8fdb8da74faa40b5e4b
  
      int ok = write_header_le(f, &h);
  
-@@ -242,6 +250,18 @@
+@@ -242,6 +251,18 @@
          }
      }
  
@@ -50,7 +53,7 @@ index b4acb4175df98cced308fbcc84e64d56a9b98c0c..7ba1437dbe6da8fdb8da74faa40b5e4b
      fclose(f);
      if (!ok)
          remove(path);
-@@ -271,6 +291,19 @@
+@@ -271,6 +292,19 @@
              if (!pst_r_u32(&r, &cpu->gte_ctrl[i])) return 0;
          return 1;
      }
@@ -70,12 +73,14 @@ index b4acb4175df98cced308fbcc84e64d56a9b98c0c..7ba1437dbe6da8fdb8da74faa40b5e4b
      case BS_SEC_RAM:
          if (len != RAM_SIZE) return 0;
          memcpy(memory_get_ram_ptr(), p, RAM_SIZE);
-@@ -424,6 +457,8 @@
+@@ -424,6 +458,10 @@
  
      if (!ok || (seen & required) != required)
          return 0;
 +    if (!(seen & (1u << BS_SEC_GPU_DMA_MEMORY)))
 +        psx_mod_gpu_dma_memory_restore(NULL, 0u);
++    interrupts_resync_after_restore();
++    cpu->muldiv_ts_done = cpu->gte_ts_done = psx_cycle_count; /* a state carries neither deadline: one of the old clock stalls the next MFLO or GTE read up to it in one step */
      return 1;
  }
  

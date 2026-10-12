@@ -1,5 +1,5 @@
 diff --git a/runtime/src/interrupts.c b/runtime/src/interrupts.c
-index c267a87da5a361b8d34d15a00622279e231c314f..f105a564bdfa0c97aa46db56bda7acc5db2ba626 100644
+index c267a87da5a361b8d34d15a00622279e231c314f..7544e4b1b39d36fcfbef97b2cf054a7ec5cb5aa0 100644
 --- a/runtime/src/interrupts.c
 +++ b/runtime/src/interrupts.c
 @@ -37,6 +37,7 @@
@@ -21,7 +21,18 @@ index c267a87da5a361b8d34d15a00622279e231c314f..f105a564bdfa0c97aa46db56bda7acc5
  static uint32_t s_last_interrupt_check_pc = 0;
  static uint64_t s_last_interrupt_check_cycle = UINT64_MAX;
  
-@@ -731,6 +736,8 @@
+@@ -609,6 +614,10 @@
+     last_sio_progress_cycle = psx_get_cycle_count();
+ }
+ 
++void interrupts_resync_after_restore(void) {
++    post_exception_cooldown_until = 0;
++}
++
+ /*
+  * Called by the runtime's ReturnFromException implementation (traps.c)
+  * when the recompiled BIOS handler or a chain callback invokes
+@@ -731,6 +740,8 @@
  }
  
  void psx_check_interrupts(CPUState* cpu) {
@@ -30,7 +41,7 @@ index c267a87da5a361b8d34d15a00622279e231c314f..f105a564bdfa0c97aa46db56bda7acc5
      psx_cyc_batch_flush();
      extern int g_ls_suppress_record;
  #define PSX_CHECK_INTERRUPTS_RETURN() do { if (g_ls_suppress_record > 0) g_ls_suppress_record--; return; } while (0)
-@@ -749,11 +756,10 @@
+@@ -749,11 +760,10 @@
      if (!in_exception && !s_defer_switch_pending && (i_stat & i_mask) != 0) {
          uint32_t sr = cpu->cop0[COP0_SR];
          if (!(sr & 0x01u) || !(sr & (1u << 10))) {
@@ -45,7 +56,7 @@ index c267a87da5a361b8d34d15a00622279e231c314f..f105a564bdfa0c97aa46db56bda7acc5
              return;
          }
      }
-@@ -795,11 +801,10 @@
+@@ -795,11 +805,10 @@
              psx_idle_note_check(cpu, check_pc);
          }
          if ((i_stat & i_mask) == 0 && sw_pending == 0) {
@@ -60,7 +71,7 @@ index c267a87da5a361b8d34d15a00622279e231c314f..f105a564bdfa0c97aa46db56bda7acc5
              return;
          }
          /* Idle skip advanced time and a device raised I_STAT — deliver below. */
-@@ -817,11 +822,10 @@
+@@ -817,11 +826,10 @@
          s_last_interrupt_check_cycle = psx_get_cycle_count();
          g_ls_suppress_record++;
          total_checks++;
@@ -76,7 +87,7 @@ index c267a87da5a361b8d34d15a00622279e231c314f..f105a564bdfa0c97aa46db56bda7acc5
          goto irq_deliver_eval;
      }
  
-@@ -862,10 +866,8 @@
+@@ -862,10 +870,8 @@
       * only act outside the exception handler so a restore's stack-unwind can't
       * strand a half-finished handler. Near-free when nothing is staged. A load
       * longjmps to the scheduler and never returns here. */
@@ -89,7 +100,7 @@ index c267a87da5a361b8d34d15a00622279e231c314f..f105a564bdfa0c97aa46db56bda7acc5
  
      /* Deferred cooperative thread switch: honor at the next real thread-save
       * boundary (see s_defer_switch_* above). A
-@@ -1649,6 +1651,7 @@
+@@ -1649,6 +1655,7 @@
  void psx_check_interrupts_at(CPUState* cpu, uint32_t resume_pc) {
      uint32_t prev = s_compiled_interrupt_resume_pc;
      s_compiled_interrupt_resume_pc = resume_pc;
