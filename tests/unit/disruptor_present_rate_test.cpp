@@ -77,8 +77,11 @@ extern "C" void gl_renderer_interpolation_diag(int *, int *, int *, double *host
     if (host_hz) *host_hz = g_host.display_hz;
 }
 
+std::string g_hint;
+
 namespace ImGui {
 void BeginDisabled() { ++g_slider.disabled; }
+bool BeginItemTooltip() { return true; }
 bool Checkbox(const char *label, bool *value) {
     g_switch.label = label;
     g_switch.shown = *value;
@@ -88,6 +91,10 @@ bool Checkbox(const char *label, bool *value) {
     return taken;
 }
 void EndDisabled() { --g_slider.disabled; }
+void EndTooltip() {}
+float GetFontSize() { return 13.0f; }
+void PopTextWrapPos() {}
+void PushTextWrapPos(float) {}
 void SetNextItemWidth(float) {}
 bool SliderInt(const char *label, int *value, int lowest, int highest, const char *, int) {
     g_slider.label = label;
@@ -99,6 +106,7 @@ bool SliderInt(const char *label, int *value, int lowest, int highest, const cha
     return g_slider.moved && g_slider.disabled == 0;
 }
 void TextDisabled(const char *text, ...) { g_slider.text = text; }
+void TextUnformatted(const char *text) { g_hint = text; }
 }  // namespace ImGui
 
 #include "../../src/game/frame/present_rate.cpp"
@@ -123,9 +131,9 @@ void test_the_control_hands_over_what_the_user_chose() {
     launcher_override("");
     g_host = Host{};
     g_slider = Slider{};
-    expect(disruptor_present_rate_control("Rate", &accepted) == 0 && accepted == -7 && g_host.sets == 0,
+    expect(disruptor_present_rate_control("Rate", "Rate hint", &accepted) == 0 && accepted == -7 && g_host.sets == 0,
            "a control nobody touched changes nothing");
-    expect(g_slider.label == "Rate", "the control is drawn under the label it was given");
+    expect(g_slider.label == "Rate" && g_hint == "Rate hint", "the control is drawn under the label and with the hint it was given");
     expect(g_slider.shown == 60 && g_slider.lowest == 30 && g_slider.highest == 144 && g_slider.disabled == 0 &&
                g_slider.disabled_when_drawn == 0,
            "it shows the host's target between 30 and the display's rounded rate");
@@ -133,19 +141,19 @@ void test_the_control_hands_over_what_the_user_chose() {
                g_slider.text.find("launcher") == std::string::npos,
            "and says where its top comes from");
     launcher_override("90");
-    (void)disruptor_present_rate_control("Rate", &accepted);
+    (void)disruptor_present_rate_control("Rate", "Rate hint", &accepted);
     expect(g_slider.text.find("PSX_FRAME_INTERPOLATION_FPS of the launcher replaces it") != std::string::npos &&
                g_slider.text.find("not known") == std::string::npos,
            "with the launcher's override set it says the override wins at the next start");
     for (const char *refused : {"29", "1001", "-5"}) {
         launcher_override(refused);
-        (void)disruptor_present_rate_control("Rate", &accepted);
+        (void)disruptor_present_rate_control("Rate", "Rate hint", &accepted);
         expect(g_slider.text.find("launcher") == std::string::npos,
                "a launcher rate the start refuses is not announced as replacing the saved one");
     }
     launcher_override("");
     g_host.display_hz = 1000.6;
-    (void)disruptor_present_rate_control("Rate", &accepted);
+    (void)disruptor_present_rate_control("Rate", "Rate hint", &accepted);
     expect(g_slider.highest == 120 && g_slider.text.find("outside the host's range") != std::string::npos,
            "a refresh rate past the host's range gives 120, as the sentence says");
     g_host.display_hz = 143.86;
@@ -153,21 +161,21 @@ void test_the_control_hands_over_what_the_user_chose() {
     g_slider = Slider{};
     g_slider.moved = true;
     g_slider.moved_to = 30;
-    expect(disruptor_present_rate_control("Rate", &accepted) == 1 && accepted == 30 && g_host.set_target == 30 && g_host.set_blend == 2,
+    expect(disruptor_present_rate_control("Rate", "Rate hint", &accepted) == 1 && accepted == 30 && g_host.set_target == 30 && g_host.set_blend == 2,
            "a moved control sets the chosen rate and reports it");
     g_host = Host{};
     g_host.accepts = 0;
     accepted = -7;
-    expect(disruptor_present_rate_control("Rate", &accepted) == 0 && accepted == -7 && g_host.sets == 1,
+    expect(disruptor_present_rate_control("Rate", "Rate hint", &accepted) == 0 && accepted == -7 && g_host.sets == 1,
            "a rate the host refuses is not reported as chosen");
     g_host = Host{};
-    expect(disruptor_present_rate_control("Rate", nullptr) == 1 && g_host.set_target == 30, "the caller may ask for no report");
+    expect(disruptor_present_rate_control("Rate", "Rate hint", nullptr) == 1 && g_host.set_target == 30, "the caller may ask for no report");
 
     g_host = Host{};
     g_host.display_hz = 59.94;
     g_host.target = 0;
     g_slider = Slider{};
-    (void)disruptor_present_rate_control("Rate", &accepted);
+    (void)disruptor_present_rate_control("Rate", "Rate hint", &accepted);
     expect(g_slider.highest == 120 && g_slider.shown == 120, "on a 60 Hz display the top is 120 and a target of 0 is shown as the top");
 
     g_host = Host{};
@@ -176,7 +184,7 @@ void test_the_control_hands_over_what_the_user_chose() {
     g_slider.moved = true;
     g_slider.moved_to = 45;
     accepted = -7;
-    expect(disruptor_present_rate_control("Rate", &accepted) == 0 && accepted == -7 && g_host.sets == 0 && g_slider.disabled == 0 &&
+    expect(disruptor_present_rate_control("Rate", "Rate hint", &accepted) == 0 && accepted == -7 && g_host.sets == 0 && g_slider.disabled == 0 &&
                g_slider.disabled_when_drawn == 1,
            "with in-between frames off the control is drawn disabled and sets nothing");
     expect(g_slider.text.find("In-between frames are off") != std::string::npos, "and says why");
@@ -201,40 +209,41 @@ void test_the_switch_turns_the_frames_on_and_off() {
     g_host.enabled = 0;
     g_slider = Slider{};
     g_switch = Switch{};
-    expect(disruptor_present_rate_switch("Switch", 1, &state) == 0 && g_switch.label == "Switch",
-           "the switch is drawn under the label it was given");
-    expect(disruptor_present_rate_switch("Switch", 1, &state) == 0 && state == -7 && g_host.sets == 0 && !g_switch.shown &&
+    expect(disruptor_present_rate_switch("Switch", "Switch hint", 1, &state) == 0 && g_switch.label == "Switch" &&
+               g_hint == "Switch hint",
+           "the switch is drawn under the label and with the hint it was given");
+    expect(disruptor_present_rate_switch("Switch", "Switch hint", 1, &state) == 0 && state == -7 && g_host.sets == 0 && !g_switch.shown &&
                g_switch.disabled_when_drawn == 0,
            "a switch nobody touched changes nothing and shows the host's state");
     g_switch.clicked = true;
-    expect(disruptor_present_rate_switch("Switch", 1, &state) == 1 && state == 1 && g_host.set_enabled == 1,
+    expect(disruptor_present_rate_switch("Switch", "Switch hint", 1, &state) == 1 && state == 1 && g_host.set_enabled == 1,
            "a click on a switch that is off turns the frames on and reports it");
     g_host = Host{};
     state = -7;
-    expect(disruptor_present_rate_switch("Switch", 1, &state) == 1 && state == 0 && g_host.set_enabled == 0 && g_switch.shown,
+    expect(disruptor_present_rate_switch("Switch", "Switch hint", 1, &state) == 1 && state == 0 && g_host.set_enabled == 0 && g_switch.shown,
            "a click on a switch that is on turns them off and reports it");
     g_host = Host{};
     g_host.enabled = 0;
     g_host.accepts = 0;
     state = -7;
-    expect(disruptor_present_rate_switch("Switch", 1, &state) == 0 && state == -7 && g_host.sets == 1,
+    expect(disruptor_present_rate_switch("Switch", "Switch hint", 1, &state) == 0 && state == -7 && g_host.sets == 1,
            "a switch the host refuses is not reported as changed");
     g_host = Host{};
     g_host.enabled = 0;
-    expect(disruptor_present_rate_switch("Switch", 1, nullptr) == 1 && g_host.set_enabled == 1, "the caller may ask for no report");
+    expect(disruptor_present_rate_switch("Switch", "Switch hint", 1, nullptr) == 1 && g_host.set_enabled == 1, "the caller may ask for no report");
 
     g_host = Host{};
     g_host.enabled = 0;
     g_slider = Slider{};
     state = -7;
-    expect(disruptor_present_rate_switch("Switch", 0, &state) == 0 && state == -7 && g_host.sets == 0 && g_slider.disabled == 0 &&
+    expect(disruptor_present_rate_switch("Switch", "Switch hint", 0, &state) == 0 && state == -7 && g_host.sets == 0 && g_slider.disabled == 0 &&
                g_switch.disabled_when_drawn == 1,
            "without exact geometry the switch is drawn disabled and sets nothing");
     expect(g_slider.text.find("Enable exact geometry") != std::string::npos, "and says what it waits for");
     g_host = Host{};
     g_slider = Slider{};
     state = -7;
-    expect(disruptor_present_rate_switch("Switch", 0, &state) == 1 && state == 0 && g_host.set_enabled == 0 &&
+    expect(disruptor_present_rate_switch("Switch", "Switch hint", 0, &state) == 1 && state == 0 && g_host.set_enabled == 0 &&
                g_switch.disabled_when_drawn == 0 && g_slider.text.empty(),
            "frames that are on can be switched off without exact geometry too");
 }

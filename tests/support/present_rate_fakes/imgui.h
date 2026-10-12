@@ -3,10 +3,16 @@
 enum { ImGuiSliderFlags_AlwaysClamp = 16 };
 namespace ImGui {
 void BeginDisabled();
+bool BeginItemTooltip();
 bool Checkbox(const char *label, bool *value);
 void EndDisabled();
+void EndTooltip();
+float GetFontSize();
+void PopTextWrapPos();
+void PushTextWrapPos(float position);
 void SetNextItemWidth(float width);
 bool SliderInt(const char *label, int *value, int lowest, int highest, const char *format, int flags);
 void TextDisabled(const char *text, ...);
+void TextUnformatted(const char *text);
 }  // namespace ImGui
 #endif

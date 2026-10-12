@@ -5,6 +5,8 @@
 
 #include "game/frame/present_rate.h"
 
+#include "game/ui/hint.h"
+
 #include "host_ui.h"
 #include "imgui.h"
 
@@ -20,14 +22,15 @@ int disruptor_present_rate_enable(int enabled) {
     return psx_host_video_set_interpolation(enabled ? 1 : 0, target, blend) != 0;
 }
 
-int disruptor_present_rate_switch(const char *label, int available, int *enabled) {
+int disruptor_present_rate_switch(const char *label, const char *hint, int available, int *enabled) {
     int on = 0, changed = 0;
     psx_host_video_get_interpolation(&on, nullptr, nullptr);
     bool checked = on != 0;
     const bool locked = !available && !checked;
     if (locked) ImGui::BeginDisabled();
-    if (ImGui::Checkbox(label, &checked) &&
-        disruptor_present_rate_enable(checked ? 1 : 0)) {
+    const bool clicked = ImGui::Checkbox(label, &checked);
+    disruptor::ui::hint(hint);
+    if (clicked && disruptor_present_rate_enable(checked ? 1 : 0)) {
         if (enabled) *enabled = checked ? 1 : 0;
         changed = 1;
     }
@@ -43,7 +46,7 @@ int disruptor_present_rate_apply(int frames_per_second) {
     return enabled && psx_host_video_set_interpolation(1, frames_per_second, blend) != 0;
 }
 
-int disruptor_present_rate_control(const char *label, int *accepted) {
+int disruptor_present_rate_control(const char *label, const char *hint, int *accepted) {
     int enabled = 0, target = 0, changed = 0;
     double display_hz = 0.0;
     psx_host_video_get_interpolation(&enabled, &target, nullptr);
@@ -52,9 +55,10 @@ int disruptor_present_rate_control(const char *label, int *accepted) {
     int shown = disruptor_present_rate_shown(target, top);
     if (!enabled) ImGui::BeginDisabled();
     ImGui::SetNextItemWidth(260.0f);
-    if (ImGui::SliderInt(label, &shown, kDisruptorPresentRateLowest, top, "%d FPS",
-                         ImGuiSliderFlags_AlwaysClamp) &&
-        disruptor_present_rate_apply(shown)) {
+    const bool moved = ImGui::SliderInt(label, &shown, kDisruptorPresentRateLowest, top, "%d FPS",
+                                        ImGuiSliderFlags_AlwaysClamp);
+    disruptor::ui::hint(hint);
+    if (moved && disruptor_present_rate_apply(shown)) {
         if (accepted) *accepted = shown;
         changed = 1;
     }

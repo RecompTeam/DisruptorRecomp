@@ -194,12 +194,14 @@ require(
     "    int present_enabled = 0;\n"
     "    if (disruptor_present_rate_switch(\n"
     '            find_option("video.frame_interpolation")->label,\n'
+    '            find_option("video.frame_interpolation")->hint,\n'
     '            applies("video.frame_interpolation") ? 1 : 0,\n'
     "            &present_enabled))\n"
     "        mark_present_enabled(present_enabled != 0);\n"
     "    int present_rate = 0;\n"
     "    if (disruptor_present_rate_control(\n"
-    '            find_option("video.frame_interpolation_fps")->label, &present_rate))\n'
+    '            find_option("video.frame_interpolation_fps")->label,\n'
+    '            find_option("video.frame_interpolation_fps")->hint, &present_rate))\n'
     "        mark_present_rate(present_rate);\n"
     "#endif\n"
     in menu
@@ -213,9 +215,10 @@ require(
     "a build without the frame interpolator must have no rate control, in the menu or in the sources",
 )
 require(
-    'if (ImGui::SliderInt(label, &shown, kDisruptorPresentRateLowest, top, "%d FPS",\n'
-    "                         ImGuiSliderFlags_AlwaysClamp) &&\n"
-    "        disruptor_present_rate_apply(shown)) {\n"
+    '    const bool moved = ImGui::SliderInt(label, &shown, kDisruptorPresentRateLowest, top, "%d FPS",\n'
+    "                                        ImGuiSliderFlags_AlwaysClamp);\n"
+    "    disruptor::ui::hint(hint);\n"
+    "    if (moved && disruptor_present_rate_apply(shown)) {\n"
     "        if (accepted) *accepted = shown;\n"
     "        changed = 1;\n"
     in present_control
@@ -235,10 +238,12 @@ require(
     "    return psx_host_video_set_interpolation(enabled ? 1 : 0, target, blend) != 0;\n" in present_control
     and '"video.frame_interpolation", "In-between frames", 0,' in options
     and 'slider("video.frame_interpolation_fps", "In-between frame rate", 0,' in options
-    and "int disruptor_present_rate_switch(const char *label, int available, int *enabled) {\n" in present_control
-    and "int disruptor_present_rate_control(const char *label, int *accepted) {\n" in present_control
-    and "if (ImGui::Checkbox(label, &checked) &&\n"
-    "        disruptor_present_rate_enable(checked ? 1 : 0)) {\n"
+    and "int disruptor_present_rate_switch(const char *label, const char *hint, int available, int *enabled) {\n"
+    in present_control
+    and "int disruptor_present_rate_control(const char *label, const char *hint, int *accepted) {\n" in present_control
+    and "    const bool clicked = ImGui::Checkbox(label, &checked);\n"
+    "    disruptor::ui::hint(hint);\n"
+    "    if (clicked && disruptor_present_rate_enable(checked ? 1 : 0)) {\n"
     "        if (enabled) *enabled = checked ? 1 : 0;\n"
     in present_control,
     "the switch must keep the rate and the blend mode and report only a state the host accepted",

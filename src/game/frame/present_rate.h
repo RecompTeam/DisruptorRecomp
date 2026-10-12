@@ -28,10 +28,10 @@ constexpr int disruptor_present_rate_shown(int target_fps, int top) {
 /* Switches in-between frames on or off at the rate and blend the host has. Returns 0 when the host refused. */
 int disruptor_present_rate_enable(int enabled);
 /* Draws the switch: frames that are off cannot be switched on while `available` is 0. Returns 1 and the state in `enabled` when the user changed it and the host took it. */
-int disruptor_present_rate_switch(const char *label, int available, int *enabled);
+int disruptor_present_rate_switch(const char *label, const char *hint, int available, int *enabled);
 /* Sets the rate of in-between frames that are on. Returns 0 when they are off or the host refused. */
 int disruptor_present_rate_apply(int frames_per_second);
 /* Draws the control. Returns 1 and the rate in `accepted` when the user changed it and the host took it. */
-int disruptor_present_rate_control(const char *label, int *accepted);
+int disruptor_present_rate_control(const char *label, const char *hint, int *accepted);
 
 #endif

@@ -17,6 +17,7 @@
 #include "game/frame/present_rate.h"
 #include "game/session/restart.h"
 #include "game/settings/options.h"
+#include "game/ui/hint.h"
 #include "config_loader.h"
 #include "gpu.h"
 #include "host_ui.h"
@@ -212,29 +213,38 @@ bool applies(const char *key) {
 }
 
 bool option_toggle(const char *key, bool *value) {
-    return ImGui::Checkbox(find_option(key)->label, value);
+    const Option &option = *find_option(key);
+    const bool moved = ImGui::Checkbox(option.label, value);
+    disruptor::ui::hint(option.hint);
+    return moved;
 }
 
 bool option_slider(const char *key, int *value) {
     const Option &option = *find_option(key);
     const char *format = option.unit == Unit::percent ? "%d%%" : "%d";
-    return ImGui::SliderInt(option.label, value, option.lowest,
-                            option.highest, format,
-                            ImGuiSliderFlags_AlwaysClamp);
+    const bool moved =
+        ImGui::SliderInt(option.label, value, option.lowest, option.highest,
+                         format, ImGuiSliderFlags_AlwaysClamp);
+    disruptor::ui::hint(option.hint);
+    return moved;
 }
 
 bool option_slider(const char *key, float *value) {
     const Option &option = *find_option(key);
-    return ImGui::SliderFloat(option.label, value, option.lowest / 1000.0f,
-                              option.highest / 1000.0f, "%.3f",
-                              ImGuiSliderFlags_Logarithmic);
+    const bool moved = ImGui::SliderFloat(
+        option.label, value, option.lowest / 1000.0f,
+        option.highest / 1000.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
+    disruptor::ui::hint(option.hint);
+    return moved;
 }
 
 bool option_list(const char *key, int *index, size_t skipped = 0) {
     const Option &option = *find_option(key);
     const auto shown = option.choices.subspan(skipped);
-    return ImGui::Combo(option.label, index, shown.data(),
-                        static_cast<int>(shown.size()));
+    const bool moved = ImGui::Combo(option.label, index, shown.data(),
+                                    static_cast<int>(shown.size()));
+    disruptor::ui::hint(option.hint);
+    return moved;
 }
 
 void mark_mouse_aim(bool value) { mark("disruptor.mouse_aim", value); }
@@ -756,10 +766,6 @@ void draw_controls_tab() {
     }
     if (!turn_applies) ImGui::EndDisabled();
     draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
-    ImGui::TextDisabled(
-        "The game turns in 256 steps of a circle. While the mouse is captured "
-        "the picture is turned by the part of a step in between. Needs mouse aim "
-        "and exact geometry.");
 
     ImGui::SeparatorText("Vertical look");
     bool vertical_look = disruptor_mouse_vertical_look_enabled() != 0;
@@ -902,9 +908,6 @@ void draw_aspect_controls() {
             mark_shadow_shape(shadow_shape != 0);
         }
         draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
-        ImGui::TextDisabled(
-            "Improved lays a shadow flat on the floor: as wide as the game makes it and as tall "
-            "as the floor's perspective gives. Works with geometry correction on.");
     }
 
     int hud_scale = gpu_ws_hud_scale();
@@ -914,9 +917,6 @@ void draw_aspect_controls() {
         mark_hud_scale(hud_scale);
     }
     draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
-    ImGui::TextDisabled(
-        "Widescreen only. Shrinks the health and ammunition displays toward "
-        "their screen edges. The weapon keeps its size.");
 }
 
 void draw_internal_resolution_controls() {
@@ -974,9 +974,6 @@ void draw_enhancements_tab() {
     }
     if (!gaps_apply) ImGui::EndDisabled();
     draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
-    ImGui::TextDisabled(
-        "Closes hairline gaps between polygons and keeps the game's own "
-        "patches off their neighbours.");
 
     bool by_depth = gl_renderer_world_depth() != 0;
     const bool depth_applies = applies("disruptor.depth_sorted_world");
@@ -987,9 +984,6 @@ void draw_enhancements_tab() {
     }
     if (!depth_applies) ImGui::EndDisabled();
     draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
-    ImGui::TextDisabled(
-        "Draws world polygons by their depth where the game's own order puts a "
-        "far one over a near one.");
 
     ImGui::SeparatorText("Synchronisation");
     int vsync = psx_host_video_get_vsync();
@@ -1020,12 +1014,14 @@ void draw_enhancements_tab() {
     int present_enabled = 0;
     if (disruptor_present_rate_switch(
             find_option("video.frame_interpolation")->label,
+            find_option("video.frame_interpolation")->hint,
             applies("video.frame_interpolation") ? 1 : 0,
             &present_enabled))
         mark_present_enabled(present_enabled != 0);
     int present_rate = 0;
     if (disruptor_present_rate_control(
-            find_option("video.frame_interpolation_fps")->label, &present_rate))
+            find_option("video.frame_interpolation_fps")->label,
+            find_option("video.frame_interpolation_fps")->hint, &present_rate))
         mark_present_rate(present_rate);
 #endif
 
@@ -1036,7 +1032,6 @@ void draw_enhancements_tab() {
         mark_skip_intro(skip_intro);
     }
     draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
-    ImGui::TextDisabled("Escape skips the logo or movie on screen.");
 }
 
 const char *cheat_result_message(int result, const char *success) {
@@ -1084,7 +1079,6 @@ void draw_experimental_tab() {
         gl_renderer_set_ssao_shape(static_cast<float>(reach), strength / 100.0f);
         mark_occlusion_shape(reach, strength);
     }
-    ImGui::TextDisabled("Shades corners and the floor under things.");
 }
 
 void draw_debug_tab() {
