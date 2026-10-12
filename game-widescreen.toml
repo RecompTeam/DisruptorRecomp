@@ -200,6 +200,10 @@ offer = true
 offer_ultrawide = true
 adaptive_view = true
 
+[widescreen.cull]
+slti_sites = ["0x8003D0F8", "0x8003D110"]
+slti_lower_sites = ["0x8003D108", "0x8003D118"]
+
 [[widescreen.cull.yaw_cone]]
 address = "0x80040FE8"
 expected = "0x24710020"
@@ -224,6 +228,22 @@ expected = "0x0067102A"
 
 [[widescreen.cull.horizontal_slt]]
 address = "0x8003BD0C"
+expected = "0x0062102A"
+
+[[widescreen.cull.horizontal_slt]]
+address = "0x8003C194"
+expected = "0x02A9102A"
+
+[[widescreen.cull.horizontal_slt]]
+address = "0x8003C1A0"
+expected = "0x02A2102A"
+
+[[widescreen.cull.horizontal_slt]]
+address = "0x8003CDA4"
+expected = "0x0068102A"
+
+[[widescreen.cull.horizontal_slt]]
+address = "0x8003CDB0"
 expected = "0x0062102A"
 
 [widescreen.backdrop]

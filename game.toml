@@ -205,6 +205,12 @@ offer = true
 offer_ultrawide = true
 adaptive_view = true
 
+# After projection the fourth funnel keeps a sprite only when it reaches 20 pixels into the picture,
+# the margin a television hid. A wide picture shows it, so both bounds move out by the picture's margin.
+[widescreen.cull]
+slti_sites = ["0x8003D0F8", "0x8003D110"]
+slti_lower_sites = ["0x8003D108", "0x8003D118"]
+
 # Disruptor seeds portal traversal with two eight-bit yaw rays at +/-32 units
 # (a 45-degree 4:3 half-FOV). Widen only those signed offsets for the live
 # aspect; keep every downstream unsigned 0..320 portal span intact.
@@ -218,8 +224,8 @@ address = "0x80040FF0"
 expected = "0x2472FFE0"
 full_turn = 256
 
-# Two world-object funnels repeat the 45-degree horizontal side-plane test
-# after traversal. Their adjacent vertical tests deliberately remain vanilla.
+# The four funnels that list world objects and sprites repeat the 45-degree horizontal
+# side-plane test after traversal. Their adjacent vertical tests remain vanilla.
 [[widescreen.cull.horizontal_slt]]
 address = "0x8003B8EC"
 expected = "0x0067102A"
@@ -234,6 +240,22 @@ expected = "0x0067102A"
 
 [[widescreen.cull.horizontal_slt]]
 address = "0x8003BD0C"
+expected = "0x0062102A"
+
+[[widescreen.cull.horizontal_slt]]
+address = "0x8003C194"
+expected = "0x02A9102A"
+
+[[widescreen.cull.horizontal_slt]]
+address = "0x8003C1A0"
+expected = "0x02A2102A"
+
+[[widescreen.cull.horizontal_slt]]
+address = "0x8003CDA4"
+expected = "0x0068102A"
+
+[[widescreen.cull.horizontal_slt]]
+address = "0x8003CDB0"
 expected = "0x0062102A"
 
 # Disruptor's static-world portal renderer assumes every clip span remains in

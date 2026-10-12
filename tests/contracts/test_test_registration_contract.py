@@ -134,7 +134,7 @@ scripts = {
 }
 scripts[Path(__file__).name] = False
 require(contract_faults(cmake, scripts) == [], "; ".join(contract_faults(cmake, scripts)))
-require(sum(scripts.values()) == 8, "eight contracts take the retail artifacts")
+require(sum(scripts.values()) == 9, "nine contracts take the retail artifacts")
 
 sources = sorted(f"tests/unit/{path.name}" for path in (ROOT / "tests/unit").glob("*.cpp"))
 require(

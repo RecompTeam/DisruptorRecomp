@@ -62,6 +62,20 @@ HORIZONTAL_SIDE_PLANE_SITES = {
     "0x8003B8F8": "0x0062102A",
     "0x8003BD00": "0x0067102A",
     "0x8003BD0C": "0x0062102A",
+    "0x8003C194": "0x02A9102A",
+    "0x8003C1A0": "0x02A2102A",
+    "0x8003CDA4": "0x0068102A",
+    "0x8003CDB0": "0x0062102A",
+}
+
+SCREEN_RIGHT_BOUND_SITES = {
+    "0x8003D0F8": "0x28E2012C",
+    "0x8003D110": "0x2842012C",
+}
+
+SCREEN_LEFT_BOUND_SITES = {
+    "0x8003D108": "0x28420015",
+    "0x8003D118": "0x28E20015",
 }
 
 PRECISION_MFC2_SITES = {
@@ -488,6 +502,19 @@ def main() -> int:
     ):
         failures.append("unexpected horizontal side-plane helper call count")
 
+    for helper, note, expected, name in (
+        ("psx_ws_cull_slti", "ws cull slti site (right edge)", SCREEN_RIGHT_BOUND_SITES, "screen right-bound"),
+        ("psx_ws_cull_slti_lower", "ws cull slti lower site", SCREEN_LEFT_BOUND_SITES, "screen left-bound"),
+    ):
+        bound_tags = re.findall(
+            helper + r"\([^;]+;\s*/\* " + re.escape(note) + r" \*/\s*/\* (0x[0-9A-F]{8}): (0x[0-9A-F]{8}) \*/",
+            shard_text,
+        )
+        if dict(bound_tags) != expected:
+            failures.append(f"{name} sites differ: expected {expected}, found {dict(bound_tags)}")
+        if shard_text.count(helper + "(") != len(expected):
+            failures.append(f"unexpected {name} helper call count")
+
     vertical_camera_matches = re.findall(
         r"disruptor_vertical_camera_instruction_hook\(cpu, "
         r"0x([0-9A-F]{8})u, 0x([0-9A-F]{8})u, 1\)",
@@ -761,7 +788,6 @@ def main() -> int:
         "/* ws manual upper",
         "/* ws manual packed",
         "/* ws explicit screen-x cull */",
-        "/* ws cull slti site",
     ):
         if tag in shard_text:
             failures.append("unsafe native-wide portal emit remains: " + tag)

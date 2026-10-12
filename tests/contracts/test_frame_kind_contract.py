@@ -38,6 +38,7 @@ cmake = read("CMakeLists.txt")
 manifest = read("framework/FILES.txt")
 gpu = read("psxrecomp/runtime/src/gpu.c")
 header = read("psxrecomp/runtime/include/gpu.h")
+kinds = read("psxrecomp/runtime/include/gpu_ws_frame_kind.h")
 runtime = read("psxrecomp/runtime/src/main.cpp")
 
 require(
@@ -132,8 +133,8 @@ require(
     "    psx_ws_frame_kinds_pictured(&ws_frame_kinds, (uint32_t)x, (uint32_t)y, (uint32_t)w, (uint32_t)h,\n"
     "                                (uint32_t)ws_disp_w(), (uint32_t)ws_disp_h());\n}" in gpu
     and gpu.count("psx_ws_frame_kinds_pictured(") == 1
-    and gpu.count("ws_frame_pictured(") == 3,
-    "a picture is measured against buffers the size of the display, and only an upload and a copy report one",
+    and gpu.count("ws_frame_pictured(") == 2,
+    "a picture is measured against buffers the size of the display, and only an upload reports one",
 )
 require(
     "\n    ws_frame_pictured(vram_write_x, vram_write_y, vram_write_w, vram_write_h);\n    /* Record for debug */\n" in upload
@@ -141,8 +142,38 @@ require(
     "every upload must report where it lands, whatever the front end makes of it",
 )
 require(
-    "            gr_copy_rect(src_x, src_y, dst_x, dst_y, w, h);\n            ws_frame_pictured(dst_x, dst_y, w, h);\n            break;\n" in gpu,
-    "every copy inside video memory must report where it lands",
+    "            gr_copy_rect(src_x, src_y, dst_x, dst_y, w, h);\n"
+    "            psx_ws_frame_kinds_copied(&ws_frame_kinds, (uint32_t)src_x, (uint32_t)src_y, (uint32_t)dst_x, (uint32_t)dst_y, (uint32_t)w, (uint32_t)h,\n"
+    "                                      (uint32_t)ws_disp_w(), (uint32_t)ws_disp_h());\n            break;\n" in gpu
+    and gpu.count("psx_ws_frame_kinds_copied(") == 1,
+    "every copy inside video memory must report where it comes from and where it lands: one buffer copied whole onto the other keeps its kind",
+)
+require(
+    "    if (opcode >= 0x20 && opcode <= 0x7F) {\n"
+    "        psx_ws_frame_kinds_drawn(&ws_frame_kinds, psx_ws_frame_kinds_blend(opcode));\n" in gpu
+    and "        gp0_state = shaded ? GP0_POLYLINE_SHADED : GP0_POLYLINE_MONO;\n"
+    "        psx_ws_frame_kinds_drawn(&ws_frame_kinds, psx_ws_frame_kinds_blend(opcode));\n" in gpu
+    and gpu.count("psx_ws_frame_kinds_drawn(") == 2
+    and gpu.index("        psx_ws_frame_kinds_drawn(&ws_frame_kinds, psx_ws_frame_kinds_blend(opcode));\n        int32_t cvx, cvy;")
+    < gpu.index("    switch (opcode) {\n        case 0x00:"),
+    "every drawing command, a polyline too, must say before it is drawn whether it is a blend: the first that is none ends a veil",
+)
+require(
+    "    psx_ws_frame_kinds_filled(&ws_frame_kinds, dst_x, dst_y, width, height, (uint32_t)ws_disp_w(), (uint32_t)ws_disp_h());\n"
+    "    ws_menu_yield((int)dst_x, (int)dst_y, (int)width, (int)height, 1);\n"
+    "    gr_fill_rect((int)dst_x, (int)dst_y, (int)width, (int)height, color16);\n" in gpu
+    and gpu.count("psx_ws_frame_kinds_filled(") == 1,
+    "a fill, which no drawing area bounds, must report the rectangle it clears before it clears it: one that covers a veiled buffer ends its veil",
+)
+require(
+    "    const int held = kinds->buffers[slot].known && kinds->buffers[slot].x == x && kinds->buffers[slot].y == y && !kinds->buffers[slot].flat;\n"
+    "    const int flat = kinds->told ? kinds->told_flat : kinds->projected < least;\n" in kinds
+    and "    kinds->buffers[slot].veiled = flat && !kinds->told && held;\n"
+    "    kinds->buffers[slot].flat = flat && !kinds->buffers[slot].veiled;\n" in kinds
+    and "    if (blend || !buffer->veiled) return;\n    buffer->veiled = 0;\n    buffer->flat = 1;\n" in kinds
+    and "    return (opcode & 2u) != 0 && (lines || (opcode & 4u) == 0);\n" in kinds,
+    "a frame of too few vertices set on a buffer that holds a world's frame is that frame under a veil, as when a level's end "
+    "fades it out, until something but an untextured blend is drawn over it: taken for a flat frame it was shown in 4:3 on a wide screen",
 )
 require(
     "int gpu_ws_displayed_flat(void) {\n"

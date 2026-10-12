@@ -16,10 +16,15 @@ void expect(bool condition, const char *message) {
     std::cerr << "FAIL: " << message << '\n';
 }
 
-/* One frame of the game: what it projects, then its drawing area. */
+/* One frame of the game: what it projects, its drawing area, and something drawn there that is no blend. */
 void frame(PsxWsFrameKinds &kinds, std::uint32_t vertices, std::uint32_t y) {
     if (vertices) psx_ws_frame_kinds_project(&kinds, vertices);
     psx_ws_frame_kinds_area(&kinds, 0, y, kLeast);
+    psx_ws_frame_kinds_drawn(&kinds, 0);
+}
+
+bool worlds(const PsxWsFrameKinds &kinds, int first, int second) {
+    return psx_ws_frame_kinds_displayed(&kinds, 0, 0) == first && psx_ws_frame_kinds_displayed(&kinds, 0, 240) == second;
 }
 
 void test_nothing_is_known_at_the_start() {
@@ -43,7 +48,7 @@ void test_the_map_opens_and_closes() {
            "in play the frame being drawn and the frame on display both hold a world");
 
     frame(kinds, 0, 240);
-    expect(psx_ws_frame_kinds_drawing(&kinds, kLeast) == 1, "the first frame of the map is flat as soon as its drawing area is set");
+    expect(psx_ws_frame_kinds_drawing(&kinds, kLeast) == 1, "the first frame of the map is flat as soon as it draws");
     expect(psx_ws_frame_kinds_displayed(&kinds, 0, 0) == 0, "while the frame on display is still the world drawn before it");
     frame(kinds, 0, 0);
     expect(psx_ws_frame_kinds_drawing(&kinds, kLeast) == 1 && psx_ws_frame_kinds_displayed(&kinds, 0, 240) == 1,
@@ -271,6 +276,128 @@ void test_a_picture_ends_a_front_end_frame() {
     expect(psx_ws_frame_kinds_displayed(&kinds, 0, 0) == 1 && psx_ws_frame_kinds_menu(&kinds), "which stays a flat frame, and the frame being drawn stays the front end's");
 }
 
+/* The end of a level: the frame on display is copied onto the other buffer, then every frame only darkens what its buffer holds. */
+void test_a_world_under_a_veil_stays_a_world() {
+    PsxWsFrameKinds kinds{};
+    frame(kinds, 1500, 0);
+    frame(kinds, 1500, 240);
+    psx_ws_frame_kinds_copied(&kinds, 0, 0, 0, 240, 320, 240, 320, 240);
+    expect(worlds(kinds, 0, 0), "a world's frame copied whole onto the other buffer is that frame there too");
+    for (int step = 0; step < 6; ++step) {
+        const std::uint32_t y = step % 2 ? 240 : 0;
+        psx_ws_frame_kinds_area(&kinds, 0, y, kLeast);
+        expect(psx_ws_frame_kinds_drawing(&kinds, kLeast) == 0 && worlds(kinds, 0, 0), "a frame of no vertices set on a buffer that holds a world leaves it that world");
+        psx_ws_frame_kinds_drawn(&kinds, 1);
+        expect(psx_ws_frame_kinds_drawing(&kinds, kLeast) == 0 && worlds(kinds, 0, 0), "and a blend drawn over it changes nothing, frame after frame, in both buffers");
+    }
+    psx_ws_frame_kinds_area(&kinds, 0, 0, kLeast);
+    psx_ws_frame_kinds_drawn(&kinds, 1);
+    psx_ws_frame_kinds_drawn(&kinds, 0);
+    expect(worlds(kinds, 1, 0) && psx_ws_frame_kinds_drawing(&kinds, kLeast) == 1, "anything but a blend makes the frame the flat one its count said, in its own buffer only");
+    psx_ws_frame_kinds_drawn(&kinds, 1);
+    expect(worlds(kinds, 1, 0), "and a blend after that does not bring the world back");
+    psx_ws_frame_kinds_area(&kinds, 0, 0, kLeast);
+    expect(worlds(kinds, 1, 0), "nor does the next frame there: a flat buffer has no world to veil");
+
+    PsxWsFrameKinds told{};
+    frame(told, 1500, 0);
+    frame(told, 1500, 240);
+    psx_ws_frame_kinds_tell(&told, 1);
+    psx_ws_frame_kinds_area(&told, 0, 0, kLeast);
+    expect(worlds(told, 1, 0), "a frame the game told flat is flat at its drawing area, over a world or not");
+    psx_ws_frame_kinds_tell(&told, 0);
+    psx_ws_frame_kinds_area(&told, 0, 0, kLeast);
+    psx_ws_frame_kinds_drawn(&told, 0);
+    expect(worlds(told, 0, 0), "and a frame told a world's has no veil to end: what it draws leaves it a world");
+
+    PsxWsFrameKinds fresh{};
+    psx_ws_frame_kinds_area(&fresh, 0, 0, kLeast);
+    expect(psx_ws_frame_kinds_displayed(&fresh, 0, 0) == 1, "a frame of no vertices in a buffer that held nothing is flat at once");
+    frame(fresh, 1500, 0);
+    frame(fresh, 1500, 240);
+    psx_ws_frame_kinds_area(&fresh, 320, 0, kLeast);
+    expect(psx_ws_frame_kinds_displayed(&fresh, 320, 0) == 1 && psx_ws_frame_kinds_displayed(&fresh, 0, 240) == 0,
+           "and so is one at a third origin: the world in the buffer it takes the place of was drawn elsewhere");
+}
+
+void test_a_fill_or_a_picture_ends_a_veil() {
+    PsxWsFrameKinds kinds{};
+    frame(kinds, 1500, 0);
+    frame(kinds, 1500, 240);
+    psx_ws_frame_kinds_filled(&kinds, 0, 0, 320, 240, 320, 240);
+    psx_ws_frame_kinds_filled(&kinds, 0, 240, 320, 240, 320, 240);
+    expect(worlds(kinds, 0, 0), "a world's frame begins with a fill of its buffer and stays a world's");
+    psx_ws_frame_kinds_area(&kinds, 0, 0, kLeast);
+    psx_ws_frame_kinds_area(&kinds, 0, 240, kLeast);
+    for (const auto &[x, y, w, h] : {std::array<std::uint32_t, 4>{320, 0, 64, 240}, {0, 480, 320, 16}, {0, 236, 320, 4}, {16, 0, 304, 240}, {0, 0, 304, 240},
+                                     {0, 1, 320, 239}, {0, 0, 320, 239}, {0, 240, 320, 224}, {0, 256, 320, 224}}) {
+        psx_ws_frame_kinds_filled(&kinds, x, y, w, h, 320, 240);
+        expect(worlds(kinds, 0, 0), "a fill beside the buffers, or of a part of one however large, leaves the world that still shows there");
+    }
+    psx_ws_frame_kinds_filled(&kinds, 0, 0, 320, 240, 320, 240);
+    expect(worlds(kinds, 1, 0), "a fill that covers a veiled buffer clears the frame it held, and no other buffer's");
+    psx_ws_frame_kinds_filled(&kinds, 0, 0, 1024, 512, 320, 240);
+    expect(worlds(kinds, 1, 1), "and one over all of video memory covers both");
+    frame(kinds, 1500, 240);
+    psx_ws_frame_kinds_area(&kinds, 0, 240, kLeast);
+    expect(worlds(kinds, 1, 0), "the next world there can be veiled again");
+    psx_ws_frame_kinds_pictured(&kinds, 96, 364, 64, 12, 320, 240);
+    expect(worlds(kinds, 1, 1), "and so does a picture put into one");
+    psx_ws_frame_kinds_area(&kinds, 0, 240, kLeast);
+    expect(worlds(kinds, 1, 1), "after which the next frame there is flat by its count again");
+}
+
+void test_a_buffer_copied_whole_keeps_its_kind() {
+    PsxWsFrameKinds kinds{};
+    psx_ws_frame_kinds_copied(&kinds, 0, 0, 0, 240, 320, 240, 320, 240);
+    expect(worlds(kinds, -1, -1), "a copy makes no buffer known");
+    frame(kinds, 1500, 240);
+    psx_ws_frame_kinds_copied(&kinds, 0, 0, 0, 240, 320, 240, 320, 240);
+    expect(worlds(kinds, -1, 1), "a copy from where no buffer is known yet is a picture in the buffer it lands in");
+    frame(kinds, 1500, 0);
+    frame(kinds, 0, 240);
+    psx_ws_frame_kinds_copied(&kinds, 0, 240, 0, 0, 320, 240, 320, 240);
+    expect(worlds(kinds, 1, 1), "a flat frame copied whole over a world makes that buffer flat");
+    frame(kinds, 1500, 0);
+    psx_ws_frame_kinds_copied(&kinds, 0, 0, 0, 240, 320, 240, 320, 240);
+    expect(worlds(kinds, 0, 0), "and a world copied whole over a flat frame makes it a world");
+    for (const auto &[from_x, from_y, x, y, w, h] :
+         {std::array<std::uint32_t, 6>{0, 0, 0, 240, 320, 239}, {0, 0, 0, 240, 319, 240}, {16, 0, 0, 240, 320, 240}, {0, 0, 0, 241, 320, 240},
+          {320, 0, 0, 240, 320, 240}}) {
+        frame(kinds, 1500, 0);
+        frame(kinds, 1500, 240);
+        psx_ws_frame_kinds_copied(&kinds, from_x, from_y, x, y, w, h, 320, 240);
+        expect(psx_ws_frame_kinds_displayed(&kinds, 0, 240) == 1, "a copy of less than a whole buffer, or from or to another place, is a picture where it lands");
+    }
+    frame(kinds, 1500, 0);
+    frame(kinds, 1500, 240);
+    psx_ws_frame_kinds_area(&kinds, 0, 0, kLeast);
+    psx_ws_frame_kinds_copied(&kinds, 0, 0, 0, 240, 320, 240, 320, 240);
+    psx_ws_frame_kinds_area(&kinds, 0, 240, kLeast);
+    psx_ws_frame_kinds_drawn(&kinds, 0);
+    expect(worlds(kinds, 0, 1), "a veiled frame copied whole is veiled there too: the first thing drawn there that is no blend ends it");
+    frame(kinds, 1500, 0);
+    frame(kinds, 1500, 240);
+    psx_ws_frame_kinds_area(&kinds, 0, 0, kLeast);
+    psx_ws_frame_kinds_copied(&kinds, 0, 0, 0, 240, 320, 240, 320, 240);
+    psx_ws_frame_kinds_filled(&kinds, 0, 240, 320, 240, 320, 240);
+    expect(worlds(kinds, 0, 1), "or a fill that covers it, with no drawing area set there since");
+    frame(kinds, 0, 240);
+    psx_ws_frame_kinds_menu_begin(&kinds);
+    psx_ws_frame_kinds_copied(&kinds, 0, 240, 0, 0, 320, 240, 320, 240);
+    expect(psx_ws_frame_kinds_displayed_menu(&kinds, 0, 0) && worlds(kinds, 1, 1), "and a front-end frame copied whole is the front end's there too");
+}
+
+void test_a_blend_is_a_flat_colour_laid_over() {
+    for (std::uint32_t opcode = 0x20; opcode < 0x80; ++opcode) {
+        const bool lines = opcode >= 0x40 && opcode < 0x60, textured = !lines && (opcode & 4) != 0, blended = (opcode & 2) != 0;
+        expect((psx_ws_frame_kinds_blend(opcode) != 0) == (blended && !textured), "a drawing command is a blend when it is semi-transparent and has no texture");
+    }
+    expect(psx_ws_frame_kinds_blend(0x3A) && !psx_ws_frame_kinds_blend(0x38) && !psx_ws_frame_kinds_blend(0x3E) && !psx_ws_frame_kinds_blend(0x66) &&
+               psx_ws_frame_kinds_blend(0x62) && psx_ws_frame_kinds_blend(0x42) && psx_ws_frame_kinds_blend(0x46) && !psx_ws_frame_kinds_blend(0x44),
+           "the game's fade (a shaded quad, blended) is one, an opaque quad, a blended textured one and a blended sprite are not, a blended line is");
+}
+
 }  // namespace
 
 int main() {
@@ -283,6 +410,10 @@ int main() {
     test_a_list_asks_about_the_buffer_drawn_last();
     test_a_front_end_screen_is_flat_and_shown_wide();
     test_a_picture_ends_a_front_end_frame();
+    test_a_world_under_a_veil_stays_a_world();
+    test_a_fill_or_a_picture_ends_a_veil();
+    test_a_buffer_copied_whole_keeps_its_kind();
+    test_a_blend_is_a_flat_colour_laid_over();
     if (g_failures) return 1;
     std::cout << "GPU widescreen frame kind tests passed\n";
     return 0;

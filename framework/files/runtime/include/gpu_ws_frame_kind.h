@@ -20,6 +20,7 @@ typedef struct {
     uint32_t x, y;
     int known, flat;
     int menu; /* a front-end screen whose backdrop fills a wide screen: flat, and shown wide all the same */
+    int veiled; /* a world's frame the game no longer redraws and only blends over: the end of a level fades it out so */
 } PsxWsFrameBuffer;
 
 typedef struct {
@@ -47,15 +48,20 @@ static inline void psx_ws_frame_kinds_list(PsxWsFrameKinds *kinds, int inside) {
 
 /* The game set a drawing area at (x, y): the frame it draws there is what the
  * game told, or else flat when fewer than `least` vertices were projected for
- * it. A third origin takes the place of the buffer that was not drawn last. */
+ * it. A third origin takes the place of the buffer that was not drawn last.
+ * A frame flat by that count alone, set on a buffer holding a world's frame,
+ * leaves it that frame until something but a blend is drawn over it. */
 static inline void psx_ws_frame_kinds_area(PsxWsFrameKinds *kinds, uint32_t x, uint32_t y, uint32_t least) {
     int slot = kinds->drawing ^ 1;
     for (int i = 0; i < 2; ++i)
         if (kinds->buffers[i].known && kinds->buffers[i].x == x && kinds->buffers[i].y == y) slot = i;
+    const int held = kinds->buffers[slot].known && kinds->buffers[slot].x == x && kinds->buffers[slot].y == y && !kinds->buffers[slot].flat;
+    const int flat = kinds->told ? kinds->told_flat : kinds->projected < least;
     kinds->buffers[slot].x = x;
     kinds->buffers[slot].y = y;
     kinds->buffers[slot].known = 1;
-    kinds->buffers[slot].flat = kinds->told ? kinds->told_flat : kinds->projected < least;
+    kinds->buffers[slot].veiled = flat && !kinds->told && held;
+    kinds->buffers[slot].flat = flat && !kinds->buffers[slot].veiled;
     kinds->buffers[slot].menu = 0;
     kinds->drawing = slot;
     kinds->projected = 0;
@@ -70,6 +76,46 @@ static inline void psx_ws_frame_kinds_pictured(PsxWsFrameKinds *kinds, uint32_t 
         if (x >= buffer->x + wide || x + w <= buffer->x || y >= buffer->y + tall || y + h <= buffer->y) continue;
         buffer->flat = 1;
         buffer->menu = 0;
+    }
+}
+
+/* The game copied a whole frame buffer onto the other: the copy is that frame, of that kind. Any other copy is a picture. */
+static inline void psx_ws_frame_kinds_copied(PsxWsFrameKinds *kinds, uint32_t from_x, uint32_t from_y, uint32_t x, uint32_t y, uint32_t w,
+                                             uint32_t h, uint32_t wide, uint32_t tall) {
+    for (int i = 0; i < 2; ++i) {
+        const PsxWsFrameBuffer *from = &kinds->buffers[i];
+        PsxWsFrameBuffer *to = &kinds->buffers[i ^ 1];
+        if (!from->known || !to->known || from->x != from_x || from->y != from_y || to->x != x || to->y != y || w != wide || h != tall) continue;
+        to->flat = from->flat;
+        to->menu = from->menu;
+        to->veiled = from->veiled;
+        return;
+    }
+    psx_ws_frame_kinds_pictured(kinds, x, y, w, h, wide, tall);
+}
+
+/* 1 when a drawing command (GP0 0x20 to 0x7F) only blends a flat colour over what is there: semi-transparent and untextured. */
+static inline int psx_ws_frame_kinds_blend(uint32_t opcode) {
+    const int lines = opcode >= 0x40 && opcode < 0x60;
+    return (opcode & 2u) != 0 && (lines || (opcode & 4u) == 0);
+}
+
+/* The frame being drawn drew something. Anything but a blend ends a veil: the frame is the flat one its count said. */
+static inline void psx_ws_frame_kinds_drawn(PsxWsFrameKinds *kinds, int blend) {
+    PsxWsFrameBuffer *buffer = &kinds->buffers[kinds->drawing];
+    if (blend || !buffer->veiled) return;
+    buffer->veiled = 0;
+    buffer->flat = 1;
+}
+
+/* The game filled a rectangle, which no drawing area bounds: a veiled frame it covers whole is cleared and flat. */
+static inline void psx_ws_frame_kinds_filled(PsxWsFrameKinds *kinds, uint32_t x, uint32_t y, uint32_t w, uint32_t h, uint32_t wide,
+                                             uint32_t tall) {
+    for (int i = 0; i < 2; ++i) {
+        PsxWsFrameBuffer *buffer = &kinds->buffers[i];
+        if (!buffer->veiled || x > buffer->x || x + w < buffer->x + wide || y > buffer->y || y + h < buffer->y + tall) continue;
+        buffer->veiled = 0;
+        buffer->flat = 1;
     }
 }
 
