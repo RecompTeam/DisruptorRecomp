@@ -2,6 +2,7 @@
 
 #include "config_loader.h"
 
+#include <functional>
 #include <span>
 
 // The settings a player can change, said once for the launcher and for the in-game menu.
@@ -24,12 +25,14 @@ struct Option {
     int lowest;
     int highest;
     std::span<const char* const> choices;
-    const char* needs; // the toggle that must be on for this option to apply
+    std::span<const char* const> needs; // the toggles that must be on for this option to apply
     Unit unit;
     const char* hint;
 };
 
 std::span<const Option> options();
 const Option* find_option(const char* key);
+// Whether every toggle the option needs is on, as `on` tells, and every toggle those need in turn.
+bool applies(const Option& option, const std::function<bool(const Option&)>& on);
 
 } // namespace disruptor::settings

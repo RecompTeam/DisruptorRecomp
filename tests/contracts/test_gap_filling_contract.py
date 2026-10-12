@@ -142,12 +142,13 @@ require(
 enhancements = between(menu, "void draw_enhancements_tab() {", "const char *cheat_result_message(")
 require(
     """    bool gaps = gl_renderer_gap_fill() != 0;
-    if (!geometry) ImGui::BeginDisabled();
+    const bool gaps_apply = applies("disruptor.gap_filling");
+    if (!gaps_apply) ImGui::BeginDisabled();
     if (option_toggle("disruptor.gap_filling", &gaps)) {
         gl_renderer_set_gap_fill(gaps ? 1 : 0);
         mark_gap_filling(gaps);
     }
-    if (!geometry) ImGui::EndDisabled();
+    if (!gaps_apply) ImGui::EndDisabled();
 """ in enhancements
     and menu.count('option_toggle("disruptor.gap_filling"') == 1
     and enhancements.count("ImGui::BeginDisabled()") == enhancements.count("ImGui::EndDisabled()"),
@@ -184,7 +185,8 @@ require(
 
 row = between(options, '"disruptor.gap_filling", "Gap filling", 1,', "),\n")
 require(
-    row.endswith("geometry_key")
+    row.endswith("needs_geometry")
+    and "constexpr const char* needs_geometry[] = {geometry_key};\n" in options
     and options.count('"disruptor.gap_filling"') == launcher.count('"disruptor.gap_filling"') == 1
     and '    {"disruptor.gap_filling", Page::enhancements},\n' in launcher,
     "the launcher offers it on the Enhancements page, on at first and only with geometry correction",

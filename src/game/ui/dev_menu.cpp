@@ -198,6 +198,19 @@ bool changed(const char *key) {
     return g_preferences.changed.contains(find_option(key));
 }
 
+bool prerequisite_on(const Option &option) {
+    const std::string_view key(option.key);
+    if (key == "disruptor.geometry_correction")
+        return gpu_geometry_correction_enabled() != 0;
+    if (key == "disruptor.mouse_aim") return disruptor_mouse_aim_enabled() != 0;
+    if (key == "disruptor.ambient_occlusion") return gl_renderer_ssao() != 0;
+    return false;
+}
+
+bool applies(const char *key) {
+    return disruptor::settings::applies(*find_option(key), prerequisite_on);
+}
+
 bool option_toggle(const char *key, bool *value) {
     return ImGui::Checkbox(find_option(key)->label, value);
 }
@@ -734,7 +747,7 @@ void draw_controls_tab() {
         mark_invert_x(invert_x);
     }
 
-    const bool turn_applies = mouse_aim && gpu_geometry_correction_enabled() != 0;
+    const bool turn_applies = applies("disruptor.high_precision_camera");
     bool smooth = disruptor_high_precision_camera_enabled() != 0;
     if (!turn_applies) ImGui::BeginDisabled();
     if (option_toggle("disruptor.high_precision_camera", &smooth)) {
@@ -941,35 +954,38 @@ void draw_enhancements_tab() {
     draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
 
     bool textures = gpu_texture_correction_enabled() != 0;
-    if (!geometry) ImGui::BeginDisabled();
+    const bool textures_apply = applies("disruptor.perspective_textures");
+    if (!textures_apply) ImGui::BeginDisabled();
     if (option_toggle("disruptor.perspective_textures", &textures)) {
         gpu_texture_correction_set(textures ? 1 : 0);
         mark_textures(textures);
     }
-    if (!geometry) ImGui::EndDisabled();
+    if (!textures_apply) ImGui::EndDisabled();
     draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
-    if (!geometry)
+    if (!textures_apply)
         ImGui::TextDisabled("Enable exact geometry before perspective textures.");
 
     bool gaps = gl_renderer_gap_fill() != 0;
-    if (!geometry) ImGui::BeginDisabled();
+    const bool gaps_apply = applies("disruptor.gap_filling");
+    if (!gaps_apply) ImGui::BeginDisabled();
     if (option_toggle("disruptor.gap_filling", &gaps)) {
         gl_renderer_set_gap_fill(gaps ? 1 : 0);
         mark_gap_filling(gaps);
     }
-    if (!geometry) ImGui::EndDisabled();
+    if (!gaps_apply) ImGui::EndDisabled();
     draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
     ImGui::TextDisabled(
         "Closes hairline gaps between polygons and keeps the game's own "
         "patches off their neighbours.");
 
     bool by_depth = gl_renderer_world_depth() != 0;
-    if (!geometry) ImGui::BeginDisabled();
+    const bool depth_applies = applies("disruptor.depth_sorted_world");
+    if (!depth_applies) ImGui::BeginDisabled();
     if (option_toggle("disruptor.depth_sorted_world", &by_depth)) {
         gl_renderer_set_world_depth(by_depth ? 1 : 0);
         mark_world_depth(by_depth);
     }
-    if (!geometry) ImGui::EndDisabled();
+    if (!depth_applies) ImGui::EndDisabled();
     draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
     ImGui::TextDisabled(
         "Draws world polygons by their depth where the game's own order puts a "
@@ -1003,7 +1019,8 @@ void draw_enhancements_tab() {
 #ifndef PSX_DISABLE_FRAME_INTERPOLATION
     int present_enabled = 0;
     if (disruptor_present_rate_switch(
-            find_option("video.frame_interpolation")->label, geometry ? 1 : 0,
+            find_option("video.frame_interpolation")->label,
+            applies("video.frame_interpolation") ? 1 : 0,
             &present_enabled))
         mark_present_enabled(present_enabled != 0);
     int present_rate = 0;
@@ -1043,24 +1060,26 @@ void draw_experimental_tab() {
         "correction on.");
     ImGui::Spacing();
 
-    const bool geometry = gpu_geometry_correction_enabled() != 0;
     bool occlusion = gl_renderer_ssao() != 0;
-    if (!geometry) ImGui::BeginDisabled();
+    const bool occlusion_applies = applies("disruptor.ambient_occlusion");
+    if (!occlusion_applies) ImGui::BeginDisabled();
     if (option_toggle("disruptor.ambient_occlusion", &occlusion)) {
         gl_renderer_set_ssao(occlusion ? 1 : 0);
         mark_occlusion(occlusion);
     }
-    if (!geometry) ImGui::EndDisabled();
+    if (!occlusion_applies) ImGui::EndDisabled();
     draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
     int reach = static_cast<int>(std::lround(gl_renderer_ssao_radius()));
     int strength = static_cast<int>(std::lround(gl_renderer_ssao_strength() * 100.0f));
-    if (!geometry) ImGui::BeginDisabled();
+    const bool shape_applies = applies("disruptor.occlusion_reach") &&
+                               applies("disruptor.occlusion_strength");
+    if (!shape_applies) ImGui::BeginDisabled();
     ImGui::SetNextItemWidth(260.0f);
     const bool reach_moved = option_slider("disruptor.occlusion_reach", &reach);
     ImGui::SetNextItemWidth(260.0f);
     const bool strength_moved =
         option_slider("disruptor.occlusion_strength", &strength);
-    if (!geometry) ImGui::EndDisabled();
+    if (!shape_applies) ImGui::EndDisabled();
     if (reach_moved || strength_moved) {
         gl_renderer_set_ssao_shape(static_cast<float>(reach), strength / 100.0f);
         mark_occlusion_shape(reach, strength);
