@@ -6,8 +6,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from menu_sources import menu_sources, menu_text
 
 ROOT = Path(__file__).resolve().parents[2]
+
 
 
 def read(path: str) -> str:
@@ -58,7 +60,7 @@ host_ui = read("psxrecomp/runtime/include/host_ui.h")
 main_cpp = read("psxrecomp/runtime/src/main.cpp")
 gl = read("psxrecomp/runtime/src/gpu_gl_renderer.c")
 gte = read("psxrecomp/runtime/src/gte.cpp")
-menu = read("src/game/ui/dev_menu.cpp")
+menu = menu_text(ROOT)
 options = read("src/game/settings/options.cpp")
 STAGED = (
     "void mark(const char *key, int value) {\n"
@@ -91,9 +93,32 @@ require("v1.92.6.tar.gz" in cmake and
         "5b17c01f69545bde732b14936d89ce0f508adb83e8b56fa82448371845172bc3"
         in cmake.lower(),
         "Dear ImGui source must remain versioned and integrity-pinned")
-require("src/game/ui/dev_menu.cpp" in cmake and
+menu_files = menu_sources(ROOT)
+require([name.rsplit("/", 1)[1] for name in menu_files] == [
+            "menu.h", "preferences.cpp", "rows.cpp", "tab_controls.cpp", "tab_enhancements.cpp",
+            "tab_experimental.cpp", "tab_debug.cpp", "tab_cheats.cpp", "tab_system.cpp", "tab_language.cpp",
+            "menu.cpp"] and
+        sorted(menu_files) == sorted(
+            found.relative_to(ROOT).as_posix() for found in (ROOT / "src/game/ui/menu").iterdir()) and
         "target_link_libraries(psx-runtime PRIVATE disruptor-imgui)" in cmake,
-        "menu implementation must be linked only into the game runtime")
+        "every file of the menu's folder must be built, and linked only into the game runtime")
+for name in menu_files[1:]:
+    source = read(name)
+    require(source.startswith('#include "game/ui/menu/menu.h"\n\nnamespace disruptor::menu {\n') and
+            source.endswith("}  // namespace disruptor::menu\n") and
+            source.count("namespace disruptor::menu {") == 1 and "#include" not in source[10:],
+            f"{name} must hold its definitions in the menu's namespace, behind the menu's one header")
+for tab in ("controls", "enhancements", "experimental", "debug", "cheats", "system", "language"):
+    source = read(f"src/game/ui/menu/tab_{tab}.cpp")
+    require(f"\nvoid draw_{tab}_tab() {{\n" in source and source.count("_tab() {") == 1 and
+            f"void draw_{tab}_tab();\n" in read("src/game/ui/menu/menu.h") and
+            f"draw_{tab}_tab();" in function_body(read("src/game/ui/menu/menu.cpp"), "draw_menu"),
+            f"the {tab} tab is drawn by its own file, and the menu draws it")
+require("PreferenceState g_preferences;\n" in read("src/game/ui/menu/preferences.cpp") and
+        "DevMenuState g_menu;\n" in read("src/game/ui/menu/menu.cpp") and
+        "MenuRegistration g_registration;\n" in read("src/game/ui/menu/menu.cpp") and
+        "bool option_toggle(const char *key, bool *value) {\n" in read("src/game/ui/menu/rows.cpp"),
+        "the staged settings, the menu's own state and its registration, and the rows each have one file")
 require("src/game/session/cheats.cpp" in cmake and
         "tests/unit/disruptor_cheats_test.cpp" in cmake,
         "version-pinned cheats and their behavioral test must be built")
@@ -769,7 +794,7 @@ require(STAGED in menu and
         "PreferenceDirty" not in menu and "PREF_" not in menu and
         '    list(APPEND DISRUPTOR_EXTRA_SOURCES\n'
         '        "${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings/options.cpp"\n'
-        '        "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/dev_menu.cpp")\n' in cmake,
+        '        "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/preferences.cpp"\n' in cmake,
         "a staged change must be an option of the shared table, and a save must write and then forget every one")
 
 HELPERS = (
@@ -799,7 +824,7 @@ HELPERS = (
     "    return moved;\n"
     "}\n"
     "\n"
-    "bool option_list(const char *key, int *index, size_t skipped = 0) {\n"
+    "bool option_list(const char *key, int *index, size_t skipped) {\n"
     "    const Option &option = *find_option(key);\n"
     "    const auto shown = option.choices.subspan(skipped);\n"
     "    const bool moved = ImGui::Combo(option.label, index, shown.data(),\n"
@@ -813,7 +838,8 @@ shared_choices = re.findall(r'"([^"]+)"', "".join(re.findall(r"constexpr const c
 drawn_keys = set(re.findall(r'\boption_(?:toggle|slider|list)\("([\w.]+)"', menu)) | set(
     re.findall(r'find_option\("([\w.]+)"\)->label', menu))
 present = read("src/game/frame/present_rate.cpp")
-require(HELPERS in menu and len(shared_labels) == 27 and drawn_keys == shared_keys and
+require(HELPERS in menu and "bool option_list(const char *key, int *index, size_t skipped = 0);\n" in menu and
+        len(shared_labels) == 27 and drawn_keys == shared_keys and
         not [text for text in [*shared_labels, *shared_choices] if f'"{text}"' in menu + present] and
         "    static constexpr int kScaleCount = 8;\n" in menu and
         '"1x (native)", "2x", "3x", "4x", "5x", "6x", "7x", "8x"' in options and
@@ -842,6 +868,8 @@ LIVE = (
     '    if (key == "disruptor.ambient_occlusion") return gl_renderer_ssao() != 0;\n'
     "    return false;\n"
     "}\n"
+    "\n"
+    "}  // namespace\n"
     "\n"
     "bool applies(const char *key) {\n"
     "    return disruptor::settings::applies(*find_option(key), prerequisite_on);\n"

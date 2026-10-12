@@ -4,6 +4,8 @@
 import re
 from pathlib import Path
 
+from menu_sources import menu_text
+
 ROOT = Path(__file__).resolve().parents[2]
 
 # Keys the game saves and the launcher leaves to the in-game menu, the command line or a hand edit.
@@ -45,7 +47,7 @@ launcher_cmake = read("src/launcher/CMakeLists.txt")
 cmake = read("CMakeLists.txt")
 loader = read("psxrecomp/recompiler/src/config_loader.cpp")
 game_section = read("src/game/settings/saved.cpp")
-menu = read("src/game/ui/dev_menu.cpp") + read("src/game/frame/present_rate.cpp")
+menu = menu_text(ROOT) + read("src/game/frame/present_rate.cpp")
 
 ROW = r'\b(toggle|choice|slider)(?:<[^>]*>)?\(\s*"([\w.]+)", "([^"]+)", (-?\d+)'
 rows = re.findall(ROW, options)

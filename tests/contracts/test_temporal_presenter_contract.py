@@ -4,6 +4,8 @@
 import re
 from pathlib import Path
 
+from menu_sources import menu_text
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -231,7 +233,7 @@ require(
     '    if (const char *asked = std::getenv("PSX_DISRUPTOR_IMPROVED_SHADOWS")) gpu_set_shadow_shape(asked[0] == \'1\');\n'
     in read("src/game/host.cpp")
     and '    if (settings.has_improved_shadows && !env_override_present("PSX_DISRUPTOR_IMPROVED_SHADOWS"))\n'
-    "        gpu_set_shadow_shape(settings.improved_shadows ? 1 : 0);\n" in read("src/game/ui/dev_menu.cpp"),
+    "        gpu_set_shadow_shape(settings.improved_shadows ? 1 : 0);\n" in menu_text(ROOT),
     "the renderer holds the shadow switch and reads no environment: the game sets it at the start, "
     "and a saved setting gives way to the environment",
 )

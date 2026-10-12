@@ -96,7 +96,16 @@ if(DISRUPTOR_DEV_MENU)
 
     list(APPEND DISRUPTOR_EXTRA_SOURCES
         "${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings/options.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/dev_menu.cpp")
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/preferences.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/rows.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/tab_controls.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/tab_enhancements.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/tab_experimental.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/tab_debug.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/tab_cheats.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/tab_system.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/tab_language.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/menu.cpp")
     if(DISRUPTOR_FRAME_INTERPOLATION)
         list(APPEND DISRUPTOR_EXTRA_SOURCES
             "${CMAKE_CURRENT_SOURCE_DIR}/src/game/frame/present_rate.cpp")

@@ -6,6 +6,8 @@ import struct
 import sys
 from pathlib import Path
 
+from menu_sources import menu_text
+
 ROOT = Path(__file__).resolve().parents[2]
 LOAD_ADDRESS = 0x80011200
 ROM_TEXT_OFFSET = 0x800
@@ -45,7 +47,7 @@ def require(condition: bool, message: str) -> None:
 cmake = read("CMakeLists.txt")
 source = read("src/game/frame/frame_rate.cpp")
 header = read("src/game/frame/frame_rate.h")
-menu = read("src/game/ui/dev_menu.cpp")
+menu = menu_text(ROOT)
 options = read("src/game/settings/options.cpp")
 STAGED = (
     "void mark(const char *key, int value) {\n"

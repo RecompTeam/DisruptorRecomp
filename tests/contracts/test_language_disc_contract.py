@@ -5,6 +5,8 @@ import struct
 import sys
 from pathlib import Path
 
+from menu_sources import menu_text
+
 ROOT = Path(__file__).resolve().parents[2]
 LOAD_ADDRESS = 0x80011200
 ROM_TEXT_OFFSET = 0x800
@@ -76,7 +78,7 @@ pick_slot = read("psxrecomp/runtime/include/host_pick_slot.h")
 restart = read("src/game/session/restart.cpp")
 settings_header = read("src/game/settings/game_user_settings.h")
 settings_loader = read("src/game/settings/saved.cpp")
-menu = read("src/game/ui/dev_menu.cpp")
+menu = menu_text(ROOT)
 reader = read("psxrecomp/runtime/src/iso_reader_c.cpp")
 
 require(

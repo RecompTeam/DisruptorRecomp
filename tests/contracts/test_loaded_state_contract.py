@@ -7,6 +7,8 @@ were found by comparing the memory of a booted session with that of the same sta
 
 from pathlib import Path
 
+from menu_sources import menu_text
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -24,7 +26,7 @@ memory = read("psxrecomp/runtime/src/memory.c")
 state = read("psxrecomp/runtime/src/boot_state.c")
 cycles = read("psxrecomp/runtime/include/psx_cyc.h")
 latch = read("psxrecomp/runtime/src/fntrace.c")
-menu = read("src/game/ui/dev_menu.cpp")
+menu = menu_text(ROOT)
 rate = read("src/game/frame/frame_rate.cpp")
 
 require(

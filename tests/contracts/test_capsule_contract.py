@@ -3,6 +3,8 @@
 
 from pathlib import Path
 
+from menu_sources import menu_text
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -19,7 +21,7 @@ host = read("psxrecomp/runtime/src/main.cpp")
 game_side = read("src/game/host.cpp")
 capsule = read("src/game/session/capsule.cpp")
 mouse = read("src/game/input/mouse_aim.cpp")
-menu = read("src/game/ui/dev_menu.cpp")
+menu = menu_text(ROOT)
 cmake = read("CMakeLists.txt")
 
 require(

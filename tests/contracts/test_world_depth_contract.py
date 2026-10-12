@@ -3,6 +3,8 @@
 
 from pathlib import Path
 
+from menu_sources import menu_text
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -25,7 +27,7 @@ overlay = read("framework/FILES.txt")
 header = read("psxrecomp/runtime/include/gpu_world_depth.h")
 renderer = read("psxrecomp/runtime/src/gpu_gl_renderer.c")
 presenter = read("psxrecomp/runtime/src/gpu_gl_temporal.c.inc")
-menu = read("src/game/ui/dev_menu.cpp")
+menu = menu_text(ROOT)
 launcher = read("src/launcher/launcher_settings.cpp")
 options = read("src/game/settings/options.cpp")
 STAGED = (

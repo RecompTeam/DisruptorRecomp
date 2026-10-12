@@ -3,6 +3,8 @@
 
 from pathlib import Path
 
+from menu_sources import menu_text
+
 ROOT = Path(__file__).resolve().parents[2]
 
 
@@ -20,7 +22,7 @@ manifest = read("framework/FILES.txt")
 scale_header = read("psxrecomp/runtime/include/gpu_ws_hud_scale.h")
 gpu = read("psxrecomp/runtime/src/gpu.c")
 header = read("psxrecomp/runtime/include/gpu.h")
-menu = read("src/game/ui/dev_menu.cpp")
+menu = menu_text(ROOT)
 options = read("src/game/settings/options.cpp")
 STAGED = (
     "void mark(const char *key, int value) {\n"
