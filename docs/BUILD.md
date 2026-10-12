@@ -143,7 +143,9 @@ The framework reaches the game through one header, `runtime/include/game_host.h`
 which `src/game/host.cpp` answers. The instructions the game hooks are listed in
 `game.toml` under `[[recompiler.instruction_hook]]` for code that runs from RAM.
 The code generator holds its own copy for native code, and a contract keeps the
-two equal.
+two equal. The game's section of `settings.toml` belongs to the game as well:
+its fields are in `src/game/settings/game_user_settings.h`, and
+`src/game/settings/saved.cpp` reads and writes them for the framework's reader.
 
 A save state carries a key made of the code generator's sources, listed in
 `psxrecomp/runtime/codegen_hash_sources.cmake`. Any edit to one of them, a

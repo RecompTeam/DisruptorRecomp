@@ -63,7 +63,7 @@ MERGED = (
 generator = read("psxrecomp/recompiler/src/code_generator.cpp")
 configs = read("game.toml") + read("game-widescreen.toml")
 audit = read("tools/audit_codegen.py")
-settings_loader = read("psxrecomp/recompiler/src/config_loader.cpp")
+settings_loader = read("src/game/settings/saved.cpp")
 
 require(
     "src/game/session/intro_skip.cpp" in cmake

@@ -8,7 +8,8 @@ target_link_libraries(disruptor-disc-import PUBLIC bcrypt)
 # settings.toml goes through the game's own reader and writer.
 add_library(disruptor-launcher-config STATIC
     "${PSXRECOMP_ROOT}/recompiler/src/config_loader.cpp"
-    "${PSXRECOMP_ROOT}/recompiler/src/ps1_exe_parser.cpp")
+    "${PSXRECOMP_ROOT}/recompiler/src/ps1_exe_parser.cpp"
+    "${PROJECT_SOURCE_DIR}/src/game/settings/saved.cpp")
 target_compile_features(disruptor-launcher-config PUBLIC cxx_std_20)
 target_include_directories(disruptor-launcher-config PUBLIC
     "${PSXRECOMP_ROOT}/recompiler/src"

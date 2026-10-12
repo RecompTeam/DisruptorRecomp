@@ -150,7 +150,7 @@ require(
     "        disruptor_frame_rate_set_unlocked(settings.frame_unlock ? 1 : 0);" in menu,
     "a saved switch must be applied at start unless the environment overrides it",
 )
-settings_loader = read("psxrecomp/recompiler/src/config_loader.cpp")
+settings_loader = read("src/game/settings/saved.cpp")
 require(
     's.frame_unlock = toml::find<bool>(d, "frame_unlock");' in settings_loader
     and 'f << "frame_unlock = " << (s.frame_unlock ? "true" : "false")' in settings_loader
@@ -291,7 +291,8 @@ require(
     "the presenter must run at any rate from 30 FPS",
 )
 require(
-    "(s.frame_interpolation_fps >= 30 && s.frame_interpolation_fps <= 1000))" in settings_loader,
+    "(s.frame_interpolation_fps >= 30 && s.frame_interpolation_fps <= 1000))"
+    in read("psxrecomp/recompiler/src/config_loader.cpp"),
     "settings.toml must keep an in-between frame rate from 30 FPS",
 )
 

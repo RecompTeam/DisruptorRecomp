@@ -1,5 +1,5 @@
 diff --git a/runtime/src/main.cpp b/runtime/src/main.cpp
-index 81e048307ec9dd9fc7234a1e6285042ffab16457..bb8b7276d85ec6ed3ff60d86eb3e46ca71f0f85f 100644
+index 81e048307ec9dd9fc7234a1e6285042ffab16457..0ff3b64e04111d2c549b1192dc2ee8f8fc3648db 100644
 --- a/runtime/src/main.cpp
 +++ b/runtime/src/main.cpp
 @@ -1,9 +1,16 @@
@@ -1944,15 +1944,14 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..bb8b7276d85ec6ed3ff60d86eb3e46ca
      {
          const char *mode_env = std::getenv("PSX_PARAPPA_TIMING_MODE");
          const char *early_env = std::getenv("PSX_PARAPPA_TIMING_EXTRA_EARLY");
-@@ -5916,7 +6925,14 @@
+@@ -5916,7 +6925,13 @@
      if (want_launcher) {
          if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) == 0) {
              int lr = 2; /* 0 = launch, 1 = quit, 2 = unavailable */
 -            PSXRecompV4::UserSettings seed;
 +            /* Merge launcher edits into the canonical file instead of
-+             * constructing a fresh snapshot.  Game-owned sections (including
-+             * [disruptor]) and settings not exposed by recomp-ui must survive
-+             * a later launcher save. */
++             * constructing a fresh snapshot.  Game-owned sections and settings
++             * not exposed by recomp-ui must survive a later launcher save. */
 +            PSXRecompV4::UserSettings seed =
 +                PSXRecompV4::load_user_settings(
 +                    exe_dir_from_argv(argv[0]) / "settings.toml");
@@ -1960,7 +1959,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..bb8b7276d85ec6ed3ff60d86eb3e46ca
              seed.renderer = g_video_renderer;             seed.has_renderer = true;
              seed.supersampling = g_video_scale;           seed.has_supersampling = true;
              seed.antialiasing = g_video_aa;               seed.has_antialiasing = true;
-@@ -6415,6 +7431,12 @@
+@@ -6415,6 +7430,12 @@
      g_turbo_load_release_frames = TURBO_LOADS_RELEASE_FRAMES;
      if (!turbo_loads_offered)
          g_turbo_loads_enabled = 0;
@@ -1973,7 +1972,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..bb8b7276d85ec6ed3ff60d86eb3e46ca
      g_frame_interpolation_blend = g_frame_interpolation_blend_default;
      mod_runtime_activate_plugins();
      if (g_mod_controller_mode_override[0] >= 0)
-@@ -6527,6 +7549,22 @@
+@@ -6527,6 +7548,22 @@
      gr_set_scale(g_video_scale);
      g_video_scale = gr_scale(); /* reflect any clamp / alloc fallback */
      gr_set_texture_filter(g_video_texfilter);
@@ -1996,7 +1995,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..bb8b7276d85ec6ed3ff60d86eb3e46ca
      /* Display aspect. Identity at the default 4:3. The present letterbox uses
       * this aspect; native-wide fills it with a genuinely wider frame (no
       * stretch), squash mode stretches the 4:3 frame into it. */
-@@ -6633,6 +7671,7 @@
+@@ -6633,6 +7670,7 @@
       * the local EXE file (dev checkouts) and the disc image (every install). */
      if (game_config_path)
          arm_text_image_guard(text_guard_exe_path, text_guard_load_addr,
@@ -2004,7 +2003,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..bb8b7276d85ec6ed3ff60d86eb3e46ca
                               disc_path_str);
      mod_runtime_enable_disc_patches();
      {
-@@ -6691,6 +7730,7 @@
+@@ -6691,6 +7729,7 @@
  
    if (g_headless) {
      std::fprintf(stdout, "psxrecomp: headless frontend enabled\n");
@@ -2012,7 +2011,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..bb8b7276d85ec6ed3ff60d86eb3e46ca
    } else {
      /* ---- SDL init ---- */
      /* Scale quality governs SDL's logical-size -> window scaling. Linear when
-@@ -6780,6 +7820,17 @@
+@@ -6780,6 +7819,17 @@
          std::fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
          return 1;
      }
@@ -2030,7 +2029,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..bb8b7276d85ec6ed3ff60d86eb3e46ca
  
      /* Sync-to-host-refresh: with SDL PRESENTVSYNC on, a fixed 59.94 Hz wall-clock
       * pacer fights a 60.00 Hz panel — rendered frames slip onto an uneven vblank
-@@ -6909,6 +7960,7 @@
+@@ -6909,6 +7959,7 @@
          std::fprintf(stderr, "failed to allocate %dx staging buffer\n", g_video_scale);
          return 1;
      }
@@ -2038,7 +2037,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..bb8b7276d85ec6ed3ff60d86eb3e46ca
  
    if (!g_gl_active && !g_vk_active) {
      sdl_texture = SDL_CreateTexture(
-@@ -6924,6 +7976,12 @@
+@@ -6924,6 +7975,12 @@
      SDL_SetTextureScaleMode(sdl_texture,
                              g_video_aa ? SDL_ScaleModeLinear : SDL_ScaleModeNearest);
    }
@@ -2051,7 +2050,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..bb8b7276d85ec6ed3ff60d86eb3e46ca
    }
  
      /* Register vblank presentation callback. */
-@@ -7012,6 +8070,9 @@
+@@ -7012,6 +8069,9 @@
              bios_hle_requested = (e[0] && e[0] != '0');
          if (const char* e = std::getenv("PSX_BIOS_HLE_KEEP_INTRO"))
              bios_hle_keep_intro = (e[0] && e[0] != '0');
@@ -2061,7 +2060,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..bb8b7276d85ec6ed3ff60d86eb3e46ca
  
          PsxBiosHleRequest req;
          req.bios_hle               = bios_hle_requested ? 1 : 0;
-@@ -7062,6 +8123,10 @@
+@@ -7062,6 +8122,10 @@
      if (game_entry_pc != 0) {
          savestate_configure(memcard_dir.string().c_str(),
                              memory_get_bios_checksum(), game_entry_pc);

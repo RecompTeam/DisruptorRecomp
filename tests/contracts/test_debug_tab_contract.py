@@ -23,8 +23,8 @@ def between(source: str, opening: str, closing: str) -> str:
 cmake = read("CMakeLists.txt")
 renderer = read("psxrecomp/runtime/src/gpu_gl_renderer.c")
 menu = read("src/game/ui/dev_menu.cpp")
-loader = read("psxrecomp/recompiler/src/config_loader.cpp")
-settings = read("psxrecomp/recompiler/src/config_loader.h")
+loader = read("src/game/settings/saved.cpp")
+settings = read("src/game/settings/game_user_settings.h")
 
 require("    disruptor_contract(debug_tab)\n" in cmake, "this contract is registered")
 

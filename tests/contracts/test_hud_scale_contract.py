@@ -33,7 +33,7 @@ MERGED = (
     "    for (const Option *option : g_preferences.changed)\n"
     "        option->set(settings, option->get(pending));\n"
 )
-settings_loader = read("psxrecomp/recompiler/src/config_loader.cpp")
+settings_loader = read("src/game/settings/saved.cpp")
 
 require(
     "+runtime/include/gpu_ws_hud_scale.h" in manifest.splitlines(),

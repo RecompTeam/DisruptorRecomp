@@ -33,6 +33,7 @@ set(DISRUPTOR_EXTRA_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/far_rendering.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/frame/frame_rate.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/host.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings/saved.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/intro_skip.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/language.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/language_disc.cpp"
@@ -53,6 +54,9 @@ set(PSXRECOMP_BIOS_STEMS "OpenBIOS" CACHE STRING "" FORCE)
 set(PSX_RECOMP_UI OFF CACHE BOOL "" FORCE)
 
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/src")
+# The framework's settings reader takes the game's section of settings.toml from here, in every target alike.
+include_directories("${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings")
+add_compile_definitions(PSX_HAS_GAME_USER_SETTINGS=1)
 include("${PSXRECOMP_ROOT}/runtime/runtime.cmake")
 
 if(DISRUPTOR_DEV_MENU)
@@ -231,6 +235,7 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
         SOURCES
             "${PSXRECOMP_ROOT}/recompiler/src/config_loader.cpp"
             "${PSXRECOMP_ROOT}/recompiler/src/ps1_exe_parser.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings/saved.cpp"
         INCLUDES
             "${PSXRECOMP_ROOT}/recompiler/src"
             "${PSXRECOMP_ROOT}/recompiler/include"

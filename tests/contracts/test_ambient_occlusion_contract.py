@@ -36,8 +36,8 @@ MERGED = (
     "    for (const Option *option : g_preferences.changed)\n"
     "        option->set(settings, option->get(pending));\n"
 )
-loader = read("psxrecomp/recompiler/src/config_loader.cpp")
-settings = read("psxrecomp/recompiler/src/config_loader.h")
+loader = read("src/game/settings/saved.cpp")
+settings = read("src/game/settings/game_user_settings.h")
 
 require("    disruptor_contract(ambient_occlusion)\n" in cmake, "this contract is registered")
 

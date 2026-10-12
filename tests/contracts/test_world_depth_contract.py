@@ -39,7 +39,7 @@ MERGED = (
     "    for (const Option *option : g_preferences.changed)\n"
     "        option->set(settings, option->get(pending));\n"
 )
-loader = read("psxrecomp/recompiler/src/config_loader.cpp")
+loader = read("src/game/settings/saved.cpp")
 
 require(
     overlay.count("+runtime/include/gpu_world_depth.h\n") == 1
@@ -160,7 +160,7 @@ require(
 """ in loader
     and "s.has_depth_sorted_world" in between(loader, "    if (s.has_mouse_aim", "{\n")
     and "    bool has_depth_sorted_world = false; bool depth_sorted_world = false;\n"
-    in read("psxrecomp/recompiler/src/config_loader.h"),
+    in read("src/game/settings/game_user_settings.h"),
     "the settings file keeps the choice, which is off until made",
 )
 

@@ -1,8 +1,8 @@
 diff --git a/recompiler/src/config_loader.cpp b/recompiler/src/config_loader.cpp
-index 246483fe90be378f8baf3e85671b692986823a8e..98a404f8bff2b3fc666007ae4a50cc1028726852 100644
+index 246483fe90be378f8baf3e85671b692986823a8e..4fba08ff61a27a02f2f41e064aeba68d120e3f05 100644
 --- a/recompiler/src/config_loader.cpp
 +++ b/recompiler/src/config_loader.cpp
-@@ -3,12 +3,26 @@
+@@ -3,13 +3,27 @@
  #include "config_loader.h"
  
  #include <algorithm>
@@ -17,7 +17,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..98a404f8bff2b3fc666007ae4a50cc10
  #include <set>
  #include <stdexcept>
  #include <string>
-+
+ 
 +#ifdef _WIN32
 +#ifndef NOMINMAX
 +#define NOMINMAX
@@ -26,10 +26,26 @@ index 246483fe90be378f8baf3e85671b692986823a8e..98a404f8bff2b3fc666007ae4a50cc10
 +#else
 +#include <unistd.h>
 +#endif
- 
++
  #include "bios_rom_alias.h"
  #include "fmt/format.h"
-@@ -64,6 +78,10 @@
+ #include "ps1_exe_parser.h"
+@@ -17,6 +31,14 @@
+ // toml11 is header-only.
+ #define TOML11_USE_UNRELEASED_TOML_FEATURES
+ #include "toml.hpp"
++
++#ifdef PSX_HAS_GAME_USER_SETTINGS
++namespace PSXRecompV4 {
++// Supplied by the game project: its own section of the user's settings file.
++void read_game_user_settings(const toml::value& doc, UserSettings& s);
++void write_game_user_settings(std::ostream& f, const UserSettings& s);
++}
++#endif
+ 
+ namespace PSXRecompV4 {
+ 
+@@ -64,6 +86,10 @@
      h.words("cull_screen_x", c.ws_cull_screen_x_sites);
      h.words("cull_slti", c.ws_cull_slti_sites);
      h.words("cull_slti_lower", c.ws_cull_slti_lower_sites);
@@ -40,7 +56,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..98a404f8bff2b3fc666007ae4a50cc10
      h.words("cull_bltz", c.ws_cull_bltz_sites);
      h.words("cull_negsub", c.ws_cull_negsub_sites);
      h.words("cull_vxrange", c.ws_cull_vxrange_sites);
-@@ -120,6 +138,36 @@
+@@ -120,6 +146,36 @@
      h.tag("cull_angle");
      h.u32((uint32_t)angle_sites.size());
      for (const auto& site : angle_sites) {
@@ -77,7 +93,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..98a404f8bff2b3fc666007ae4a50cc10
          h.u32(site.address);
          h.u32(site.expected);
      }
-@@ -496,9 +544,9 @@
+@@ -496,9 +552,9 @@
          const toml::value& video = toml::find(cfg, "video");
          if (video.contains("supersampling")) {
              const auto n = toml::find<int64_t>(video, "supersampling");
@@ -89,7 +105,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..98a404f8bff2b3fc666007ae4a50cc10
              }
              rt.video_supersampling = static_cast<int>(n);
          }
-@@ -1264,6 +1312,41 @@
+@@ -1264,6 +1320,41 @@
          for (const auto& a : arr)
              mod_function_entry_funcs.push_back(
                  parse_hex(a, "recompiler.mod_function_entry_funcs"));
@@ -131,7 +147,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..98a404f8bff2b3fc666007ae4a50cc10
      }
      std::vector<uint32_t> hot_funcs;
      if (recomp.contains("hot_funcs")) {
-@@ -1451,6 +1534,10 @@
+@@ -1451,6 +1542,10 @@
      std::vector<uint32_t> ws_cull_screen_x_sites;
      std::vector<uint32_t> ws_cull_slti_sites;
      std::vector<uint32_t> ws_cull_slti_lower_sites;
@@ -142,7 +158,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..98a404f8bff2b3fc666007ae4a50cc10
      std::vector<uint32_t> ws_cull_bltz_sites;
      std::vector<uint32_t> ws_cull_negsub_sites;
      std::vector<uint32_t> ws_cull_vxrange_sites;
-@@ -1459,6 +1546,9 @@
+@@ -1459,6 +1554,9 @@
      std::vector<uint32_t> ws_cull_xclip_load_sites;
      std::vector<WidescreenCullKeepSite> ws_cull_keep_sites;
      std::vector<WidescreenAngleSite> ws_cull_angle_sites;
@@ -152,7 +168,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..98a404f8bff2b3fc666007ae4a50cc10
      WidescreenAspectConeConfig ws_aspect_cone;
      int ws_cull_guard_pixels = 0;
      int ws_cull_activation_guard_pixels = 0;
-@@ -1484,6 +1574,10 @@
+@@ -1484,6 +1582,10 @@
              load_sites("screen_x_sites", ws_cull_screen_x_sites);
              load_sites("slti_sites",  ws_cull_slti_sites);
              load_sites("slti_lower_sites", ws_cull_slti_lower_sites);
@@ -163,7 +179,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..98a404f8bff2b3fc666007ae4a50cc10
              load_sites("bltz_sites",  ws_cull_bltz_sites);
              load_sites("negsub_sites", ws_cull_negsub_sites);
              load_sites("vxrange_sites", ws_cull_vxrange_sites);
-@@ -1552,6 +1646,85 @@
+@@ -1552,6 +1654,85 @@
                              "{}: duplicate cull-angle address 0x{:08X}",
                              config_path.string(), site.address));
                      ws_cull_angle_sites.push_back(site);
@@ -249,7 +265,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..98a404f8bff2b3fc666007ae4a50cc10
                  }
              }
              if (cull.contains("aspect_cone")) {
-@@ -1886,6 +2059,7 @@
+@@ -1886,6 +2067,7 @@
          /*ws_auto_ui_squash*/      ws_auto_ui_squash,
          /*data_shard_funcs*/      data_shard_funcs,
          /*mod_function_entry_funcs*/ mod_function_entry_funcs,
@@ -257,7 +273,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..98a404f8bff2b3fc666007ae4a50cc10
          /*hot_funcs*/             hot_funcs,
          /*vsync_query_func*/      vsync_query_func,
          /*vsync_counter_addr*/    vsync_counter_addr,
-@@ -1901,6 +2075,10 @@
+@@ -1901,6 +2083,10 @@
          /*ws_cull_screen_x_sites*/ ws_cull_screen_x_sites,
          /*ws_cull_slti_sites*/    ws_cull_slti_sites,
          /*ws_cull_slti_lower_sites*/ ws_cull_slti_lower_sites,
@@ -268,7 +284,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..98a404f8bff2b3fc666007ae4a50cc10
          /*ws_cull_bltz_sites*/    ws_cull_bltz_sites,
          /*ws_cull_negsub_sites*/  ws_cull_negsub_sites,
          /*ws_cull_vxrange_sites*/ ws_cull_vxrange_sites,
-@@ -1909,6 +2087,8 @@
+@@ -1909,6 +2095,8 @@
          /*ws_cull_xclip_load_sites*/ ws_cull_xclip_load_sites,
          /*ws_cull_keep_sites*/    ws_cull_keep_sites,
          /*ws_cull_angle_sites*/   ws_cull_angle_sites,
@@ -277,7 +293,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..98a404f8bff2b3fc666007ae4a50cc10
          /*ws_aspect_cone*/         ws_aspect_cone,
          /*ws_cull_guard_pixels*/  ws_cull_guard_pixels,
          /*ws_cull_activation_guard_pixels*/ ws_cull_activation_guard_pixels,
-@@ -1995,7 +2175,7 @@
+@@ -1995,7 +2183,7 @@
      return go;
  }
  
@@ -286,7 +302,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..98a404f8bff2b3fc666007ae4a50cc10
  
  UserSettings load_user_settings(const fs::path& path) {
      UserSettings s;
-@@ -2004,7 +2184,10 @@
+@@ -2004,7 +2192,10 @@
  
      toml::value doc;
      try {
@@ -298,7 +314,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..98a404f8bff2b3fc666007ae4a50cc10
      } catch (const std::exception&) {
          // Malformed file: fall back to all-defaults rather than refuse to boot,
          // but tell the caller so the user hears about it (and so the file can
-@@ -2026,7 +2209,7 @@
+@@ -2026,7 +2217,7 @@
          });
          if (v.contains("supersampling")) try_get([&]{
              const auto n = toml::find<int64_t>(v, "supersampling");
@@ -307,7 +323,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..98a404f8bff2b3fc666007ae4a50cc10
          });
          if (v.contains("window_width")) try_get([&]{
              const auto n = toml::find<int64_t>(v, "window_width");
-@@ -2087,8 +2270,16 @@
+@@ -2087,8 +2278,16 @@
          });
          if (v.contains("frame_interpolation_fps")) try_get([&]{
              s.frame_interpolation_fps = toml::find<int>(v, "frame_interpolation_fps");
@@ -325,7 +341,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..98a404f8bff2b3fc666007ae4a50cc10
          });
          if (v.contains("aspect_ratio")) try_get([&]{
              const auto m = toml::find<std::string>(v, "aspect_ratio");
-@@ -2106,6 +2297,17 @@
+@@ -2106,6 +2305,17 @@
          const toml::value& a = toml::find(doc, "audio");
          if (a.contains("spu_hq")) try_get([&]{
              s.spu_hq = toml::find<bool>(a, "spu_hq"); s.has_spu_hq = true;
@@ -343,133 +359,13 @@ index 246483fe90be378f8baf3e85671b692986823a8e..98a404f8bff2b3fc666007ae4a50cc10
          });
      }
      if (doc.contains("launcher")) {
-@@ -2230,15 +2432,190 @@
+@@ -2230,15 +2440,70 @@
              if (n >= 0 && n <= 32767) { s.deadzone = (int)n; s.has_deadzone = true; }
          });
      }
-+    if (doc.contains("disruptor")) {
-+        const toml::value& d = toml::find(doc, "disruptor");
-+        if (d.contains("mouse_aim")) try_get([&]{
-+            s.mouse_aim = toml::find<bool>(d, "mouse_aim");
-+            s.has_mouse_aim = true;
-+        });
-+        if (d.contains("modern_controls")) try_get([&]{
-+            s.modern_controls = toml::find<bool>(d, "modern_controls");
-+            s.has_modern_controls = true;
-+        });
-+        if (d.contains("horizontal_sensitivity")) try_get([&]{
-+            double n = 0.0;
-+            try {
-+                n = toml::find<double>(d, "horizontal_sensitivity");
-+            } catch (const std::exception&) {
-+                n = static_cast<double>(
-+                    toml::find<int64_t>(d, "horizontal_sensitivity"));
-+            }
-+            if (std::isfinite(n) && n >= 0.005 && n <= 2.0) {
-+                s.horizontal_sensitivity = n;
-+                s.has_horizontal_sensitivity = true;
-+            }
-+        });
-+        if (d.contains("invert_horizontal")) try_get([&]{
-+            s.invert_horizontal = toml::find<bool>(d, "invert_horizontal");
-+            s.has_invert_horizontal = true;
-+        });
-+        if (d.contains("vertical_look")) try_get([&]{
-+            s.vertical_look = toml::find<bool>(d, "vertical_look");
-+            s.has_vertical_look = true;
-+        });
-+        if (d.contains("vertical_sensitivity")) try_get([&]{
-+            double n = 0.0;
-+            try {
-+                n = toml::find<double>(d, "vertical_sensitivity");
-+            } catch (const std::exception&) {
-+                n = static_cast<double>(
-+                    toml::find<int64_t>(d, "vertical_sensitivity"));
-+            }
-+            if (std::isfinite(n) && n >= 0.005 && n <= 2.0) {
-+                s.vertical_sensitivity = n;
-+                s.has_vertical_sensitivity = true;
-+            }
-+        });
-+        if (d.contains("invert_vertical")) try_get([&]{
-+            s.invert_vertical = toml::find<bool>(d, "invert_vertical");
-+            s.has_invert_vertical = true;
-+        });
-+        if (d.contains("high_precision_camera")) try_get([&]{
-+            s.high_precision_camera = toml::find<bool>(d, "high_precision_camera");
-+            s.has_high_precision_camera = true;
-+        });
-+        if (d.contains("geometry_correction")) try_get([&]{
-+            s.geometry_correction = toml::find<bool>(d, "geometry_correction");
-+            s.has_geometry_correction = true;
-+        });
-+        if (d.contains("perspective_textures")) try_get([&]{
-+            s.perspective_textures = toml::find<bool>(d, "perspective_textures");
-+            s.has_perspective_textures = true;
-+        });
-+        if (d.contains("frame_unlock")) try_get([&]{
-+            s.frame_unlock = toml::find<bool>(d, "frame_unlock");
-+            s.has_frame_unlock = true;
-+        });
-+        if (d.contains("skip_intro")) try_get([&]{
-+            s.skip_intro = toml::find<bool>(d, "skip_intro");
-+            s.has_skip_intro = true;
-+        });
-+        if (d.contains("language_disc")) try_get([&]{
-+            s.language_disc = toml::find<std::string>(d, "language_disc");
-+            s.has_language_disc = true;
-+        });
-+        if (d.contains("language_discs")) try_get([&]{
-+            s.language_discs = toml::find<std::vector<std::string>>(d, "language_discs");
-+            s.has_language_discs = true;
-+        });
-+        if (d.contains("hud_scale")) try_get([&]{
-+            const int percent = toml::find<int>(d, "hud_scale");
-+            if (percent >= 50 && percent <= 100) {
-+                s.hud_scale = percent;
-+                s.has_hud_scale = true;
-+            }
-+        });
-+        if (d.contains("improved_shadows")) try_get([&]{
-+            s.improved_shadows = toml::find<bool>(d, "improved_shadows");
-+            s.has_improved_shadows = true;
-+        });
-+        if (d.contains("ambient_occlusion")) try_get([&]{
-+            s.ambient_occlusion = toml::find<bool>(d, "ambient_occlusion");
-+            s.has_ambient_occlusion = true;
-+        });
-+        if (d.contains("occlusion_reach")) try_get([&]{
-+            const int reach = toml::find<int>(d, "occlusion_reach");
-+            if (reach >= 50 && reach <= 800) {
-+                s.occlusion_reach = reach;
-+                s.has_occlusion_reach = true;
-+            }
-+        });
-+        if (d.contains("occlusion_strength")) try_get([&]{
-+            const int percent = toml::find<int>(d, "occlusion_strength");
-+            if (percent >= 0 && percent <= 300) {
-+                s.occlusion_strength = percent;
-+                s.has_occlusion_strength = true;
-+            }
-+        });
-+        if (d.contains("gap_filling")) try_get([&]{
-+            s.gap_filling = toml::find<bool>(d, "gap_filling");
-+            s.has_gap_filling = true;
-+        });
-+        if (d.contains("depth_sorted_world")) try_get([&]{
-+            s.depth_sorted_world = toml::find<bool>(d, "depth_sorted_world");
-+            s.has_depth_sorted_world = true;
-+        });
-+        if (d.contains("diagnostic_view")) try_get([&]{
-+            const std::string view = toml::find<std::string>(d, "diagnostic_view");
-+            for (int index = 0; index < kDisruptorDiagnosticViewCount; ++index) {
-+                if (view == kDisruptorDiagnosticViews[index]) {
-+                    s.diagnostic_view = index;
-+                    s.has_diagnostic_view = true;
-+                }
-+            }
-+        });
-+    }
++#ifdef PSX_HAS_GAME_USER_SETTINGS
++    read_game_user_settings(doc, s);
++#endif
      return s;
  }
 +
@@ -535,30 +431,16 @@ index 246483fe90be378f8baf3e85671b692986823a8e..98a404f8bff2b3fc666007ae4a50cc10
      if (!f.is_open()) return false;
  
      // TOML strings use forward slashes so backslash escaping is never an issue.
-@@ -2247,7 +2624,21 @@
+@@ -2247,7 +2512,7 @@
          return str;
      };
  
 -    f << "# psxrecomp user settings - written by the launcher. Safe to hand-edit.\n";
-+    // A TOML basic string: a quote, a backslash and a control character are escaped.
-+    auto quoted = [](const std::string& text) {
-+        std::string out = "\"";
-+        for (const char letter : text) {
-+            const unsigned code = static_cast<unsigned char>(letter);
-+            char escape[8];
-+            if (letter == '\\' || letter == '"') std::snprintf(escape, sizeof(escape), "\\%c", letter);
-+            else if (code < 0x20 || code == 0x7F) std::snprintf(escape, sizeof(escape), "\\u%04X", code);
-+            else std::snprintf(escape, sizeof(escape), "%c", letter);
-+            out += escape;
-+        }
-+        return out + "\"";
-+    };
-+
 +    f << "# psxrecomp user settings - written by settings UIs. Safe to hand-edit.\n";
      f << "# Overrides the bundled game.toml; the command line overrides this file.\n\n";
  
      f << "[video]\n";
-@@ -2287,6 +2678,11 @@
+@@ -2287,6 +2552,11 @@
          f << "frame_interpolation = " << (s.frame_interpolation ? "true" : "false") << "\n";
      if (s.has_frame_interpolation_fps)
          f << "frame_interpolation_fps = " << s.frame_interpolation_fps << "\n";
@@ -570,7 +452,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..98a404f8bff2b3fc666007ae4a50cc10
      if (s.has_aspect_ratio)
          f << "aspect_ratio      = \"" << s.aspect_num << ":" << s.aspect_den << "\"\n";
      if (s.has_adaptive_view)
-@@ -2294,6 +2690,10 @@
+@@ -2294,6 +2564,10 @@
      f << "\n[audio]\n";
      if (s.has_spu_hq)
          f << "spu_hq = " << (s.spu_hq ? "true" : "false") << "\n";
@@ -581,84 +463,14 @@ index 246483fe90be378f8baf3e85671b692986823a8e..98a404f8bff2b3fc666007ae4a50cc10
      if (s.has_skip_launcher)
          f << "\n[launcher]\nskip_launcher = " << (s.skip_launcher ? "true" : "false") << "\n";
      if ((s.has_netplay_player_name && !s.netplay_player_name.empty()) ||
-@@ -2353,7 +2753,98 @@
+@@ -2353,7 +2627,28 @@
              f << "extra_late = " << s.parappa_timing_extra_late << "\n";
      }
  
 -    return f.good();
-+    if (s.has_mouse_aim || s.has_modern_controls ||
-+        s.has_horizontal_sensitivity || s.has_invert_horizontal ||
-+        s.has_vertical_look || s.has_vertical_sensitivity ||
-+        s.has_invert_vertical ||
-+        s.has_high_precision_camera || s.has_geometry_correction ||
-+        s.has_perspective_textures || s.has_frame_unlock || s.has_improved_shadows ||
-+        s.has_ambient_occlusion || s.has_occlusion_reach || s.has_occlusion_strength ||
-+        s.has_gap_filling || s.has_depth_sorted_world || s.has_diagnostic_view ||
-+        s.has_language_discs ||
-+        s.has_language_disc || s.has_skip_intro ||
-+        s.has_hud_scale) {
-+        f << "\n[disruptor]\n";
-+        if (s.has_mouse_aim)
-+            f << "mouse_aim = " << (s.mouse_aim ? "true" : "false") << "\n";
-+        if (s.has_modern_controls)
-+            f << "modern_controls = " << (s.modern_controls ? "true" : "false") << "\n";
-+        if (s.has_horizontal_sensitivity &&
-+            std::isfinite(s.horizontal_sensitivity) &&
-+            s.horizontal_sensitivity >= 0.005 &&
-+            s.horizontal_sensitivity <= 2.0) {
-+            f << "horizontal_sensitivity = "
-+              << std::setprecision(std::numeric_limits<double>::max_digits10)
-+              << s.horizontal_sensitivity << "\n";
-+        }
-+        if (s.has_invert_horizontal)
-+            f << "invert_horizontal = " << (s.invert_horizontal ? "true" : "false") << "\n";
-+        if (s.has_vertical_look)
-+            f << "vertical_look = " << (s.vertical_look ? "true" : "false") << "\n";
-+        if (s.has_vertical_sensitivity &&
-+            std::isfinite(s.vertical_sensitivity) &&
-+            s.vertical_sensitivity >= 0.005 &&
-+            s.vertical_sensitivity <= 2.0) {
-+            f << "vertical_sensitivity = "
-+              << std::setprecision(std::numeric_limits<double>::max_digits10)
-+              << s.vertical_sensitivity << "\n";
-+        }
-+        if (s.has_invert_vertical)
-+            f << "invert_vertical = " << (s.invert_vertical ? "true" : "false") << "\n";
-+        if (s.has_high_precision_camera)
-+            f << "high_precision_camera = " << (s.high_precision_camera ? "true" : "false") << "\n";
-+        if (s.has_geometry_correction)
-+            f << "geometry_correction = " << (s.geometry_correction ? "true" : "false") << "\n";
-+        if (s.has_perspective_textures)
-+            f << "perspective_textures = " << (s.perspective_textures ? "true" : "false") << "\n";
-+        if (s.has_frame_unlock)
-+            f << "frame_unlock = " << (s.frame_unlock ? "true" : "false") << "\n";
-+        if (s.has_skip_intro)
-+            f << "skip_intro = " << (s.skip_intro ? "true" : "false") << "\n";
-+        if (s.has_language_disc)
-+            f << "language_disc = " << quoted(s.language_disc) << "\n";
-+        if (s.has_language_discs) {
-+            f << "language_discs = [";
-+            for (size_t index = 0; index < s.language_discs.size(); ++index)
-+                f << (index ? ", " : "") << quoted(s.language_discs[index]);
-+            f << "]\n";
-+        }
-+        if (s.has_hud_scale && s.hud_scale >= 50 && s.hud_scale <= 100)
-+            f << "hud_scale = " << s.hud_scale << "\n";
-+        if (s.has_improved_shadows)
-+            f << "improved_shadows = " << (s.improved_shadows ? "true" : "false") << "\n";
-+        if (s.has_ambient_occlusion)
-+            f << "ambient_occlusion = " << (s.ambient_occlusion ? "true" : "false") << "\n";
-+        if (s.has_occlusion_reach && s.occlusion_reach >= 50 && s.occlusion_reach <= 800)
-+            f << "occlusion_reach = " << s.occlusion_reach << "\n";
-+        if (s.has_occlusion_strength && s.occlusion_strength >= 0 && s.occlusion_strength <= 300)
-+            f << "occlusion_strength = " << s.occlusion_strength << "\n";
-+        if (s.has_gap_filling)
-+            f << "gap_filling = " << (s.gap_filling ? "true" : "false") << "\n";
-+        if (s.has_depth_sorted_world)
-+            f << "depth_sorted_world = " << (s.depth_sorted_world ? "true" : "false") << "\n";
-+        if (s.has_diagnostic_view && s.diagnostic_view >= 0 && s.diagnostic_view < kDisruptorDiagnosticViewCount)
-+            f << "diagnostic_view = " << quoted(kDisruptorDiagnosticViews[s.diagnostic_view]) << "\n";
-+    }
++#ifdef PSX_HAS_GAME_USER_SETTINGS
++    write_game_user_settings(f, s);
++#endif
 +
 +    f.flush();
 +    const bool write_ok = f.good();

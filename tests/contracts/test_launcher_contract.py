@@ -44,6 +44,7 @@ region = read("src/launcher/region_disc.cpp")
 launcher_cmake = read("src/launcher/CMakeLists.txt")
 cmake = read("CMakeLists.txt")
 loader = read("psxrecomp/recompiler/src/config_loader.cpp")
+game_section = read("src/game/settings/saved.cpp")
 menu = read("src/game/ui/dev_menu.cpp") + read("src/game/frame/present_rate.cpp")
 
 ROW = r'\b(toggle|choice|slider)(?:<[^>]*>)?\(\s*"([\w.]+)", "([^"]+)", (-?\d+)'
@@ -67,6 +68,39 @@ require(
 )
 
 writer = loader[loader.index("bool save_user_settings(") :]
+require(
+    "#ifdef PSX_HAS_GAME_USER_SETTINGS\n    write_game_user_settings(f, s);\n#endif\n\n    f.flush();\n" in writer
+    and "#ifdef PSX_HAS_GAME_USER_SETTINGS\n    read_game_user_settings(doc, s);\n#endif\n    return s;\n" in loader
+    and "disruptor" not in loader.lower()
+    and '    if (doc.contains("disruptor")) {\n        const toml::value& d = toml::find(doc, "disruptor");\n' in game_section
+    and '        f << "\\n[disruptor]\\n";\n' in game_section,
+    "the framework's writer and reader hand the game's section to the game, last, and name no game",
+)
+settings_struct = read("psxrecomp/recompiler/src/config_loader.h")
+require(
+    "#ifdef PSX_HAS_GAME_USER_SETTINGS\nstruct UserSettings : GameUserSettings {\n#else\nstruct UserSettings {\n#endif\n"
+    in settings_struct
+    and '#ifdef PSX_HAS_GAME_USER_SETTINGS\n#include "game_user_settings.h"' in settings_struct
+    and "disruptor" not in settings_struct.lower()
+    and "struct GameUserSettings {\n" in read("src/game/settings/game_user_settings.h")
+    and "void read_game_user_settings(const toml::value& doc, UserSettings& s) {\n" in game_section
+    and "void write_game_user_settings(std::ostream& f, const UserSettings& s) {\n" in game_section
+    and "#define TOML11_USE_UNRELEASED_TOML_FEATURES\n" in game_section
+    and "#define TOML11_USE_UNRELEASED_TOML_FEATURES\n" in loader,
+    "the settings struct takes the game's fields from the game, which reads and writes its own section "
+    "with the reader's own build of the TOML library",
+)
+require(
+    cmake.index('include_directories("${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings")\n')
+    < cmake.index("add_compile_definitions(PSX_HAS_GAME_USER_SETTINGS=1)\n")
+    < cmake.index("psxrecomp_add_runtime_target(psx-runtime")
+    < cmake.index("    add_subdirectory(src/launcher)")
+    and cmake.count('"${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings/saved.cpp"\n') == 2
+    and '    "${PROJECT_SOURCE_DIR}/src/game/settings/saved.cpp")\n' in launcher_cmake
+    and "PSX_HAS_GAME_USER_SETTINGS" not in launcher_cmake,
+    "every target of the build sees the same settings struct, and each that builds the reader builds the game's section",
+)
+writer += game_section[game_section.index("void write_game_user_settings(") :]
 saved, section = set(), ""
 for header, key in re.findall(r'f << "(?:\\n)?\[(\w+)\]\\n|f << "(\w+)\s*= ', writer):
     section = header or section

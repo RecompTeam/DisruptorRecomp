@@ -36,7 +36,7 @@ MERGED = (
     "    for (const Option *option : g_preferences.changed)\n"
     "        option->set(settings, option->get(pending));\n"
 )
-loader = read("psxrecomp/recompiler/src/config_loader.cpp")
+loader = read("src/game/settings/saved.cpp")
 
 require("    disruptor_contract(gap_filling)\n" in cmake, "this contract is registered")
 
@@ -179,7 +179,7 @@ require(
             f << "gap_filling = " << (s.gap_filling ? "true" : "false") << "\\n";
 """ in loader
     and "s.has_gap_filling" in between(loader, "    if (s.has_mouse_aim", "{\n")
-    and "    bool has_gap_filling = false; bool gap_filling = true;\n" in read("psxrecomp/recompiler/src/config_loader.h"),
+    and "    bool has_gap_filling = false; bool gap_filling = true;\n" in read("src/game/settings/game_user_settings.h"),
     "the settings file keeps the choice, which is on until changed",
 )
 
