@@ -79,7 +79,7 @@ void gl_renderer_set_ssao_shape(float radius, float strength) {
     "or a strength that is not one changes nothing",
 )
 
-experimental = between(menu, "void draw_experimental_tab() {", "\n}\n")
+experimental = between(menu, "void draw_experimental_tab() {", "\n}\n") + "\n"
 require(
     """    bool occlusion = gl_renderer_ssao() != 0;
     const bool occlusion_applies = applies("disruptor.ambient_occlusion");

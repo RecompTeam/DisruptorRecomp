@@ -169,7 +169,7 @@ constexpr Option option_list[] = {
     toggle<&Settings::has_high_precision_camera, &Settings::high_precision_camera>(
         "disruptor.high_precision_camera", "Smooth mouse turning", 0,
         "The game turns in 256 steps of a circle. With this on, the picture also turns by the part of "
-        "a step in between. Needs exact geometry.", needs_aim_and_geometry),
+        "a step in between. Needs mouse aim and exact geometry.", needs_aim_and_geometry),
     toggle<&Settings::has_vertical_look, &Settings::vertical_look>(
         "disruptor.vertical_look", "Vertical mouse look", 0,
         "Looks up and down with the mouse, to about 31 degrees each way. The original game has no "

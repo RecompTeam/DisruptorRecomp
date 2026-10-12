@@ -771,29 +771,38 @@ require(STAGED in menu and
 
 HELPERS = (
     "bool option_toggle(const char *key, bool *value) {\n"
-    "    return ImGui::Checkbox(find_option(key)->label, value);\n"
+    "    const Option &option = *find_option(key);\n"
+    "    const bool moved = ImGui::Checkbox(option.label, value);\n"
+    "    disruptor::ui::hint(option.hint);\n"
+    "    return moved;\n"
     "}\n"
     "\n"
     "bool option_slider(const char *key, int *value) {\n"
     "    const Option &option = *find_option(key);\n"
     '    const char *format = option.unit == Unit::percent ? "%d%%" : "%d";\n'
-    "    return ImGui::SliderInt(option.label, value, option.lowest,\n"
-    "                            option.highest, format,\n"
-    "                            ImGuiSliderFlags_AlwaysClamp);\n"
+    "    const bool moved =\n"
+    "        ImGui::SliderInt(option.label, value, option.lowest, option.highest,\n"
+    "                         format, ImGuiSliderFlags_AlwaysClamp);\n"
+    "    disruptor::ui::hint(option.hint);\n"
+    "    return moved;\n"
     "}\n"
     "\n"
     "bool option_slider(const char *key, float *value) {\n"
     "    const Option &option = *find_option(key);\n"
-    "    return ImGui::SliderFloat(option.label, value, option.lowest / 1000.0f,\n"
-    '                              option.highest / 1000.0f, "%.3f",\n'
-    "                              ImGuiSliderFlags_Logarithmic);\n"
+    "    const bool moved = ImGui::SliderFloat(\n"
+    "        option.label, value, option.lowest / 1000.0f,\n"
+    '        option.highest / 1000.0f, "%.3f", ImGuiSliderFlags_Logarithmic);\n'
+    "    disruptor::ui::hint(option.hint);\n"
+    "    return moved;\n"
     "}\n"
     "\n"
     "bool option_list(const char *key, int *index, size_t skipped = 0) {\n"
     "    const Option &option = *find_option(key);\n"
     "    const auto shown = option.choices.subspan(skipped);\n"
-    "    return ImGui::Combo(option.label, index, shown.data(),\n"
-    "                        static_cast<int>(shown.size()));\n"
+    "    const bool moved = ImGui::Combo(option.label, index, shown.data(),\n"
+    "                                    static_cast<int>(shown.size()));\n"
+    "    disruptor::ui::hint(option.hint);\n"
+    "    return moved;\n"
     "}\n"
 )
 shared_labels = re.findall(r'\b(?:toggle<[^>]*>|choice|slider)\(\s*"[\w.]+",\s*"([^"]+)"', options)
@@ -880,5 +889,30 @@ require(len(greyed) == 7 and all(greyed_by_own_rule(menu, key) for key in greyed
         not greyed_by_own_rule(menu.replace('applies("disruptor.gap_filling")', 'applies("disruptor.vsync")'),
                                "disruptor.gap_filling"),
         "each control that needs something must be drawn inside a disabled block opened by its own rule")
+
+HINT = (
+    "inline void hint(const char *text) {\n"
+    "    if (!ImGui::BeginItemTooltip()) return;\n"
+    "    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30.0f);\n"
+    "    ImGui::TextUnformatted(text);\n"
+    "    ImGui::PopTextWrapPos();\n"
+    "    ImGui::EndTooltip();\n"
+    "}\n"
+)
+LITERAL = r'"((?:[^"\\]|\\.)*)"'
+shared_hints = [
+    "".join(re.findall(LITERAL, pieces))
+    for pieces in re.findall(
+        r'\b(?:toggle<[^>]*>|choice|slider)\(\s*"[\w.]+",\s*"[^"]+",\s*-?\d+,\s*((?:"(?:[^"\\]|\\.)*"\s*)+)', options)
+]
+written = "".join(re.findall(LITERAL, menu + present))
+require(HINT in read("src/game/ui/hint.h") and len(shared_hints) == 27 and
+        all(20 <= len(text) <= 240 for text in shared_hints) and
+        not [text for text in shared_hints if text[:32] in written] and
+        "Needs mouse aim and exact geometry." in shared_hints[
+            [key for key in re.findall(r'\b(?:toggle<[^>]*>|choice|slider)\(\s*"([\w.]+)"', options)].index(
+                "disruptor.high_precision_camera")],
+        "the menu must show an option's description from the shared table while the pointer rests on its control, "
+        "and write none of the descriptions itself")
 
 print("developer menu contract: PASS")
