@@ -837,7 +837,7 @@ static void temporal_underlay(float alpha,int covered) {
             for (int k=0;k<3;++k) {
                 float *v=&s_temp_under[(j+k)*TEXV];
                 v[0]=v[t?20:7]=show?out.x[k]:0; v[1]=v[t?21:8]=show?out.y[k]:0;
-                v[t?23:9]=show?temporal_order(p->gone_to[ti].depth[k]*(covered?TEMP_ORDER_CLEARANCE:1.0f)):TEMP_ORDER_FAR;
+                v[t?23:9]=show?temporal_order(gpu_temporal_lerp_depth(&p->gone_to[ti],&out,k)*(covered?TEMP_ORDER_CLEARANCE:1.0f)):TEMP_ORDER_FAR;
             }
             any|=show;
         }
@@ -890,6 +890,7 @@ static int temporal_present(float alpha,int lx,int ly,int lw,int lh) {
                 float *v=&s_temp_scratch[(j+k)*TEXV];
                 v[0]=v[t?20:7]=out.x[facing?k:0]; v[1]=v[t?21:8]=out.y[facing?k:0];
                 if (t) v[22]=out.q[k];
+                if (now->depth[k]>0.0f) v[t?23:9]=temporal_order(gpu_temporal_lerp_depth(now,&out,k));
             }
         } else for (int j=0;j<c->count;++j)
             s_temp_scratch[j*TEXV+9]=c->first_tri<=first_world || (s_world_depth && c->first_tri<=last_world)

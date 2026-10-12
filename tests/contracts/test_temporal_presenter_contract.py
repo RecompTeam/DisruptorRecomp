@@ -82,7 +82,8 @@ require(
 )
 require(
     "glDepthFunc(covered ? GL_LESS : GL_ALWAYS); glDepthMask(covered ? GL_FALSE : GL_TRUE);" in underlay
-    and "v[t?23:9]=show?temporal_order(p->gone_to[ti].depth[k]*(covered?TEMP_ORDER_CLEARANCE:1.0f)):TEMP_ORDER_FAR;" in underlay
+    and "v[t?23:9]=show?temporal_order(gpu_temporal_lerp_depth(&p->gone_to[ti],&out,k)*(covered?TEMP_ORDER_CLEARANCE:1.0f)):TEMP_ORDER_FAR;"
+    in underlay
     and "#define TEMP_ORDER_CLEARANCE 1.03f" in temporal
     and "glDepthFunc(GL_ALWAYS); glDepthMask(GL_TRUE);" in underlay,
     "the second pass must win only against current faces that lie farther away, and leave depth alone",
@@ -99,6 +100,11 @@ require(
     "now->world && now->depth[k]>0.0f ? temporal_order(now->depth[k])\n"
     "                    : ti<first_world ? TEMP_ORDER_FAR : TEMP_ORDER_NEAR;" in present,
     "a current face must carry its camera depth, the backdrop the far plane and everything else the near plane",
+)
+require(
+    "            gpu_temporal_lerp(&s->from[ti],now,alpha,&out);\n" in present
+    and "                if (now->depth[k]>0.0f) v[t?23:9]=temporal_order(gpu_temporal_lerp_depth(now,&out,k));\n" in present,
+    "a face between two frames must be ordered by the depth it has there, or a wall and its pieces part",
 )
 require(
     "            temporal_submit(s,c,s->height,s_temp_scratch,split);\n"
