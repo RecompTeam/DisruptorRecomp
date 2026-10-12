@@ -53,6 +53,8 @@ extern "C" void gl_renderer_set_world_depth(int enabled);
 extern "C" int gl_renderer_world_depth(void);
 extern "C" void gl_renderer_set_full_yaw(int enabled);
 extern "C" void gl_renderer_set_mesh_view(int enabled);
+extern "C" void gl_renderer_set_one_layer(int enabled);
+extern "C" int gl_renderer_one_layer(void);
 extern "C" int gl_renderer_mesh_view(void);
 extern "C" int gl_renderer_record_shown(const char *folder, int skip, int count, int width);
 extern "C" int gl_renderer_recording_shown(void);
