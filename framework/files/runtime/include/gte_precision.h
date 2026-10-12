@@ -1,7 +1,7 @@
 /* Exact GTE projection provenance shared by the GTE and GPU paths.
  *
- * SWC2 records the projection associated with a guest RAM word.  Some games,
- * including Disruptor, instead read SXY through MFC2 and later use an ordinary
+ * SWC2 records the projection associated with a guest RAM word.  Some games
+ * instead read SXY through MFC2 and later use an ordinary
  * SW.  Those routes are admitted only through opcode/dataflow-reviewed MFC2
  * and store PCs registered by the game runtime; a separately reviewed route
  * may seed a finite set of scratchpad words for a later exact packet copy.

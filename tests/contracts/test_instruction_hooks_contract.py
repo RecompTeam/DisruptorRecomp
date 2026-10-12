@@ -87,6 +87,16 @@ require(
     and "instruction_hooks" not in read("psxrecomp/recompiler/include/code_generator.h"),
     "the generator's sources make the key of a save state: its own site tables stay until the pin is raised",
 )
+changed = [
+    line.removeprefix("+").strip()
+    for line in read("framework/FILES.txt").splitlines()
+    if line.strip() and not line.startswith("#")
+]
+naming = sorted(path for path in changed if b"disruptor" in (ROOT / "psxrecomp" / path).read_bytes().lower())
+require(
+    naming == ["recompiler/src/code_generator.cpp"],
+    f"of the framework files the project changes only the code generator may name the game: {naming}",
+)
 require(
     "disruptor" not in interpreter.lower()
     and interpreter.count("psx_game_instruction_ran(") == 1
