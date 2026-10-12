@@ -58,9 +58,86 @@ require(
 }
 """ in renderer
     and "    const int visual_flags = take_visual_triangle(xs, ys, px, py, pq, pz, pid);\n"
+    "    PsxTurnCorner cut[PSX_TURN_CLIP_MAX];\n"
+    "    const int cut_corners = turn_clip(px, py, visual_flags, cut);\n"
+    "    const float whole_q[3] = {pq[0], pq[1], pq[2]};\n"
     "    turned_perspective(px, pq, visual_flags);\n" in renderer
     and renderer.count("turned_perspective(px, pq, visual_flags);") == 1,
     "every textured triangle with exact corners has its weights turned by the turn the picture is drawn under",
+)
+
+temporal = read("psxrecomp/runtime/src/gpu_gl_temporal.c.inc")
+require(
+    overlay.count("+runtime/include/gpu_turn_clip.h\n") == 1
+    and '#include "gpu_turn_clip.h"\n' in renderer
+    and "    disruptor_unit_test(disruptor_gpu_turn_clip tests/unit/gpu_turn_clip_test.cpp RUNTIME_HEADERS)\n" in cmake,
+    "the turn clip's header is applied to the framework and its test is registered",
+)
+clip = between(renderer, "static int turn_clip(", "\n}\n")
+require(
+    "    if (!visual_flags ||\n"
+    "        !psx_turn_band(s_yaw_sin, s_yaw_cos, (float)g_wide_cur_base + s_yaw_center_x, s_yaw_focal_x, &low, &high))\n"
+    "        return -1;\n" in clip
+    and "    if (px[0] >= low && px[0] <= high && px[1] >= low && px[1] <= high && px[2] >= low && px[2] <= high) return -1;\n"
+    in clip
+    and clip.endswith("    return psx_turn_clip(px, py, low, high, cut);"),
+    "a triangle the picture turns is cut to the band of the turn it is drawn under, and only when a corner leaves the band",
+)
+require(
+    "        if (s_tb_n + 3 + (cut_corners > 2 ? 3 * (cut_corners - 2) : 0) > TEXBATCH_MAXV) { s_batch_reason[6]++; flush_tex_batch(); }\n"
+    in renderer
+    and "            vp[20] = visual_flags ? px[cut_corners >= 0 ? 0 : i] : (float)xs[i];" in renderer
+    and "            vp[21] = visual_flags ? py[cut_corners >= 0 ? 0 : i] : (float)ys[i];\n" in renderer
+    and "        for (int piece = 0; piece + 2 < cut_corners; ++piece) {" in renderer
+    and "            const int corner_of[3] = {0, piece + 1, piece + 2};\n"
+    "            const int perspective = whole_q[0] > 0.0f && whole_q[1] > 0.0f && whole_q[2] > 0.0f;\n" in renderer
+    and "                piece_q[i] = mixed_q[i] = perspective ? psx_turn_mix(&cut[corner_of[i]], whole_q) : 0.0f;\n" in renderer
+    and "            turned_perspective(piece_x, piece_q, visual_flags);\n" in renderer
+    and "                memcpy(vp, whole, TEXV * sizeof(float));\n" in renderer
+    and "                    vp[channel] = own >= 0 ? whole[own * TEXV + channel]\n"
+    "                                           : psx_turn_mix(corner, of_corners) / (channel < 4 && perspective ? mixed_q[i] : 1.0f);\n"
+    in renderer
+    and "                vp[20] = corner->x;\n                vp[21] = corner->y;\n                vp[22] = piece_q[i];\n" in renderer
+    and "        const uint64_t cut_id = pid[0] == pid[1] && pid[1] == pid[2] ? pid[0] : 0u;" in renderer
+    and "                s_tb_identity[s_tb_n + i] = own >= 0 ? pid[own] : cut_id;\n" in renderer,
+    "a cut textured triangle keeps its canonical picture, is one point in the mirror, and its pieces are one point in the "
+    "canonical picture with texture, colour and weights taken along the triangle",
+)
+require(
+    "        cut_corners = turn_clip(px, py, visual_flags, cut);\n" in renderer
+    and "    if (s_fb_n + n + (cut_corners > 2 ? 3 * (cut_corners - 2) : 0) > FLATBATCH_MAXV)\n" in renderer
+    and "        v[7] = visual_flags ? px[cut_corners >= 0 ? 0 : i] : (float)xs[i];" in renderer
+    and "        v[8] = visual_flags ? py[cut_corners >= 0 ? 0 : i] : (float)ys[i];\n" in renderer
+    and "    const float *whole = &s_fb[(s_fb_n - n) * GEOV];\n" in renderer
+    and "            memcpy(v, whole, GEOV * sizeof(float));\n" in renderer
+    and "            v[7] = corner->x;\n            v[8] = corner->y;\n" in renderer
+    and "            s_fb_identity[s_fb_n++] = own >= 0 ? pid[own] : pid[0] == pid[1] && pid[1] == pid[2] ? pid[0] : 0u;\n"
+    in renderer,
+    "an untextured triangle is cut the same way",
+)
+require(
+    "static float turned_depth(float x, float depth, int visual_flags) {\n"
+    "    return visual_flags ? psx_turned_depth(x, depth, s_yaw_sin, s_yaw_cos, (float)g_wide_cur_base + s_yaw_center_x, s_yaw_focal_x)\n"
+    "                        : depth;\n" in renderer
+    and "        for (int k = 0; k < cut_corners; ++k) cut_z[k] = turned_depth(cut[k].x, psx_turn_depth(&cut[k], pz), visual_flags);\n"
+    in renderer
+    and "            const float piece_z[3] = {cut_z[0], cut_z[piece + 1], cut_z[piece + 2]};\n" in renderer
+    and "            vp[23] = turned_z[i];" in renderer
+    and "                vp[23] = cut_z[corner_of[i]];\n" in renderer
+    and "        v[9] = turned_depth(px[i], pz[i], visual_flags);" in renderer
+    and "            v[9] = turned_depth(corner->x, psx_turn_depth(corner, pz), visual_flags);\n" in renderer,
+    "every turned corner carries its depth along the turned view, a cut one the depth of its place in the triangle",
+)
+require(
+    "#define TEMPORAL_CUT_IDENTITY UINT64_C(0x1000000000000000)" in renderer
+    and "            s_tb_identity[s_tb_n + i] = cut_corners >= 0 ? TEMPORAL_CUT_IDENTITY : pid[i];\n" in renderer
+    and "        s_fb_identity[s_fb_n] = cut_corners >= 0 ? TEMPORAL_CUT_IDENTITY : pid[i];\n" in renderer
+    and "        const int cut = identities && identities[i]==TEMPORAL_CUT_IDENTITY &&\n"
+    "            identities[i+1]==TEMPORAL_CUT_IDENTITY && identities[i+2]==TEMPORAL_CUT_IDENTITY;\n"
+    "        t->world = !cut;\n" in temporal
+    and "        t->modelled = !sprite && !partial && !cut && identities && identities[i] && identities[i+1] && identities[i+2];\n"
+    in temporal,
+    "the whole of a cut triangle is marked, and the in-between presenter takes a marked triangle for no world face",
 )
 
 require(

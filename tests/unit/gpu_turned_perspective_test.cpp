@@ -121,10 +121,70 @@ void a_corner_that_cannot_be_trusted_makes_the_whole_triangle_affine() {
     }
 }
 
+float turned_x(float x, float sine, float cosine) {
+    const float ux = (x - kCenter) / kFocal;
+    return kCenter + kFocal * (ux * cosine + sine) / (cosine - ux * sine);
+}
+
+void a_triangle_without_weights_has_its_texture_turned_as_a_picture() {
+    const float sine = 0.0245412f, cosine = 0.999699f;  // one whole step
+    const float px[3] = {200.0f, kCenter + kFocal * 15.0f, 480.0f};
+    float pq[3] = {0.0f, 0.0f, 0.0f};
+    psx_turned_perspective(px, pq, sine, cosine, kCenter, kFocal);
+    expect(close(pq[0], 1.0 / (cosine - (200.0 - kCenter) / kFocal * sine)) && close(pq[1], 1.0 / (cosine - 15.0 * sine)),
+           "a triangle without weights takes one over the turn's denominator at each corner");
+    const float u[2] = {8.0f, 200.0f};
+    for (const float along : {0.1f, 0.5f, 0.9f}) {
+        const float place = turned_x(px[0] + (px[1] - px[0]) * along, sine, cosine);
+        const float there = (place - turned_x(px[0], sine, cosine)) / (turned_x(px[1], sine, cosine) - turned_x(px[0], sine, cosine));
+        const float weighted = ((1.0f - there) * u[0] * pq[0] + there * u[1] * pq[1]) / ((1.0f - there) * pq[0] + there * pq[1]);
+        const float unweighted = (1.0f - there) * u[0] + there * u[1], own = u[0] + (u[1] - u[0]) * along;
+        expect(std::fabs(weighted - own) < 0.01f, "with them a point of an edge keeps the texel it had before the turn");
+        expect(along != 0.5f || std::fabs(unweighted - own) > 10.0f, "and without them it would take another, texels away");
+    }
+    const float far_px[3] = {200.0f, kCenter + kFocal * 20.9f, 480.0f};
+    float far_q[3] = {0.0f, 0.0f, 0.0f};
+    psx_turned_perspective(far_px, far_q, sine, cosine, kCenter, kFocal);
+    expect(all_affine(far_q), "a corner too far aside leaves such a triangle without weights");
+    float still[3] = {0.0f, 0.0f, 0.0f};
+    psx_turned_perspective(px, still, 0.0f, 1.0f, kCenter, kFocal);
+    expect(all_affine(still), "and without a turn it stays without them");
+}
+
+void a_turn_gives_the_depth_along_the_turned_view() {
+    const Corner corners[3] = {{-90.0, 200.0}, {120.0, 360.0}, {15.0, 64.0}};
+    for (const double turn : {kQuarterStep, -2.0 * kQuarterStep}) {
+        const float sine = static_cast<float>(std::sin(turn)), cosine = static_cast<float>(std::cos(turn));
+        for (const Corner &corner : corners) {
+            const float depth = static_cast<float>(corner.z);
+            expect(close(psx_turned_depth(screen_x(corner, kFocal), depth, sine, cosine, kCenter, kFocal), ahead_after(corner, turn)),
+                   "a corner's depth is its distance ahead in the turned view");
+            expect(psx_turned_depth(screen_x(corner, kFocal), -depth, sine, cosine, kCenter, kFocal) < 0.0f,
+                   "a depth that is the mirror's alone stays so");
+        }
+    }
+    expect(psx_turned_depth(900.0f, 64.0f, 0.0f, 1.0f, kCenter, kFocal) == 64.0f, "without a turn a depth stays");
+    expect(psx_turned_depth(900.0f, 64.0f, 0.01f, 0.99995f, kCenter, 0.0f) == 64.0f, "without a focal length it stays");
+    expect(psx_turned_depth(kCenter + kFocal * 20.9f, 64.0f, 0.0245412f, 0.999699f, kCenter, kFocal) == 64.0f,
+           "a corner too far aside to trust keeps the depth it has");
+    const float nearer = kCenter + kFocal * 4.0625f, farther = kCenter - kFocal * 4.087f;  // the denominator is 0.9 and 1.1
+    for (const float none : {16.0f, 15.9f, 0.0f, -16.0f, -3.0f})
+        expect(psx_turned_depth(farther, none, 0.0245412f, 0.999699f, kCenter, kFocal) == none,
+               "a depth the mirror takes as none stays none, however the turn would stretch it");
+    const float kept = psx_turned_depth(nearer, 17.0f, 0.0245412f, 0.999699f, kCenter, kFocal);
+    const float mirrored = psx_turned_depth(nearer, -17.0f, 0.0245412f, 0.999699f, kCenter, kFocal);
+    expect(kept > PSX_TURNED_NO_DEPTH && kept < 16.01f && mirrored == -kept,
+           "a depth just past none stays a depth when the turn would bring it under");
+    expect(close(psx_turned_depth(farther, 16.5f, 0.0245412f, 0.999699f, kCenter, kFocal), 16.5 * (0.999699 + 4.087 * 0.0245412)),
+           "and one that the turn stretches is stretched");
+}
+
 }  // namespace
 
 int main() {
     a_turn_gives_the_weights_of_the_turned_view();
+    a_turn_gives_the_depth_along_the_turned_view();
+    a_triangle_without_weights_has_its_texture_turned_as_a_picture();
     no_turn_and_no_focal_length_change_nothing();
     a_corner_that_cannot_be_trusted_makes_the_whole_triangle_affine();
     std::puts("GPU turned perspective tests passed");

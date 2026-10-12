@@ -186,7 +186,7 @@ draw = function_body(temporal, "static void temporal_draw(const float *vertices,
 require(
     "const int sprite = identities && identities[i]==TEMPORAL_SPRITE_IDENTITY &&" in draw
     and "t->sprite = sprite;" in draw
-    and "t->modelled = !sprite && !partial && identities && identities[i] && identities[i+1] && identities[i+2];" in draw
+    and "t->modelled = !sprite && !partial && !cut && identities && identities[i] && identities[i+1] && identities[i+2];" in draw
     and "if (v[textured ? 19 : 6] <= 0.5f && !sprite && !partial) t->world=0;" in draw,
     "a sprite with a camera depth must be a world face without model coordinates",
 )

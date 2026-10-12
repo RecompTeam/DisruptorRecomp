@@ -337,9 +337,11 @@ static void temporal_draw(const float *vertices, const uint64_t *identities, int
             identities[i+1]==TEMPORAL_SPRITE_IDENTITY && identities[i+2]==TEMPORAL_SPRITE_IDENTITY;
         const int partial = identities && identities[i]==TEMPORAL_PARTIAL_IDENTITY &&
             identities[i+1]==TEMPORAL_PARTIAL_IDENTITY && identities[i+2]==TEMPORAL_PARTIAL_IDENTITY;
-        t->world = 1;
+        const int cut = identities && identities[i]==TEMPORAL_CUT_IDENTITY &&
+            identities[i+1]==TEMPORAL_CUT_IDENTITY && identities[i+2]==TEMPORAL_CUT_IDENTITY;
+        t->world = !cut;
         t->sprite = sprite;
-        t->modelled = !sprite && !partial && identities && identities[i] && identities[i+1] && identities[i+2];
+        t->modelled = !sprite && !partial && !cut && identities && identities[i] && identities[i+1] && identities[i+2];
         for (int j=0; t->modelled && j<3; ++j)
             for (int axis=0; axis<3; ++axis)
                 t->model[j][axis]=(int16_t)(identities[i+j]>>(16*axis));

@@ -1,18 +1,19 @@
 diff --git a/runtime/src/gpu_gl_renderer.c b/runtime/src/gpu_gl_renderer.c
-index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4fbc378aee 100644
+index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..ef0a6f80dc39e0c8c42f6dbd5ed34a44617798d0 100644
 --- a/runtime/src/gpu_gl_renderer.c
 +++ b/runtime/src/gpu_gl_renderer.c
-@@ -67,6 +67,9 @@
+@@ -67,6 +67,10 @@
  #include "gpu_render.h"
  #include "gpu_sw_renderer.h"
  #include "gpu_gl_renderer.h"
 +#include "gpu_turned_perspective.h"
++#include "gpu_turn_clip.h"
 +#include "gpu_world_depth.h"
 +#include "host_ui.h"
  #include "latency_ring.h"
  
  #include "psx_sdl.h"
-@@ -76,6 +79,7 @@
+@@ -76,6 +80,7 @@
  #include <SDL_opengl.h>
  #endif
  #include <stddef.h>
@@ -20,7 +21,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
  #include <stdio.h>
  #include <stdlib.h>
  #include <string.h>
-@@ -121,7 +125,7 @@
+@@ -121,7 +126,7 @@
  
  #define VRAM_W 1024
  #define VRAM_H 512
@@ -29,7 +30,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
  
  /* ---- Loaded modern-GL entry points ------------------------------------- */
  typedef GLuint (APIENTRY *PFN_glCreateShader)(GLenum);
-@@ -245,6 +249,7 @@
+@@ -245,6 +250,7 @@
  static int s_ws_ablate = 0;
  static void flush_tex_batch(void); /* textured-prim batch — defined below, flushed from coherency points */
  static void flush_flat_batch(void); /* flat/gouraud GEO batch (MotK starfield 0x68 dots) */
@@ -37,7 +38,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
  static PFN_glGenRenderbuffers  p_glGenRenderbuffers;
  static PFN_glDeleteRenderbuffers p_glDeleteRenderbuffers;
  static PFN_glBindRenderbuffer  p_glBindRenderbuffer;
-@@ -273,9 +278,11 @@
+@@ -273,9 +279,11 @@
      LOAD(p_glVertexAttribPointer, "glVertexAttribPointer");
      LOAD(p_glEnableVertexAttribArray, "glEnableVertexAttribArray");
      LOAD(p_glBindFragDataLocationIndexed, "glBindFragDataLocationIndexed");
@@ -49,7 +50,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      LOAD(p_glGenFramebuffers, "glGenFramebuffers"); LOAD(p_glBindFramebuffer, "glBindFramebuffer");
      LOAD(p_glDeleteFramebuffers, "glDeleteFramebuffers");
      LOAD(p_glFramebufferTexture2D, "glFramebufferTexture2D");
-@@ -312,6 +319,18 @@
+@@ -312,6 +320,18 @@
  static int           s_present_w = 0, s_present_h = 0;
  static GLuint        s_present_prog = 0, s_present_vao = 0;
  static GLint         s_present_uTex = -1, s_present_uUvRect = -1;
@@ -68,7 +69,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
  static GLuint        s_interp_prog = 0, s_interp_tex[3];
  static GLsync        s_interp_fence[3];
  static GLsync        s_interp_draw_fence = NULL;
-@@ -320,9 +339,11 @@
+@@ -320,9 +340,11 @@
  static GLint         s_interp_uBlendMode = -1;
  static int           s_interp_enabled = 0, s_interp_valid = 0;
  static int           s_interp_suspended = 0;
@@ -81,7 +82,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
  static int           s_interp_force_4_3 = 0, s_interp_source_path = -1;
  static uint64_t      s_interp_start = 0, s_interp_duration = 1;
  static uint64_t      s_interp_last_capture = 0, s_interp_swaps = 0;
-@@ -335,12 +356,62 @@
+@@ -335,12 +357,63 @@
  static SDL_mutex    *s_interp_mutex = NULL;
  static SDL_atomic_t  s_interp_thread_run;
  static GLuint        s_interp_thread_vao = 0;
@@ -133,6 +134,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
 +static uint64_t      s_next_identity[3] = { 0u, 0u, 0u };
 +#define TEMPORAL_SPRITE_IDENTITY UINT64_C(0x4000000000000000)
 +#define TEMPORAL_PARTIAL_IDENTITY UINT64_C(0x2000000000000000) /* a world polygon with a corner off its projection */
++#define TEMPORAL_CUT_IDENTITY UINT64_C(0x1000000000000000) /* a triangle the turn clip cut: its pieces follow, itself it shows nothing */
 +static float         s_next_sprite_depth = 0.0f, s_sprite_depth = 0.0f;
 +static float         s_next_sprite_sides[4], s_sprite_sides[4]; /* left, top, right, bottom */
 +static int           s_sprite_x, s_sprite_y;
@@ -145,7 +147,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
  
  /* Authoritative VRAM: hr color texture + stencil (mask bit) FBO. */
  static GLuint        s_hr_tex = 0, s_hr_fbo = 0, s_hr_rb = 0;
-@@ -354,9 +425,10 @@
+@@ -354,9 +427,10 @@
  /* Programs. */
  static GLuint s_geo_prog = 0, s_geo_vao = 0, s_geo_vbo = 0;
  static GLuint s_tex_prog = 0, s_tex_vao = 0, s_tex_vbo = 0;
@@ -159,7 +161,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
  static GLuint s_blit_prog = 0, s_blit_vao = 0, s_blit_vbo = 0;
  static GLuint s_pack_prog = 0, s_stencil_prog = 0, s_empty_vao = 0;
  
-@@ -379,6 +451,12 @@
+@@ -379,6 +453,12 @@
   * prim each frame). 1.0 / 0.0 => no-op, so the canonical pass stays identical. */
  static GLint s_geo_uXscale = -1, s_geo_uXcenter = -1;
  static GLint s_tex_uXscale = -1, s_tex_uXcenter = -1;
@@ -172,7 +174,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
  /* Runtime controls (ws_backdrop_stretch debug command). */
  int g_ws_bd_stretch_on   = 1;   /* feature on (gated by native-wide + per-prim gate) */
  int g_ws_bd_stretch_pct  = 0;   /* 0 = auto (g_wide_w/native_w); else pct/100 */
-@@ -475,6 +553,7 @@
+@@ -475,6 +555,7 @@
  #define WIDE_MAX_SURF 4
  static GLuint s_wide_tex[WIDE_MAX_SURF];     /* color tex per surface (0 = free) */
  static GLuint s_wide_fbo[WIDE_MAX_SURF];     /* FBO per surface */
@@ -180,7 +182,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
  static GLuint s_wide_rb[WIDE_MAX_SURF];      /* depth-stencil RB per surface (mask
                                                * mirror, same as hr). PERF-CRITICAL:
                                                * a stencil-less wide FBO made every
-@@ -495,6 +574,95 @@
+@@ -495,6 +576,110 @@
  /* X-translation (native px) from canonical VRAM space into the active wide
   * surface: local_x = vram_x - base_x + OFFSET. Same as SW wide_dx(). */
  static inline int wide_dx(void) { return g_wide_off - g_wide_cur_base; }
@@ -273,10 +275,25 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
 +    if (visual_flags & 2)
 +        psx_turned_perspective(px, pq, s_yaw_sin, s_yaw_cos, (float)g_wide_cur_base + s_yaw_center_x, s_yaw_focal_x);
 +}
++
++static float turned_depth(float x, float depth, int visual_flags) {
++    return visual_flags ? psx_turned_depth(x, depth, s_yaw_sin, s_yaw_cos, (float)g_wide_cur_base + s_yaw_center_x, s_yaw_focal_x)
++                        : depth;
++}
++
++/* Under a part-step turn: the corners left of a triangle between the columns the turn can place, 0 for none, -1 to draw it whole. */
++static int turn_clip(const float px[3], const float py[3], int visual_flags, PsxTurnCorner cut[PSX_TURN_CLIP_MAX]) {
++    float low, high;
++    if (!visual_flags ||
++        !psx_turn_band(s_yaw_sin, s_yaw_cos, (float)g_wide_cur_base + s_yaw_center_x, s_yaw_focal_x, &low, &high))
++        return -1;
++    if (px[0] >= low && px[0] <= high && px[1] >= low && px[1] <= high && px[2] >= low && px[2] <= high) return -1;
++    return psx_turn_clip(px, py, low, high, cut);
++}
  
  /* ---- dirty-rect helpers ------------------------------------------------- */
  static void rect_clear(DirtyRect *r) { r->set = 0; }
-@@ -742,6 +910,94 @@
+@@ -742,6 +927,94 @@
      "#version 330\n"
      "in vec2 v_uv; uniform sampler2D u_tex; out vec4 frag;\n"
      "void main(){ frag = texture(u_tex, v_uv); }\n";
@@ -371,7 +388,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
  static const char *INTERP_FS =
      "#version 330\n"
      "in vec2 v_uv; uniform sampler2D u_prev; uniform sampler2D u_curr;\n"
-@@ -757,6 +1013,7 @@
+@@ -757,6 +1030,7 @@
      "  }\n"
      "  frag=mix(prev,curr,alpha);\n"
      "}\n";
@@ -379,7 +396,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
  
  /* Geometry: position in VRAM pixels (draw offset already applied by gpu.c),
   * color rgb in 0..1, color a = mask bit (0/1). The clip transform is in
-@@ -775,24 +1032,41 @@
+@@ -775,24 +1049,41 @@
      "#version 330\n"
      "layout(location=0) in vec2 a_pos;\n"
      "layout(location=1) in vec4 a_col;\n"
@@ -426,7 +443,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
  
  /* Textured prims: sample raw 1555 VRAM (integer), CLUT decode per depth,
   * texture window, optional bilinear, texel-0 discard, STP-split discard,
-@@ -816,12 +1090,20 @@
+@@ -816,12 +1107,20 @@
      "layout(location=6) in float a_raw;\n"
      "layout(location=7) in vec4 a_limits;\n"
      "layout(location=8) in float a_semi;\n"
@@ -448,7 +465,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      "flat out ivec2 v_tpage; flat out ivec2 v_clut; flat out int v_depth;\n"
      "flat out int v_raw; flat out ivec4 v_limits; flat out int v_semi;\n"
      "void main(){ v_uv = a_uv; v_col = a_col;\n"
-@@ -831,16 +1113,32 @@
+@@ -831,16 +1130,32 @@
      "  v_limits = ivec4(floor(a_limits + 0.5));\n"
      "  /* u_shift: align GL's center-sample grid with the PS1 integer grid (see\n"
      "   * GEO_VS) so interpolated uv at a fragment equals the PS1 DDA value. */\n"
@@ -484,7 +501,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      "out vec4 frag; out vec4 blend_factor;\n"
      "flat in ivec2 v_tpage;   /* texture page base, VRAM px */\n"
      "flat in ivec2 v_clut;    /* CLUT base, VRAM px */\n"
-@@ -879,9 +1177,11 @@
+@@ -879,9 +1194,11 @@
      "  return vec3(float(raw & 31), float((raw >> 5) & 31), float((raw >> 10) & 31)) / 31.0;\n"
      "}\n"
      "void main(){\n"
@@ -497,7 +514,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      "    if (raw == 0) discard;\n"
      "    rgb = col5(raw);\n"
      "    stp = (raw >> 15) & 1;\n"
-@@ -892,8 +1192,8 @@
+@@ -892,8 +1209,8 @@
      "     * its opacity with the colour renormalised — so prim edges and\n"
      "     * cutout borders keep their colour instead of dissolving into the\n"
      "     * transparent (black) neighbour and discarding whole edge columns. */\n"
@@ -508,7 +525,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      "    int sx = fx < 0.0 ? -1 : 1, sy = fy < 0.0 ? -1 : 1;\n"
      "    fx = abs(fx); fy = abs(fy);\n"
      "    int c00 = fetch_texel(iu, iv);\n"
-@@ -914,6 +1214,7 @@
+@@ -914,6 +1231,7 @@
      "  if (u_semipass == 1 && stp == 1) discard;\n"
      "  if (u_semipass == 2 && stp == 0) discard;\n"
      "  if (v_raw == 0) rgb = clamp(rgb * v_col.rgb * 2.0, 0.0, 1.0);\n"
@@ -516,7 +533,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      "  float dst_factor = 0.0;\n"
      "  if (u_semimode == 4 && v_semi != 0 && stp != 0) {\n"
      "    dst_factor = v_semi == 1 ? 0.5 : 1.0;\n"
-@@ -1006,6 +1307,70 @@
+@@ -1006,6 +1324,70 @@
          fprintf(stdout, "psxrecomp: GL program link failed: %s\n", log); return 0; }
      return p;
  }
@@ -587,7 +604,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
  static GLuint build_program(const char *vs, const char *fs) {
      return build_program_ex(vs, fs, 0);
  }
-@@ -1025,6 +1390,14 @@
+@@ -1025,6 +1407,14 @@
   *              stored value is known to be 0 when the test passed) and a 0
   *              via KEEP. */
  static void mask_stencil(int write_val) {
@@ -602,7 +619,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      glEnable(GL_STENCIL_TEST);
      glStencilMask(0x01);
      if (s_mask_check) {
-@@ -1135,6 +1508,7 @@
+@@ -1135,6 +1525,7 @@
                          PSXGL_RED_INTEGER, GL_UNSIGNED_SHORT,
                          s_vram + (size_t)y * VRAM_W + x);
          glPixelStorei(PSXGL_UNPACK_ROW_LENGTH, 0);
@@ -610,7 +627,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
          if (diag) s_rt_up_diag[4] += SDL_GetPerformanceCounter() - t0;
      }
  
-@@ -1223,6 +1597,7 @@
+@@ -1223,6 +1614,7 @@
      int h = s_pack_dirty.y1 - s_pack_dirty.y0 + 1;
      rect_clear(&s_pack_dirty);
      coh_record(GL_COH_PACK, x, y, x + w - 1, y + h - 1);
@@ -618,7 +635,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
  
      p_glBindFramebuffer(PSXGL_FRAMEBUFFER, s_raw_fbo);
      glViewport(0, 0, VRAM_W, VRAM_H);
-@@ -1327,9 +1702,43 @@
+@@ -1327,9 +1719,43 @@
   * boundary (MMX6: draw area alternates y=0/y=240, both bands in ONE wide
   * surface) bleed into the OTHER band's rows — presented one frame later as
   * top/bottom edge flicker (16:9 GL only). */
@@ -662,7 +679,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      glViewport(0, 0, g_wide_w * s_scale, VRAM_H * s_scale);
      glEnable(GL_SCISSOR_TEST);
      {
-@@ -1339,10 +1748,12 @@
+@@ -1339,10 +1765,12 @@
          if (sh < 0) sh = 0;
          glScissor(0, sy * s_scale, g_wide_w * s_scale, sh * s_scale);
      }
@@ -675,7 +692,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      p_glUniform1f(uXoff, 0.0f);
      p_glUniform1f(uXhalf, 512.0f);
      if (s_ws_ablate != 3)
-@@ -1397,13 +1808,13 @@
+@@ -1397,13 +1825,13 @@
  /* True if [lo,hi] (canonical draw-x) lies strictly inside the 4:3 frame, so the
   * prim adds nothing to either reveal margin and its mirror can be skipped. */
  static int mirror_x_center_only(int lo, int hi) {
@@ -691,7 +708,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      int lo = xs[0], hi = xs[0];
      for (int i = 1; i < n; i++) { if (xs[i] < lo) lo = xs[i]; if (xs[i] > hi) hi = xs[i]; }
      return mirror_x_center_only(lo, hi);
-@@ -1449,6 +1860,7 @@
+@@ -1449,6 +1877,7 @@
   * flush_tex_batch never re-enters those helpers. */
  #define TEXBATCH_MAXV 8190                 /* multiple of 3; ~2730 tris */
  static float s_tb[TEXBATCH_MAXV * TEXV];
@@ -699,7 +716,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
  static int   s_tb_n = 0;                    /* verts queued */
  static int   s_tb_semi = -2;
  static int   s_tb_mask = 0, s_tb_filter = 0;
-@@ -1506,7 +1918,7 @@
+@@ -1506,7 +1935,7 @@
          if (s_tb_mask) mask_stencil(1); else glDisable(GL_STENCIL_TEST);
          p_glUniform1i(s_uSemipass, 0);
          glDrawArrays(GL_TRIANGLES, 0, nverts);
@@ -708,7 +725,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      } else {
          glDisable(GL_BLEND);                           /* Pass 1: STP=0 texels (opaque) */
          mask_stencil(s_tb_mask);
-@@ -1540,7 +1952,7 @@
+@@ -1540,7 +1969,7 @@
  /* Textured-batch variant of mirror_x_center_only: scan the queued verts' x
   * (attr 0, stride TEXV). Defined here so s_tb / TEXV are in scope. */
  static int mirror_batch_center_only(int nverts) {
@@ -717,7 +734,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      int lo = (int)s_tb[0], hi = (int)s_tb[0];
      for (int i = 1; i < nverts; i++) {
          int x = (int)s_tb[i * TEXV];
-@@ -1549,15 +1961,74 @@
+@@ -1549,15 +1978,74 @@
      return mirror_x_center_only(lo, hi);
  }
  
@@ -792,7 +809,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      p_glActiveTexture(PSXGL_TEXTURE0);
      glBindTexture(GL_TEXTURE_2D, s_raw_tex);
      p_glUniform1i(s_uVram, 0);
-@@ -1580,9 +2051,34 @@
+@@ -1580,9 +2068,34 @@
          s_bd_gate = s_tb_gate;              /* this batch is uniform-gate (flushed on change) */
          gl_perf_mirror_begin();
          wide_target_begin(dx, s_tex_uXoff, s_tex_uXhalf);
@@ -828,7 +845,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
          wide_target_end(s_tex_uXoff, s_tex_uXhalf);
          gl_perf_mirror_end();
      }
-@@ -1594,16 +2090,17 @@
+@@ -1594,16 +2107,17 @@
   * GP0(68h) 1x1 dots; each was two immediate gpu_triangle draws (BufferData +
   * DrawArrays each). Coalesce opaque/semi-uniform tris into one draw. */
  #define FLATBATCH_MAXV 8190                 /* multiple of 3 */
@@ -849,7 +866,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
          if (x < lo) lo = x; if (x > hi) hi = x;
      }
      return mirror_x_center_only(lo, hi);
-@@ -1618,9 +2115,10 @@
+@@ -1618,9 +2132,10 @@
      if (semi >= 0) apply_psx_blend(semi); else glDisable(GL_BLEND);
      mask_stencil(mask);
      p_glUseProgram(s_geo_prog);
@@ -861,7 +878,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
                     s_fb, PSXGL_STREAM_DRAW);
      glDrawArrays(GL_TRIANGLES, 0, nverts);
  
-@@ -1631,9 +2129,13 @@
+@@ -1631,9 +2146,13 @@
          s_bd_gate = 0;
          gl_perf_mirror_begin();
          wide_target_begin(dx, s_geo_uXoff, s_geo_uXhalf);
@@ -875,7 +892,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
          wide_target_end(s_geo_uXoff, s_geo_uXhalf);
          gl_perf_mirror_end();
      }
-@@ -1641,9 +2143,23 @@
+@@ -1641,9 +2160,27 @@
  }
  
  /* Flat / gouraud triangles and lines share the GEO program. mode: GL_TRIANGLES
@@ -888,8 +905,12 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
 +    float px[3] = {0}, py[3] = {0}, pz[3] = {0};
 +    uint64_t pid[3] = {0};
 +    int visual_flags = 0;
-+    if (mode == GL_TRIANGLES && n == 3)
++    PsxTurnCorner cut[PSX_TURN_CLIP_MAX];
++    int cut_corners = -1;
++    if (mode == GL_TRIANGLES && n == 3) {
 +        visual_flags = take_visual_triangle(xs, ys, px, py, NULL, pz, pid) & 3;
++        cut_corners = turn_clip(px, py, visual_flags, cut);
++    }
 +    else {
 +        s_next_world = 0;
 +        s_next_precise = 0;
@@ -900,7 +921,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      flush_tex_batch();   /* flat prim: drain textured draws first (order + program) */
      flush_cpu_upload();  /* also drains flat batch if an upload was pending */
      mark_prim_dirty(xs, ys, n, 0 /* flat */);
-@@ -1651,24 +2167,29 @@
+@@ -1651,24 +2188,29 @@
      /* Lines stay immediate (rare); tris batch for MotK 0x68 starfields. */
      if (mode != GL_TRIANGLES || n < 3) {
          flush_flat_batch();
@@ -938,7 +959,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
                         verts, PSXGL_STREAM_DRAW);
          glDrawArrays(mode, 0, n);
          if (g_wide_cur && !s_wide_suppress && s_ws_ablate != 1 &&
-@@ -1677,9 +2198,13 @@
+@@ -1677,9 +2219,13 @@
              s_bd_gate = bd_prim_gate(xs, n, 0);
              gl_perf_mirror_begin();
              wide_target_begin(dx, s_geo_uXoff, s_geo_uXhalf);
@@ -952,7 +973,15 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
              wide_target_end(s_geo_uXoff, s_geo_uXhalf);
              gl_perf_mirror_end();
          }
-@@ -1696,13 +2221,18 @@
+@@ -1689,21 +2235,44 @@
+ 
+     if (s_fb_n > 0 && (s_fb_semi != semi || s_fb_mask != (int)s_mask_set))
+         flush_flat_batch();
+-    if (s_fb_n + n > FLATBATCH_MAXV)
++    if (s_fb_n + n + (cut_corners > 2 ? 3 * (cut_corners - 2) : 0) > FLATBATCH_MAXV)
+         flush_flat_batch();
+     s_fb_semi = semi;
+     s_fb_mask = (int)s_mask_set;
  
      float mask_a = s_mask_set ? 1.0f : 0.0f;
      for (int i = 0; i < n; i++) {
@@ -965,35 +994,70 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
          v[4] = (((cs[i] >> 10) & 0x1F) << 3) / 255.0f;
          v[5] = mask_a;
 +        v[6] = (float)visual_flags;
-+        v[7] = visual_flags ? px[i] : (float)xs[i];
-+        v[8] = visual_flags ? py[i] : (float)ys[i];
-+        v[9] = pz[i]; /* temporal identity only; no shader attribute */
-+        s_fb_identity[s_fb_n] = pid[i];
++        v[7] = visual_flags ? px[cut_corners >= 0 ? 0 : i] : (float)xs[i];  /* a cut triangle: one point, nothing in the mirror */
++        v[8] = visual_flags ? py[cut_corners >= 0 ? 0 : i] : (float)ys[i];
++        v[9] = turned_depth(px[i], pz[i], visual_flags); /* temporal identity only; no shader attribute */
++        s_fb_identity[s_fb_n] = cut_corners >= 0 ? TEMPORAL_CUT_IDENTITY : pid[i];
          s_fb_n++;
++    }
++    const float *whole = &s_fb[(s_fb_n - n) * GEOV];
++    for (int piece = 0; piece + 2 < cut_corners; ++piece) {  /* its pieces for the mirror: one point in the canonical picture */
++        const int corner_of[3] = {0, piece + 1, piece + 2};
++        for (int i = 0; i < 3; ++i) {
++            const PsxTurnCorner *corner = &cut[corner_of[i]];
++            const int own = psx_turn_own(corner);
++            float *v = &s_fb[s_fb_n * GEOV];
++            memcpy(v, whole, GEOV * sizeof(float));
++            for (int channel = 2; channel < 5; ++channel) {
++                const float of_corners[3] = {whole[channel], whole[GEOV + channel], whole[2 * GEOV + channel]};
++                v[channel] = psx_turn_mix(corner, of_corners);
++            }
++            v[7] = corner->x;
++            v[8] = corner->y;
++            v[9] = turned_depth(corner->x, psx_turn_depth(corner, pz), visual_flags);
++            s_fb_identity[s_fb_n++] = own >= 0 ? pid[own] : pid[0] == pid[1] && pid[1] == pid[2] ? pid[0] : 0u;
++        }
      }
  }
-@@ -1733,6 +2263,10 @@
+ 
+@@ -1733,6 +2302,13 @@
                                    const float *col, uint16_t texpage,
                                    uint16_t clut_x, uint16_t clut_y, int rawtex,
                                    int semi, const int *lim) {
 +    float px[3], py[3], pq[3], pz[3];
 +    uint64_t pid[3];
 +    const int visual_flags = take_visual_triangle(xs, ys, px, py, pq, pz, pid);
++    PsxTurnCorner cut[PSX_TURN_CLIP_MAX];
++    const int cut_corners = turn_clip(px, py, visual_flags, cut);
++    const float whole_q[3] = {pq[0], pq[1], pq[2]};
 +    turned_perspective(px, pq, visual_flags);
      int lim_buf[4];
      int uv_buf[6];
      if (!lim) {
-@@ -1762,6 +2296,8 @@
+@@ -1762,6 +2338,17 @@
          flush_flat_batch();   /* painter order: flat GEO before textured */
          int twx = s_tw_mask_x, twy = s_tw_mask_y, tox = s_tw_off_x, toy = s_tw_off_y;
          int gate = bd_prim_gate(xs, 3, 1); /* backdrop-stretch gate is also a batch key */
-+        const int world = psx_world_depth_class(s_world_depth, visual_flags, pz, s_world_margin);
++        const float turned_z[3] = {turned_depth(px[0], pz[0], visual_flags), turned_depth(px[1], pz[1], visual_flags),
++                                   turned_depth(px[2], pz[2], visual_flags)};
++        const uint64_t cut_id = pid[0] == pid[1] && pid[1] == pid[2] ? pid[0] : 0u;  /* a sprite's pieces stay a sprite's */
++        float cut_z[PSX_TURN_CLIP_MAX];
++        int world = psx_world_depth_class(s_world_depth, visual_flags, turned_z, s_world_margin);
++        for (int k = 0; k < cut_corners; ++k) cut_z[k] = turned_depth(cut[k].x, psx_turn_depth(&cut[k], pz), visual_flags);
++        for (int piece = 0; world && piece + 2 < cut_corners; ++piece) {  /* a cut triangle is of the class all its pieces are */
++            const float piece_z[3] = {cut_z[0], cut_z[piece + 1], cut_z[piece + 2]};
++            world = psx_world_depth_class(s_world_depth, visual_flags, piece_z, s_world_margin);
++        }
 +        if (s_tb_n > 0 && world != s_tb_world) flush_tex_batch();
          /* With mask checking off, opaque and mode-0 semi primitives use the
           * same dual-source blend state. The per-vertex a_semi flag selects
           * replace vs half-blend without breaking painter order. */
-@@ -1800,11 +2336,14 @@
-         if (s_tb_n + 3 > TEXBATCH_MAXV) { s_batch_reason[6]++; flush_tex_batch(); }
+@@ -1797,14 +2384,18 @@
+             s_batch_reason[reason]++;
+             flush_tex_batch();
+         }
+-        if (s_tb_n + 3 > TEXBATCH_MAXV) { s_batch_reason[6]++; flush_tex_batch(); }
++        if (s_tb_n + 3 + (cut_corners > 2 ? 3 * (cut_corners - 2) : 0) > TEXBATCH_MAXV) { s_batch_reason[6]++; flush_tex_batch(); }
          if (s_tb_n == 0) {            /* opening a batch: capture its keyed state */
              s_tb_semi = batch_semi; s_tb_mask = s_mask_set; s_tb_filter = s_tex_filter; s_tb_gate = gate;
 +            s_tb_fillers = 0;
@@ -1001,6 +1065,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
              s_tb_twin[0] = twx; s_tb_twin[1] = twy; s_tb_twin[2] = tox; s_tb_twin[3] = toy;
          }
          float *vp = &s_tb[s_tb_n * TEXV];
++        const float *whole = vp;
          for (int i = 0; i < 3; i++, vp += TEXV) {
 -            vp[0] = (float)xs[i];   vp[1] = (float)ys[i];
 +            vp[0] = (float)xs[i];
@@ -1008,22 +1073,52 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
              vp[2] = (float)us[i];   vp[3] = (float)vs[i];
              vp[4] = col[i*3+0];     vp[5] = col[i*3+1];     vp[6] = col[i*3+2];   vp[7] = 1.0f;
              vp[8]  = (float)base_x;  vp[9]  = (float)base_y;        /* a_tpage  */
-@@ -1813,7 +2352,14 @@
+@@ -1813,8 +2404,44 @@
              vp[14] = (float)lim[0];  vp[15] = (float)lim[1];        /* a_limits */
              vp[16] = (float)lim[2];  vp[17] = (float)lim[3];
              vp[18] = semi >= 0 ? (float)(semi + 1) : 0.0f;          /* a_semi code */
 +            vp[19] = (float)visual_flags;                            /* a_visual_flags */
-+            vp[20] = visual_flags ? px[i] : (float)xs[i];            /* a_visual_pos */
-+            vp[21] = visual_flags ? py[i] : (float)ys[i];
++            vp[20] = visual_flags ? px[cut_corners >= 0 ? 0 : i] : (float)xs[i];  /* a_visual_pos: a cut triangle is one point, nothing in the mirror */
++            vp[21] = visual_flags ? py[cut_corners >= 0 ? 0 : i] : (float)ys[i];
 +            vp[22] = pq[i];                                          /* a_q (0 = affine) */
-+            vp[23] = pz[i]; /* temporal identity only; no shader attribute */
-+            s_tb_identity[s_tb_n + i] = pid[i];
++            vp[23] = turned_z[i]; /* temporal identity only; no shader attribute */
++            s_tb_identity[s_tb_n + i] = cut_corners >= 0 ? TEMPORAL_CUT_IDENTITY : pid[i];
          }
 +        if (visual_flags & 4) s_tb_fillers++;
          s_tb_n += 3;
++        for (int piece = 0; piece + 2 < cut_corners; ++piece) {  /* its pieces for the mirror: one point in the canonical picture */
++            const int corner_of[3] = {0, piece + 1, piece + 2};
++            const int perspective = whole_q[0] > 0.0f && whole_q[1] > 0.0f && whole_q[2] > 0.0f;
++            float piece_x[3], piece_q[3], mixed_q[3];
++            for (int i = 0; i < 3; ++i) {
++                piece_x[i] = cut[corner_of[i]].x;
++                piece_q[i] = mixed_q[i] = perspective ? psx_turn_mix(&cut[corner_of[i]], whole_q) : 0.0f;
++            }
++            turned_perspective(piece_x, piece_q, visual_flags);
++            for (int i = 0; i < 3; ++i, vp += TEXV) {
++                const PsxTurnCorner *corner = &cut[corner_of[i]];
++                const int own = psx_turn_own(corner);
++                memcpy(vp, whole, TEXV * sizeof(float));
++                for (int channel = 2; channel < 7; ++channel) {  /* uv by the texture's own depth term, the colour along the picture */
++                    const float weight[3] = {channel < 4 && perspective ? whole_q[0] : 1.0f, channel < 4 && perspective ? whole_q[1] : 1.0f,
++                                             channel < 4 && perspective ? whole_q[2] : 1.0f};
++                    const float of_corners[3] = {whole[channel] * weight[0], whole[TEXV + channel] * weight[1],
++                                                 whole[2 * TEXV + channel] * weight[2]};
++                    vp[channel] = own >= 0 ? whole[own * TEXV + channel]
++                                           : psx_turn_mix(corner, of_corners) / (channel < 4 && perspective ? mixed_q[i] : 1.0f);
++                }
++                vp[20] = corner->x;
++                vp[21] = corner->y;
++                vp[22] = piece_q[i];
++                vp[23] = cut_z[corner_of[i]];
++                s_tb_identity[s_tb_n + i] = own >= 0 ? pid[own] : cut_id;
++            }
++            s_tb_n += 3;
++        }
          if (isolate) flush_tex_batch();   /* draw this semi prim alone, in submission order */
      }
-@@ -1831,31 +2377,44 @@
+ }
+@@ -1831,31 +2458,44 @@
      float b = (((c >> 10) & 0x1F) << 3) / 255.0f;
      float a = s_mask_set ? 1.0f : 0.0f;
      float fx0 = (float)wx, fy0 = (float)y, fx1 = (float)(wx + ww), fy1 = (float)(y + h);
@@ -1071,7 +1166,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      if (w <= 0 || h <= 0) return;
      /* Full-screen 2D overlay (pause gray-filter / load fade): a flat rect
       * spanning the whole 4:3 framebuffer must cover the whole wide surface too,
-@@ -1877,6 +2436,7 @@
+@@ -1877,6 +2517,7 @@
      gpu_triangle(x,   y,   c, x+w, y,   c, x,   y+h, c, semi);
      gpu_triangle(x+w, y,   c, x,   y+h, c, x+w, y+h, c, semi);
      if (overlay) {
@@ -1079,7 +1174,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
          s_wide_suppress = 0;
          /* The two canonical triangles drew into the hr FBO already (each
           * gpu_triangle ran its own hr_begin/hr_end). Re-open the bracket just
-@@ -1895,7 +2455,19 @@
+@@ -1895,7 +2536,19 @@
  static void gpu_textured_rect(int x,int y,int w,int h,
                                int u0,int v0,int u1,int v1,
                                uint16_t clut_x,uint16_t clut_y,uint16_t tp,int semi) {
@@ -1100,7 +1195,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      float mr=s_mod_r/255.0f, mg=s_mod_g/255.0f, mb=s_mod_b/255.0f;
      float col[9]={mr,mg,mb, mr,mg,mb, mr,mg,mb};
      /* gpu.c routes axis-aligned MIRRORED quads (X/Y-flipped 2D sprites,
-@@ -1911,6 +2483,7 @@
+@@ -1911,6 +2564,7 @@
      int xs2[3]={x+w, x, x+w},  ys2[3]={y, y+h, y+h};
      int us2[3]={u1,u0,u1},     vs2[3]={v0,v1,v1};
      gpu_textured_triangle(xs2,ys2,us2,vs2,col,tp,clut_x,clut_y,s_mod_raw,semi,lim);
@@ -1108,7 +1203,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
  }
  
  /* GP0(02h) fill: writes color with bit15=0, ignoring draw area, mask and
-@@ -2020,6 +2593,8 @@
+@@ -2020,6 +2674,8 @@
      if (s < 1) s = 1;
      if (s > GL_MAX_INTERNAL_SCALE) s = GL_MAX_INTERNAL_SCALE;
      s_req_scale = s;
@@ -1117,7 +1212,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      sw_renderer_set_scale(1);
  }
  static int  glb_scale(void) { return s_scale; }   /* real internal SSAA scale (was a stub 1; the
-@@ -2028,6 +2603,131 @@
+@@ -2028,6 +2684,131 @@
                                                        unaffected since it never reads gr_scale()) */
  static void glb_set_texture_filter(int b) { s_tex_filter = b ? 1 : 0; sw_set_texture_filter(b); }
  static int  glb_texture_filter(void) { return s_tex_filter; }
@@ -1249,7 +1344,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
  
  static void glb_set_semi_transparency(int e, int m) { s_semi_en = e; s_semi_mode = m & 3; sw_set_semi_transparency(e, m); }
  static void glb_set_mask_bits(int s, int c) {
-@@ -2152,6 +2852,7 @@
+@@ -2152,6 +2933,7 @@
      glStencilMask(0xFF);
      glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
      if (s_raw_fbo) {
@@ -1257,7 +1352,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
          p_glBindFramebuffer(PSXGL_FRAMEBUFFER, s_raw_fbo);
          glViewport(0, 0, VRAM_W, VRAM_H);
          glScissor(x0, y0, rw, rh);
-@@ -2266,11 +2967,176 @@
+@@ -2266,11 +3048,176 @@
      return 1;
  }
  
@@ -1437,7 +1532,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      s_blit_prog = build_program(BLIT_VS, BLIT_FS);
      s_pack_prog = build_program(PACK_VS, PACK_FS);
      s_stencil_prog = build_program(PACK_VS, STENCIL_FS);
-@@ -2335,12 +3201,21 @@
+@@ -2335,12 +3282,21 @@
      s_geo_uXcenter = p_glGetUniformLocation(s_geo_prog, "u_xcenter");
      s_tex_uXscale  = p_glGetUniformLocation(s_tex_prog, "u_xscale");
      s_tex_uXcenter = p_glGetUniformLocation(s_tex_prog, "u_xcenter");
@@ -1459,7 +1554,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
  
      /* Sample-grid alignment shift: half an HR pixel, set once (S is fixed
       * for the lifetime of the pipeline). Backed off by 1/64 native px so
-@@ -2372,10 +3247,16 @@
+@@ -2372,10 +3328,16 @@
      p_glBindVertexArray(s_geo_vao);
      p_glGenBuffers(1, &s_geo_vbo);
      p_glBindBuffer(PSXGL_ARRAY_BUFFER, s_geo_vbo);
@@ -1478,7 +1573,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
  
      p_glGenVertexArrays(1, &s_tex_vao);
      p_glBindVertexArray(s_tex_vao);
-@@ -2392,6 +3273,10 @@
+@@ -2392,6 +3354,10 @@
          p_glVertexAttribPointer(6, 1, GL_FLOAT, GL_FALSE, st, (void*)(13*sizeof(float))); p_glEnableVertexAttribArray(6); /* raw    */
          p_glVertexAttribPointer(7, 4, GL_FLOAT, GL_FALSE, st, (void*)(14*sizeof(float))); p_glEnableVertexAttribArray(7); /* limits */
          p_glVertexAttribPointer(8, 1, GL_FLOAT, GL_FALSE, st, (void*)(18*sizeof(float))); p_glEnableVertexAttribArray(8); /* semi   */
@@ -1489,7 +1584,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      }
  
      p_glGenVertexArrays(1, &s_blit_vao);
-@@ -2433,6 +3318,12 @@
+@@ -2433,6 +3399,12 @@
      gl_perf_init();   /* frame_perf GPU/CPU phase timing (no-op if queries absent) */
      fprintf(stdout, "psxrecomp: GL GPU pipeline ready (internal scale %dx, "
              "mask-bit stencil, texture window, GPU copy/upload)\n", s_scale);
@@ -1502,7 +1597,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      return 1;
  }
  
-@@ -2467,11 +3358,60 @@
+@@ -2467,11 +3439,60 @@
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
          s_present_prog = build_program(PRESENT_VS, PRESENT_FS);
@@ -1563,7 +1658,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
              s_interp_uPrev = p_glGetUniformLocation(s_interp_prog, "u_prev");
              s_interp_uCurr = p_glGetUniformLocation(s_interp_prog, "u_curr");
              s_interp_uAlpha = p_glGetUniformLocation(s_interp_prog, "u_alpha");
-@@ -2484,6 +3424,7 @@
+@@ -2484,6 +3505,7 @@
                  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
                  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
              }
@@ -1571,7 +1666,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
          } else ok = 0;
      }
      if (ok) ok = init_gpu_raster();
-@@ -2496,20 +3437,28 @@
+@@ -2496,20 +3518,28 @@
      return 1;
  }
  
@@ -1613,7 +1708,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      if (s_interp_thread) {
          SDL_AtomicSet(&s_interp_thread_run, 0);
          SDL_WaitThread(s_interp_thread, NULL);
-@@ -2532,12 +3481,25 @@
+@@ -2532,12 +3562,25 @@
              }
          }
          ensure_cpu();
@@ -1639,7 +1734,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      free(s_conv); s_conv = NULL;
      s_raster_ok = 0;
      /* New context regenerates s_present_tex empty; a stale size makes
-@@ -2549,16 +3511,36 @@
+@@ -2549,16 +3592,36 @@
      rect_clear(&s_d24_skip_fb);
  }
  
@@ -1677,7 +1772,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      glDisable(GL_SCISSOR_TEST);
      glViewport(0, 0, ww, wh);
      glClearColor(0.f,0.f,0.f,1.f); glClear(GL_COLOR_BUFFER_BIT);
-@@ -2608,6 +3590,8 @@
+@@ -2608,6 +3671,8 @@
      p_glBindVertexArray(s_present_vao); glDrawArrays(GL_TRIANGLES, 0, 3);
      p_glBindVertexArray(0); p_glUseProgram(0);
      pres_record(GL_PRES_CPU, 0, 0, src_w, src_h, lx, ly, lw, lh);
@@ -1686,7 +1781,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      latency_ring_mark(LAT_SWAP_BEGIN);
      SDL_GL_SwapWindow(s_win);
      latency_ring_mark(LAT_SWAP_END);
-@@ -2618,10 +3602,12 @@
+@@ -2618,10 +3683,12 @@
  void gl_renderer_present_blank(void) {
      if (!s_ctx) return;
      interp_reset_history();
@@ -1700,7 +1795,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      latency_ring_mark(LAT_SWAP_BEGIN);
      SDL_GL_SwapWindow(s_win);
      latency_ring_mark(LAT_SWAP_END);
-@@ -2749,6 +3735,7 @@
+@@ -2749,6 +3816,7 @@
   * ------------------------------------------------------------------------- */
  
  static void wide_free_all(void) {
@@ -1708,7 +1803,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      for (int i = 0; i < WIDE_MAX_SURF; i++) {
          if (s_wide_fbo[i]) { p_glDeleteFramebuffers(1, &s_wide_fbo[i]); s_wide_fbo[i] = 0; }
          if (s_wide_tex[i]) { glDeleteTextures(1, &s_wide_tex[i]); s_wide_tex[i] = 0; }
-@@ -2802,9 +3789,11 @@
+@@ -2802,9 +3870,11 @@
  static void glb_wide_configure(int wide_w, int offset) {
      if (!s_raster_ok) return;
      double t0 = cw_ms(); s_cw_wide_cfgs++;
@@ -1720,7 +1815,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      g_wide_w = wide_w;
      g_wide_off = offset;
      s_cw_wide_ms += cw_ms() - t0;
-@@ -2814,6 +3803,7 @@
+@@ -2814,6 +3884,7 @@
  static void glb_wide_set_target(int base_x) {
      if (!s_raster_ok) { g_wide_cur = 0; return; }
      double t0 = cw_ms(); s_cw_wide_sets++;
@@ -1728,7 +1823,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      flush_tex_batch();   /* drain into the OLD target before switching */
      g_wide_cur = wide_fbo_for(base_x);
      g_wide_cur_base = base_x;
-@@ -2821,7 +3811,7 @@
+@@ -2821,7 +3892,7 @@
  }
  
  /* Stop mirroring (offscreen draws that don't target a framebuffer). */
@@ -1737,7 +1832,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
  
  /* Mirror a framebuffer clear: fill the full wide width over [y, y+h) of the
   * surface for base_x, so the revealed margins are clean. Mirrors sw_wide_clear:
-@@ -2829,9 +3819,11 @@
+@@ -2829,9 +3900,11 @@
  static void glb_wide_clear(int base_x, int y, int h, uint16_t color) {
      if (!s_raster_ok || s_ws_ablate == 1) return;
      double t0 = cw_ms(); s_cw_wide_clears++;
@@ -1749,7 +1844,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      gl_perf_mirror_begin();
      int H = VRAM_H * s_scale;
      int y0 = y * s_scale, y1 = (y + h) * s_scale;
-@@ -2849,6 +3841,13 @@
+@@ -2849,6 +3922,13 @@
      glClearColor(r, g, b, a);
      glClearStencil((color >> 15) & 1);   /* stencil mirrors bit15, like the color alpha */
      glStencilMask(0xFF);
@@ -1763,7 +1858,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
      glDisable(GL_SCISSOR_TEST);
      p_glBindFramebuffer(PSXGL_FRAMEBUFFER, 0);
-@@ -2861,9 +3860,11 @@
+@@ -2861,9 +3941,11 @@
  static void glb_wide_clear_margins(int base_x, int y, int h, uint16_t color, int sides) {
      if (!s_raster_ok || s_ws_ablate == 1 || g_wide_off <= 0) return;
      double t0 = cw_ms(); s_cw_wide_clears++;
@@ -1775,7 +1870,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      gl_perf_mirror_begin();
      int H = VRAM_H * s_scale;
      int W = g_wide_w * s_scale;
-@@ -3236,10 +4237,153 @@
+@@ -3236,10 +4318,153 @@
  }
  
  /* Native-wide mirror ablation (perf attribution): see s_ws_ablate. */
@@ -1930,7 +2025,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      s_interp_valid = 0;
      s_interp_w = s_interp_h = 0;
      s_interp_start = s_interp_last_capture = 0;
-@@ -3257,9 +4401,10 @@
+@@ -3257,9 +4482,10 @@
                                     int blend_mode) {
      double effective_hz = target_hz < 0.0
          ? -1.0
@@ -1943,7 +2038,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      const char *diag = getenv("PSX_GL_INTERP_DIAG");
      s_interp_diag = diag && diag[0] && diag[0] != '0';
      if (active && !s_interp_ctx && s_ctx) {
-@@ -3273,6 +4418,7 @@
+@@ -3273,6 +4499,7 @@
           * FMV temporarily suspends interpolation and the main context presents. */
          SDL_GL_SetSwapInterval(0);
          if (s_interp_ctx && s_interp_mutex) {
@@ -1951,7 +2046,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
              SDL_AtomicSet(&s_interp_thread_run, 1);
              s_interp_thread = SDL_CreateThread(interp_thread_main,
                                                 "psx-gl-interp", NULL);
-@@ -3284,31 +4430,52 @@
+@@ -3284,31 +4511,52 @@
              active = 0;
          }
      }
@@ -2013,7 +2108,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
  }
  
  void gl_renderer_interpolation_diag(int *enabled, int *suspended,
-@@ -3325,12 +4492,69 @@
+@@ -3325,12 +4573,69 @@
      if (s_interp_mutex) SDL_UnlockMutex(s_interp_mutex);
  }
  
@@ -2083,7 +2178,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      /* The presentation context may still have a draw queued which samples one
       * of the shared history textures.  Order this context's next allocation or
       * copy after that draw before recycling a texture.  glWaitSync keeps the
-@@ -3343,6 +4567,7 @@
+@@ -3343,6 +4648,7 @@
      int pw = w * s_scale, ph = h * s_scale;
      if (pw != s_interp_w || ph != s_interp_h ||
          source_path != s_interp_source_path || force_4_3 != s_interp_force_4_3) {
@@ -2091,7 +2186,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
          s_interp_valid = 0;
          s_interp_w = pw; s_interp_h = ph;
          s_interp_prev = s_interp_cur = 0;
-@@ -3365,6 +4590,22 @@
+@@ -3365,6 +4671,22 @@
      glBindTexture(GL_TEXTURE_2D, s_interp_tex[dst]);
      glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0,
                          x * s_scale, y * s_scale, pw, ph);
@@ -2114,7 +2209,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      s_interp_fence[dst] = p_glFenceSync(PSXGL_SYNC_GPU_COMMANDS_COMPLETE, 0);
      glFlush();
      p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, 0);
-@@ -3388,21 +4629,41 @@
+@@ -3388,21 +4710,41 @@
          s_interp_cur = dst;
          s_interp_valid = 2;
      }
@@ -2157,7 +2252,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      p_glBindFramebuffer(PSXGL_FRAMEBUFFER, 0);
      glViewport(lx, ly, lw, lh);
      p_glActiveTexture(PSXGL_TEXTURE0);
-@@ -3418,12 +4679,135 @@
+@@ -3418,12 +4760,135 @@
      p_glUniform1i(s_interp_uCurr, 1);
      p_glUniform1f(s_interp_uAlpha, alpha);
      p_glUniform1i(s_interp_uBlendMode, s_interp_blend_mode);
@@ -2294,7 +2389,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
  }
  
  static int interp_present(void) {
-@@ -3438,7 +4822,7 @@
+@@ -3438,7 +4903,7 @@
      if (a > 1.0) a = 1.0;
      if (a < 0.0) a = 0.0;
  
@@ -2303,7 +2398,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      int lx, ly, lw, lh;
      if (s_interp_force_4_3)
          letterbox_rect_aspect(ww, wh, 4, 3, &lx, &ly, &lw, &lh);
-@@ -3450,22 +4834,44 @@
+@@ -3450,22 +4915,44 @@
          glClearColor(0.f, 0.f, 0.f, 1.f);
          glClear(GL_COLOR_BUFFER_BIT);
      }
@@ -2350,7 +2445,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      uint64_t freq = SDL_GetPerformanceFrequency();
      uint64_t deadline = SDL_GetPerformanceCounter();
      uint64_t diag_start = deadline, diag_swaps = 0, diag_captures = 0;
-@@ -3477,7 +4883,7 @@
+@@ -3477,7 +4964,7 @@
          int uncapped = hz < 0.0;
          uint64_t now = SDL_GetPerformanceCounter();
          if (!uncapped) {
@@ -2359,7 +2454,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
              uint64_t period = (uint64_t)((double)freq / hz);
              if (!period) period = 1;
              deadline += period;
-@@ -3492,20 +4898,80 @@
+@@ -3492,20 +4979,80 @@
              }
              while (SDL_GetPerformanceCounter() < deadline) {}
              now = SDL_GetPerformanceCounter();
@@ -2440,7 +2535,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
              fflush(stdout);
              diag_start = now;
              diag_captures = s_interp_captures;
-@@ -3518,6 +4984,33 @@
+@@ -3518,6 +5065,33 @@
      SDL_GL_MakeCurrent(s_win, NULL);
      return 0;
  }
@@ -2474,7 +2569,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
  
  static void present_target_quad(GLuint tex, int tex_w, int tex_h,
                                  int x, int y, int w, int h, int linear,
-@@ -3553,13 +5046,14 @@
+@@ -3553,13 +5127,14 @@
          s_last_present_path == GL_PRES_VRAM &&
          s_last_dx == disp_x && s_last_dy == disp_y &&
          s_last_dw == w && s_last_dh == h &&
@@ -2491,7 +2586,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      int lx, ly, lw, lh;
      if (force_4_3)
          letterbox_rect_aspect(ww, wh, 4, 3, &lx, &ly, &lw, &lh);
-@@ -3588,6 +5082,8 @@
+@@ -3588,6 +5163,8 @@
      present_target_quad(s_hr_tex, VRAM_W, VRAM_H,
                          disp_x, disp_y, w, h, linear, lx, ly, lw, lh);
      pres_record(GL_PRES_VRAM, disp_x, disp_y, w, h, lx, ly, lw, lh);
@@ -2500,7 +2595,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      latency_ring_mark(LAT_SWAP_BEGIN);
      SDL_GL_SwapWindow(s_win);
      latency_ring_mark(LAT_SWAP_END);
-@@ -3607,7 +5103,9 @@
+@@ -3607,7 +5184,9 @@
   * x-translated by the reveal offset. No-op when s_wide_fast is off (then the
   * mirror drew the full surface, as before). Shared by both present paths. */
  static void wide_blit_center(GLuint wide_fbo, int base_x, int disp_y, int disp_h) {
@@ -2511,7 +2606,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      int native_w = g_wide_w - 2 * g_wide_off;
      if (native_w <= 0) return;
      int S = s_scale;
-@@ -3638,6 +5136,71 @@
+@@ -3638,6 +5217,71 @@
   * disp_y+disp_h] region into the letterbox, V-flipped like present_vram (FBO y
   * bottom-origin → window top). Returns 0 if there's no wide surface for base_x
   * (caller falls back). disp_x is the displayed buffer base (the wide-surface key). */
@@ -2583,7 +2678,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
  int gl_renderer_present_wide_fbo(int disp_x, int disp_y, int disp_h, int linear) {
      if (!s_ctx || !s_raster_ok || g_wide_w <= 0) return 0;
      GLuint fbo = 0, tex = 0;
-@@ -3653,13 +5216,14 @@
+@@ -3653,13 +5297,14 @@
          s_last_present_path == GL_PRES_WIDE &&
          s_last_dx == disp_x && s_last_dy == disp_y &&
          s_last_dw == g_wide_w && s_last_dh == disp_h &&
@@ -2600,7 +2695,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      int lx, ly, lw, lh;
      letterbox_rect(ww, wh, &lx, &ly, &lw, &lh);
      wide_blit_center(fbo, disp_x, disp_y, disp_h);   /* fast-path: authoritative centre */
-@@ -3681,9 +5245,13 @@
+@@ -3681,9 +5326,13 @@
          s_last_dw = g_wide_w; s_last_dh = disp_h;
          return 1;
      }
@@ -2616,7 +2711,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0393785031c50ddbc08f68dffa068b4f
      latency_ring_mark(LAT_SWAP_BEGIN);
      SDL_GL_SwapWindow(s_win);
      latency_ring_mark(LAT_SWAP_END);
-@@ -3702,6 +5270,21 @@
+@@ -3702,6 +5351,21 @@
      .set_texture_filter = glb_set_texture_filter, .texture_filter = glb_texture_filter,
      .set_semi_transparency = glb_set_semi_transparency, .set_mask_bits = glb_set_mask_bits,
      .set_texture_window = glb_set_texture_window, .set_color_modulation = glb_set_color_modulation,

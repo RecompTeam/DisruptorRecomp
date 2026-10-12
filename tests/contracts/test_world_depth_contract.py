@@ -59,7 +59,9 @@ require(
 )
 
 require(
-    "        const int world = psx_world_depth_class(s_world_depth, visual_flags, pz, s_world_margin);\n"
+    "        int world = psx_world_depth_class(s_world_depth, visual_flags, turned_z, s_world_margin);\n" in renderer
+    and "            world = psx_world_depth_class(s_world_depth, visual_flags, piece_z, s_world_margin);\n"
+    "        }\n"
     "        if (s_tb_n > 0 && world != s_tb_world) flush_tex_batch();\n" in renderer
     and "            s_tb_world = world;\n" in renderer
     and "static float s_world_margin = 0.03f;\n" in renderer
