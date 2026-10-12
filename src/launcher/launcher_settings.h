@@ -1,48 +1,37 @@
 #pragma once
 
-#include "config_loader.h"
+#include "game/settings/options.h"
 
 #include <filesystem>
 #include <span>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace disruptor::launcher {
 
-using Settings = PSXRecompV4::UserSettings;
+using settings::find_option;
+using settings::Kind;
+using settings::Option;
+using settings::options;
+using settings::Settings;
+using settings::Unit;
 
 enum class Page { display, enhancements, controls, audio, experimental };
-enum class Kind { toggle, choice, slider };
-enum class Unit { none, percent, frames, thousandths };
-
-// A value is 0 or 1 for a toggle, an index into `choices` for a choice and a whole number of `unit` for a slider.
-struct Option {
-    const char* key; // "section.key" in settings.toml
-    Page page;
-    Kind kind;
-    const wchar_t* label;
-    bool (*saved)(const Settings&);
-    int (*get)(const Settings&);
-    void (*set)(Settings&, int);
-    int initial; // what a fresh installation runs with
-    int lowest;
-    int highest;
-    std::span<const wchar_t* const> choices;
-    const char* needs; // the toggle that must be on for this row to apply
-    Unit unit;
-    const wchar_t* hint; // shown when the pointer rests on the row
-};
+// A row of the settings pages. The rows of a page are shown in the order they are listed.
+struct Placement { const char* key; Page page; };
 
 struct PresetValue { const char* key; int value; };
 struct Preset { const wchar_t* label; std::span<const PresetValue> values; };
 
-std::span<const Option> options();
+std::span<const Placement> layout();
 std::span<const Preset> presets();
-const Option* find_option(const char* key);
 // Whether a release's settings.toml names the row: for these the game's own value is not the one a release runs with.
 bool shipped(const Option& option);
 std::span<const wchar_t* const> page_labels();
 
+// Bytes that are not UTF-8 come out as U+FFFD.
+std::wstring wide(std::string_view utf8_text);
 std::string utf8(const std::filesystem::path& path);
 std::filesystem::path from_utf8(const std::string& text);
 // The PSX_ variables of this process, which the game it starts lets replace settings for that run.

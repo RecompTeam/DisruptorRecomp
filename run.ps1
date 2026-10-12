@@ -36,9 +36,9 @@ if ($MouseAim -or $VerticalLook -or $ModernControls) {
 
 $RuntimeDirectory = Split-Path -Parent $Runtime
 $KeybindPresetName = if ($ModernControls) {
-    'keybinds-modern.ini'
+    'config/keybinds-modern.ini'
 } else {
-    'keybinds-original.ini'
+    'config/keybinds-original.ini'
 }
 $KeybindPreset = Join-Path $Root $KeybindPresetName
 Copy-Item -LiteralPath $KeybindPreset -Destination (Join-Path $RuntimeDirectory 'keybinds.ini') -Force

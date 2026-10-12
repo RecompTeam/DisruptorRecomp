@@ -11,3 +11,6 @@
 *.c text eol=lf
 *.cpp text eol=lf
 *.h text eol=lf
+
+# A patch must reach every machine byte for byte: one framework file has CRLF lines.
+framework/patches/** -text

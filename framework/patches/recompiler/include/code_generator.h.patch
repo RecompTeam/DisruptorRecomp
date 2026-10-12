@@ -1,0 +1,34 @@
+diff --git a/recompiler/include/code_generator.h b/recompiler/include/code_generator.h
+index db776ad6748afc7f0f31731ef183d9b6c6d76e0e..8e6e02e72c421768b1729489c1e161584027af27 100644
+--- a/recompiler/include/code_generator.h
++++ b/recompiler/include/code_generator.h
+@@ -110,6 +110,13 @@
+     // Signed lower-bound counterpart: `slti rt,sx,-W` compares against
+     // `-W-x_margin`, preserving the original result at 4:3.
+     std::set<uint32_t> ws_cull_slti_lower_sites;
++    // Manual screen-window counterparts for zero-bound branches, constant /
++    // zero-store clamps, right-edge constants, and packed [left,right] spans.
++    // Each configured site is instruction-shape checked by codegen.
++    std::set<uint32_t> ws_cull_lower_branch_sites;
++    std::set<uint32_t> ws_cull_lower_value_sites;
++    std::set<uint32_t> ws_cull_upper_value_sites;
++    std::set<uint32_t> ws_cull_span_value_sites;
+ 
+     // `bltz rs, reject` emitted through psx_ws_cull_bltz — the explicit
+     // LEFT-edge counterpart to ws_cull_slti_sites ([widescreen.cull]
+@@ -148,6 +155,15 @@
+     // Exact `addi[u] rt,zero,imm` 12-bit angular half-extents. The runtime
+     // scales tan(angle) by the current horizontal reveal factor.
+     std::vector<PSXRecompV4::WidescreenAngleSite> ws_cull_angle_sites;
++
++    // Exact `addi[u] rt,rs,+/-half_fov` wrapping-yaw sites. The runtime widens
++    // only the signed offset in the site's declared angular unit system.
++    std::vector<PSXRecompV4::WidescreenYawConeSite> ws_cull_yaw_cone_sites;
++
++    // Exact signed `slt dst,bound,horizontal` side-plane comparisons. The
++    // horizontal operand is projection-scaled only while widescreen is live.
++    std::vector<PSXRecompV4::WidescreenHorizontalSltSite>
++        ws_cull_horizontal_slt_sites;
+ 
+     // Exact model-participation cosine compares that gain a camera-horizontal
+     // aspect envelope while preserving the vanilla vertical cone.

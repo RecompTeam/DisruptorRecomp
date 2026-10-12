@@ -1,0 +1,16 @@
+diff --git a/recompiler/tests/test_reachable_discovery_codegen.py b/recompiler/tests/test_reachable_discovery_codegen.py
+index db87e2bea0f88e85d6930b3c687472c91f8e1784..26fd31f8575e5ec96dbcbe054a15fcc05a41b558 100644
+--- a/recompiler/tests/test_reachable_discovery_codegen.py
++++ b/recompiler/tests/test_reachable_discovery_codegen.py
+@@ -90,6 +90,11 @@
+ 
+     failures = []
+     with tempfile.TemporaryDirectory() as tmp:
++        # Keep find_project_root() anchored to this fixture. Some CI/sandbox
++        # hosts place a repository marker in the shared temp parent, which
++        # would otherwise make relative test.exe/seeds.txt paths resolve one
++        # directory too high and turn this into an environment-dependent test.
++        pathlib.Path(tmp, ".gitignore").write_text("\n", encoding="utf-8")
+         exe = os.path.join(tmp, "test.exe")
+         seeds = os.path.join(tmp, "seeds.txt")
+         config = os.path.join(tmp, "game.toml")

@@ -8,7 +8,8 @@ target_link_libraries(disruptor-disc-import PUBLIC bcrypt)
 # settings.toml goes through the game's own reader and writer.
 add_library(disruptor-launcher-config STATIC
     "${PSXRECOMP_ROOT}/recompiler/src/config_loader.cpp"
-    "${PSXRECOMP_ROOT}/recompiler/src/ps1_exe_parser.cpp")
+    "${PSXRECOMP_ROOT}/recompiler/src/ps1_exe_parser.cpp"
+    "${PROJECT_SOURCE_DIR}/src/game/settings/saved.cpp")
 target_compile_features(disruptor-launcher-config PUBLIC cxx_std_20)
 target_include_directories(disruptor-launcher-config PUBLIC
     "${PSXRECOMP_ROOT}/recompiler/src"
@@ -24,7 +25,8 @@ add_library(disruptor-launcher-model STATIC
     launcher_settings.cpp
     region_disc.cpp
     startup_log.cpp
-    "${PROJECT_SOURCE_DIR}/src/disruptor_language_disc.cpp")
+    "${PROJECT_SOURCE_DIR}/src/game/language/language_disc.cpp"
+    "${PROJECT_SOURCE_DIR}/src/game/settings/options.cpp")
 target_include_directories(disruptor-launcher-model PUBLIC "${PROJECT_SOURCE_DIR}/src")
 target_link_libraries(disruptor-launcher-model PUBLIC
     disruptor-disc-import disruptor-launcher-config)
@@ -58,19 +60,19 @@ add_custom_command(TARGET disruptor-launcher POST_BUILD
     COMMAND "${CMAKE_COMMAND}"
         "-DSOURCE=${PROJECT_SOURCE_DIR}"
         "-DDESTINATION=$<TARGET_FILE_DIR:disruptor-launcher>"
-        -P "${PROJECT_SOURCE_DIR}/tools/stage_launcher.cmake"
+        -P "${PROJECT_SOURCE_DIR}/cmake/stage_launcher.cmake"
     VERBATIM)
 set_property(TARGET disruptor-launcher APPEND PROPERTY LINK_DEPENDS
-    "${PROJECT_SOURCE_DIR}/tools/stage_launcher.cmake"
+    "${PROJECT_SOURCE_DIR}/cmake/stage_launcher.cmake"
     "${PROJECT_SOURCE_DIR}/game.toml"
     "${PROJECT_SOURCE_DIR}/mouse-aim.ini"
     "${PROJECT_SOURCE_DIR}/docs/PLAYING.md"
     "${PROJECT_SOURCE_DIR}/release/windows/Play Disruptor.cmd"
-    "${PROJECT_SOURCE_DIR}/keybinds-modern.ini"
+    "${PROJECT_SOURCE_DIR}/config/keybinds-modern.ini"
     "${PROJECT_SOURCE_DIR}/release/windows/settings.toml")
 
 if(BUILD_TESTING)
-    add_executable(disruptor-disc-import-test "${PROJECT_SOURCE_DIR}/tests/disc_import_test.cpp")
+    add_executable(disruptor-disc-import-test "${PROJECT_SOURCE_DIR}/tests/unit/disc_import_test.cpp")
     set_target_properties(disruptor-disc-import-test PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
     target_link_libraries(disruptor-disc-import-test PRIVATE disruptor-disc-import)
@@ -81,18 +83,18 @@ if(BUILD_TESTING)
     endif()
     add_test(NAME disruptor_disc_import COMMAND disruptor-disc-import-test)
 
-    add_executable(disruptor-launcher-settings-test "${PROJECT_SOURCE_DIR}/tests/launcher_settings_test.cpp")
+    add_executable(disruptor-launcher-settings-test "${PROJECT_SOURCE_DIR}/tests/unit/launcher_settings_test.cpp")
     target_link_libraries(disruptor-launcher-settings-test PRIVATE disruptor-launcher-model)
     target_compile_definitions(disruptor-launcher-settings-test PRIVATE "DISRUPTOR_SOURCE_DIR=LR\"(${PROJECT_SOURCE_DIR})\"")
     add_test(NAME disruptor_launcher_settings COMMAND disruptor-launcher-settings-test)
 
-    add_executable(disruptor-launcher-flow-test "${PROJECT_SOURCE_DIR}/tests/launcher_flow_test.cpp")
+    add_executable(disruptor-launcher-flow-test "${PROJECT_SOURCE_DIR}/tests/unit/launcher_flow_test.cpp")
     target_link_libraries(disruptor-launcher-flow-test PRIVATE disruptor-launcher-model)
     add_test(NAME disruptor_launcher_flow COMMAND disruptor-launcher-flow-test)
 
     # The synthetic discs include the layout code whole, so this test takes region_disc.cpp and not the library.
     add_executable(disruptor-region-disc-test
-        "${PROJECT_SOURCE_DIR}/tests/region_disc_test.cpp" region_disc.cpp)
+        "${PROJECT_SOURCE_DIR}/tests/unit/region_disc_test.cpp" region_disc.cpp)
     target_include_directories(disruptor-region-disc-test PRIVATE "${PROJECT_SOURCE_DIR}/src")
     target_link_libraries(disruptor-region-disc-test PRIVATE disruptor-disc-import)
     add_test(NAME disruptor_region_disc COMMAND disruptor-region-disc-test)

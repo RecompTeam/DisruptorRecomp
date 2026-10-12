@@ -1,6 +1,6 @@
 # Third-party notices
 
-`psxrecomp-overlay/` contains modified files based on PSXRecomp revision
+`framework/` contains patches to, and files written for, PSXRecomp revision
 `854a658372b304c222a0d0cbbae16c66264b785e`. PSXRecomp is copyright Matthew
 Stan and is provided under the PolyForm Noncommercial License 1.0.0. The
 upstream license is reproduced in

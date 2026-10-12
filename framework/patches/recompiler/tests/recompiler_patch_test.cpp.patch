@@ -1,0 +1,209 @@
+diff --git a/recompiler/tests/recompiler_patch_test.cpp b/recompiler/tests/recompiler_patch_test.cpp
+index 05f9cd45d963df9fd098b35522822c17191a739d..19125131038d312fe36111cd17e0b6b61bd297d5 100644
+--- a/recompiler/tests/recompiler_patch_test.cpp
++++ b/recompiler/tests/recompiler_patch_test.cpp
+@@ -206,6 +206,32 @@
+               std::vector<uint32_t>{0x80012340u},
+           "parser preserves negsub cull sites");
+ 
++    const auto manual_window = write_config(root, "manual-window", R"toml(
++[widescreen.cull]
++lower_branch_sites = ["0x80012340"]
++lower_value_sites = ["0x80012344"]
++upper_value_sites = ["0x80012348"]
++span_value_sites = ["0x8001234C"]
++)toml");
++    const auto manual_window_config =
++        PSXRecompV4::load_game_config(manual_window);
++    check(manual_window_config.ws_cull_lower_branch_sites ==
++              std::vector<uint32_t>{0x80012340u} &&
++              manual_window_config.ws_cull_lower_value_sites ==
++              std::vector<uint32_t>{0x80012344u} &&
++              manual_window_config.ws_cull_upper_value_sites ==
++              std::vector<uint32_t>{0x80012348u} &&
++              manual_window_config.ws_cull_span_value_sites ==
++              std::vector<uint32_t>{0x8001234Cu},
++          "parser preserves manual screen-window site families");
++    auto changed_manual_window_config = manual_window_config;
++    changed_manual_window_config.ws_cull_span_value_sites.push_back(
++        0x80012350u);
++    check(PSXRecompV4::overlay_codegen_config_hash(manual_window_config) !=
++              PSXRecompV4::overlay_codegen_config_hash(
++                  changed_manual_window_config),
++          "manual screen-window sites change overlay cache identity");
++
+     const auto vxrange = write_config(root, "vxrange", R"toml(
+ [widescreen.cull]
+ vxrange_sites = ["0x80012340"]
+@@ -324,6 +350,65 @@
+     check_throws([&] { (void)PSXRecompV4::load_game_config(bad_angle); },
+                  "expected must be ADDI/ADDIU rt,zero,imm",
+                  "parser rejects non-constant terrain-angle instructions");
++
++    const auto yaw_cone = write_config(root, "yaw-cone", R"toml(
++[[widescreen.cull.yaw_cone]]
++address = "0x80040FE8"
++expected = "0x24710020"
++full_turn = 256
++
++[[widescreen.cull.yaw_cone]]
++address = "0x80040FF0"
++expected = "0x2472FFE0"
++full_turn = 256
++
++[[widescreen.cull.horizontal_slt]]
++address = "0x8003B8EC"
++expected = "0x0067102A"
++)toml");
++    const auto yaw_cone_config = PSXRecompV4::load_game_config(yaw_cone);
++    check(yaw_cone_config.ws_cull_yaw_cone_sites.size() == 2 &&
++              yaw_cone_config.ws_cull_yaw_cone_sites[0].address ==
++                  0x80040FE8u &&
++              yaw_cone_config.ws_cull_yaw_cone_sites[0].expected ==
++                  0x24710020u &&
++              yaw_cone_config.ws_cull_yaw_cone_sites[0].full_turn == 256u &&
++              yaw_cone_config.ws_cull_yaw_cone_sites[1].expected ==
++                  0x2472FFE0u,
++          "parser preserves signed wrapping-yaw cone sites");
++    check(yaw_cone_config.ws_cull_horizontal_slt_sites.size() == 1 &&
++              yaw_cone_config.ws_cull_horizontal_slt_sites[0].address ==
++                  0x8003B8ECu &&
++              yaw_cone_config.ws_cull_horizontal_slt_sites[0].expected ==
++                  0x0067102Au,
++          "parser preserves signed horizontal side-plane sites");
++    auto changed_yaw_cone_config = yaw_cone_config;
++    changed_yaw_cone_config.ws_cull_yaw_cone_sites[0].full_turn = 512u;
++    check(PSXRecompV4::overlay_codegen_config_hash(yaw_cone_config) !=
++              PSXRecompV4::overlay_codegen_config_hash(
++                  changed_yaw_cone_config),
++          "yaw-cone metadata changes overlay cache identity");
++
++    const auto bad_yaw_cone = write_config(root, "yaw-cone-bad", R"toml(
++[[widescreen.cull.yaw_cone]]
++address = "0x80040FE8"
++expected = "0x24110020"
++full_turn = 256
++)toml");
++    check_throws([&] { (void)PSXRecompV4::load_game_config(bad_yaw_cone); },
++                 "rs != zero",
++                 "parser rejects yaw-cone constants without a live base yaw");
++
++    const auto bad_horizontal_slt = write_config(
++        root, "horizontal-slt-bad", R"toml(
++[[widescreen.cull.horizontal_slt]]
++address = "0x8003B8EC"
++expected = "0x0067102B"
++)toml");
++    check_throws(
++        [&] { (void)PSXRecompV4::load_game_config(bad_horizontal_slt); },
++        "signed register-register SLT",
++        "parser rejects unsigned horizontal side-plane compares");
+ 
+     const auto aspect_cone = write_config(root, "aspect-cone", R"toml(
+ [widescreen.cull.aspect_cone]
+@@ -622,6 +707,67 @@
+     check(overlay_mismatch.find("ws cull negsub") == std::string::npos,
+           "overlay nonmatching negsub variant remains unchanged");
+ 
++    PSXRecomp::CodeGenConfig cpu_projection_config;
++    cpu_projection_config.ws_backdrop_x_sites.insert(0x80010000u);
++    const std::string cpu_projection = generate_first_instruction(
++        0x248200A0u, {}, false, cpu_projection_config); // addiu v0,a0,160
++    check(cpu_projection.find(
++              "psx_ws_project_x((int32_t)(cpu->gpr[4] + (uint32_t)160))") !=
++              std::string::npos,
++          "codegen squashes exact CPU-projected screen-X sites");
++
++    const std::string cpu_projection_overlay_mismatch =
++        generate_first_instruction(
++            0x288200A0u, {}, true, cpu_projection_config); // slti at same VA
++    check(cpu_projection_overlay_mismatch.find("psx_ws_project_x") ==
++              std::string::npos,
++          "overlay nonmatching CPU-projection variant remains unchanged");
++
++    PSXRecomp::CodeGenConfig lower_branch_config;
++    lower_branch_config.ws_cull_lower_branch_sites.insert(0x80010000u);
++    const std::string lower_bgez = generate_first_instruction(
++        0x04810002u, {}, false, lower_branch_config); // bgez a0,+2
++    check(lower_bgez.find(
++              "(int32_t)cpu->gpr[4] >= -psx_ws_x_margin()") !=
++              std::string::npos,
++          "codegen widens a manual bgez lower screen edge");
++    const std::string lower_blez = generate_first_instruction(
++        0x18800002u, {}, false, lower_branch_config); // blez a0,+2
++    check(lower_blez.find(
++              "(int32_t)cpu->gpr[4] <= -psx_ws_x_margin()") !=
++              std::string::npos,
++          "codegen preserves manual lower-edge branch sense");
++
++    PSXRecomp::CodeGenConfig lower_value_config;
++    lower_value_config.ws_cull_lower_value_sites.insert(0x80010000u);
++    const std::string lower_zero = generate_first_instruction(
++        0x00001021u, {}, false, lower_value_config); // addu v0,zero,zero
++    check(lower_zero.find("psx_ws_cull_lower_value(0)") !=
++              std::string::npos,
++          "codegen widens a register lower clamp");
++    const std::string lower_store = generate_first_instruction(
++        0xAFA0002Cu, {}, false, lower_value_config); // sw zero,44(sp)
++    check(lower_store.find("cpu->write_word(cpu->gpr[29] + 44, "
++                           "(uint32_t)psx_ws_cull_lower_value(0))") !=
++              std::string::npos,
++          "codegen widens a stored lower clamp");
++
++    PSXRecomp::CodeGenConfig upper_value_config;
++    upper_value_config.ws_cull_upper_value_sites.insert(0x80010000u);
++    const std::string upper_value = generate_first_instruction(
++        0x34020140u, {}, false, upper_value_config); // ori v0,zero,320
++    check(upper_value.find("psx_ws_cull_upper_value(320)") !=
++              std::string::npos,
++          "codegen widens a manual upper bound constant");
++
++    PSXRecomp::CodeGenConfig span_value_config;
++    span_value_config.ws_cull_span_value_sites.insert(0x80010000u);
++    const std::string span_value = generate_first_instruction(
++        0x34020140u, {}, false, span_value_config); // packed [0,320]
++    check(span_value.find("psx_ws_cull_span_value(0x00000140u)") !=
++              std::string::npos,
++          "codegen widens both halves of a packed screen span");
++
+     PSXRecomp::CodeGenConfig vxrange_config;
+     vxrange_config.ws_cull_vxrange_sites.insert(0x80010000u);
+     const std::string vxrange = generate_first_instruction(
+@@ -747,6 +893,37 @@
+     check(angle_overlay_mismatch.find("psx_ws_angle_widen") ==
+               std::string::npos,
+           "overlay full-word mismatch leaves terrain angle unchanged");
++
++    PSXRecomp::CodeGenConfig yaw_config;
++    yaw_config.ws_cull_yaw_cone_sites.push_back(
++        {0x80010000u, 0x24710020u, 256u});
++    const std::string yaw = generate_first_instruction(
++        0x24710020u, {}, false, yaw_config);
++    check(yaw.find("cpu->gpr[17] = cpu->gpr[3] + (uint32_t)"
++                   "psx_ws_yaw_cone_offset(32, 256u)") !=
++              std::string::npos,
++          "codegen emits aspect-scaled wrapping-yaw offset");
++    const std::string yaw_overlay_mismatch = generate_first_instruction(
++        0x2471001Fu, {}, true, yaw_config);
++    check(yaw_overlay_mismatch.find("psx_ws_yaw_cone_offset") ==
++              std::string::npos,
++          "overlay full-word mismatch leaves yaw cone unchanged");
++
++    PSXRecomp::CodeGenConfig horizontal_slt_config;
++    horizontal_slt_config.ws_cull_horizontal_slt_sites.push_back(
++        {0x80010000u, 0x0067102Au});
++    const std::string horizontal_slt = generate_first_instruction(
++        0x0067102Au, {}, false, horizontal_slt_config);
++    check(horizontal_slt.find(
++              "cpu->gpr[2] = psx_ws_horizontal_slt(cpu->gpr[3], "
++              "cpu->gpr[7])") != std::string::npos,
++          "codegen emits signed camera-horizontal side-plane helper");
++    const std::string horizontal_slt_overlay_mismatch =
++        generate_first_instruction(
++            0x0067102Bu, {}, true, horizontal_slt_config);
++    check(horizontal_slt_overlay_mismatch.find("psx_ws_horizontal_slt") ==
++              std::string::npos,
++          "overlay full-word mismatch leaves horizontal side plane unchanged");
+ 
+     PSXRecomp::CodeGenConfig aspect_config;
+     aspect_config.ws_aspect_cone.sites.push_back(

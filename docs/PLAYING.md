@@ -77,6 +77,9 @@ are enabled initially. Vertical mouse look is experimental and starts off;
 enable it in **Settings → Controls** if desired.
 **Smooth mouse turning** in the same tab turns the picture between the game's
 256 heading steps. It requires captured mouse aim and exact geometry.
+A setting shows its description under the pointer, the same one as in the
+launcher. A setting that needs another one stays greyed until that one is on.
+In-between frames that are on can still be switched off.
 
 **Settings → Enhancements** offers 1x–8x resolution, widescreen options,
 HUD size for widescreen, and 60 FPS gameplay and in-between frames. Both

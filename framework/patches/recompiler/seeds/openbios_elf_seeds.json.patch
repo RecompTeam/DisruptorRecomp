@@ -1,0 +1,25 @@
+diff --git a/recompiler/seeds/openbios_elf_seeds.json b/recompiler/seeds/openbios_elf_seeds.json
+index 32c77f16e016ecfa8c96e6a295fb5e8892371ffd..cb55a0042829b79c3c5e4d639139d10386d181d1 100644
+--- a/recompiler/seeds/openbios_elf_seeds.json
++++ b/recompiler/seeds/openbios_elf_seeds.json
+@@ -1,7 +1,7 @@
+ {
+   "schema": "psxrecomp phase2 seeds",
+   "source": "gen_bios_seeds_from_elf.py over openbios.elf, shell.elf + 5 empirical seeds from openbios_dispatch_miss.json",
+-  "seed_count": 646,
++  "seed_count": 647,
+   "seeds": [
+     {
+       "address": "0xBFC00000",
+@@ -1429,6 +1429,11 @@
+       "rationale": "ELF STT_FUNC symbol from openbios.elf"
+     },
+     {
++      "address": "0xBFC095F8",
++      "label": "data_after_osDbgPrintf",
++      "rationale": "verified exclusive end of osDbgPrintf; prevents unconditional-branch fallthrough analysis from entering adjacent data"
++    },
++    {
+       "address": "0xBFC0A500",
+       "label": "elf_entry_shell_elf",
+       "rationale": "ELF entry point (e_entry) of shell.elf"

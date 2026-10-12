@@ -1,6 +1,6 @@
 #include "startup_log.h"
 
-#include <windows.h>
+#include "launcher_settings.h"
 
 #include <algorithm>
 #include <fstream>
@@ -10,14 +10,6 @@ namespace fs = std::filesystem;
 namespace disruptor::launcher {
 namespace {
 constexpr std::streamoff most_bytes = 16384;
-
-// Bytes that are not UTF-8 come out as U+FFFD: a log in another encoding is still shown.
-std::wstring decode(const std::string& text) {
-    const int size = MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0);
-    std::wstring result(static_cast<size_t>(std::max(size, 0)), L'\0');
-    if (size > 0) MultiByteToWideChar(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), result.data(), size);
-    return result;
-}
 } // namespace
 
 std::wstring log_tail(const fs::path& log, size_t lines) {
@@ -43,7 +35,7 @@ std::wstring log_tail(const fs::path& log, size_t lines) {
     }
     std::string joined;
     for (auto line = kept.rbegin(); line != kept.rend(); ++line) joined += *line + "\r\n";
-    return decode(joined);
+    return wide(joined);
 }
 
 } // namespace disruptor::launcher

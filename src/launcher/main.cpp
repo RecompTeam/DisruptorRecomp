@@ -114,7 +114,13 @@ std::optional<fs::path> pick_image(HWND owner, const wchar_t* title) {
 
 struct Update { std::wstring status; unsigned percent; };
 struct Placed { HWND window; int x, y, width, height; bool heading; };
-struct Row { const Option* option; int order = 0; HWND label = nullptr, control = nullptr, value = nullptr; };
+struct Row {
+    const Option* option;
+    Page page;
+    int order = 0;
+    std::wstring hint;
+    HWND label = nullptr, control = nullptr, value = nullptr;
+};
 
 struct App {
     fs::path root;
@@ -273,10 +279,10 @@ struct App {
             }
             const bool on = editable() && settings.applies(option);
             const int slot = row.order - first;
-            const bool here = static_cast<int>(option.page) == page && slot >= 0 && slot < page_slots;
+            const bool here = static_cast<int>(row.page) == page && slot >= 0 && slot < page_slots;
             if (here) put_row(row, slot);
             const int shown = here ? SW_SHOW : SW_HIDE;
-            if (here) tip_of(slot, option.hint);
+            if (here) tip_of(slot, row.hint.c_str());
             for (HWND part : {row.label, row.control, row.value}) {
                 if (!part) continue;
                 EnableWindow(part, on);
@@ -413,20 +419,22 @@ void create_controls(App& app) {
     }
     std::vector<int> rows_on_page(page_labels().size(), 0);
     index = 0;
-    for (const auto& option : options()) {
-        const int order = rows_on_page[static_cast<int>(option.page)]++, y = 38 + 28 * std::min(order, page_slots - 1);
+    for (const auto& placement : layout()) {
+        const Option& option = *find_option(placement.key);
+        const int order = rows_on_page[static_cast<int>(placement.page)]++, y = 38 + 28 * std::min(order, page_slots - 1);
+        const std::wstring label = wide(option.label);
         const int id = option_base + index++;
-        Row row{&option, order};
+        Row row{&option, placement.page, order, wide(option.hint)};
         if (option.kind == Kind::toggle) {
-            row.control = app.add(app.tabs, L"BUTTON", option.label, BS_AUTOCHECKBOX | WS_TABSTOP, 0,
+            row.control = app.add(app.tabs, L"BUTTON", label.c_str(), BS_AUTOCHECKBOX | WS_TABSTOP, 0,
                                   18, y, 560, 24, id);
         } else {
-            row.label = app.add(app.tabs, L"STATIC", option.label, SS_LEFT, 0, 18, y + 4, 250, 20);
+            row.label = app.add(app.tabs, L"STATIC", label.c_str(), SS_LEFT, 0, 18, y + 4, 250, 20);
             if (option.kind == Kind::choice) {
                 row.control = app.add(app.tabs, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 0,
                                       280, y, 250, 240, id);
-                for (const wchar_t* label : option.choices)
-                    SendMessageW(row.control, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label));
+                for (const char* choice : option.choices)
+                    SendMessageW(row.control, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(wide(choice).c_str()));
             } else {
                 row.control = app.add(app.tabs, TRACKBAR_CLASSW, L"", TBS_HORZ | TBS_NOTICKS | WS_TABSTOP, 0,
                                       274, y, 256, 26, id);
@@ -443,7 +451,7 @@ void create_controls(App& app) {
     for (const auto& row : app.rows) {
         TTTOOLINFOW tool{sizeof(tool), TTF_IDISHWND | TTF_SUBCLASS, app.tabs};
         tool.uId = reinterpret_cast<UINT_PTR>(row.control);
-        tool.lpszText = const_cast<wchar_t*>(row.option->hint);
+        tool.lpszText = const_cast<wchar_t*>(row.hint.c_str());
         SendMessageW(app.tips, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&tool));
     }
     for (int slot = 0; slot < page_slots; ++slot) {

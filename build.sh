@@ -3,7 +3,7 @@ set -eu
 
 ROOT=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 FRAMEWORK="$ROOT/psxrecomp"
-PIN=$(tr -d '[:space:]' < "$ROOT/PSXRECOMP_PIN")
+PIN=$(tr -d '[:space:]' < "$ROOT/framework/PIN")
 
 for command in git cmake ctest python3; do
     command -v "$command" >/dev/null 2>&1 || {
@@ -11,6 +11,10 @@ for command in git cmake ctest python3; do
         exit 1
     }
 done
+python3 -c 'import sys; sys.exit(sys.version_info < (3, 10))' || {
+    echo "Python 3.10 or newer is required." >&2
+    exit 1
+}
 # DISRUPTOR_WITHOUT_GAME=1 is for a machine without the game: every source is
 # compiled, the runtime is not linked, and the tests that read no retail data run.
 WITHOUT_GAME="${DISRUPTOR_WITHOUT_GAME:-}"
@@ -24,8 +28,7 @@ if [ ! -d "$FRAMEWORK/.git" ]; then
 fi
 git -C "$FRAMEWORK" fetch --quiet origin "$PIN"
 git -C "$FRAMEWORK" checkout --detach "$PIN"
-python3 "$ROOT/tools/apply_framework_overlay.py" --framework "$FRAMEWORK"
-python3 "$ROOT/tools/patch_openbios_seeds.py" --framework "$FRAMEWORK"
+python3 "$ROOT/tools/framework.py" apply --framework "$FRAMEWORK"
 
 GENERATOR=""
 if command -v ninja >/dev/null 2>&1; then GENERATOR="-G Ninja"; fi
@@ -86,7 +89,7 @@ if [ -n "$WITHOUT_GAME" ]; then
     printf '%s\n' $OBJECTS $TESTS | xargs -n 100 ninja -C "$BUILD"
     ctest --test-dir "$BUILD" --output-on-failure --no-tests=error -LE retail
     # The retail contracts still check the sources when the image is not asked for.
-    for contract in tests/test_*_contract.py; do
+    for contract in tests/contracts/test_*_contract.py; do
         python3 -B "$contract"
     done
     echo "Built and tested without the game: the runtime was compiled and not linked."

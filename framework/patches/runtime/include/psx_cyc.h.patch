@@ -1,0 +1,30 @@
+diff --git a/runtime/include/psx_cyc.h b/runtime/include/psx_cyc.h
+index a7e79f81c443083143768c02fcc5ea201a0fc8c7..30ef6723fcd47aa8c7d74ba0a802e22f4f6f747c 100644
+--- a/runtime/include/psx_cyc.h
++++ b/runtime/include/psx_cyc.h
+@@ -66,11 +66,25 @@
+ }
+ #endif
+ 
++#if !defined(PSX_OVERLAY_DLL_BUILD)
++/* Enhancement-only guest CPU overclock: instruction cycles are charged at
++ * 1 / (1 << shift). Zero keeps the faithful cost. */
++extern uint32_t g_psx_cyc_overclock_shift;
++extern uint32_t g_psx_cyc_overclock_carry;
++#endif
++
+ static inline void psx_cyc_charge(uint32_t cycles) {
+     if (cycles == 0u) return;
+ #if defined(PSX_OVERLAY_DLL_BUILD)
+     psx_advance_cycles(cycles);
+ #else
++    if (g_psx_cyc_overclock_shift) {
++        const uint32_t total = g_psx_cyc_overclock_carry + cycles;
++        g_psx_cyc_overclock_carry =
++            total & ((1u << g_psx_cyc_overclock_shift) - 1u);
++        cycles = total >> g_psx_cyc_overclock_shift;
++        if (cycles == 0u) return;
++    }
+ #if defined(__GNUC__) || defined(__clang__)
+     if (__builtin_expect(g_ls_replay_active | g_event_step_conservative, 0)) {
+ #else

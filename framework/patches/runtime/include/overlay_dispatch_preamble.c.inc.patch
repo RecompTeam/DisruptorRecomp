@@ -1,0 +1,24 @@
+diff --git a/runtime/include/overlay_dispatch_preamble.c.inc b/runtime/include/overlay_dispatch_preamble.c.inc
+index 6cd4b10e4d8525813984ce8a136803e71f6ecb5b..ea2e5c7cb9190c84d87f9ac1d984760aab04c015 100644
+--- a/runtime/include/overlay_dispatch_preamble.c.inc
++++ b/runtime/include/overlay_dispatch_preamble.c.inc
+@@ -202,6 +202,19 @@
+ int psx_ws_cull_slti(uint32_t sx, uint32_t imm) {
+     return ((int32_t)sx < (int32_t)imm + psx_ws_x_margin()) ? 1 : 0;
+ }
++int32_t psx_ws_cull_lower_value(int32_t vanilla) {
++    return vanilla - psx_ws_x_margin();
++}
++int32_t psx_ws_cull_upper_value(int32_t vanilla) {
++    return vanilla + psx_ws_x_margin();
++}
++uint32_t psx_ws_cull_span_value(uint32_t vanilla) {
++    int32_t margin = psx_ws_x_margin();
++    int32_t left = (int32_t)(int16_t)(uint16_t)(vanilla >> 16);
++    uint32_t right = vanilla & 0xFFFFu;
++    return ((uint32_t)(uint16_t)(left - margin) << 16) |
++           (uint32_t)(uint16_t)((int32_t)right + margin);
++}
+ int psx_ws_cull_bltz(uint32_t v) {
+     return ((int32_t)v < -psx_ws_x_margin()) ? 1 : 0;
+ }

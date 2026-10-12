@@ -57,10 +57,10 @@ if [ "$PERSPECTIVE_TEXTURES" -eq 1 ]; then
 fi
 
 if [ "$MODERN_CONTROLS" -eq 1 ]; then
-    cp "$ROOT/keybinds-modern.ini" "$BUILD/keybinds.ini"
+    cp "$ROOT/config/keybinds-modern.ini" "$BUILD/keybinds.ini"
     echo "Modern controls enabled: WASD, LMB fire, RMB psionic, Space jump, E use."
 else
-    cp "$ROOT/keybinds-original.ini" "$BUILD/keybinds.ini"
+    cp "$ROOT/config/keybinds-original.ini" "$BUILD/keybinds.ini"
 fi
 
 GAME_CONFIG=game.toml

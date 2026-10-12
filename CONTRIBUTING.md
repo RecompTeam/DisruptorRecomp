@@ -4,16 +4,17 @@ Keep contributions source-only. Do not commit disc images, extracted game code
 or assets, generated translations, captured overlays, proprietary BIOS files,
 binaries, saves, captures, logs, credentials, or machine-specific paths.
 
-Edit project source, configuration, seeds, tests, or `psxrecomp-overlay/`, then
-regenerate locally. Every framework-overlay change must be listed in
-`PSXRECOMP_OVERLAY_FILES.txt`; do not hand-edit `generated/*.c` or include
+Edit project source, configuration, seeds, tests, or the framework checkout,
+then regenerate locally. Save a framework change with
+`python tools/framework.py refresh`, and list a newly changed file in
+`framework/FILES.txt` first. Do not hand-edit `generated/*.c` or include
 unrelated framework changes.
 
 Before submitting a change:
 
 - Run the relevant tests and review both the working diff and staged paths.
 - Keep experimental visual features optional.
-- Update [STATUS.md](STATUS.md) when behavior, verified coverage, or a known
+- Update [STATUS.md](docs/STATUS.md) when behavior, verified coverage, or a known
   limitation changes. Keep it focused on the current build.
 
 For bug reports, include the level, steps to reproduce, render scale/aspect,

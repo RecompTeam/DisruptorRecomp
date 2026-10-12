@@ -1,0 +1,495 @@
+diff --git a/recompiler/src/config_loader.cpp b/recompiler/src/config_loader.cpp
+index 246483fe90be378f8baf3e85671b692986823a8e..4fba08ff61a27a02f2f41e064aeba68d120e3f05 100644
+--- a/recompiler/src/config_loader.cpp
++++ b/recompiler/src/config_loader.cpp
+@@ -3,13 +3,27 @@
+ #include "config_loader.h"
+ 
+ #include <algorithm>
++#include <atomic>
+ #include <cctype>
++#include <chrono>
++#include <cmath>
+ #include <cstdio>
+ #include <fstream>
++#include <iomanip>
++#include <limits>
+ #include <set>
+ #include <stdexcept>
+ #include <string>
+ 
++#ifdef _WIN32
++#ifndef NOMINMAX
++#define NOMINMAX
++#endif
++#include <windows.h>
++#else
++#include <unistd.h>
++#endif
++
+ #include "bios_rom_alias.h"
+ #include "fmt/format.h"
+ #include "ps1_exe_parser.h"
+@@ -17,6 +31,14 @@
+ // toml11 is header-only.
+ #define TOML11_USE_UNRELEASED_TOML_FEATURES
+ #include "toml.hpp"
++
++#ifdef PSX_HAS_GAME_USER_SETTINGS
++namespace PSXRecompV4 {
++// Supplied by the game project: its own section of the user's settings file.
++void read_game_user_settings(const toml::value& doc, UserSettings& s);
++void write_game_user_settings(std::ostream& f, const UserSettings& s);
++}
++#endif
+ 
+ namespace PSXRecompV4 {
+ 
+@@ -64,6 +86,10 @@
+     h.words("cull_screen_x", c.ws_cull_screen_x_sites);
+     h.words("cull_slti", c.ws_cull_slti_sites);
+     h.words("cull_slti_lower", c.ws_cull_slti_lower_sites);
++    h.words("cull_lower_branch", c.ws_cull_lower_branch_sites);
++    h.words("cull_lower_value", c.ws_cull_lower_value_sites);
++    h.words("cull_upper_value", c.ws_cull_upper_value_sites);
++    h.words("cull_span_value", c.ws_cull_span_value_sites);
+     h.words("cull_bltz", c.ws_cull_bltz_sites);
+     h.words("cull_negsub", c.ws_cull_negsub_sites);
+     h.words("cull_vxrange", c.ws_cull_vxrange_sites);
+@@ -120,6 +146,36 @@
+     h.tag("cull_angle");
+     h.u32((uint32_t)angle_sites.size());
+     for (const auto& site : angle_sites) {
++        h.u32(site.address);
++        h.u32(site.expected);
++    }
++
++    std::vector<WidescreenYawConeSite> yaw_cone_sites =
++        c.ws_cull_yaw_cone_sites;
++    std::sort(yaw_cone_sites.begin(), yaw_cone_sites.end(),
++              [](const auto& a, const auto& b) {
++                  if (a.address != b.address) return a.address < b.address;
++                  if (a.expected != b.expected) return a.expected < b.expected;
++                  return a.full_turn < b.full_turn;
++              });
++    h.tag("cull_yaw_cone");
++    h.u32((uint32_t)yaw_cone_sites.size());
++    for (const auto& site : yaw_cone_sites) {
++        h.u32(site.address);
++        h.u32(site.expected);
++        h.u32(site.full_turn);
++    }
++
++    std::vector<WidescreenHorizontalSltSite> horizontal_slt_sites =
++        c.ws_cull_horizontal_slt_sites;
++    std::sort(horizontal_slt_sites.begin(), horizontal_slt_sites.end(),
++              [](const auto& a, const auto& b) {
++                  if (a.address != b.address) return a.address < b.address;
++                  return a.expected < b.expected;
++              });
++    h.tag("cull_horizontal_slt");
++    h.u32((uint32_t)horizontal_slt_sites.size());
++    for (const auto& site : horizontal_slt_sites) {
+         h.u32(site.address);
+         h.u32(site.expected);
+     }
+@@ -496,9 +552,9 @@
+         const toml::value& video = toml::find(cfg, "video");
+         if (video.contains("supersampling")) {
+             const auto n = toml::find<int64_t>(video, "supersampling");
+-            if (n < 1 || n > 4) {
++            if (n < 1 || n > 8) {
+                 throw std::runtime_error(fmt::format(
+-                    "[video] supersampling out of range (1..4): {}", n));
++                    "[video] supersampling out of range (1..8): {}", n));
+             }
+             rt.video_supersampling = static_cast<int>(n);
+         }
+@@ -1264,6 +1320,41 @@
+         for (const auto& a : arr)
+             mod_function_entry_funcs.push_back(
+                 parse_hex(a, "recompiler.mod_function_entry_funcs"));
++    }
++    std::vector<InstructionHook> instruction_hooks;
++    if (recomp.contains("instruction_hook")) {
++        for (const auto& item :
++             toml::find<toml::array>(recomp, "instruction_hook")) {
++            InstructionHook hook;
++            hook.callback = toml::find<std::string>(item, "callback");
++            const bool named = !hook.callback.empty() &&
++                !std::isdigit((unsigned char)hook.callback[0]) &&
++                std::all_of(hook.callback.begin(), hook.callback.end(),
++                    [](unsigned char c) { return std::isalnum(c) || c == '_'; });
++            if (!named)
++                throw std::runtime_error(fmt::format(
++                    "{}: [[recompiler.instruction_hook]] callback must be a "
++                    "C identifier", config_path.string()));
++            for (const auto& pair : toml::find<std::vector<std::vector<
++                     std::string>>>(item, "sites")) {
++                if (pair.size() != 2)
++                    throw std::runtime_error(fmt::format(
++                        "{}: [[recompiler.instruction_hook]] a site is an "
++                        "address and a word", config_path.string()));
++                InstructionHookSite site;
++                site.address = parse_hex(
++                    pair[0], "recompiler.instruction_hook.sites");
++                site.expected = parse_hex(
++                    pair[1], "recompiler.instruction_hook.sites");
++                if ((site.address & 3u) != 0)
++                    throw std::runtime_error(fmt::format(
++                        "{}: instruction hook address 0x{:08X} is not "
++                        "instruction-aligned",
++                        config_path.string(), site.address));
++                hook.sites.push_back(site);
++            }
++            instruction_hooks.push_back(std::move(hook));
++        }
+     }
+     std::vector<uint32_t> hot_funcs;
+     if (recomp.contains("hot_funcs")) {
+@@ -1451,6 +1542,10 @@
+     std::vector<uint32_t> ws_cull_screen_x_sites;
+     std::vector<uint32_t> ws_cull_slti_sites;
+     std::vector<uint32_t> ws_cull_slti_lower_sites;
++    std::vector<uint32_t> ws_cull_lower_branch_sites;
++    std::vector<uint32_t> ws_cull_lower_value_sites;
++    std::vector<uint32_t> ws_cull_upper_value_sites;
++    std::vector<uint32_t> ws_cull_span_value_sites;
+     std::vector<uint32_t> ws_cull_bltz_sites;
+     std::vector<uint32_t> ws_cull_negsub_sites;
+     std::vector<uint32_t> ws_cull_vxrange_sites;
+@@ -1459,6 +1554,9 @@
+     std::vector<uint32_t> ws_cull_xclip_load_sites;
+     std::vector<WidescreenCullKeepSite> ws_cull_keep_sites;
+     std::vector<WidescreenAngleSite> ws_cull_angle_sites;
++    std::vector<WidescreenYawConeSite> ws_cull_yaw_cone_sites;
++    std::vector<WidescreenHorizontalSltSite>
++        ws_cull_horizontal_slt_sites;
+     WidescreenAspectConeConfig ws_aspect_cone;
+     int ws_cull_guard_pixels = 0;
+     int ws_cull_activation_guard_pixels = 0;
+@@ -1484,6 +1582,10 @@
+             load_sites("screen_x_sites", ws_cull_screen_x_sites);
+             load_sites("slti_sites",  ws_cull_slti_sites);
+             load_sites("slti_lower_sites", ws_cull_slti_lower_sites);
++            load_sites("lower_branch_sites", ws_cull_lower_branch_sites);
++            load_sites("lower_value_sites", ws_cull_lower_value_sites);
++            load_sites("upper_value_sites", ws_cull_upper_value_sites);
++            load_sites("span_value_sites", ws_cull_span_value_sites);
+             load_sites("bltz_sites",  ws_cull_bltz_sites);
+             load_sites("negsub_sites", ws_cull_negsub_sites);
+             load_sites("vxrange_sites", ws_cull_vxrange_sites);
+@@ -1552,6 +1654,85 @@
+                             "{}: duplicate cull-angle address 0x{:08X}",
+                             config_path.string(), site.address));
+                     ws_cull_angle_sites.push_back(site);
++                }
++            }
++            if (cull.contains("yaw_cone")) {
++                std::set<uint32_t> seen;
++                for (const auto& item :
++                     toml::find<toml::array>(cull, "yaw_cone")) {
++                    WidescreenYawConeSite site;
++                    site.address = parse_hex(
++                        toml::find<std::string>(item, "address"),
++                        "widescreen.cull.yaw_cone.address");
++                    site.expected = parse_hex(
++                        toml::find<std::string>(item, "expected"),
++                        "widescreen.cull.yaw_cone.expected");
++                    const int64_t full_turn =
++                        toml::find<int64_t>(item, "full_turn");
++                    if (full_turn < 16 || full_turn > 65536 ||
++                        (full_turn & 3) != 0) {
++                        throw std::runtime_error(fmt::format(
++                            "{}: [[widescreen.cull.yaw_cone]] full_turn "
++                            "must be a multiple of four in [16, 65536]",
++                            config_path.string()));
++                    }
++                    site.full_turn = (uint32_t)full_turn;
++                    const uint32_t op = site.expected >> 26;
++                    const uint32_t rs = (site.expected >> 21) & 31u;
++                    const int32_t imm =
++                        (int16_t)(site.expected & 0xFFFFu);
++                    const int32_t magnitude = imm < 0 ? -imm : imm;
++                    if ((op != 0x08u && op != 0x09u) || rs == 0u ||
++                        imm == 0 ||
++                        magnitude >= (int32_t)(site.full_turn / 4u)) {
++                        throw std::runtime_error(fmt::format(
++                            "{}: [[widescreen.cull.yaw_cone]] expected must "
++                            "be ADDI/ADDIU rt,rs,+/-half_fov with rs != zero "
++                            "and |half_fov| < full_turn/4",
++                            config_path.string()));
++                    }
++                    if ((site.address & 3u) != 0)
++                        throw std::runtime_error(fmt::format(
++                            "{}: yaw-cone address 0x{:08X} is not "
++                            "instruction-aligned",
++                            config_path.string(), site.address));
++                    if (!seen.insert(site.address & 0x1FFFFFFFu).second)
++                        throw std::runtime_error(fmt::format(
++                            "{}: duplicate yaw-cone address 0x{:08X}",
++                            config_path.string(), site.address));
++                    ws_cull_yaw_cone_sites.push_back(site);
++                }
++            }
++            if (cull.contains("horizontal_slt")) {
++                std::set<uint32_t> seen;
++                for (const auto& item :
++                     toml::find<toml::array>(cull, "horizontal_slt")) {
++                    WidescreenHorizontalSltSite site;
++                    site.address = parse_hex(
++                        toml::find<std::string>(item, "address"),
++                        "widescreen.cull.horizontal_slt.address");
++                    site.expected = parse_hex(
++                        toml::find<std::string>(item, "expected"),
++                        "widescreen.cull.horizontal_slt.expected");
++                    const uint32_t op = site.expected >> 26;
++                    const uint32_t fn = site.expected & 0x3Fu;
++                    const uint32_t shamt = (site.expected >> 6) & 31u;
++                    if (op != 0u || fn != 0x2Au || shamt != 0u) {
++                        throw std::runtime_error(fmt::format(
++                            "{}: [[widescreen.cull.horizontal_slt]] expected "
++                            "must be a signed register-register SLT",
++                            config_path.string()));
++                    }
++                    if ((site.address & 3u) != 0)
++                        throw std::runtime_error(fmt::format(
++                            "{}: horizontal-SLT address 0x{:08X} is not "
++                            "instruction-aligned",
++                            config_path.string(), site.address));
++                    if (!seen.insert(site.address & 0x1FFFFFFFu).second)
++                        throw std::runtime_error(fmt::format(
++                            "{}: duplicate horizontal-SLT address 0x{:08X}",
++                            config_path.string(), site.address));
++                    ws_cull_horizontal_slt_sites.push_back(site);
+                 }
+             }
+             if (cull.contains("aspect_cone")) {
+@@ -1886,6 +2067,7 @@
+         /*ws_auto_ui_squash*/      ws_auto_ui_squash,
+         /*data_shard_funcs*/      data_shard_funcs,
+         /*mod_function_entry_funcs*/ mod_function_entry_funcs,
++        /*instruction_hooks*/     instruction_hooks,
+         /*hot_funcs*/             hot_funcs,
+         /*vsync_query_func*/      vsync_query_func,
+         /*vsync_counter_addr*/    vsync_counter_addr,
+@@ -1901,6 +2083,10 @@
+         /*ws_cull_screen_x_sites*/ ws_cull_screen_x_sites,
+         /*ws_cull_slti_sites*/    ws_cull_slti_sites,
+         /*ws_cull_slti_lower_sites*/ ws_cull_slti_lower_sites,
++        /*ws_cull_lower_branch_sites*/ ws_cull_lower_branch_sites,
++        /*ws_cull_lower_value_sites*/ ws_cull_lower_value_sites,
++        /*ws_cull_upper_value_sites*/ ws_cull_upper_value_sites,
++        /*ws_cull_span_value_sites*/ ws_cull_span_value_sites,
+         /*ws_cull_bltz_sites*/    ws_cull_bltz_sites,
+         /*ws_cull_negsub_sites*/  ws_cull_negsub_sites,
+         /*ws_cull_vxrange_sites*/ ws_cull_vxrange_sites,
+@@ -1909,6 +2095,8 @@
+         /*ws_cull_xclip_load_sites*/ ws_cull_xclip_load_sites,
+         /*ws_cull_keep_sites*/    ws_cull_keep_sites,
+         /*ws_cull_angle_sites*/   ws_cull_angle_sites,
++        /*ws_cull_yaw_cone_sites*/ ws_cull_yaw_cone_sites,
++        /*ws_cull_horizontal_slt_sites*/ ws_cull_horizontal_slt_sites,
+         /*ws_aspect_cone*/         ws_aspect_cone,
+         /*ws_cull_guard_pixels*/  ws_cull_guard_pixels,
+         /*ws_cull_activation_guard_pixels*/ ws_cull_activation_guard_pixels,
+@@ -1995,7 +2183,7 @@
+     return go;
+ }
+ 
+-// ---- UserSettings (settings.toml) — launcher-written override layer ----
++// ---- UserSettings (settings.toml) — user-interface-written override layer ----
+ 
+ UserSettings load_user_settings(const fs::path& path) {
+     UserSettings s;
+@@ -2004,7 +2192,10 @@
+ 
+     toml::value doc;
+     try {
+-        doc = toml::parse(path.string());
++        // Opened by its wide name: path.string() is UTF-8 under MinGW, which the narrow open reads as the ANSI page.
++        std::ifstream file(path, std::ios::binary);
++        if (!file) throw std::runtime_error("settings.toml could not be opened");
++        doc = toml::parse(file, "settings.toml");
+     } catch (const std::exception&) {
+         // Malformed file: fall back to all-defaults rather than refuse to boot,
+         // but tell the caller so the user hears about it (and so the file can
+@@ -2026,7 +2217,7 @@
+         });
+         if (v.contains("supersampling")) try_get([&]{
+             const auto n = toml::find<int64_t>(v, "supersampling");
+-            if (n >= 1 && n <= 4) { s.supersampling = (int)n; s.has_supersampling = true; }
++            if (n >= 1 && n <= 8) { s.supersampling = (int)n; s.has_supersampling = true; }
+         });
+         if (v.contains("window_width")) try_get([&]{
+             const auto n = toml::find<int64_t>(v, "window_width");
+@@ -2087,8 +2278,16 @@
+         });
+         if (v.contains("frame_interpolation_fps")) try_get([&]{
+             s.frame_interpolation_fps = toml::find<int>(v, "frame_interpolation_fps");
+-            if (s.frame_interpolation_fps == 0 || s.frame_interpolation_fps >= 90)
++            if (s.frame_interpolation_fps == 0 ||
++                (s.frame_interpolation_fps >= 30 && s.frame_interpolation_fps <= 1000))
+                 s.has_frame_interpolation_fps = true;
++        });
++        if (v.contains("frame_interpolation_blend")) try_get([&]{
++            const auto n = toml::find<int64_t>(v, "frame_interpolation_blend");
++            if (n == 0 || n == 1 || n == 2) {
++                s.frame_interpolation_blend = static_cast<int>(n);
++                s.has_frame_interpolation_blend = true;
++            }
+         });
+         if (v.contains("aspect_ratio")) try_get([&]{
+             const auto m = toml::find<std::string>(v, "aspect_ratio");
+@@ -2106,6 +2305,17 @@
+         const toml::value& a = toml::find(doc, "audio");
+         if (a.contains("spu_hq")) try_get([&]{
+             s.spu_hq = toml::find<bool>(a, "spu_hq"); s.has_spu_hq = true;
++        });
++        if (a.contains("master_volume")) try_get([&]{
++            const auto n = toml::find<int64_t>(a, "master_volume");
++            if (n >= 0 && n <= 100) {
++                s.master_volume = static_cast<int>(n);
++                s.has_master_volume = true;
++            }
++        });
++        if (a.contains("muted")) try_get([&]{
++            s.audio_muted = toml::find<bool>(a, "muted");
++            s.has_audio_muted = true;
+         });
+     }
+     if (doc.contains("launcher")) {
+@@ -2230,15 +2440,70 @@
+             if (n >= 0 && n <= 32767) { s.deadzone = (int)n; s.has_deadzone = true; }
+         });
+     }
++#ifdef PSX_HAS_GAME_USER_SETTINGS
++    read_game_user_settings(doc, s);
++#endif
+     return s;
+ }
++
++namespace {
++
++fs::path user_settings_temp_path(const fs::path& destination) {
++    static std::atomic<uint64_t> sequence{0};
++#ifdef _WIN32
++    const auto process_id = static_cast<uint64_t>(::GetCurrentProcessId());
++#else
++    const auto process_id = static_cast<uint64_t>(::getpid());
++#endif
++    const auto tick = static_cast<uint64_t>(
++        std::chrono::steady_clock::now().time_since_epoch().count());
++
++    fs::path temporary = destination;
++    temporary += fmt::format(".tmp.{}.{}.{}", process_id, tick,
++                             sequence.fetch_add(1, std::memory_order_relaxed));
++    return temporary;
++}
++
++bool atomic_replace_user_settings(const fs::path& temporary,
++                                  const fs::path& destination) {
++#ifdef _WIN32
++    // A reader or antivirus scanner may briefly deny replacement after a save.
++    // Keep the old file intact and allow up to 500 ms for that handle to close.
++    for (unsigned attempt = 0; ; ++attempt) {
++        if (::MoveFileExW(temporary.c_str(), destination.c_str(),
++                         MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) return true;
++        const DWORD error = ::GetLastError();
++        const bool transient = error == ERROR_ACCESS_DENIED ||
++                               error == ERROR_SHARING_VIOLATION ||
++                               error == ERROR_LOCK_VIOLATION;
++        const DWORD attributes = ::GetFileAttributesW(destination.c_str());
++        const bool blocked = attributes != INVALID_FILE_ATTRIBUTES &&
++                             (attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_READONLY));
++        if (!transient || blocked || attempt == 20) {
++            ::SetLastError(error);
++            return false;
++        }
++        ::Sleep(25);
++    }
++#else
++    return std::rename(temporary.c_str(), destination.c_str()) == 0;
++#endif
++}
++
++void remove_user_settings_temp(const fs::path& temporary) {
++    std::error_code ignored;
++    fs::remove(temporary, ignored);
++}
++
++} // namespace
+ 
+ bool save_user_settings(const fs::path& path, const UserSettings& s) {
+     std::error_code ec;
+     if (!path.parent_path().empty())
+         fs::create_directories(path.parent_path(), ec);  // best-effort
+ 
+-    std::ofstream f(path, std::ios::trunc);
++    const fs::path temporary = user_settings_temp_path(path);
++    std::ofstream f(temporary, std::ios::trunc);
+     if (!f.is_open()) return false;
+ 
+     // TOML strings use forward slashes so backslash escaping is never an issue.
+@@ -2247,7 +2512,7 @@
+         return str;
+     };
+ 
+-    f << "# psxrecomp user settings - written by the launcher. Safe to hand-edit.\n";
++    f << "# psxrecomp user settings - written by settings UIs. Safe to hand-edit.\n";
+     f << "# Overrides the bundled game.toml; the command line overrides this file.\n\n";
+ 
+     f << "[video]\n";
+@@ -2287,6 +2552,11 @@
+         f << "frame_interpolation = " << (s.frame_interpolation ? "true" : "false") << "\n";
+     if (s.has_frame_interpolation_fps)
+         f << "frame_interpolation_fps = " << s.frame_interpolation_fps << "\n";
++    if (s.has_frame_interpolation_blend &&
++        (s.frame_interpolation_blend == 0 ||
++         s.frame_interpolation_blend == 1 ||
++         s.frame_interpolation_blend == 2))
++        f << "frame_interpolation_blend = " << s.frame_interpolation_blend << "\n";
+     if (s.has_aspect_ratio)
+         f << "aspect_ratio      = \"" << s.aspect_num << ":" << s.aspect_den << "\"\n";
+     if (s.has_adaptive_view)
+@@ -2294,6 +2564,10 @@
+     f << "\n[audio]\n";
+     if (s.has_spu_hq)
+         f << "spu_hq = " << (s.spu_hq ? "true" : "false") << "\n";
++    if (s.has_master_volume)
++        f << "master_volume = " << s.master_volume << "\n";
++    if (s.has_audio_muted)
++        f << "muted = " << (s.audio_muted ? "true" : "false") << "\n";
+     if (s.has_skip_launcher)
+         f << "\n[launcher]\nskip_launcher = " << (s.skip_launcher ? "true" : "false") << "\n";
+     if ((s.has_netplay_player_name && !s.netplay_player_name.empty()) ||
+@@ -2353,7 +2627,28 @@
+             f << "extra_late = " << s.parappa_timing_extra_late << "\n";
+     }
+ 
+-    return f.good();
++#ifdef PSX_HAS_GAME_USER_SETTINGS
++    write_game_user_settings(f, s);
++#endif
++
++    f.flush();
++    const bool write_ok = f.good();
++    f.close();
++    if (!write_ok || f.fail()) {
++        remove_user_settings_temp(temporary);
++        return false;
++    }
++    if (!atomic_replace_user_settings(temporary, path)) {
++#ifdef _WIN32
++        const DWORD error = ::GetLastError();
++#endif
++        remove_user_settings_temp(temporary);
++#ifdef _WIN32
++        ::SetLastError(error);
++#endif
++        return false;
++    }
++    return true;
+ }
+ 
+ } // namespace PSXRecompV4

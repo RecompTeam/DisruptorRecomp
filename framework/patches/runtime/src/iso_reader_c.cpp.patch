@@ -1,0 +1,102 @@
+diff --git a/runtime/src/iso_reader_c.cpp b/runtime/src/iso_reader_c.cpp
+index 13c0beb274a76941b174bd8083f89c92266cc403..a3fd420284513192ff70b4446bcb50e9b1adf02c 100644
+--- a/runtime/src/iso_reader_c.cpp
++++ b/runtime/src/iso_reader_c.cpp
+@@ -4,9 +4,25 @@
+  * Provides iso_open() / iso_read_sector() / iso_close() for use by cdrom.c
+  */
+ 
++#include "iso_overlay.h"
+ #include "iso_reader.h"
+ #include "mod_runtime.h"
++#include <algorithm>
+ #include <cstdio>
++#include <cstring>
++#include <vector>
++
++namespace {
++
++const PsxIsoOverlay* g_overlay = nullptr;
++std::vector<void*> g_plain;
++void* g_game_disc = nullptr;
++
++bool overlaid(void* handle) {
++    return g_overlay && std::find(g_plain.begin(), g_plain.end(), handle) == g_plain.end();
++}
++
++}  // namespace
+ 
+ extern "C" {
+ 
+@@ -16,14 +32,39 @@
+         delete reader;
+         return nullptr;
+     }
++    g_game_disc = reader;
+     return reader;
++}
++
++void iso_set_overlay(const PsxIsoOverlay* overlay) { g_overlay = overlay; }
++
++void* iso_open_plain(const char* path) {
++    void* const game = g_game_disc;
++    void* handle = iso_open(path);
++    g_game_disc = game;
++    if (handle) g_plain.push_back(handle);
++    return handle;
++}
++
++void* iso_game_disc(void) { return g_game_disc; }
++
++int iso_read_raw_sector_plain(void* handle, uint32_t lba, uint8_t* buffer) {
++    return handle && static_cast<PS1::ISOReader*>(handle)->ReadRawSector(lba, buffer) ? 1 : 0;
++}
++
++uint32_t iso_sector_count_plain(void* handle) {
++    return handle ? static_cast<PS1::ISOReader*>(handle)->GetSectorCount() : 0;
+ }
+ 
+ int iso_read_sector(void* handle, uint32_t lba, uint8_t* buffer, int size) {
+     if (!handle) return 0;
+     auto* reader = static_cast<PS1::ISOReader*>(handle);
+     (void)size; /* ReadSector always reads 2048 bytes */
+-    if (!reader->ReadSector(lba, buffer)) return 0;
++    uint8_t raw[2352];
++    const int stood_in = overlaid(handle) && g_overlay->read ? g_overlay->read(handle, lba, raw) : 0;
++    if (stood_in < 0) return 0;
++    if (stood_in > 0) std::memcpy(buffer, raw + 24, 2048);
++    else if (!reader->ReadSector(lba, buffer)) return 0;
+     mod_runtime_patch_disc_sector(lba, 0, buffer, 2048);
+     return 1;
+ }
+@@ -31,15 +72,17 @@
+ int iso_read_raw_sector(void* handle, uint32_t lba, uint8_t* buffer, int size) {
+     if (!handle || size < 2352) return 0;
+     auto* reader = static_cast<PS1::ISOReader*>(handle);
+-    if (!reader->ReadRawSector(lba, buffer)) return 0;
++    const int stood_in = overlaid(handle) && g_overlay->read ? g_overlay->read(handle, lba, buffer) : 0;
++    if (stood_in < 0) return 0;
++    if (stood_in == 0 && !reader->ReadRawSector(lba, buffer)) return 0;
+     mod_runtime_patch_disc_sector(lba, 1, buffer, 2352);
+     return 1;
+ }
+ 
+ uint32_t iso_sector_count(void* handle) {
+     if (!handle) return 0;
+-    auto* reader = static_cast<PS1::ISOReader*>(handle);
+-    return reader->GetSectorCount();
++    const uint32_t stood_in = overlaid(handle) && g_overlay->sectors ? g_overlay->sectors(handle) : 0;
++    return stood_in ? stood_in : iso_sector_count_plain(handle);
+ }
+ 
+ /* CD-track TOC accessors (multi-track / CD-DA support). track is 1-based. */
+@@ -65,6 +108,9 @@
+ 
+ void iso_close(void* handle) {
+     if (!handle) return;
++    if (overlaid(handle) && g_overlay->closed) g_overlay->closed(handle);
++    if (handle == g_game_disc) g_game_disc = nullptr;
++    g_plain.erase(std::remove(g_plain.begin(), g_plain.end(), handle), g_plain.end());
+     auto* reader = static_cast<PS1::ISOReader*>(handle);
+     reader->Close();
+     delete reader;
