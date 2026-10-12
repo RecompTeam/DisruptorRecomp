@@ -99,27 +99,64 @@ require(
     "only an axis-aligned quad wholly inside a widget may be mapped, corner by corner",
 )
 
+held = body(gpu, "static int ws_hud_held_rect(int32_t *x, int w) {")
+scale_header = read("psxrecomp/runtime/include/gpu_ws_hud_scale.h")
+require(
+    "    if (!ws_hud.in_hud_layer || w <= 0 || ws_hud_held_page_x < 0 || texpage_x != (uint32_t)ws_hud_held_page_x ||\n"
+    "        texpage_y != (uint32_t)ws_hud_held_page_y)\n        return 0;\n" in held
+    and "    if (!ws_hud_held_seen) {\n        ws_hud_held_pivot = psx_ws_hud_held_pivot(*x, w, ws_disp_w());\n"
+    "        ws_hud_held_seen = 1;\n    }\n" in held
+    and "    *x = ws_scale_about(*x, ws_hud_held_pivot);\n    w = (int)ws_scale_len(w);\n    return w > 0 ? w : 1;" in held
+    and "ws_hud_user_scale" not in held and "ws_hud_scale_percent" not in held
+    and "    gp0_ot_rank = 0xFFFFu;\n    ws_hud_held_seen = 0;\n" in body(gpu, "void gpu_ws_begin_linked_list(void) {")
+    and gpu.count("ws_hud_held_seen = 0;") == 1
+    and "static int ws_hud_held_page_x = -1, ws_hud_held_page_y = -1;" in gpu
+    and "void gpu_ws_set_hud_held_page(int page_x, int page_y);" in header,
+    "a sprite of the held weapon's texture page in a HUD layer keeps its size whatever the HUD size, and all of the "
+    "weapon in one list is squashed about the column its first sprite gives",
+)
+require(
+    "    if (w <= 0 || screen_w <= 0 || w >= screen_w) return screen_w / 2;\n" in scale_header
+    and "    mirrored = centre < screen_w;\n" in scale_header
+    and "    start = 12 * (int64_t)w <= 5 * (int64_t)screen_w ? 4 * (int64_t)screen_w : 3 * (int64_t)screen_w;" in scale_header
+    and "    gone = 3 * centre - start;\n    if (gone <= 0) return screen_w / 2;\n" in scale_header
+    and "    reach = 3 * (2 * (int64_t)screen_w - w) - start;\n    if (gone > reach) gone = reach;\n" in scale_header
+    and "    centre = ((int64_t)screen_w * (reach + gone) + reach) / (2 * reach);\n" in scale_header
+    and "    return (int32_t)(mirrored ? screen_w - centre : centre);\n" in scale_header,
+    "the weapon's column is the centre in the middle third and slides to the edge the sprite comes to touch",
+)
+require(
+    "constexpr int kHeldPage[2] = {15, 0};" in module
+    and "    gpu_ws_set_hud_held_page(kHeldPage[0], kHeldPage[1]);\n" in module
+    and module.count("gpu_ws_set_hud_held_page(") == 1,
+    "the game must say that it keeps the held weapon's picture at the top of texture page 15",
+)
 fixed = body(gpu, "static int ws_sprt_fixed_transform(")
 textured_rect = body(gpu, "static void gp0_exec_textured_rect(void)")
 flat_quad = body(gpu, "static void gp0_exec_mono_quad(void)")
 textured_quad = body(gpu, "static void gp0_exec_textured_quad(void)")
 require(
     "    int32_t widget_w = w, widget_h = w;\n"
+    "    const int held_w = ws_hud_held_rect(x0, w);\n"
+    "    if (held_w) return held_w;\n"
     "    if (ws_hud_widget_rect(x0, y0, &widget_w, &widget_h)) {\n"
     "        *out_h = (int)widget_h;\n"
     "        return (int)widget_w;\n"
     "    }\n"
     "    int auto_w = w;" in fixed
     and fixed.index("ws_tagged_anchor(&ax)") < fixed.index("ws_hud_widget_rect("),
-    "a fixed-size sprite must try its widget after the tag and before every other HUD rule",
+    "a fixed-size sprite must be tried as the held weapon and then as a widget, after the tag and before every other HUD rule",
 )
 require(
     "            int32_t widget_w = w, widget_h = h;\n"
-    "            if (ws_hud_widget_rect(&x0, &y0, &widget_w, &widget_h)) {\n"
+    "            const int held_w = ws_hud_held_rect(&x0, w);\n"
+    "            if (held_w) {\n"
+    "                ws_w = held_w;\n"
+    "            } else if (ws_hud_widget_rect(&x0, &y0, &widget_w, &widget_h)) {\n"
     "                ws_w = (int)widget_w;\n"
     "                ws_h = (int)widget_h;\n"
     "            } else if (ws_auto_ui_transform_rect(&x0, y0, &corrected_w, h))" in textured_rect,
-    "a textured rectangle must try its widget before every other HUD rule",
+    "a textured rectangle must be tried as the held weapon and then as a widget, before every other HUD rule",
 )
 require(
     flat_quad.count("ws_hud_widget_quad(vx, vy);") == 1

@@ -208,6 +208,47 @@ void test_a_line_of_text_is_placed_by_where_its_words_can_be() {
            "a call that is refused works nothing out of the rectangle first");
 }
 
+/* The baton of Disruptor: at rest against the right edge, then the four pictures of its swing. */
+constexpr std::array<Rect, 5> kBaton{{{216, 79, 104, 161}, {119, 206, 52, 34}, {119, 145, 64, 95}, {143, 92, 94, 148}, {176, 49, 128, 191}}};
+
+void test_a_held_weapon_slides_to_the_edge_it_touches() {
+    for (const Rect &gun : {Rect{83, 183, 122, 57}, Rect{103, 179, 106, 61}, Rect{109, 173, 82, 67}, kWeapon})
+        expect(psx_ws_hud_held_pivot(gun.x, gun.w, kWidth) == kWidth / 2, "a gun in the middle of the screen is squashed about the centre");
+    expect(psx_ws_hud_held_pivot(kBaton[0].x, kBaton[0].w, kWidth) == kWidth, "the baton at rest touches the right edge and is squashed about it");
+    for (std::int32_t sway = 1; sway <= 40; ++sway)
+        expect(psx_ws_hud_held_pivot(kBaton[0].x + sway, kBaton[0].w, kWidth) == kWidth, "and when it sways past the edge");
+    expect(psx_ws_hud_held_pivot(kBaton[1].x, kBaton[1].w, kWidth) == 160 && psx_ws_hud_held_pivot(kBaton[2].x, kBaton[2].w, kWidth) == 160 &&
+               psx_ws_hud_held_pivot(kBaton[3].x, kBaton[3].w, kWidth) == 160,
+           "the first three pictures of the swing are in the middle third");
+    expect(psx_ws_hud_held_pivot(kBaton[4].x, kBaton[4].w, kWidth) == 260, "the fourth is five eighths of the way to touching: 260");
+    for (const Aspect &aspect : kAspects) {
+        for (const std::int32_t w : {36, 52, 104, 128, 133, 134, 200, 220, 240}) {
+            std::int32_t last_left = -100000, last_pivot = 0;
+            for (std::int32_t x = -w; x <= kWidth; ++x) {
+                const std::int32_t pivot = psx_ws_hud_held_pivot(x, w, kWidth);
+                const std::int32_t left = pivot + (x - pivot) * aspect.numerator / aspect.denominator;
+                expect(pivot >= 0 && pivot <= kWidth && pivot >= last_pivot, "the column stays on the screen and never goes back as the sprite goes right");
+                expect(left >= last_left, "the sprite never goes back as it goes right");
+                expect(last_left == -100000 || left - last_left <= 4, "and never jumps, whatever its width up to three quarters of the screen");
+                expect(psx_ws_hud_held_pivot(kWidth - x - w, w, kWidth) == kWidth - pivot, "the left side is the right side's mirror");
+                if (x + w >= kWidth) expect(pivot == kWidth, "a sprite the right edge crops is squashed about that edge");
+                last_left = left;
+                last_pivot = pivot;
+            }
+        }
+    }
+    expect(psx_ws_hud_held_pivot(100, 220, kWidth) == kWidth && psx_ws_hud_held_pivot(50, 220, kWidth) == 160 &&
+               psx_ws_hud_held_pivot(60, 220, kWidth) == 192 && psx_ws_hud_held_pivot(40, 220, kWidth) == 128,
+           "a sprite too wide for an outer third slides all the way from the centre to the edge it comes to touch");
+    expect(psx_ws_hud_held_pivot(93, 133, kWidth) == 160 && psx_ws_hud_held_pivot(93, 134, kWidth) == 160 &&
+               psx_ws_hud_held_pivot(120, 133, kWidth) == 160 && psx_ws_hud_held_pivot(120, 134, kWidth) > 160,
+           "five twelfths of the screen is where the slide's start moves from the third to the centre");
+    expect(psx_ws_hud_held_pivot(0, kWidth, kWidth) == 160 && psx_ws_hud_held_pivot(30, kWidth + 40, kWidth) == 160,
+           "a sprite as wide as the screen has no edge to come to");
+    expect(psx_ws_hud_held_pivot(200, 0, kWidth) == 160 && psx_ws_hud_held_pivot(200, -4, kWidth) == 160 && psx_ws_hud_held_pivot(200, 50, 0) == 0,
+           "an empty sprite or screen gives the centre");
+}
+
 }  // namespace
 
 int main() {
@@ -217,6 +258,7 @@ int main() {
     test_widgets_shrink_toward_their_own_edge();
     test_neighbours_keep_touching();
     test_exact_values();
+    test_a_held_weapon_slides_to_the_edge_it_touches();
     if (g_failures) return 1;
     std::cout << "GPU widescreen HUD scale tests passed\n";
     return 0;
