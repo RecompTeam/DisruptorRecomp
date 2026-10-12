@@ -30,7 +30,7 @@ disc revision; the redistributable OpenBIOS backend is used for booting.
 
 ## Play the Windows alpha
 
-[Download v0.1.0-alpha.3](https://github.com/micmea668/DisruptorRecomp/releases/tag/v0.1.0-alpha.3),
+[Download v0.1.0-alpha.4](https://github.com/micmea668/DisruptorRecomp/releases/tag/v0.1.0-alpha.4),
 extract the Windows ZIP, and open **DisruptorLauncher.exe**. Browse to your
 supported USA disc image; the launcher installs, verifies, and starts the game.
 OpenBIOS is included; no build tools are needed. See the [getting-started guide](docs/PLAYING.md) for prerequisites,

@@ -31,12 +31,14 @@ and share feedback.
 6. At the game menu, use the arrow keys and **Enter** to select **New Game**,
    or choose **Practice Mode** to try a training mission.
 
-The launcher's **Display**, **Enhancements**, **Controls** and **Audio** tabs
-hold the settings of the in-game menu. A change is saved to `settings.toml`
+The launcher's **Display**, **Enhancements**, **Controls**, **Audio** and
+**Experimental** tabs hold the settings of the in-game menu. A change is saved
+to `settings.toml`
 at once and applies the next time the game starts. **Original** and
 **Enhanced** set a group of them in one step, and **Reset settings** returns
 them to those of a new installation. The tabs are locked while the game runs.
 If the game stops with an error, the launcher shows the end of `startup.log`.
+Long settings pages scroll, and hovering over an option shows its explanation.
 
 OpenBIOS is included. A PAL or Japanese disc cannot be the game disc, but it
 can give the game its language: see [Other languages](#other-languages). Keep
@@ -68,10 +70,13 @@ folder; these backups can be removed manually once the repaired copy works.
 | Fast-forward | Hold ] |
 | Save / load state | Shift+F1–F12 / F1–F12 |
 | Name a save | Type it: letters, digits, Space, Backspace and Delete. Enter moves to DONE |
+| Start / end a replay capsule | Ctrl+F12 |
 
 Modern mouse/keyboard controls, geometry correction, and perspective textures
 are enabled initially. Vertical mouse look is experimental and starts off;
 enable it in **Settings → Controls** if desired.
+**Smooth mouse turning** in the same tab turns the picture between the game's
+256 heading steps. It requires captured mouse aim and exact geometry.
 
 **Settings → Enhancements** offers 1x–8x resolution, widescreen options,
 HUD size for widescreen, and 60 FPS gameplay and in-between frames. Both
@@ -79,6 +84,10 @@ frame options start off; in-between frames need exact geometry.
 The **Shadows** setting offers Vanilla and Improved shapes when geometry
 correction is enabled. HUD size ranges from 50% to 100% in widescreen and
 leaves the weapon size unchanged.
+**Gap filling** closes small polygon gaps; **Depth-sorted world** offers an
+alternative to the game's polygon order. Both require exact geometry.
+**Settings → Experimental** adds optional ambient occlusion with adjustable
+reach and strength; it also requires exact geometry and starts off.
 
 **Skip the logos and the title movie** in Enhancements skips the boot intro
 automatically. It starts off; the other movies still play normally. Escape
@@ -133,6 +142,20 @@ retain your controls and display preferences.
 
 God Mode resets off on launch. Granting all weapons and psionics marks the game
 as cheated, including subsequent game saves.
+
+## Reports and replay capsules
+
+**Settings → Debug** offers diagnostic views and **Record the screen** for
+rendering bug reports. Close the settings menu to begin the short recording;
+its pictures and timing data are written under `shown/` beside the executable.
+Diagnostic views reset to Off at the next start.
+
+Press **Ctrl+F12** to start a replay capsule and press it again to finish.
+The capsule is saved under `capsules/` beside the executable. It contains a
+save state, inputs, settings, and build details so a run can be replayed for
+investigation. Capsules are specific to their build and are not recorded in
+network games. See the [replay instructions](https://github.com/micmea668/DisruptorRecomp/blob/v0.1.0-alpha.4/docs/BUILD.md#replay-capsules)
+for the replay tool and its limits.
 
 ## Troubleshooting
 
