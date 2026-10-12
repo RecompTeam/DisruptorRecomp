@@ -173,7 +173,8 @@ require(
 
 require(
     "disruptor_intro_skip_set_enabled(skip_intro ? 1 : 0);\n        mark_skip_intro(skip_intro);" in menu
-    and '"Skip the logos and the title movie"' in menu,
+    and '    if (option_toggle("disruptor.skip_intro", &skip_intro)) {\n' in menu
+    and '"disruptor.skip_intro", "Skip the logos and the title movie", 0,' in options,
     "the settings menu must apply the switch live and stage it for saving",
 )
 require(

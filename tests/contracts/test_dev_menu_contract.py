@@ -462,9 +462,9 @@ require("apply_modern_keybinds(disruptor_modern_controls_enabled() != 0)" in
         function_body(menu, "apply_saved_preferences"),
         "saved or environment-enabled modern controls must install conflict-free binds")
 for token in (
-    "Vertical mouse look",
-    "Vertical sensitivity",
-    "Invert vertical mouse",
+    'option_toggle("disruptor.vertical_look", &vertical_look)',
+    'option_slider("disruptor.vertical_sensitivity", &vertical_sensitivity)',
+    'option_toggle("disruptor.invert_vertical", &invert_y)',
     "Recenter vertical view",
     "disruptor_mouse_set_vertical_look_enabled",
     "disruptor_mouse_set_vertical_sensitivity",
@@ -528,14 +528,12 @@ require('#ifndef PSX_DISABLE_FRAME_INTERPOLATION\n'
 aspect_controls = function_body(menu, "draw_aspect_controls")
 for token in (
     'Checkbox("Widescreen"',
-    'Combo("Aspect ratio"',
-    '"16:9", "21:9", "32:9"',
+    'option_list("video.aspect_ratio", &selected, 1)',
     "psx_host_video_get_display_aspect",
     "psx_host_video_set_display_aspect",
     "psx_host_video_get_adaptive_view",
     "psx_host_video_set_adaptive_view",
     "mark_aspect",
-    '"Match window (up to 32:9)"',
     'draw_status_badge("LIVE"',
 ):
     require(token in aspect_controls,
@@ -544,8 +542,7 @@ for token in (
 scale_controls = function_body(menu, "draw_internal_resolution_controls")
 for token in (
     'SeparatorText("Rendering resolution")',
-    'Combo("Internal resolution scale"',
-    '"1x (native)", "2x", "3x", "4x", "5x", "6x", "7x", "8x"',
+    'option_list("video.supersampling", &selected)',
     "kScaleCount = 8",
     "psx_host_video_get_internal_scale",
     "psx_host_video_set_internal_scale",
@@ -571,8 +568,7 @@ require('BulletText("Supersampling/internal framebuffer allocation")' not in men
 fullscreen_controls = function_body(menu, "draw_fullscreen_controls")
 for token in (
     'SeparatorText("Window presentation")',
-    'Combo("Display mode"',
-    '"Windowed", "Borderless fullscreen", "Exclusive fullscreen"',
+    'option_list("video.fullscreen", &mode)',
     "psx_host_video_get_fullscreen_mode",
     "psx_host_video_set_fullscreen_mode",
     "mark_fullscreen",
@@ -604,8 +600,8 @@ require("mark_fullscreen" not in function_body(menu, "on_sdl_event"),
 audio_controls = function_body(menu, "draw_audio_controls")
 for token in (
     'SeparatorText("Audio output")',
-    'SliderInt("Master volume"',
-    'Checkbox("Mute all audio"',
+    'option_slider("audio.master_volume", &volume)',
+    'option_toggle("audio.muted", &muted)',
     "psx_host_audio_get_master_volume",
     "psx_host_audio_set_master_volume",
     "psx_host_audio_get_muted",
@@ -772,5 +768,49 @@ require(STAGED in menu and
         '        "${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings/options.cpp"\n'
         '        "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/dev_menu.cpp")\n' in cmake,
         "a staged change must be an option of the shared table, and a save must write and then forget every one")
+
+HELPERS = (
+    "bool option_toggle(const char *key, bool *value) {\n"
+    "    return ImGui::Checkbox(find_option(key)->label, value);\n"
+    "}\n"
+    "\n"
+    "bool option_slider(const char *key, int *value) {\n"
+    "    const Option &option = *find_option(key);\n"
+    '    const char *format = option.unit == Unit::percent ? "%d%%" : "%d";\n'
+    "    return ImGui::SliderInt(option.label, value, option.lowest,\n"
+    "                            option.highest, format,\n"
+    "                            ImGuiSliderFlags_AlwaysClamp);\n"
+    "}\n"
+    "\n"
+    "bool option_slider(const char *key, float *value) {\n"
+    "    const Option &option = *find_option(key);\n"
+    "    return ImGui::SliderFloat(option.label, value, option.lowest / 1000.0f,\n"
+    '                              option.highest / 1000.0f, "%.3f",\n'
+    "                              ImGuiSliderFlags_Logarithmic);\n"
+    "}\n"
+    "\n"
+    "bool option_list(const char *key, int *index, size_t skipped = 0) {\n"
+    "    const Option &option = *find_option(key);\n"
+    "    const auto shown = option.choices.subspan(skipped);\n"
+    "    return ImGui::Combo(option.label, index, shown.data(),\n"
+    "                        static_cast<int>(shown.size()));\n"
+    "}\n"
+)
+shared_labels = re.findall(r'\b(?:toggle<[^>]*>|choice|slider)\(\s*"[\w.]+",\s*"([^"]+)"', options)
+shared_choices = re.findall(r'"([^"]+)"', "".join(re.findall(r"constexpr const char\* \w+\[\] = \{([^}]*)\};", options)))
+drawn_keys = set(re.findall(r'\boption_(?:toggle|slider|list)\("([\w.]+)"', menu)) | set(
+    re.findall(r'find_option\("([\w.]+)"\)->label', menu))
+present = read("src/game/frame/present_rate.cpp")
+require(HELPERS in menu and len(shared_labels) == 27 and drawn_keys == shared_keys and
+        not [text for text in [*shared_labels, *shared_choices] if f'"{text}"' in menu + present] and
+        "    static constexpr int kScaleCount = 8;\n" in menu and
+        '"1x (native)", "2x", "3x", "4x", "5x", "6x", "7x", "8x"' in options and
+        '{"4:3", "16:9", "21:9", "32:9", "Match window (up to 32:9)"}' in options and
+        '{"Windowed", "Borderless fullscreen", "Exclusive fullscreen"}' in options and
+        '{"Adaptive", "Immediate", "Synchronised"}' in options and '{"Vanilla", "Improved"}' in options and
+        '"How far the view turns for a movement of the mouse.", 5, 2000, Unit::thousandths,' in options and
+        '"How far the view tilts for a movement of the mouse.", 5, 2000, Unit::thousandths,' in options and
+        '"The loudness of everything the game plays.", 0, 100, Unit::percent,' in options,
+        "the menu must draw every shared option by its key, with the table's label, bounds and choices and none of its own")
 
 print("developer menu contract: PASS")

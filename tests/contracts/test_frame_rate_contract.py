@@ -133,7 +133,8 @@ for token in (
 
 require(
     "disruptor_frame_rate_set_unlocked(unlocked ? 1 : 0);\n        mark_frame_unlock(unlocked);" in menu
-    and '"60 FPS gameplay"' in menu,
+    and '    if (option_toggle("disruptor.frame_unlock", &unlocked)) {\n' in menu
+    and '"disruptor.frame_unlock", "60 FPS gameplay", 0,' in options,
     "the settings menu must apply the switch live and stage it for saving",
 )
 require(
@@ -191,10 +192,14 @@ require(
     in cmake
     and "#ifndef PSX_DISABLE_FRAME_INTERPOLATION\n"
     "    int present_enabled = 0;\n"
-    "    if (disruptor_present_rate_switch(geometry ? 1 : 0, &present_enabled))\n"
+    "    if (disruptor_present_rate_switch(\n"
+    '            find_option("video.frame_interpolation")->label, geometry ? 1 : 0,\n'
+    "            &present_enabled))\n"
     "        mark_present_enabled(present_enabled != 0);\n"
     "    int present_rate = 0;\n"
-    "    if (disruptor_present_rate_control(&present_rate)) mark_present_rate(present_rate);\n"
+    "    if (disruptor_present_rate_control(\n"
+    '            find_option("video.frame_interpolation_fps")->label, &present_rate))\n'
+    "        mark_present_rate(present_rate);\n"
     "#endif\n"
     in menu
     and "#ifndef PSX_DISABLE_FRAME_INTERPOLATION\n"
@@ -207,7 +212,7 @@ require(
     "a build without the frame interpolator must have no rate control, in the menu or in the sources",
 )
 require(
-    'if (ImGui::SliderInt("In-between frame rate", &shown, kDisruptorPresentRateLowest, top, "%d FPS",\n'
+    'if (ImGui::SliderInt(label, &shown, kDisruptorPresentRateLowest, top, "%d FPS",\n'
     "                         ImGuiSliderFlags_AlwaysClamp) &&\n"
     "        disruptor_present_rate_apply(shown)) {\n"
     "        if (accepted) *accepted = shown;\n"
@@ -227,7 +232,11 @@ require(
 )
 require(
     "    return psx_host_video_set_interpolation(enabled ? 1 : 0, target, blend) != 0;\n" in present_control
-    and 'if (ImGui::Checkbox("In-between frames", &checked) &&\n'
+    and '"video.frame_interpolation", "In-between frames", 0,' in options
+    and 'slider("video.frame_interpolation_fps", "In-between frame rate", 0,' in options
+    and "int disruptor_present_rate_switch(const char *label, int available, int *enabled) {\n" in present_control
+    and "int disruptor_present_rate_control(const char *label, int *accepted) {\n" in present_control
+    and "if (ImGui::Checkbox(label, &checked) &&\n"
     "        disruptor_present_rate_enable(checked ? 1 : 0)) {\n"
     "        if (enabled) *enabled = checked ? 1 : 0;\n"
     in present_control,
