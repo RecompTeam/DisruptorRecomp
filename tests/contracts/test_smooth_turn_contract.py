@@ -21,9 +21,9 @@ def between(source: str, opening: str, closing: str) -> str:
 
 
 cmake = read("CMakeLists.txt")
-overlay = read("PSXRECOMP_OVERLAY_FILES.txt")
-renderer = read("psxrecomp-overlay/runtime/src/gpu_gl_renderer.c")
-gpu = read("psxrecomp-overlay/runtime/src/gpu.c")
+overlay = read("framework/FILES.txt")
+renderer = read("psxrecomp/runtime/src/gpu_gl_renderer.c")
+gpu = read("psxrecomp/runtime/src/gpu.c")
 mouse = read("src/game/input/mouse_aim.cpp")
 menu = read("src/game/ui/dev_menu.cpp")
 launcher = read("src/launcher/launcher_settings.cpp")

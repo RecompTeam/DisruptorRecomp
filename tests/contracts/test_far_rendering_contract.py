@@ -21,9 +21,9 @@ def require(condition: bool, message: str) -> None:
 
 source = read("src/game/render/far_rendering.cpp")
 header = read("src/game/render/far_rendering.h")
-codegen = read("psxrecomp-overlay/recompiler/src/code_generator.cpp")
-dirty = read("psxrecomp-overlay/runtime/src/dirty_ram_interp.c")
-main = read("psxrecomp-overlay/runtime/src/main.cpp")
+codegen = read("psxrecomp/recompiler/src/code_generator.cpp")
+dirty = read("psxrecomp/runtime/src/dirty_ram_interp.c")
+main = read("psxrecomp/runtime/src/main.cpp")
 audit = read("tools/audit_codegen.py")
 cmake = read("CMakeLists.txt")
 configs = read("game.toml") + read("game-widescreen.toml")

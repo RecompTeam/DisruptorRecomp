@@ -53,7 +53,7 @@ and share feedback.
 
 ## Build and run
 
-Install Git, Python 3, CMake 3.20+, and a Windows x64 C++ toolchain. Visual Studio
+Install Git, Python 3.10+, CMake 3.20+, and a Windows x64 C++ toolchain. Visual Studio
 with **Desktop development with C++** is supported; Ninja is recommended.
 
 Place these files from your own supported disc in `input/`:

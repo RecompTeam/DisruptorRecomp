@@ -1,5 +1,5 @@
 #include "psx_sdl.h"
-#include "../../psxrecomp-overlay/runtime/include/gpu.h"
+#include "../../psxrecomp/runtime/include/gpu.h"
 
 #include <algorithm>
 #include <array>

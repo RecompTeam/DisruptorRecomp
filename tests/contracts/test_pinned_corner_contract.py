@@ -41,14 +41,14 @@ def enclosing(source: str, block: str) -> list[str]:
 
 
 cmake = read("CMakeLists.txt")
-overlay = read("PSXRECOMP_OVERLAY_FILES.txt")
-gte = read("psxrecomp-overlay/runtime/src/gte.cpp")
-gpu = read("psxrecomp-overlay/runtime/src/gpu.c")
-render_header = read("psxrecomp-overlay/runtime/include/gpu_render.h")
-render = read("psxrecomp-overlay/runtime/src/gpu_render.c")
-renderer = read("psxrecomp-overlay/runtime/src/gpu_gl_renderer.c")
-temporal = read("psxrecomp-overlay/runtime/src/gpu_gl_temporal.c.inc")
-mesh = read("psxrecomp-overlay/runtime/include/gpu_temporal_mesh.h")
+overlay = read("framework/FILES.txt")
+gte = read("psxrecomp/runtime/src/gte.cpp")
+gpu = read("psxrecomp/runtime/src/gpu.c")
+render_header = read("psxrecomp/runtime/include/gpu_render.h")
+render = read("psxrecomp/runtime/src/gpu_render.c")
+renderer = read("psxrecomp/runtime/src/gpu_gl_renderer.c")
+temporal = read("psxrecomp/runtime/src/gpu_gl_temporal.c.inc")
+mesh = read("psxrecomp/runtime/include/gpu_temporal_mesh.h")
 
 REGISTRATION = "    disruptor_contract(pinned_corner)\n"
 UNIT_TEST = "    disruptor_unit_test(disruptor_gpu_pinned_corner tests/unit/gpu_pinned_corner_test.cpp RUNTIME_HEADERS)\n"

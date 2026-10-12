@@ -53,11 +53,11 @@ def host_ui_gl_restore_helper(source: str) -> tuple[str, str, str, str]:
 
 
 cmake = read("CMakeLists.txt")
-manifest = read("PSXRECOMP_OVERLAY_FILES.txt")
-host_ui = read("psxrecomp-overlay/runtime/include/host_ui.h")
-main_cpp = read("psxrecomp-overlay/runtime/src/main.cpp")
-gl = read("psxrecomp-overlay/runtime/src/gpu_gl_renderer.c")
-gte = read("psxrecomp-overlay/runtime/src/gte.cpp")
+manifest = read("framework/FILES.txt")
+host_ui = read("psxrecomp/runtime/include/host_ui.h")
+main_cpp = read("psxrecomp/runtime/src/main.cpp")
+gl = read("psxrecomp/runtime/src/gpu_gl_renderer.c")
+gte = read("psxrecomp/runtime/src/gte.cpp")
 menu = read("src/game/ui/dev_menu.cpp")
 options = read("src/game/settings/options.cpp")
 STAGED = (
@@ -75,8 +75,8 @@ mouse = read("src/game/input/mouse_aim.cpp")
 cheats = read("src/game/session/cheats.cpp")
 cheats_h = read("src/game/session/cheats.h")
 far_rendering_h = read("src/game/render/far_rendering.h")
-config_h = read("psxrecomp-overlay/recompiler/src/config_loader.h")
-config_cpp = read("psxrecomp-overlay/recompiler/src/config_loader.cpp")
+config_h = read("psxrecomp/recompiler/src/config_loader.h")
+config_cpp = read("psxrecomp/recompiler/src/config_loader.cpp")
 run_ps1 = read("run.ps1")
 run_sh = read("run.sh")
 game_toml = read("game.toml")
@@ -217,7 +217,7 @@ for token in (
     require(token in scale_setter,
             f"live internal-scale setter is missing {token}")
 
-sw_header = read("psxrecomp-overlay/runtime/include/gpu_sw_renderer.h")
+sw_header = read("psxrecomp/runtime/include/gpu_sw_renderer.h")
 require("#define SW_MAX_INTERNAL_SCALE 8" in sw_header and
         "#define GL_MAX_INTERNAL_SCALE SW_MAX_INTERNAL_SCALE" in gl,
         "renderers must share the 8x internal scale limit")

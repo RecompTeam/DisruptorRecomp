@@ -94,7 +94,7 @@ def require(condition: bool, message: str) -> None:
 
 cmake = read("CMakeLists.txt")
 module = read("src/game/input/name_entry.cpp")
-host = read("psxrecomp-overlay/runtime/src/main.cpp")
+host = read("psxrecomp/runtime/src/main.cpp")
 
 require(
     '    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/name_entry.cpp"\n' in cmake

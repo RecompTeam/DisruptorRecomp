@@ -1,0 +1,24 @@
+diff --git a/runtime/include/dirty_ram_interp.h b/runtime/include/dirty_ram_interp.h
+index 883f3eaf789ceca5ca406ba82b9d2a5c18eb4261..7f9b87c3215659923e4e5050ec343b61bbbb894b 100644
+--- a/runtime/include/dirty_ram_interp.h
++++ b/runtime/include/dirty_ram_interp.h
+@@ -102,6 +102,19 @@
+ int      psx_kernel_bless_dispatchable(uint32_t phys);
+ void     psx_kernel_bless_note_range(uint32_t phys, uint32_t len);
+ void     psx_kernel_bless_stats(uint64_t out[6]);
++/* Detail for the most recent kernel-body validation failure. `count` is the
++ * cumulative number of failed body validations; out[] is entry, body_lo,
++ * body_hi, first_mismatch, live_byte, reference_byte. */
++void     psx_kernel_bless_mismatch_detail(uint64_t *count, uint32_t out[6]);
++
++/* Opt-in, low-overhead interpreter hot-PC sampler used by
++ * PSX_RUNTIME_PERF_DIAG. It samples one retired instruction per `stride` and
++ * returns/resets the three hottest physical PCs since the previous take. */
++#define DIRTY_RAM_PERF_HOT_COUNT 3u
++void     dirty_ram_perf_hot_enable(int enabled);
++void     dirty_ram_perf_take_hot(uint32_t pcs[DIRTY_RAM_PERF_HOT_COUNT],
++                                 uint32_t samples[DIRTY_RAM_PERF_HOT_COUNT],
++                                 uint32_t *stride);
+ 
+ /* Capture/candidate window membership. Kernel window and overlay region are
+  * unconditional; main-EXE text [KERNEL_WINDOW_END, FLOOR) is included only

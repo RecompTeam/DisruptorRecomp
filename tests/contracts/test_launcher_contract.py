@@ -43,7 +43,7 @@ window = read("src/launcher/main.cpp")
 region = read("src/launcher/region_disc.cpp")
 launcher_cmake = read("src/launcher/CMakeLists.txt")
 cmake = read("CMakeLists.txt")
-loader = read("psxrecomp-overlay/recompiler/src/config_loader.cpp")
+loader = read("psxrecomp/recompiler/src/config_loader.cpp")
 menu = read("src/game/ui/dev_menu.cpp") + read("src/game/frame/present_rate.cpp")
 
 ROW = r'\b(toggle|choice|slider)(?:<[^>]*>)?\(\s*"([\w.]+)", "([^"]+)", (-?\d+)'
@@ -97,7 +97,7 @@ require(
     "the launcher must start from the game's mouse sensitivity",
 )
 require(
-    initial["video.vsync"] == 2 and "static int           g_video_vsync        = 1;" in read("psxrecomp-overlay/runtime/src/main.cpp")
+    initial["video.vsync"] == 2 and "static int           g_video_vsync        = 1;" in read("psxrecomp/runtime/src/main.cpp")
     and initial["disruptor.hud_scale"] == 100 and initial["audio.master_volume"] == 100,
     "the launcher must start from the runtime's own defaults",
 )

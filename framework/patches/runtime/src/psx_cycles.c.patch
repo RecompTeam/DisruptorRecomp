@@ -1,0 +1,13 @@
+diff --git a/runtime/src/psx_cycles.c b/runtime/src/psx_cycles.c
+index 72cbe9b496991cbb84b10afb8813c5282c7dd0cf..dfd3b33f2d8383089645c67847200a7559cd784b 100644
+--- a/runtime/src/psx_cycles.c
++++ b/runtime/src/psx_cycles.c
+@@ -20,6 +20,8 @@
+ uint32_t g_psx_cyc_batch = 0;
+ uint32_t g_psx_cyc_batch_limit = 0;
+ int      g_psx_cyc_bb_defer = 0;
++uint32_t g_psx_cyc_overclock_shift = 0;
++uint32_t g_psx_cyc_overclock_carry = 0;
+ static int      s_cycle_replay_active = 0;
+ static uint64_t s_cycle_replay_live = 0;
+ 

@@ -1,0 +1,225 @@
+diff --git a/runtime/src/memory.c b/runtime/src/memory.c
+index d96d6d74422c5b80e3ae283d3a2d872686cab632..86e933d5c6a0e4426fc33ac30c09c68cc148754a 100644
+--- a/runtime/src/memory.c
++++ b/runtime/src/memory.c
+@@ -14,6 +14,7 @@
+ #include "dma.h"
+ #include "fntrace.h"
+ #include "gpu.h"
++#include "gte_precision.h"
+ #include "mdec.h"
+ #include "mod_memory.h"
+ #include "sio.h"
+@@ -82,6 +83,16 @@
+     return PSX_MOD_GPU_DMA_GUEST_BASE + start;
+ }
+ 
++uint32_t psx_mod_gpu_dma_memory_bytes(void) { return mod_gpu_dma_memory_used; }
++const uint8_t *psx_mod_gpu_dma_memory_data(void) { return mod_gpu_dma_memory; }
++int psx_mod_gpu_dma_memory_restore(const uint8_t *data, uint32_t size) {
++    if (size > PSX_MOD_GPU_DMA_APERTURE_SIZE || (size && !data)) return 0;
++    if (size) memcpy(mod_gpu_dma_memory, data, size);
++    memset(mod_gpu_dma_memory + size, 0, PSX_MOD_GPU_DMA_APERTURE_SIZE - size);
++    mod_gpu_dma_memory_used = size;
++    return 1;
++}
++
+ static int mod_gpu_dma_memory_offset(uint32_t phys, uint32_t width,
+                                      uint32_t *offset) {
+     return psx_mod_gpu_dma_aperture_offset_for(
+@@ -115,7 +126,11 @@
+ uint8_t *memory_get_ram_ptr(void) { return ram; }
+ uint8_t *memory_get_scratchpad_ptr(void) { return scratchpad; }
+ 
++static int s_low_scratch_is_the_games;  /* a loaded state of a started game: what is there is no longer the boot's */
++void memory_keep_low_boot_scratch(void) { s_low_scratch_is_the_games = 1; }
++
+ void memory_clear_low_boot_scratch(void) {
++    if (s_low_scratch_is_the_games) return;
+     memset(ram, 0, 0x10u);
+ }
+ 
+@@ -207,6 +222,7 @@
+ static uint64_t kbless_verifies      = 0;
+ static uint64_t kbless_mismatches    = 0;
+ static uint64_t kbless_invalidations = 0;
++static uint32_t kbless_last_mismatch[6] = {0};
+ 
+ static int kbless_on(void) {
+     if (kbless_enabled < 0) {
+@@ -264,6 +280,20 @@
+     }
+     kbless_state[i] = KBLESS_MISMATCH;
+     kbless_mismatches++;
++    kbless_last_mismatch[0] = phys;
++    kbless_last_mismatch[1] = b->body_lo;
++    kbless_last_mismatch[2] = b->body_hi;
++    {
++        const uint8_t *live = ram + b->body_lo;
++        const uint8_t *ref = bios_rom + s_kb_rom_off +
++                             (b->body_lo - s_kb_lo);
++        uint32_t len = b->body_hi - b->body_lo;
++        uint32_t off = 0;
++        while (off < len && live[off] == ref[off]) off++;
++        kbless_last_mismatch[3] = b->body_lo + off;
++        kbless_last_mismatch[4] = off < len ? live[off] : 0u;
++        kbless_last_mismatch[5] = off < len ? ref[off] : 0u;
++    }
+     return 0;
+ }
+ 
+@@ -322,6 +352,11 @@
+     out[3] = kbless_native_hits;
+     out[4] = kbless_verifies;
+     out[5] = kbless_invalidations;
++}
++
++void psx_kernel_bless_mismatch_detail(uint64_t *count, uint32_t out[6]) {
++    if (count) *count = kbless_mismatches;
++    if (out) memcpy(out, kbless_last_mismatch, sizeof(kbless_last_mismatch));
+ }
+ 
+ static inline void dirty_ram_mark_kernel_write(uint32_t phys) {
+@@ -881,6 +916,8 @@
+ uint32_t memory_get_bios_checksum(void) { return s_bios_checksum; }
+ 
+ void memory_init(const char* bios_path) {
++    gte_precision_word_write_begin();
++    s_low_scratch_is_the_games = 0;
+     memset(ram, 0, sizeof(ram));
+     memset(scratchpad, 0, sizeof(scratchpad));
+     /* Rematch re-enters without process exit — wipe sticky I/O regs that
+@@ -1458,10 +1495,13 @@
+ }
+ 
+ static void psx_write_word_raw(uint32_t addr, uint32_t val);
+-extern void gte_precision_invalidate_word(uint32_t addr);
+ void psx_write_word(uint32_t addr, uint32_t val) {
+     extern void (*g_overlay_flush_pending_cycles)(void);
+     if (g_overlay_flush_pending_cycles) g_overlay_flush_pending_cycles();
++    /* The immediately following provenance callback may trust only a commit
++     * from this write attempt.  Clear after the cycle flush because flushing
++     * can itself perform guest writes. */
++    gte_precision_word_write_begin();
+     if (g_ls_mode == 2) { ls_write_hook(addr, 4, val); return; }
+     if (g_ds_recording) {
+         if (g_dma_exec_depth > 0) ds_note_dma_write();
+@@ -1475,7 +1515,6 @@
+ }
+ static void psx_write_word_raw(uint32_t addr, uint32_t val) {
+     g_guest_store_count++;
+-    gte_precision_invalidate_word(addr);
+     /* KSEG2 cache control — before physical translation. */
+     if (addr == 0xFFFE0130u) { cache_ctrl = val; return; }
+     /* KSEG2 guard — see psx_read_word_raw. */
+@@ -1540,6 +1579,9 @@
+                 return;
+             }
+         }
++        /* All discard/suppression paths are now behind us.  Only a write that
++         * actually changes main RAM may invalidate prior provenance. */
++        gte_precision_invalidate_word(addr);
+         if (phys == D44_PHYS) d44_note(phys, read_ram_word(phys), val);
+         debug_server_trace_write_check(phys, read_ram_word(phys), val, 4);
+         parity_trace_note_write(phys, 4, effective_store_pc());
+@@ -1554,12 +1596,18 @@
+         ram[phys + 1] = (uint8_t)(val >> 8);
+         ram[phys + 2] = (uint8_t)(val >> 16);
+         ram[phys + 3] = (uint8_t)(val >> 24);
++        gte_precision_main_ram_word_committed(phys);
++        /* The matching emitted/interpreted guest-store callback consumes this
++         * token after write_word returns. DMA, HLE and mod writes deliberately
++         * have no such callback, so a sticky debug PC cannot grant provenance. */
+         return;
+     }
+     {
+         uint32_t off;
+         if (mod_gpu_dma_memory_offset(phys, 4u, &off)) {
++            gte_precision_invalidate_word(addr);
+             memcpy(mod_gpu_dma_memory + off, &val, sizeof(val));
++            gte_precision_gpu_dma_word_committed(phys);
+             return;
+         }
+     }
+@@ -1574,6 +1622,9 @@
+     if (phys >= 0x1F000000u && phys <= 0x1F7FFFFFu) return;
+     if (phys >= 0x1F800000u && phys <= 0x1F8003FFu) {
+         uint32_t off = phys - 0x1F800000u;
++        /* All discard/suppression paths are behind us.  Invalidate any
++         * reviewed scratch provenance before the replacement bytes land. */
++        gte_precision_invalidate_word(addr);
+         debug_server_trace_write_check(phys,
+             (uint32_t)scratchpad[off]
+           | ((uint32_t)scratchpad[off + 1] << 8)
+@@ -1584,6 +1635,7 @@
+         scratchpad[off + 1] = (uint8_t)(val >> 8);
+         scratchpad[off + 2] = (uint8_t)(val >> 16);
+         scratchpad[off + 3] = (uint8_t)(val >> 24);
++        gte_precision_scratch_word_committed(phys);
+         return;
+     }
+     if (phys >= 0x1F801000u && phys <= 0x1F803FFFu) {
+@@ -1662,7 +1714,6 @@
+ }
+ static void psx_write_half_raw(uint32_t addr, uint16_t val) {
+     g_guest_store_count++;
+-    gte_precision_invalidate_word(addr);
+     if (sr_ptr && (*sr_ptr & 0x10000u)) return;
+ 
+         /* KSEG2 guard — see psx_read_word_raw. */
+@@ -1670,6 +1721,7 @@
+     uint32_t phys = psx_phys_addr(addr);
+ 
+     if (phys < RAM_SIZE) {
++        gte_precision_invalidate_word(addr);
+         debug_server_trace_write_check(phys, (uint32_t)read_ram_half(phys), (uint32_t)val, 2);
+         parity_trace_note_write(phys, 2, effective_store_pc());
+         card_data_writes_check(phys, (uint32_t)val, 2);
+@@ -1686,6 +1738,7 @@
+     {
+         uint32_t off;
+         if (mod_gpu_dma_memory_offset(phys, 2u, &off)) {
++            gte_precision_invalidate_word(addr);
+             mod_gpu_dma_memory[off] = (uint8_t)val;
+             mod_gpu_dma_memory[off + 1u] = (uint8_t)(val >> 8);
+             return;
+@@ -1702,6 +1755,7 @@
+     if (phys >= 0x1F000000u && phys <= 0x1F7FFFFFu) return;
+     if (phys >= 0x1F800000u && phys <= 0x1F8003FFu) {
+         uint32_t off = phys - 0x1F800000u;
++        gte_precision_invalidate_word(addr);
+         debug_server_trace_write_check(phys,
+             (uint32_t)scratchpad[off] | ((uint32_t)scratchpad[off + 1] << 8),
+             (uint32_t)val, 2);
+@@ -1998,7 +2052,6 @@
+ }
+ static void psx_write_byte_raw(uint32_t addr, uint8_t val) {
+     g_guest_store_count++;
+-    gte_precision_invalidate_word(addr);
+     if (sr_ptr && (*sr_ptr & 0x10000u)) return;
+ 
+         /* KSEG2 guard — see psx_read_word_raw. */
+@@ -2006,6 +2059,7 @@
+     uint32_t phys = psx_phys_addr(addr);
+ 
+     if (phys < RAM_SIZE) {
++        gte_precision_invalidate_word(addr);
+         debug_server_trace_write_check(phys, (uint32_t)ram[phys], (uint32_t)val, 1);
+         parity_trace_note_write(phys, 1, effective_store_pc());
+         card_data_writes_check(phys, (uint32_t)val, 1);
+@@ -2021,6 +2075,7 @@
+     {
+         uint32_t off;
+         if (mod_gpu_dma_memory_offset(phys, 1u, &off)) {
++            gte_precision_invalidate_word(addr);
+             mod_gpu_dma_memory[off] = val;
+             return;
+         }
+@@ -2034,6 +2089,7 @@
+     }
+     if (phys >= 0x1F000000u && phys <= 0x1F7FFFFFu) return;
+     if (phys >= 0x1F800000u && phys <= 0x1F8003FFu) {
++        gte_precision_invalidate_word(addr);
+         debug_server_trace_write_check(phys, (uint32_t)scratchpad[phys - 0x1F800000u],
+                                        (uint32_t)val, 1);
+         scratchpad[phys - 0x1F800000u] = val;

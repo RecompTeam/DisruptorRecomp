@@ -35,10 +35,10 @@ def enclosing(source: str, block: str) -> list[str]:
 
 
 cmake = read("CMakeLists.txt")
-manifest = read("PSXRECOMP_OVERLAY_FILES.txt")
-gpu = read("psxrecomp-overlay/runtime/src/gpu.c")
-header = read("psxrecomp-overlay/runtime/include/gpu.h")
-runtime = read("psxrecomp-overlay/runtime/src/main.cpp")
+manifest = read("framework/FILES.txt")
+gpu = read("psxrecomp/runtime/src/gpu.c")
+header = read("psxrecomp/runtime/include/gpu.h")
+runtime = read("psxrecomp/runtime/src/main.cpp")
 
 require(
     "+runtime/include/gpu_ws_frame_kind.h" in manifest.splitlines(),

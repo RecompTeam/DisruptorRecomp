@@ -60,10 +60,10 @@ MERGED = (
     "    for (const Option *option : g_preferences.changed)\n"
     "        option->set(settings, option->get(pending));\n"
 )
-generator = read("psxrecomp-overlay/recompiler/src/code_generator.cpp")
-interpreter = read("psxrecomp-overlay/runtime/src/dirty_ram_interp.c")
+generator = read("psxrecomp/recompiler/src/code_generator.cpp")
+interpreter = read("psxrecomp/runtime/src/dirty_ram_interp.c")
 audit = read("tools/audit_codegen.py")
-settings_loader = read("psxrecomp-overlay/recompiler/src/config_loader.cpp")
+settings_loader = read("psxrecomp/recompiler/src/config_loader.cpp")
 
 require(
     "src/game/session/intro_skip.cpp" in cmake
@@ -128,8 +128,8 @@ for token in ("disruptor_intro_skip_enabled", "disruptor_intro_skip_set_enabled"
               "disruptor_intro_skip_fast_forward"):
     require(token in header and token in source, f"intro-skip API is missing {token}")
 
-host_header = read("psxrecomp-overlay/runtime/include/host_ui.h")
-host = read("psxrecomp-overlay/runtime/src/main.cpp")
+host_header = read("psxrecomp/runtime/include/host_ui.h")
+host = read("psxrecomp/runtime/src/main.cpp")
 require(
     'extern "C" int disruptor_intro_skip_fast_forward(void) {\n'
     "    if (g_boot_over || !psx_mod_game_started()) return 0;\n"
@@ -197,7 +197,7 @@ require(
     "settings.toml must read and write [disruptor] skip_intro",
 )
 
-runtime_main = read("psxrecomp-overlay/runtime/src/main.cpp")
+runtime_main = read("psxrecomp/runtime/src/main.cpp")
 require(
     "        if (us.has_skip_intro && us.skip_intro &&\n"
     '            !std::getenv("PSX_DISRUPTOR_SKIP_INTRO"))\n'

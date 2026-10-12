@@ -37,7 +37,7 @@ def require(condition: bool, message: str) -> None:
 
 cmake = read("CMakeLists.txt")
 source = read("src/game/render/grown_quad.cpp")
-gpu = read("psxrecomp-overlay/runtime/src/gpu.c")
+gpu = read("psxrecomp/runtime/src/gpu.c")
 
 require(
     '"${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/grown_quad.cpp"' in cmake

@@ -4,7 +4,7 @@
 
 - The verified Disruptor USA executable and BIN/CUE files in `input/`; see
   [DISC.md](DISC.md).
-- Git, Python 3, CMake 3.20+, and a C++20 toolchain.
+- Git, Python 3.10+, CMake 3.20+, and a C++20 toolchain.
 - Windows x64: Visual Studio with **Desktop development with C++**, or
   MSYS2 MinGW-w64. Ninja is recommended.
 - Linux: GCC and the platform development libraries needed to build SDL.
@@ -118,14 +118,24 @@ cmake --build build --config Release --parallel
 ctest --test-dir build -C Release --output-on-failure
 ```
 
-Changes to `psxrecomp-overlay/` must be applied before rebuilding:
+The project's changes to the framework are patches against the revision in
+`framework/PIN`. `framework/FILES.txt` lists every changed file, a `+` marking
+one the project adds. To change the framework, edit the file in the `psxrecomp`
+checkout, build and test, then save the edit as a patch:
 
 ```sh
-python tools/apply_framework_overlay.py --framework psxrecomp
+python tools/framework.py refresh
 ```
 
-The framework revision is pinned in `PSXRECOMP_PIN`, and the reviewed overlay
-files are listed in `PSXRECOMP_OVERLAY_FILES.txt`. Runtime preferences live in
+After pulling changes to `framework/`, bring the checkout up to date:
+
+```sh
+python tools/framework.py apply
+```
+
+`apply` refuses to overwrite an edit that `refresh` has not saved, and
+`python tools/framework.py check` tells whether the checkout holds exactly what
+`framework/` describes. Runtime preferences live in
 `settings.toml` beside the executable; game files, generated code, and build
 directories are ignored by Git.
 
@@ -135,7 +145,7 @@ directories are ignored by Git.
 | --- | --- |
 | `src/game/` | The game's own module by area: `input`, `render`, `frame`, `language`, `session`, `settings`, `ui` |
 | `src/launcher/` | The Windows launcher |
-| `psxrecomp-overlay/` | The framework files this project replaces or adds |
+| `framework/` | The pinned framework revision, the project's patches to it and the files it adds |
 | `tests/unit/` | Unit tests, one executable each |
 | `tests/contracts/` | Source contracts, run by Python |
 | `tests/support/` | Stubs and fakes the unit tests build against |

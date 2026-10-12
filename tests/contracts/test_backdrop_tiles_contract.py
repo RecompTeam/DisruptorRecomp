@@ -54,10 +54,10 @@ def require(condition: bool, message: str) -> None:
 
 cmake = read("CMakeLists.txt")
 source = read("src/game/render/backdrop_tiles.cpp")
-gpu = read("psxrecomp-overlay/runtime/src/gpu.c")
-gpu_header = read("psxrecomp-overlay/runtime/include/gpu.h")
-codegen = read("psxrecomp-overlay/recompiler/src/code_generator.cpp")
-interpreter = read("psxrecomp-overlay/runtime/src/dirty_ram_interp.c")
+gpu = read("psxrecomp/runtime/src/gpu.c")
+gpu_header = read("psxrecomp/runtime/include/gpu.h")
+codegen = read("psxrecomp/recompiler/src/code_generator.cpp")
+interpreter = read("psxrecomp/runtime/src/dirty_ram_interp.c")
 audit = read("tools/audit_codegen.py")
 
 require(
@@ -75,7 +75,7 @@ require(
     "the Disruptor target must opt into the dirty-interpreter backdrop seams",
 )
 require(
-    "+runtime/include/gpu_ws_screen_tile.h" in read("PSXRECOMP_OVERLAY_FILES.txt").splitlines(),
+    "+runtime/include/gpu_ws_screen_tile.h" in read("framework/FILES.txt").splitlines(),
     "the tile header must be applied to the framework checkout",
 )
 

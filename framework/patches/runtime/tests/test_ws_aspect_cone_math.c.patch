@@ -1,0 +1,23 @@
+diff --git a/runtime/tests/test_ws_aspect_cone_math.c b/runtime/tests/test_ws_aspect_cone_math.c
+index 30ca90a49e62012c1115db3cd4675d0929f8a3e8..5575a2d22c88cd40f19fc8f69d0ccd53b53181a5 100644
+--- a/runtime/tests/test_ws_aspect_cone_math.c
++++ b/runtime/tests/test_ws_aspect_cone_math.c
+@@ -64,5 +64,18 @@
+     check(psx_ws_widen_angle_q12(1023, 256) <= 1023,
+           "terrain angle remains below a quarter turn");
+ 
++    check(psx_ws_widen_angle_units(32, 256, 0) == 32 &&
++              psx_ws_widen_angle_units(-32, 256, 0) == -32,
++          "wrapping yaw offsets are exact at 4:3");
++    check(psx_ws_widen_angle_units(32, 256, 53) == 38 &&
++              psx_ws_widen_angle_units(-32, 256, 53) == -38,
++          "eight-bit yaw cone widens symmetrically for 16:9");
++    check(psx_ws_scale_horizontal_320(213, 53) == 160 &&
++              psx_ws_scale_horizontal_320(-213, 53) == -160,
++          "16:9 horizontal edges map to the original side plane");
++    check(psx_ws_scale_horizontal_320(123, 0) == 123 &&
++              psx_ws_scale_horizontal_320(-123, 0) == -123,
++          "horizontal side-plane scaling is exact at 4:3");
++
+     return failures ? 1 : 0;
+ }

@@ -21,7 +21,7 @@
 #include "game/input/mouse_aim.h"
 #include "game/session/capsule.h"
 #include "game/input/vertical_camera.h"
-#include "../../../psxrecomp-overlay/runtime/include/gpu.h"
+#include "../../../psxrecomp/runtime/include/gpu.h"
 
 #include <algorithm>
 #include <cmath>

@@ -21,10 +21,10 @@ def between(source: str, opening: str, closing: str) -> str:
 
 
 cmake = read("CMakeLists.txt")
-overlay = read("PSXRECOMP_OVERLAY_FILES.txt")
-header = read("psxrecomp-overlay/runtime/include/gpu_world_depth.h")
-renderer = read("psxrecomp-overlay/runtime/src/gpu_gl_renderer.c")
-presenter = read("psxrecomp-overlay/runtime/src/gpu_gl_temporal.c.inc")
+overlay = read("framework/FILES.txt")
+header = read("psxrecomp/runtime/include/gpu_world_depth.h")
+renderer = read("psxrecomp/runtime/src/gpu_gl_renderer.c")
+presenter = read("psxrecomp/runtime/src/gpu_gl_temporal.c.inc")
 menu = read("src/game/ui/dev_menu.cpp")
 launcher = read("src/launcher/launcher_settings.cpp")
 options = read("src/game/settings/options.cpp")
@@ -39,7 +39,7 @@ MERGED = (
     "    for (const Option *option : g_preferences.changed)\n"
     "        option->set(settings, option->get(pending));\n"
 )
-loader = read("psxrecomp-overlay/recompiler/src/config_loader.cpp")
+loader = read("psxrecomp/recompiler/src/config_loader.cpp")
 
 require(
     overlay.count("+runtime/include/gpu_world_depth.h\n") == 1
@@ -160,7 +160,7 @@ require(
 """ in loader
     and "s.has_depth_sorted_world" in between(loader, "    if (s.has_mouse_aim", "{\n")
     and "    bool has_depth_sorted_world = false; bool depth_sorted_world = false;\n"
-    in read("psxrecomp-overlay/recompiler/src/config_loader.h"),
+    in read("psxrecomp/recompiler/src/config_loader.h"),
     "the settings file keeps the choice, which is off until made",
 )
 

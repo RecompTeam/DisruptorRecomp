@@ -21,11 +21,11 @@ def require(condition: bool, message: str) -> None:
 
 source = read("src/game/render/billboard_aspect.cpp")
 header = read("src/game/render/billboard_aspect.h")
-codegen = read("psxrecomp-overlay/recompiler/src/code_generator.cpp")
-dirty = read("psxrecomp-overlay/runtime/src/dirty_ram_interp.c")
-gpu = read("psxrecomp-overlay/runtime/src/gpu.c")
-gpu_h = read("psxrecomp-overlay/runtime/include/gpu.h")
-tag_match_h = read("psxrecomp-overlay/runtime/include/gpu_ws_tag_match.h")
+codegen = read("psxrecomp/recompiler/src/code_generator.cpp")
+dirty = read("psxrecomp/runtime/src/dirty_ram_interp.c")
+gpu = read("psxrecomp/runtime/src/gpu.c")
+gpu_h = read("psxrecomp/runtime/include/gpu.h")
+tag_match_h = read("psxrecomp/runtime/include/gpu_ws_tag_match.h")
 audit = read("tools/audit_codegen.py")
 cmake = read("CMakeLists.txt")
 

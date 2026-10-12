@@ -1,0 +1,230 @@
+diff --git a/runtime/include/gpu.h b/runtime/include/gpu.h
+index 11b29fe121b12ffe7b453fde551c274d99425a1e..fad42ec530bb44fb305f34317c46958e1d126ace 100644
+--- a/runtime/include/gpu.h
++++ b/runtime/include/gpu.h
+@@ -1,4 +1,4 @@
+-﻿/* gpu.h — PS1 GPU hardware simulation (Phase 3).
++/* gpu.h — PS1 GPU hardware simulation (Phase 3).
+  *
+  * Implements GPUSTAT, GP0, GP1, and 1024x512 16-bit VRAM.
+  * No rendering to screen — just correct hardware state transitions.
+@@ -116,6 +116,135 @@
+  * env var, if set, overrides this. Default 0 (raw) is byte-identical. */
+ void gpu_set_screen_kind(int kind);
+ 
++/* Presentation-only high-precision geometry. The guest-visible GP0/GTE path
++ * remains integer; supported renderers mirror gameplay polygons into a
++ * separate display surface using retained 16.16 projection coordinates. */
++void gpu_geometry_correction_set(int enabled);
++int  gpu_geometry_correction_enabled(void);
++void gpu_geometry_camera_yaw_residual_set(double yaw_units);
++/* Display-relative projection horizon shared with the optional presentation
++ * yaw homography. Values are rounded to an integer pixel; non-finite or
++ * out-of-range values reset the horizon to the 240-line default of 120. */
++void gpu_geometry_camera_projection_center_y_set(double center_y);
++int  gpu_geometry_camera_projection_center_y_get(void);
++void gpu_geometry_correction_stats(uint64_t *world_triangles,
++                                   uint64_t *precise_triangles);
++
++/* Independent, default-off perspective texture interpolation for exact world
++ * triangles on the presentation mirror. Canonical VRAM, sprites, rectangles,
++ * UI, and any polygon without strict projective depth remain affine. */
++void gpu_texture_correction_set(int enabled);
++int  gpu_texture_correction_enabled(void);
++uint32_t gpu_texture_correction_hits(void);
++
++/* Versioned Test-13 diagnostics. Candidate/accepted primitive arrays count
++ * polygons; triangle and vertex totals make quad coverage unambiguous. The
++ * latest_live counters are the most recent presentation which was eligible to
++ * consume the independent corrected surface, while cumulative includes every
++ * geometry-correction candidate since the feature was enabled. */
++#define GPU_GEOMETRY_DIAGNOSTICS_VERSION 1u
++#define GPU_GEOMETRY_REJECT_REASON_COUNT 15u
++#define GPU_GEOMETRY_PRIMITIVE_CLASS_COUNT 8u
++#define GPU_GEOMETRY_OPCODE_COUNT 32u
++#define GPU_GEOMETRY_DEPTH_BUCKET_COUNT 6u
++#define GPU_GEOMETRY_SCREEN_BUCKET_COUNT 10u
++#define GPU_GEOMETRY_CORRECTION_BUCKET_COUNT 5u
++
++typedef enum GpuGeometryRejectReason {
++    GPU_GEOMETRY_REJECT_NO_COMMAND_SOURCE = 0,
++    GPU_GEOMETRY_REJECT_SOURCE_ADDRESS_OVERFLOW,
++    GPU_GEOMETRY_REJECT_TRACKING_DISABLED,
++    GPU_GEOMETRY_REJECT_SPECULATIVE_LOOKUP,
++    GPU_GEOMETRY_REJECT_SOURCE_NOT_RAM,
++    GPU_GEOMETRY_REJECT_SOURCE_UNALIGNED,
++    GPU_GEOMETRY_REJECT_STORE_MISS,
++    GPU_GEOMETRY_REJECT_STORE_COLLISION,
++    GPU_GEOMETRY_REJECT_PROJECTION_INVALID,
++    GPU_GEOMETRY_REJECT_PACKED_MISMATCH,
++    GPU_GEOMETRY_REJECT_ZERO_DEPTH,
++    GPU_GEOMETRY_REJECT_SATURATED,
++    GPU_GEOMETRY_REJECT_INTEGER_MISMATCH,
++    GPU_GEOMETRY_REJECT_ATOMIC_FALLBACK,
++    GPU_GEOMETRY_REJECT_RECTANGLE_FAST_PATH
++} GpuGeometryRejectReason;
++
++typedef enum GpuGeometryPrimitiveClass {
++    GPU_GEOMETRY_PRIMITIVE_FLAT_TRI = 0,
++    GPU_GEOMETRY_PRIMITIVE_TEXTURED_FLAT_TRI,
++    GPU_GEOMETRY_PRIMITIVE_GOURAUD_TRI,
++    GPU_GEOMETRY_PRIMITIVE_TEXTURED_GOURAUD_TRI,
++    GPU_GEOMETRY_PRIMITIVE_FLAT_QUAD,
++    GPU_GEOMETRY_PRIMITIVE_TEXTURED_FLAT_QUAD,
++    GPU_GEOMETRY_PRIMITIVE_GOURAUD_QUAD,
++    GPU_GEOMETRY_PRIMITIVE_TEXTURED_GOURAUD_QUAD
++} GpuGeometryPrimitiveClass;
++
++typedef struct GpuGeometryCorrectionCounters {
++    uint64_t triangle_candidates;
++    uint64_t triangle_accepted;
++    uint64_t polygon_candidates;
++    uint64_t polygon_accepted;
++    uint64_t vertex_candidates;
++    uint64_t vertex_accepted;
++    uint64_t vertex_rejections[GPU_GEOMETRY_REJECT_REASON_COUNT];
++    uint64_t primitive_candidates[GPU_GEOMETRY_PRIMITIVE_CLASS_COUNT];
++    uint64_t primitive_accepted[GPU_GEOMETRY_PRIMITIVE_CLASS_COUNT];
++    /* Polygon opcode 0x20..0x3f, indexed by opcode - 0x20. */
++    uint64_t opcode_candidates[GPU_GEOMETRY_OPCODE_COUNT];
++    uint64_t opcode_accepted[GPU_GEOMETRY_OPCODE_COUNT];
++    /* Accepted vertices: z <256,<1024,<4096,<16384,<32768,>=32768. */
++    uint64_t depth_vertices[GPU_GEOMETRY_DEPTH_BUCKET_COUNT];
++    /* Accepted vertices: 3x3 on-screen cells followed by off-screen. */
++    uint64_t screen_vertices[GPU_GEOMETRY_SCREEN_BUCKET_COUNT];
++    uint64_t correction_vertices;
++    uint64_t correction_abs_x16_sum;
++    uint64_t correction_abs_y16_sum;
++    uint64_t correction_magnitude16_sum;
++    uint64_t correction_magnitude16_max;
++    uint64_t correction_x16_squared_sum;
++    uint64_t correction_y16_squared_sum;
++    /* Set to one if any correction sum has saturated at UINT64_MAX. */
++    uint64_t correction_accumulators_saturated;
++    /* max(|dx|,|dy|): zero, <.25px, <.5px, <.75px, <1px. */
++    uint64_t correction_magnitude_buckets[
++        GPU_GEOMETRY_CORRECTION_BUCKET_COUNT];
++    uint64_t partial_polygon_rejections;
++    uint64_t partial_quad_rejections;
++} GpuGeometryCorrectionCounters;
++
++typedef struct GpuGeometryCorrectionStats {
++    uint32_t version;
++    uint32_t size;
++    uint64_t presentation_sequence;
++    uint64_t corrected_presentations;
++    uint64_t latest_live_presentation;
++    uint32_t latest_live_valid;
++    uint32_t reserved;
++    uint64_t provenance_store_collisions;
++    uint64_t provenance_store_evictions;
++    uint64_t provenance_lookup_collisions;
++    GpuGeometryCorrectionCounters cumulative;
++    GpuGeometryCorrectionCounters latest_live;
++    /* Additive tail field: older size-bounded callers retain the version-1
++     * prefix while current diagnostics expose rejected uncommitted SWC2s. */
++    uint64_t provenance_store_uncommitted_rejections;
++    /* Reviewed MFC2 -> ordinary-SW routes. Attempts count committed-site
++     * observations; accepts entered exact provenance, while packed rejections
++     * identify clipped/repacked output that deliberately stayed canonical. */
++    uint64_t provenance_registered_store_attempts;
++    uint64_t provenance_registered_store_accepts;
++    uint64_t provenance_registered_store_packed_rejections;
++    /* Reviewed projected-vertex-buffer -> GP0 packet copy routes. */
++    uint64_t provenance_copy_load_attempts;
++    uint64_t provenance_copy_load_accepts;
++    uint64_t provenance_copy_store_attempts;
++    uint64_t provenance_copy_store_accepts;
++    uint64_t provenance_copy_store_packed_rejections;
++} GpuGeometryCorrectionStats;
++
++void gpu_geometry_correction_stats_detailed(
++    GpuGeometryCorrectionStats *out, uint32_t out_size);
++
+ /* Widescreen proportion correction (active only when aspect != 4:3 and the
+  * game's [widescreen] block opts in — see config_loader.h). Tagged
+  * character/billboard prims are re-squashed around their projected anchor;
+@@ -126,6 +255,39 @@
+  * (render the wider FOV into a wider frame, present 1:1; GTE not squashed). */
+ void gpu_ws_configure(int aspect_num, int aspect_den,
+                       uint32_t sprite_anchor_addr, int hud_sprt_squash, int mode);
++/* Add an audited world primitive to the existing classic-squash provenance
++ * table.  This is host presentation metadata only; it never edits guest RAM.
++ * Calls are ignored outside an active classic-wide gameplay presentation. */
++/* Camera depth of a CPU-projected POLY_FT4 sprite, for frame interpolation. */
++void gpu_temporal_note_sprite(CPUState *cpu, uint32_t primitive_addr,
++                              int32_t depth);
++/* The unrounded centre column of the sprite just noted and its distance from its row, 16.16. */
++void gpu_temporal_place_sprite(uint32_t primitive_addr, int32_t centre_x16, int32_t offset_y16);
++/* The unrounded row the placed sprite is centred on and its unrounded sides, 16.16. A shadow lies on the floor.
++ * whole: the packet spans the size cut to whole pixels, not one less. */
++void gpu_temporal_size_sprite(uint32_t primitive_addr, int32_t row16, int32_t width16, int32_t height16,
++                              int shadow, int whole);
++/* Shadows as the game shapes them (0) or flattened the way the floor recedes (1). */
++void gpu_set_shadow_shape(int improved);
++int gpu_shadow_shape(void);
++int gpu_sprite_placement_available(void);
++void gpu_ws_tag_primitive(CPUState *cpu, uint32_t primitive_addr,
++                          int32_t anchor_x);
++/* Mark a completed, audited SPRT packet as a backdrop tile laid out edge to
++ * edge in widened coordinates: classic squash maps it about the display centre. */
++void gpu_ws_tag_screen_tile(CPUState *cpu, uint32_t primitive_addr);
++/* Widened counterpart of a frame X for such a tile span. */
++int32_t gpu_ws_widen_x(int32_t x, int round_up);
++/* Size of the widescreen HUD in percent, 50 to 100. 100 is the authored size. */
++void gpu_ws_set_hud_scale(int percent);
++int gpu_ws_hud_scale(void);
++/* HUD widgets of a game that links its HUD to `layers` nodes just below its ordering table, whose address
++ * is the guest word at `table_pointer`: six numbers each, the box x0, y0, x1, y1 and the pivot x, y. Once
++ * such a layer has shown a widget, later rectangles inside its box belong to it too, until the game sets
++ * its next drawing area. The game has to set one every frame. */
++void gpu_ws_set_hud_widgets(uint32_t table_pointer, int layers, const int32_t *boxes, int count);
++/* A game whose text printer draws a line as one picture `wide` across, the words from its left end. */
++void gpu_ws_set_hud_text_strip(int wide);
+ /* [widescreen] full_2d: opt a pure-2D sprite game into the widescreen present
+  * path (treat every in-game frame as gameplay, since it never tags 3D prims). */
+ void gpu_ws_set_full_2d(int on);
+@@ -186,6 +348,13 @@
+  * full-2D menu/title screen), so the squash is suppressed and content drawn
+  * pixel-native. The present path uses the same predicate to pillarbox. */
+ int  gpu_ws_present_native_43(void);
++/* The same for the frame on display, which a double-buffered game drew a frame earlier. */
++int  gpu_ws_displayed_native_43(void);
++/* The frame on display is a front-end screen shown wide: flat, so nothing is put in between its frames. */
++int  gpu_ws_displayed_menu(void);
++/* A game says what the frame it begins to build is, before it culls or projects for it: 1 a full-2D screen, 0 a world. */
++void gpu_ws_tell_frame_kind(int flat);
++int  gpu_ws_displayed_flat(void);
+ /* Per-side X cull-margin (screen/world units) emitted into the game's draw-
+  * cull immediates by the recompiler ([widescreen.cull]); 0 unless stretching. */
+ int  psx_ws_x_margin(void);
+@@ -240,6 +409,8 @@
+ int psx_ws_cull_keep_site(uint32_t pc, uint32_t instr, uint32_t vanilla,
+                           uint32_t *out);
+ uint32_t psx_ws_angle_widen(uint32_t vanilla);
++int32_t psx_ws_yaw_cone_offset(int32_t vanilla, uint32_t full_turn);
++uint32_t psx_ws_horizontal_slt(uint32_t bound, uint32_t horizontal);
+ int psx_ws_angle_site(uint32_t pc, uint32_t instr, uint32_t *out);
+ uint32_t psx_ws_aspect_cone_result(uint32_t site, uint32_t vanilla,
+                                    uint32_t object, int32_t x, int32_t z,
+@@ -263,6 +434,9 @@
+  * widen for the paired `bltz maxSX` reject. Identity at 4:3. */
+ int  psx_ws_cull_slti(uint32_t sx, uint32_t imm);
+ int  psx_ws_cull_slti_lower(uint32_t sx, uint32_t imm);
++int32_t psx_ws_cull_lower_value(int32_t vanilla);
++int32_t psx_ws_cull_upper_value(int32_t vanilla);
++uint32_t psx_ws_cull_span_value(uint32_t vanilla);
+ int  psx_ws_cull_bltz(uint32_t v);
+ int  psx_ws_cull_vxrange(uint32_t x, uint32_t imm);
+ /* True if a run of instruction words carries the screen-extent reject signature
+@@ -318,6 +492,10 @@
+  * final screenX store to squash it around the screen centre (identity at 4:3).
+  * Pulls far backdrop pieces in from past the 320px edge to cover the 16:9 FOV. */
+ int  psx_ws_backdrop_x(int x);
++/* CPU-calculated perspective X counterpart to the GTE widescreen squash.
++ * Exact game sites use this only for final projected screen coordinates. */
++int  psx_ws_project_x(int x);
++int32_t psx_ws_project_x16(int x, int32_t fraction16);
+ 
+ /* Backdrop PRELOAD ([widescreen.cull] auto_backdrop). psx_ws_backdrop_preload()
+  * is nonzero only while native-wide widescreen is engaged (0 at 4:3 / boot /

@@ -32,9 +32,9 @@ def polls_are_the_four(source: str) -> bool:
 
 
 cmake = read("CMakeLists.txt")
-manifest = read("PSXRECOMP_OVERLAY_FILES.txt").splitlines()
-interrupts = read("psxrecomp-overlay/runtime/src/interrupts.c")
-rule = read("psxrecomp-overlay/runtime/include/save_point.h")
+manifest = read("framework/FILES.txt").splitlines()
+interrupts = read("psxrecomp/runtime/src/interrupts.c")
+rule = read("psxrecomp/runtime/include/save_point.h")
 
 require(
     "    disruptor_contract(save_point)\n" in cmake

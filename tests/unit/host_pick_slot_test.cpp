@@ -1,4 +1,4 @@
-#include "../../psxrecomp-overlay/runtime/include/host_pick_slot.h"
+#include "../../psxrecomp/runtime/include/host_pick_slot.h"
 
 #include <iostream>
 #include <string>

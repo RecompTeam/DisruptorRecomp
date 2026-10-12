@@ -14,7 +14,7 @@ from math import isclose
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-OVERLAY = ROOT / "psxrecomp-overlay" / "runtime"
+OVERLAY = ROOT / "psxrecomp" / "runtime"
 MAIN = OVERLAY / "src" / "main.cpp"
 GPU = OVERLAY / "src" / "gpu.c"
 GL = OVERLAY / "src" / "gpu_gl_renderer.c"

@@ -19,10 +19,10 @@ def require(condition: bool, message: str) -> None:
         raise AssertionError(message)
 
 
-host = read("psxrecomp-overlay/runtime/src/main.cpp")
-memory = read("psxrecomp-overlay/runtime/src/memory.c")
-state = read("psxrecomp-overlay/runtime/src/boot_state.c")
-cycles = read("psxrecomp-overlay/runtime/include/psx_cyc.h")
+host = read("psxrecomp/runtime/src/main.cpp")
+memory = read("psxrecomp/runtime/src/memory.c")
+state = read("psxrecomp/runtime/src/boot_state.c")
+cycles = read("psxrecomp/runtime/include/psx_cyc.h")
 latch = read("psxrecomp/runtime/src/fntrace.c")
 menu = read("src/game/ui/dev_menu.cpp")
 rate = read("src/game/frame/frame_rate.cpp")

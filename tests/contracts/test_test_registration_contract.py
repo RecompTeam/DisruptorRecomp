@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 ARTIFACTS = "--require-" + "artifacts"
 EXPLICIT = {
     "test_borderless_contract.py": "host_borderless_contract",
-    "test_framework_overlay_new_file.py": "disruptor_framework_overlay_new_file",
+    "test_framework_tool.py": "disruptor_framework_tool",
 }
 CONTRACT_HELPER = """function(disruptor_contract name)
     cmake_parse_arguments(PARSE_ARGV 1 CONTRACT "RETAIL" "" "")
@@ -114,7 +114,7 @@ helpers = read("cmake/DisruptorTests.cmake")
 
 require(
     '    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/DisruptorTests.cmake")\n' in cmake
-    and cmake.index("find_package(Python3 REQUIRED COMPONENTS Interpreter)") < cmake.index("cmake/DisruptorTests.cmake")
+    and cmake.index("find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)") < cmake.index("cmake/DisruptorTests.cmake")
     and cmake.index("cmake/DisruptorTests.cmake") < cmake.index("disruptor_contract("),
     "the helpers are loaded after Python is found and before the first registration",
 )

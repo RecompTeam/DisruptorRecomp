@@ -35,8 +35,8 @@ def enclosing(source: str, block: str) -> list[str]:
 
 
 cmake = read("CMakeLists.txt")
-gpu = read("psxrecomp-overlay/runtime/src/gpu.c")
-renderer = read("psxrecomp-overlay/runtime/src/gpu_gl_renderer.c")
+gpu = read("psxrecomp/runtime/src/gpu.c")
+renderer = read("psxrecomp/runtime/src/gpu_gl_renderer.c")
 
 REGISTRATION = "    disruptor_contract(depth24_sync)\n"
 require(

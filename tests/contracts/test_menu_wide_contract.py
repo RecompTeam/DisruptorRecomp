@@ -15,10 +15,10 @@ def require(condition: bool, message: str) -> None:
         raise AssertionError(message)
 
 
-gpu = read("psxrecomp-overlay/runtime/src/gpu.c")
-host = read("psxrecomp-overlay/runtime/src/main.cpp")
-kinds = read("psxrecomp-overlay/runtime/include/gpu_ws_frame_kind.h")
-state = read("psxrecomp-overlay/runtime/src/boot_state.c")
+gpu = read("psxrecomp/runtime/src/gpu.c")
+host = read("psxrecomp/runtime/src/main.cpp")
+kinds = read("psxrecomp/runtime/include/gpu_ws_frame_kind.h")
+state = read("psxrecomp/runtime/src/boot_state.c")
 cmake = read("CMakeLists.txt")
 
 require(
@@ -189,11 +189,11 @@ require(
 )
 require(
     "                fmv_frame || mdec_recently_active(2) || gpu_ws_displayed_menu() != 0);" in host
-    and "int  gpu_ws_displayed_menu(void);" in read("psxrecomp-overlay/runtime/include/gpu.h"),
+    and "int  gpu_ws_displayed_menu(void);" in read("psxrecomp/runtime/include/gpu.h"),
     "nothing is put in between the frames of a front-end screen",
 )
 require(
-    "+runtime/include/gpu_ws_menu.h" in read("PSXRECOMP_OVERLAY_FILES.txt").splitlines()
+    "+runtime/include/gpu_ws_menu.h" in read("framework/FILES.txt").splitlines()
     and "    disruptor_unit_test(disruptor_gpu_ws_menu " in cmake
     and "    disruptor_contract(menu_wide)\n" in cmake,
     "the header is part of the overlay and its tests remain registered",

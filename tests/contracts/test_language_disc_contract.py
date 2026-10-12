@@ -64,20 +64,20 @@ def require(condition: bool, message: str) -> None:
 
 
 cmake = read("CMakeLists.txt")
-overlay_files = read("PSXRECOMP_OVERLAY_FILES.txt")
+overlay_files = read("framework/FILES.txt")
 disc = read("src/game/language/language_disc.cpp")
 disc_header = read("src/game/language/language_disc.h")
 rules = read("src/game/language/language_pack.h")
 source = read("src/game/language/language_source.cpp")
-header = read("psxrecomp-overlay/runtime/include/iso_overlay.h")
-host = read("psxrecomp-overlay/runtime/src/main.cpp")
-host_header = read("psxrecomp-overlay/runtime/include/host_ui.h")
-pick_slot = read("psxrecomp-overlay/runtime/include/host_pick_slot.h")
+header = read("psxrecomp/runtime/include/iso_overlay.h")
+host = read("psxrecomp/runtime/src/main.cpp")
+host_header = read("psxrecomp/runtime/include/host_ui.h")
+pick_slot = read("psxrecomp/runtime/include/host_pick_slot.h")
 restart = read("src/game/session/restart.cpp")
-settings_header = read("psxrecomp-overlay/recompiler/src/config_loader.h")
-settings_loader = read("psxrecomp-overlay/recompiler/src/config_loader.cpp")
+settings_header = read("psxrecomp/recompiler/src/config_loader.h")
+settings_loader = read("psxrecomp/recompiler/src/config_loader.cpp")
 menu = read("src/game/ui/dev_menu.cpp")
-reader = read("psxrecomp-overlay/runtime/src/iso_reader_c.cpp")
+reader = read("psxrecomp/runtime/src/iso_reader_c.cpp")
 
 require(
     '/src/game/language/language_disc.cpp"' in cmake

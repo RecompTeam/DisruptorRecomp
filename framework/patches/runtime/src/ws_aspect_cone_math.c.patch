@@ -1,0 +1,52 @@
+diff --git a/runtime/src/ws_aspect_cone_math.c b/runtime/src/ws_aspect_cone_math.c
+index aca28999b02c32c1c7b16ad7c820472b7e9fd17b..a97019ed2c40bd20f69652731e7f2cfe1644c494 100644
+--- a/runtime/src/ws_aspect_cone_math.c
++++ b/runtime/src/ws_aspect_cone_math.c
+@@ -2,19 +2,39 @@
+ 
+ #include <math.h>
+ 
+-uint32_t psx_ws_widen_angle_q12(uint32_t vanilla, int extent_pixels) {
+-    if (extent_pixels <= 0) return vanilla;
+-    if (vanilla == 0) return 0;
+-    if (vanilla >= 1024u) return 1023u;
++int32_t psx_ws_widen_angle_units(int32_t vanilla, uint32_t full_turn,
++                                 int extent_pixels) {
++    if (extent_pixels <= 0 || vanilla == 0) return vanilla;
++    if (full_turn < 4u || (full_turn & 3u) != 0u) return vanilla;
++
++    const int sign = vanilla < 0 ? -1 : 1;
++    int64_t magnitude = vanilla;
++    if (magnitude < 0) magnitude = -magnitude;
++    const int64_t maximum = (int64_t)full_turn / 4 - 1;
++    if (magnitude > maximum) magnitude = maximum;
+ 
+     const double tau = 6.283185307179586476925286766559;
+-    const double angle = (double)vanilla * tau / 4096.0;
++    const double angle = (double)magnitude * tau / (double)full_turn;
+     const double scale = (160.0 + (double)extent_pixels) / 160.0;
+     const double widened = atan(tan(angle) * scale);
+-    long result = lround(widened * 4096.0 / tau);
++    long result = lround(widened * (double)full_turn / tau);
+     if (result < 1) result = 1;
+-    if (result > 1023) result = 1023;
+-    return (uint32_t)result;
++    if ((int64_t)result > maximum) result = (long)maximum;
++    return (int32_t)(sign * result);
++}
++
++uint32_t psx_ws_widen_angle_q12(uint32_t vanilla, int extent_pixels) {
++    if (vanilla >= 1024u) vanilla = 1023u;
++    return (uint32_t)psx_ws_widen_angle_units(
++        (int32_t)vanilla, 4096u, extent_pixels);
++}
++
++int32_t psx_ws_scale_horizontal_320(int32_t value, int extent_pixels) {
++    if (extent_pixels <= 0 || value == 0) return value;
++    const int64_t denominator = 160 + (int64_t)extent_pixels;
++    int64_t numerator = (int64_t)value * 160;
++    numerator += numerator >= 0 ? denominator / 2 : -denominator / 2;
++    return (int32_t)(numerator / denominator);
+ }
+ 
+ int psx_ws_aspect_cone_contains(int32_t x, int32_t z, int32_t y,

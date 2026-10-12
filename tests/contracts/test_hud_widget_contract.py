@@ -21,9 +21,9 @@ def body(source: str, signature: str) -> str:
 
 
 cmake = read("CMakeLists.txt")
-manifest = read("PSXRECOMP_OVERLAY_FILES.txt")
-gpu = read("psxrecomp-overlay/runtime/src/gpu.c")
-header = read("psxrecomp-overlay/runtime/include/gpu.h")
+manifest = read("framework/FILES.txt")
+gpu = read("psxrecomp/runtime/src/gpu.c")
+header = read("psxrecomp/runtime/include/gpu.h")
 module = read("src/game/render/hud_widgets.cpp")
 
 require(

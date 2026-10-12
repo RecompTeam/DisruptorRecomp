@@ -1,0 +1,13 @@
+diff --git a/runtime/src/overlay_loader.c b/runtime/src/overlay_loader.c
+index d5d1f381cea9019bcba1db168908f599ce6ce650..f05e6918965ea0ede9ddae3e2b6dabbb5b590909 100644
+--- a/runtime/src/overlay_loader.c
++++ b/runtime/src/overlay_loader.c
+@@ -3415,7 +3415,7 @@
+         return 0;
+     }
+     int lazy_loaded = 0;
+-retry_candidates:
++retry_candidates: ;
+     int head = idx_head(phys);
+     int loaded_range_ci = -1;
+     int lazy_exact = 0;

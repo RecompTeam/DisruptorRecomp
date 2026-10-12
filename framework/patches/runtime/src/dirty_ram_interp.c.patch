@@ -1,0 +1,358 @@
+diff --git a/runtime/src/dirty_ram_interp.c b/runtime/src/dirty_ram_interp.c
+index 0a324bcd9913b32b2bb2bcd7a673fd4aba39e4c4..e988e67fb713654ee6df3833cd231b4ff1ac5452 100644
+--- a/runtime/src/dirty_ram_interp.c
++++ b/runtime/src/dirty_ram_interp.c
+@@ -24,6 +24,7 @@
+  */
+ 
+ #include "dirty_ram_interp.h"
++#include "gte_precision.h"
+ #include "cpu_state.h"
+ #include "debug_server.h"
+ #include "interrupts.h"
+@@ -45,6 +46,55 @@
+ uint64_t g_dirty_ram_aborts     = 0;
+ uint64_t g_dirty_ram_guard_yields = 0;
+ uint64_t g_dirty_ram_native_handoffs = 0;
++
++/* One sample per 256 interpreted instructions identifies stable hot loops
++ * without turning production diagnostics into another per-insn profiler. The
++ * physical-PC direct table has no hash collisions and is touched only while
++ * PSX_RUNTIME_PERF_DIAG is enabled. */
++#define DIRTY_RAM_PERF_SAMPLE_SHIFT 8u
++#define DIRTY_RAM_PERF_SAMPLE_STRIDE (1u << DIRTY_RAM_PERF_SAMPLE_SHIFT)
++static int s_dirty_ram_perf_hot_enabled = 0;
++static uint32_t s_dirty_ram_perf_hot_samples[DIRTY_RAM_EXEC_WORD_COUNT];
++
++void dirty_ram_perf_hot_enable(int enabled) {
++    s_dirty_ram_perf_hot_enabled = enabled ? 1 : 0;
++    memset(s_dirty_ram_perf_hot_samples, 0,
++           sizeof(s_dirty_ram_perf_hot_samples));
++}
++
++static inline void dirty_ram_perf_hot_record(uint32_t pc) {
++    if (!s_dirty_ram_perf_hot_enabled ||
++        (g_dirty_ram_insns_run & (DIRTY_RAM_PERF_SAMPLE_STRIDE - 1u)) != 0u)
++        return;
++    uint32_t phys = pc & 0x1FFFFFFFu;
++    if (phys >= 2u * 1024u * 1024u || (phys & 3u) != 0u) return;
++    uint32_t *slot = &s_dirty_ram_perf_hot_samples[phys >> 2];
++    if (*slot != UINT32_MAX) (*slot)++;
++}
++
++void dirty_ram_perf_take_hot(uint32_t pcs[DIRTY_RAM_PERF_HOT_COUNT],
++                             uint32_t samples[DIRTY_RAM_PERF_HOT_COUNT],
++                             uint32_t *stride) {
++    uint32_t top_pc[DIRTY_RAM_PERF_HOT_COUNT] = {0};
++    uint32_t top_n[DIRTY_RAM_PERF_HOT_COUNT] = {0};
++    for (uint32_t word = 0; word < DIRTY_RAM_EXEC_WORD_COUNT; word++) {
++        uint32_t n = s_dirty_ram_perf_hot_samples[word];
++        if (n == 0u || n <= top_n[DIRTY_RAM_PERF_HOT_COUNT - 1u]) continue;
++        uint32_t at = DIRTY_RAM_PERF_HOT_COUNT - 1u;
++        while (at > 0u && n > top_n[at - 1u]) {
++            top_n[at] = top_n[at - 1u];
++            top_pc[at] = top_pc[at - 1u];
++            at--;
++        }
++        top_n[at] = n;
++        top_pc[at] = word << 2;
++    }
++    memset(s_dirty_ram_perf_hot_samples, 0,
++           sizeof(s_dirty_ram_perf_hot_samples));
++    if (pcs) memcpy(pcs, top_pc, sizeof(top_pc));
++    if (samples) memcpy(samples, top_n, sizeof(top_n));
++    if (stride) *stride = DIRTY_RAM_PERF_SAMPLE_STRIDE;
++}
+ /* Scheduling-contract pump telemetry (see dirty_ram_dispatch). Always-on:
+  * g_dirty_pump_max_gap_insns is the largest interpreted-insn gap ever seen
+  * between two interrupt pumps — must stay bounded (~4096 + one block) once the
+@@ -1449,6 +1499,7 @@
+     uint32_t dummy_next = 0;
+     (void)exec_one_fetched(cpu, pc, insn, &dummy_next);
+     g_dirty_ram_insns_run++;
++    dirty_ram_perf_hot_record(pc);
+     /* CYCLE MODEL: the delay-slot instruction is a real retired R3000A instruction
+      * and is charged its own per-instruction interlock INSIDE exec_one (top-of-fn
+      * §1+deps+DO_LDS, or psx_cyc_load_* for a load delay slot) — so a branch+slot
+@@ -1461,6 +1512,158 @@
+  * so the delay-slot instruction observes the architecturally-correct value. */
+ static int exec_one_fetched_inner(CPUState *cpu, uint32_t pc, uint32_t insn,
+                                   uint32_t *next_pc_out);
++
++#ifdef PSX_HAS_DISRUPTOR_VERTICAL_CAMERA
++extern void disruptor_vertical_camera_instruction_hook(
++    CPUState *cpu, uint32_t address, uint32_t instruction, int phase);
++
++static int disruptor_vertical_camera_site(uint32_t pc, uint32_t insn) {
++    switch (pc) {
++    case 0x8003AD54u: case 0x8003ADE4u: case 0x8003B140u:
++    case 0x8003B1ECu: case 0x8003B764u: case 0x8003B990u:
++    case 0x8003BDA4u: case 0x8003C4B4u: case 0x8003C99Cu:
++    case 0x8003D07Cu: case 0x8003F6B0u:
++        return insn == 0x34020078u;
++    case 0x8003D398u:
++        return insn == 0x34030078u;
++    case 0x8003B900u:
++        return insn == 0x0205102Au;
++    case 0x8003B90Cu:
++        return insn == 0x0202102Au;
++    case 0x8003BD14u:
++        return insn == 0x0206102Au;
++    case 0x8003BD20u:
++        return insn == 0x0202102Au;
++    case 0x8003CDB8u:
++        return insn == 0x0065102Au;
++    case 0x8003CDC4u:
++        return insn == 0x0062102Au;
++    case 0x8002E4B8u:
++        return insn == 0x92640022u;
++    case 0x8002EAF0u:
++        return insn == 0x92430020u;
++    case 0x8004279Cu:
++        return insn == 0x8FBF016Cu;
++    default:
++        return 0;
++    }
++}
++#endif
++
++#ifdef PSX_HAS_DISRUPTOR_FAR_RENDERING
++extern void disruptor_far_rendering_instruction_hook(
++    CPUState *cpu, uint32_t address, uint32_t instruction, int phase);
++
++static int disruptor_far_rendering_site(uint32_t pc, uint32_t insn) {
++    switch (pc) {
++    case 0x8003A0F8u:
++        return insn == 0x93B300C0u;
++    case 0x8003A390u:
++        return insn == 0xA082001Fu;
++    case 0x8003A92Cu:
++        return insn == 0x00005812u;
++    case 0x8003A964u:
++        return insn == 0x00681021u;
++    case 0x8003AA74u:
++        return insn == 0x00AC1021u;
++    case 0x8003A914u:
++        return insn == 0x8F8C04A0u;
++    case 0x8003B8C8u: case 0x8003C168u: case 0x8003CD64u:
++        return insn == 0x8F8304A0u;
++    case 0x8003BCE0u:
++        return insn == 0x8F8204A0u;
++    case 0x8003B8D8u:
++        return insn == 0x0072182Au;
++    case 0x8003BCECu:
++        return insn == 0x0053102Au;
++    case 0x8003C178u: case 0x8003CD70u:
++        return insn == 0x0077182Au;
++    case 0x8003B2CCu: case 0x8003BA30u: case 0x8003BE40u:
++    case 0x8003C628u: case 0x8003C878u: case 0x8003D28Cu:
++    case 0x80043184u:
++        return insn == 0x8F820494u;
++    case 0x8003FB0Cu:
++        return insn == 0x8F840494u;
++    case 0x800410E0u:
++        return insn == 0x93830310u;
++    case 0x800410F8u:
++        return insn == 0x8F820680u;
++    case 0x800411D8u:
++        return insn == 0x8F8301D4u;
++    case 0x8004279Cu:
++        return insn == 0x8FBF016Cu;
++    default:
++        return 0;
++    }
++}
++#endif
++
++#ifdef PSX_HAS_DISRUPTOR_BILLBOARD_ASPECT
++extern void disruptor_billboard_aspect_instruction_hook(
++    CPUState *cpu, uint32_t address, uint32_t instruction, int phase);
++
++static int disruptor_billboard_aspect_site(uint32_t pc, uint32_t insn) {
++    switch (pc) {
++    case 0x8003BB88u: case 0x8003BFB0u: case 0x8003C848u:
++        return insn == 0xA6030016u;
++    case 0x8003CAD4u:
++        return insn == 0xA6020016u;
++    case 0x8003D488u:
++        return insn == 0xA2060025u;
++    case 0x800433A0u:
++        return insn == 0x02A02821u;
++    default:
++        return 0;
++    }
++}
++#endif
++
++#ifdef PSX_HAS_DISRUPTOR_INTRO_SKIP
++extern void disruptor_intro_skip_instruction_hook(
++    CPUState *cpu, uint32_t address, uint32_t instruction, int phase);
++
++static int disruptor_intro_skip_site(uint32_t pc, uint32_t insn) {
++    return (pc == 0x800147B0u && insn == 0x2A820003u) ||
++           (pc == 0x80020A80u && insn == 0x2A02005Eu) ||
++           (pc == 0x80048678u && insn == 0x30420940u);
++}
++#endif
++
++#ifdef PSX_HAS_DISRUPTOR_SPRITE_DEPTH
++extern void disruptor_sprite_depth_instruction_hook(
++    CPUState *cpu, uint32_t address, uint32_t instruction, int phase);
++
++static int disruptor_sprite_depth_site(uint32_t pc, uint32_t insn) {
++    switch (pc) {
++    case 0x8003B98Cu: case 0x8003BDA0u: case 0x8003C4B0u: case 0x8003D078u:
++        return insn == 0xAFA20010u;
++    case 0x8003D1B4u:
++        return insn == 0xA4379EA0u;
++    default:
++        return 0;
++    }
++}
++#endif
++
++#ifdef PSX_HAS_DISRUPTOR_BACKDROP_TILES
++extern void disruptor_backdrop_tiles_instruction_hook(
++    CPUState *cpu, uint32_t address, uint32_t instruction, int phase);
++
++static int disruptor_backdrop_tile_site(uint32_t pc, uint32_t insn) {
++    switch (pc) {
++    case 0x8003B328u: case 0x8003B638u:
++        return insn == 0x8FB80040u;
++    case 0x8003B338u:
++        return insn == 0x00621821u;
++    case 0x8003B348u:
++        return insn == 0x8FB80028u;
++    case 0x8003B5A8u:
++        return insn == 0x8F8205B8u;
++    default:
++        return 0;
++    }
++}
++#endif
+ 
+ static int exec_one_fetched(CPUState *cpu, uint32_t pc, uint32_t insn,
+                             uint32_t *next_pc_out) {
+@@ -1516,6 +1719,42 @@
+     const uint32_t ld_before = is_ld ? cpu->gpr[ld_rt] : 0u;
+ 
+     const int rv = exec_one_fetched_inner(cpu, pc, insn, next_pc_out);
++
++#ifdef PSX_HAS_DISRUPTOR_VERTICAL_CAMERA
++    if (disruptor_vertical_camera_site(pc, insn)) {
++        disruptor_vertical_camera_instruction_hook(cpu, pc, insn, 1);
++    }
++#endif
++
++#ifdef PSX_HAS_DISRUPTOR_FAR_RENDERING
++    if (disruptor_far_rendering_site(pc, insn)) {
++        disruptor_far_rendering_instruction_hook(cpu, pc, insn, 1);
++    }
++#endif
++
++#ifdef PSX_HAS_DISRUPTOR_BILLBOARD_ASPECT
++    if (disruptor_billboard_aspect_site(pc, insn)) {
++        disruptor_billboard_aspect_instruction_hook(cpu, pc, insn, 1);
++    }
++#endif
++
++#ifdef PSX_HAS_DISRUPTOR_INTRO_SKIP
++    if (disruptor_intro_skip_site(pc, insn)) {
++        disruptor_intro_skip_instruction_hook(cpu, pc, insn, 1);
++    }
++#endif
++
++#ifdef PSX_HAS_DISRUPTOR_SPRITE_DEPTH
++    if (disruptor_sprite_depth_site(pc, insn)) {
++        disruptor_sprite_depth_instruction_hook(cpu, pc, insn, 1);
++    }
++#endif
++
++#ifdef PSX_HAS_DISRUPTOR_BACKDROP_TILES
++    if (disruptor_backdrop_tile_site(pc, insn)) {
++        disruptor_backdrop_tiles_instruction_hook(cpu, pc, insn, 1);
++    }
++#endif
+ 
+     if (is_ld) {
+         const uint32_t loaded = cpu->gpr[ld_rt];
+@@ -2114,7 +2353,9 @@
+ #ifdef PSX_ENABLE_BLOCK_CYCLES
+             psx_gte_read(cpu, rt);
+ #endif
+-            cpu->gpr[rt] = gte_read_data(cpu, (uint8_t)rd);
++            cpu->gpr[rt] = gte_precision_mfc2_pc_read(
++                pc, insn, (uint8_t)rd,
++                gte_read_data(cpu, (uint8_t)rd));
+             cpu->gpr[0] = 0;
+             return 0;
+         }
+@@ -2181,6 +2422,8 @@
+             cpu->gpr[rt] = psx_ws_xclip_bound(psx_cyc_load_word(cpu, addr, rt, 1u << rs));
+         else
+             cpu->gpr[rt] = psx_cyc_load_word(cpu, addr, rt, 1u << rs);
++        cpu->gpr[rt] = gte_precision_copy_pc_read(
++            pc, insn, (uint8_t)rt, addr, cpu->gpr[rt]);
+         cpu->gpr[0] = 0;
+         return 0;
+     }
+@@ -2236,6 +2479,11 @@
+         g_debug_last_store_pc = pc;
+         parappa_rhythm_log_store(cpu, pc, addr, cpu->gpr[rt], 4u);
+         cpu->write_word(addr, cpu->gpr[rt]);
++        gte_precision_scratch_store_pc_word(
++            pc, insn, addr, cpu->gpr[rt]);
++        gte_precision_copy_pc_word(
++            pc, insn, (uint8_t)rt, addr, cpu->gpr[rt]);
++        gte_precision_store_pc_word(pc, insn, addr, cpu->gpr[rt]);
+         return 0;
+     }
+     case 0x2E: { /* SWR */
+@@ -2509,6 +2757,7 @@
+         cosim_exec_one_begin();
+         int transferred = exec_one(cpu, pc, &next_pc);  /* charges its own interlock */
+         g_dirty_ram_insns_run++;
++        dirty_ram_perf_hot_record(pc);
+ #ifdef PSX_COSIM
+         if (!cosim_exec_one_did_hook()) { extern void cosim_instr(uint32_t); cosim_instr(pc); }
+ #endif
+@@ -2981,6 +3230,7 @@
+             OV_FPLOG_RET1();
+         }
+         g_dirty_ram_insns_run++;
++        dirty_ram_perf_hot_record(pc);
+         insns_executed++;
+         /* COP0 software-interrupt latency: an MTC0 to CAUSE or SR that makes a
+          * software interrupt deliverable (CAUSE.IP0/IP1 & SR.IM0/IM1 & IEc)
+@@ -3433,6 +3683,7 @@
+     uint32_t    sav_unsup_pc     = g_unsupported_pc;
+     uint32_t    sav_unsup_insn   = g_unsupported_insn;
+     const char *sav_unsup_reason = g_unsupported_reason;
++    int         gte_sandbox      = gte_replay_side_effects_begin();
+     g_ls_replay_active = 1;
+     g_ls_mode = 2;
+     uint32_t pc = rep.pc;
+@@ -3456,6 +3707,7 @@
+     }
+     g_ls_mode = 0;
+     g_ls_replay_active = 0;
++    if (gte_sandbox) gte_replay_side_effects_end();
+     g_unsupported_seen   = sav_unsup_seen;     /* undo any replay-side decode-state leak */
+     g_unsupported_pc     = sav_unsup_pc;
+     g_unsupported_insn   = sav_unsup_insn;
+@@ -3550,6 +3802,7 @@
+     const char *sav_unsup_reason = g_unsupported_reason;
+     uint32_t    sav_store_pc     = g_debug_last_store_pc;
+     uint32_t    sav_func_addr    = g_debug_current_func_addr;
++    int         gte_sandbox      = gte_replay_side_effects_begin();
+ 
+     g_ls_replay_active = 1;
+     g_ls_mode = 2;
+@@ -3585,6 +3838,7 @@
+ 
+     g_ls_mode = 0;
+     g_ls_replay_active = 0;
++    if (gte_sandbox) gte_replay_side_effects_end();
+     g_unsupported_seen   = sav_unsup_seen;
+     g_unsupported_pc     = sav_unsup_pc;
+     g_unsupported_insn   = sav_unsup_insn;

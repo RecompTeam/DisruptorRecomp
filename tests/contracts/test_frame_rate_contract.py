@@ -58,9 +58,9 @@ MERGED = (
     "    for (const Option *option : g_preferences.changed)\n"
     "        option->set(settings, option->get(pending));\n"
 )
-manifest = read("PSXRECOMP_OVERLAY_FILES.txt")
-cycle_header = read("psxrecomp-overlay/runtime/include/psx_cyc.h")
-cycle_source = read("psxrecomp-overlay/runtime/src/psx_cycles.c")
+manifest = read("framework/FILES.txt")
+cycle_header = read("psxrecomp/runtime/include/psx_cyc.h")
+cycle_source = read("psxrecomp/runtime/src/psx_cycles.c")
 
 require(
     "    disruptor_contract(frame_rate RETAIL)\n" in cmake,
@@ -150,7 +150,7 @@ require(
     "        disruptor_frame_rate_set_unlocked(settings.frame_unlock ? 1 : 0);" in menu,
     "a saved switch must be applied at start unless the environment overrides it",
 )
-settings_loader = read("psxrecomp-overlay/recompiler/src/config_loader.cpp")
+settings_loader = read("psxrecomp/recompiler/src/config_loader.cpp")
 require(
     's.frame_unlock = toml::find<bool>(d, "frame_unlock");' in settings_loader
     and 'f << "frame_unlock = " << (s.frame_unlock ? "true" : "false")' in settings_loader
@@ -177,8 +177,8 @@ require(
 
 present_rate = read("src/game/frame/present_rate.h")
 present_control = read("src/game/frame/present_rate.cpp")
-renderer = read("psxrecomp-overlay/runtime/src/gpu_gl_renderer.c")
-host = read("psxrecomp-overlay/runtime/src/main.cpp")
+renderer = read("psxrecomp/runtime/src/gpu_gl_renderer.c")
+host = read("psxrecomp/runtime/src/main.cpp")
 require(
     "    disruptor_unit_test(disruptor_present_rate " in cmake
     and "constexpr int kDisruptorPresentRateLowest = 30;" in present_rate

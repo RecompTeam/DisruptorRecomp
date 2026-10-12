@@ -9,19 +9,19 @@ import sys
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-GPU = ROOT / "psxrecomp-overlay" / "runtime" / "src" / "gpu.c"
-GTE = ROOT / "psxrecomp-overlay" / "runtime" / "src" / "gte.cpp"
-MEMORY = ROOT / "psxrecomp-overlay" / "runtime" / "src" / "memory.c"
+GPU = ROOT / "psxrecomp" / "runtime" / "src" / "gpu.c"
+GTE = ROOT / "psxrecomp" / "runtime" / "src" / "gte.cpp"
+MEMORY = ROOT / "psxrecomp" / "runtime" / "src" / "memory.c"
 DIRTY_INTERP = (
-    ROOT / "psxrecomp-overlay" / "runtime" / "src" / "dirty_ram_interp.c"
+    ROOT / "psxrecomp" / "runtime" / "src" / "dirty_ram_interp.c"
 )
 GTE_HEADER = (
-    ROOT / "psxrecomp-overlay" / "runtime" / "include" / "gte_precision.h"
+    ROOT / "psxrecomp" / "runtime" / "include" / "gte_precision.h"
 )
 MOUSE = ROOT / "src" / "game" / "input" / "mouse_aim.cpp"
-MAIN = ROOT / "psxrecomp-overlay" / "runtime" / "src" / "main.cpp"
+MAIN = ROOT / "psxrecomp" / "runtime" / "src" / "main.cpp"
 CODEGEN = (
-    ROOT / "psxrecomp-overlay" / "recompiler" / "src" / "code_generator.cpp"
+    ROOT / "psxrecomp" / "recompiler" / "src" / "code_generator.cpp"
 )
 GAME_CODE = ROOT / "input" / "SLUS_002.24.code"
 

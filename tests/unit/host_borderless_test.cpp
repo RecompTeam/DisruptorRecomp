@@ -1,4 +1,4 @@
-#include "../../psxrecomp-overlay/runtime/include/host_borderless.h"
+#include "../../psxrecomp/runtime/include/host_borderless.h"
 
 #include <iostream>
 

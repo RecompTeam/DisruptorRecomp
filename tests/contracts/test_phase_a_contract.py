@@ -9,15 +9,15 @@ import sys
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[2]
-GPU = ROOT / "psxrecomp-overlay" / "runtime" / "src" / "gpu.c"
-GTE = ROOT / "psxrecomp-overlay" / "runtime" / "src" / "gte.cpp"
-GL = ROOT / "psxrecomp-overlay" / "runtime" / "src" / "gpu_gl_renderer.c"
-GPU_HEADER = ROOT / "psxrecomp-overlay" / "runtime" / "include" / "gpu.h"
+GPU = ROOT / "psxrecomp" / "runtime" / "src" / "gpu.c"
+GTE = ROOT / "psxrecomp" / "runtime" / "src" / "gte.cpp"
+GL = ROOT / "psxrecomp" / "runtime" / "src" / "gpu_gl_renderer.c"
+GPU_HEADER = ROOT / "psxrecomp" / "runtime" / "include" / "gpu.h"
 GTE_HEADER = (
-    ROOT / "psxrecomp-overlay" / "runtime" / "include" / "gte_precision.h"
+    ROOT / "psxrecomp" / "runtime" / "include" / "gte_precision.h"
 )
 MOUSE = ROOT / "src" / "game" / "input" / "mouse_aim.cpp"
-OVERLAY_LIST = ROOT / "PSXRECOMP_OVERLAY_FILES.txt"
+OVERLAY_LIST = ROOT / "framework/FILES.txt"
 
 
 def function_body(source: str, name: str) -> str:

@@ -15,7 +15,7 @@ def require(condition: bool, message: str) -> None:
         raise AssertionError(message)
 
 
-host = read("psxrecomp-overlay/runtime/src/main.cpp")
+host = read("psxrecomp/runtime/src/main.cpp")
 capsule = read("src/game/session/capsule.cpp")
 mouse = read("src/game/input/mouse_aim.cpp")
 menu = read("src/game/ui/dev_menu.cpp")

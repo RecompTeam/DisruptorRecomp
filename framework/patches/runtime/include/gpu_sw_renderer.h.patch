@@ -1,0 +1,13 @@
+diff --git a/runtime/include/gpu_sw_renderer.h b/runtime/include/gpu_sw_renderer.h
+index b8cea0e3a63da893772e2beccd97dc2ebec2559b..193ecbdf42fd1f0bd26d2ba36a0f8f17f59208d3 100644
+--- a/runtime/include/gpu_sw_renderer.h
++++ b/runtime/include/gpu_sw_renderer.h
+@@ -8,7 +8,7 @@
+ #endif
+ 
+ /* Maximum internal-resolution supersampling factor (linear, per axis). */
+-#define SW_MAX_INTERNAL_SCALE 4
++#define SW_MAX_INTERNAL_SCALE 8
+ 
+ /* Initialize software renderer */
+ void sw_renderer_init(uint16_t* vram);

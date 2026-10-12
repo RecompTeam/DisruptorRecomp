@@ -16,10 +16,10 @@ def require(condition: bool, message: str) -> None:
 
 
 cmake = read("CMakeLists.txt")
-manifest = read("PSXRECOMP_OVERLAY_FILES.txt")
-scale_header = read("psxrecomp-overlay/runtime/include/gpu_ws_hud_scale.h")
-gpu = read("psxrecomp-overlay/runtime/src/gpu.c")
-header = read("psxrecomp-overlay/runtime/include/gpu.h")
+manifest = read("framework/FILES.txt")
+scale_header = read("psxrecomp/runtime/include/gpu_ws_hud_scale.h")
+gpu = read("psxrecomp/runtime/src/gpu.c")
+header = read("psxrecomp/runtime/include/gpu.h")
 menu = read("src/game/ui/dev_menu.cpp")
 options = read("src/game/settings/options.cpp")
 STAGED = (
@@ -33,7 +33,7 @@ MERGED = (
     "    for (const Option *option : g_preferences.changed)\n"
     "        option->set(settings, option->get(pending));\n"
 )
-settings_loader = read("psxrecomp-overlay/recompiler/src/config_loader.cpp")
+settings_loader = read("psxrecomp/recompiler/src/config_loader.cpp")
 
 require(
     "+runtime/include/gpu_ws_hud_scale.h" in manifest.splitlines(),

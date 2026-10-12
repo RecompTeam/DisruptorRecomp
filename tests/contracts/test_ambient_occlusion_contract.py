@@ -21,7 +21,7 @@ def between(source: str, opening: str, closing: str) -> str:
 
 
 cmake = read("CMakeLists.txt")
-renderer = read("psxrecomp-overlay/runtime/src/gpu_gl_renderer.c")
+renderer = read("psxrecomp/runtime/src/gpu_gl_renderer.c")
 menu = read("src/game/ui/dev_menu.cpp")
 launcher = read("src/launcher/launcher_settings.cpp")
 options = read("src/game/settings/options.cpp")
@@ -36,8 +36,8 @@ MERGED = (
     "    for (const Option *option : g_preferences.changed)\n"
     "        option->set(settings, option->get(pending));\n"
 )
-loader = read("psxrecomp-overlay/recompiler/src/config_loader.cpp")
-settings = read("psxrecomp-overlay/recompiler/src/config_loader.h")
+loader = read("psxrecomp/recompiler/src/config_loader.cpp")
+settings = read("psxrecomp/recompiler/src/config_loader.h")
 
 require("    disruptor_contract(ambient_occlusion)\n" in cmake, "this contract is registered")
 

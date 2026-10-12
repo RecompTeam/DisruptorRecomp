@@ -179,7 +179,7 @@ if(WIN32)
     add_subdirectory(src/launcher)
 endif()
 if(BUILD_TESTING)
-    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)
     include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/DisruptorTests.cmake")
 
     disruptor_contract(backdrop_tiles RETAIL)
@@ -216,9 +216,18 @@ if(BUILD_TESTING)
     disruptor_contract(debug_tab)
     disruptor_contract(test_registration)
 
-    add_test(NAME disruptor_framework_overlay_new_file
+    add_test(NAME disruptor_framework_tool
         COMMAND "${Python3_EXECUTABLE}" -B
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_framework_overlay_new_file.py")
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_framework_tool.py")
+    # The contracts and some unit tests read framework files from the checkout: it must hold what framework/ says.
+    file(REAL_PATH "${PSXRECOMP_ROOT}" framework_checkout)
+    file(REAL_PATH "${CMAKE_CURRENT_SOURCE_DIR}/psxrecomp" framework_expected)
+    if(NOT framework_checkout STREQUAL framework_expected)
+        message(FATAL_ERROR "The tests read the framework from ${framework_expected}, not ${framework_checkout}")
+    endif()
+    add_test(NAME disruptor_framework_in_step
+        COMMAND "${Python3_EXECUTABLE}" -B
+            "${CMAKE_CURRENT_SOURCE_DIR}/tools/framework.py" check --framework "${PSXRECOMP_ROOT}")
 endif()
 
 if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
@@ -276,7 +285,6 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
     disruptor_unit_test(disruptor_language_disc tests/unit/disruptor_language_disc_test.cpp)
     disruptor_unit_test(disruptor_language_overlay tests/unit/disruptor_language_overlay_test.cpp
         INCLUDES
-            "${CMAKE_CURRENT_SOURCE_DIR}/psxrecomp-overlay/runtime/include"
             "${PSXRECOMP_ROOT}/runtime/include"
             "${CMAKE_CURRENT_SOURCE_DIR}/src")
     add_test(NAME disruptor_language_overlay_tall

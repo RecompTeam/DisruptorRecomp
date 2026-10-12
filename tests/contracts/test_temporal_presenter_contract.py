@@ -36,9 +36,9 @@ def shader(source: str, name: str) -> str:
 
 
 cmake = read("CMakeLists.txt")
-temporal = read("psxrecomp-overlay/runtime/src/gpu_gl_temporal.c.inc")
-renderer = read("psxrecomp-overlay/runtime/src/gpu_gl_renderer.c")
-gpu = read("psxrecomp-overlay/runtime/src/gpu.c")
+temporal = read("psxrecomp/runtime/src/gpu_gl_temporal.c.inc")
+renderer = read("psxrecomp/runtime/src/gpu_gl_renderer.c")
+gpu = read("psxrecomp/runtime/src/gpu.c")
 billboards = read("src/game/render/billboard_aspect.cpp")
 
 require(
@@ -221,7 +221,7 @@ require(
 )
 sides = function_body(gpu, "static float temporal_sprite_sides(int x, int y, int w, int h, int raw_w, int raw_h, int squashed, float sides[4])")
 sizer = function_body(gpu, "void gpu_temporal_size_sprite(uint32_t primitive_addr, int32_t row16, int32_t width16, int32_t height16,")
-sprite_header = read("psxrecomp-overlay/runtime/include/gpu_temporal_sprite.h")
+sprite_header = read("psxrecomp/runtime/include/gpu_temporal_sprite.h")
 require(
     "    if (!t) return 0.0f;" in sides
     and "    const GpuTemporalSprite sprite = gpu_temporal_sprite_from_fixed(\n        t->placed, t->sized, t->shadow, t->whole, t->centre_x, t->offset_y, t->row, t->width, t->height);" in sides
@@ -230,13 +230,13 @@ require(
     and '#include "gpu_temporal_sprite.h"' in gpu
     and "static inline void gpu_temporal_sprite_sides(const GpuTemporalSprite *sprite, float left, float top, int w, int h," in sprite_header
     and "tests/unit/gpu_temporal_sprite_test.cpp" in read("CMakeLists.txt")
-    and "+runtime/include/gpu_temporal_sprite.h" in read("PSXRECOMP_OVERLAY_FILES.txt")
+    and "+runtime/include/gpu_temporal_sprite.h" in read("framework/FILES.txt")
     and "    if (!t || t->stamp != (uint32_t)s_frame_count || !t->placed || width16 <= 0 || height16 <= 0) return;" in sizer
     and "    t->placed = t->sized = t->shadow = t->whole = 0;" in gpu,
     "the renderer must hand a sprite's own numbers, the squash and the shadow setting to the tested side arithmetic",
 )
-gte = read("psxrecomp-overlay/runtime/src/gte.cpp")
-runtime_main = read("psxrecomp-overlay/runtime/src/main.cpp")
+gte = read("psxrecomp/runtime/src/gte.cpp")
+runtime_main = read("psxrecomp/runtime/src/main.cpp")
 audit = read("tools/audit_codegen.py")
 scratch_store = function_body(gte, "extern \"C\" void gte_precision_scratch_store_pc_word(")
 band = function_body(gte, "static uint32_t precision_scratch_route_clamp(")

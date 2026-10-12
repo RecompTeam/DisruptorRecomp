@@ -1,0 +1,13 @@
+diff --git a/recompiler/src/full_function_emitter.cpp b/recompiler/src/full_function_emitter.cpp
+index 6d7f80bf721ec298f293ebd8cb39449f52865668..5c5cb38670df0dba8d65860eb134ebfed4e3dd3f 100644
+--- a/recompiler/src/full_function_emitter.cpp
++++ b/recompiler/src/full_function_emitter.cpp
+@@ -1792,7 +1792,7 @@
+                            g_sym_prefix, kb_count);
+         out += kb;
+         out += "};\n";
+-        out += fmt::format("static const uint32_t {}psx_bios_kernel_body_count = {}u;\n\n",
++        out += fmt::format("enum {{ {}psx_bios_kernel_body_count = {}u }};\n\n",
+                            g_sym_prefix, kb_count);
+     }
+ 

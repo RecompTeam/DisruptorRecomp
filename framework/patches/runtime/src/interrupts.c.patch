@@ -1,0 +1,99 @@
+diff --git a/runtime/src/interrupts.c b/runtime/src/interrupts.c
+index c267a87da5a361b8d34d15a00622279e231c314f..f105a564bdfa0c97aa46db56bda7acc5db2ba626 100644
+--- a/runtime/src/interrupts.c
++++ b/runtime/src/interrupts.c
+@@ -37,6 +37,7 @@
+ #include "lockstep.h"
+ #include "psx_cycles.h"
+ #include "psx_scheduler.h"
++#include "save_point.h"
+ #include <stdio.h>
+ #include <stdlib.h>
+ #include <string.h>
+@@ -447,6 +448,10 @@
+  * the synchronous host window, dirty_ram_dispatch can resume at this guest PC
+  * instead of treating the sentinel as pc=0 termination. */
+ static uint32_t s_compiled_interrupt_resume_pc = 0;
++/* Set by psx_check_interrupts_at for the one call it makes: in any other call the latch above is an earlier call's. */
++static int s_resume_pc_given = 0;
++static int s_save_poll_owed = 0;
++extern void savestate_poll(CPUState* cpu, uint32_t resume_pc);
+ static uint32_t s_last_interrupt_check_pc = 0;
+ static uint64_t s_last_interrupt_check_cycle = UINT64_MAX;
+ 
+@@ -731,6 +736,8 @@
+ }
+ 
+ void psx_check_interrupts(CPUState* cpu) {
++    const int save_point = s_resume_pc_given;
++    s_resume_pc_given = 0;
+     psx_cyc_batch_flush();
+     extern int g_ls_suppress_record;
+ #define PSX_CHECK_INTERRUPTS_RETURN() do { if (g_ls_suppress_record > 0) g_ls_suppress_record--; return; } while (0)
+@@ -749,11 +756,10 @@
+     if (!in_exception && !s_defer_switch_pending && (i_stat & i_mask) != 0) {
+         uint32_t sr = cpu->cop0[COP0_SR];
+         if (!(sr & 0x01u) || !(sr & (1u << 10))) {
+-            if ((++s_fast_maintenance & 0x3FFFu) == 0) {
+-                extern void savestate_poll(CPUState* cpu, uint32_t resume_pc);
++            const int periodic = (++s_fast_maintenance & 0x3FFFu) == 0;
++            if (psx_save_poll_due(periodic, save_point, &s_save_poll_owed))
+                 savestate_poll(cpu, s_compiled_interrupt_resume_pc);
+-                debug_server_poll();
+-            }
++            if (periodic) debug_server_poll();
+             return;
+         }
+     }
+@@ -795,11 +801,10 @@
+             psx_idle_note_check(cpu, check_pc);
+         }
+         if ((i_stat & i_mask) == 0 && sw_pending == 0) {
+-            if ((++s_fast_maintenance & 0x3FFFu) == 0) {
+-                extern void savestate_poll(CPUState* cpu, uint32_t resume_pc);
++            const int periodic = (++s_fast_maintenance & 0x3FFFu) == 0;
++            if (psx_save_poll_due(periodic, save_point, &s_save_poll_owed))
+                 savestate_poll(cpu, s_compiled_interrupt_resume_pc);
+-                debug_server_poll();
+-            }
++            if (periodic) debug_server_poll();
+             return;
+         }
+         /* Idle skip advanced time and a device raised I_STAT — deliver below. */
+@@ -817,11 +822,10 @@
+         s_last_interrupt_check_cycle = psx_get_cycle_count();
+         g_ls_suppress_record++;
+         total_checks++;
+-        if ((total_checks & 0x3FFFu) == 0) {
+-            extern void savestate_poll(CPUState* cpu, uint32_t resume_pc);
+-            savestate_poll(cpu, check_pc);
+-            debug_server_poll();
+-        }
++        const int periodic = (total_checks & 0x3FFFu) == 0;
++        if (psx_save_poll_due(periodic, save_point, &s_save_poll_owed))
++            savestate_poll(cpu, s_compiled_interrupt_resume_pc);
++        if (periodic) debug_server_poll();
+         goto irq_deliver_eval;
+     }
+ 
+@@ -862,10 +866,8 @@
+      * only act outside the exception handler so a restore's stack-unwind can't
+      * strand a half-finished handler. Near-free when nothing is staged. A load
+      * longjmps to the scheduler and never returns here. */
+-    if (!in_exception) {
+-        extern void savestate_poll(CPUState* cpu, uint32_t resume_pc);
+-        savestate_poll(cpu, s_last_interrupt_check_pc);
+-    }
++    if (!in_exception && psx_save_poll_due(1, save_point, &s_save_poll_owed))
++        savestate_poll(cpu, s_compiled_interrupt_resume_pc);
+ 
+     /* Deferred cooperative thread switch: honor at the next real thread-save
+      * boundary (see s_defer_switch_* above). A
+@@ -1649,6 +1651,7 @@
+ void psx_check_interrupts_at(CPUState* cpu, uint32_t resume_pc) {
+     uint32_t prev = s_compiled_interrupt_resume_pc;
+     s_compiled_interrupt_resume_pc = resume_pc;
++    s_resume_pc_given = 1;
+     psx_check_interrupts(cpu); /* flushes load-charge batch on entry */
+     s_compiled_interrupt_resume_pc = prev;
+ }

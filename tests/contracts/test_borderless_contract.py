@@ -15,8 +15,8 @@ def require(condition: bool, message: str) -> None:
         raise AssertionError(message)
 
 
-host = read("psxrecomp-overlay/runtime/src/main.cpp")
-renderer = read("psxrecomp-overlay/runtime/src/gpu_gl_renderer.c")
+host = read("psxrecomp/runtime/src/main.cpp")
+renderer = read("psxrecomp/runtime/src/gpu_gl_renderer.c")
 cmake = read("CMakeLists.txt")
 
 keep = host[
@@ -59,7 +59,7 @@ require(
     "every present of the OpenGL renderer fits its picture to the rows that are on the screen",
 )
 require(
-    "+runtime/include/host_borderless.h" in read("PSXRECOMP_OVERLAY_FILES.txt").splitlines()
+    "+runtime/include/host_borderless.h" in read("framework/FILES.txt").splitlines()
     and "    disruptor_unit_test(host_borderless " in cmake
     and "    add_test(NAME host_borderless_contract\n" in cmake
     and '/tests/contracts/test_borderless_contract.py")' in cmake,

@@ -22,9 +22,9 @@ def require(condition: bool, message: str) -> None:
 camera = read("src/game/input/vertical_camera.cpp")
 camera_h = read("src/game/input/vertical_camera.h")
 mouse = read("src/game/input/mouse_aim.cpp")
-codegen = read("psxrecomp-overlay/recompiler/src/code_generator.cpp")
-dirty = read("psxrecomp-overlay/runtime/src/dirty_ram_interp.c")
-gpu = read("psxrecomp-overlay/runtime/src/gpu.c")
+codegen = read("psxrecomp/recompiler/src/code_generator.cpp")
+dirty = read("psxrecomp/runtime/src/dirty_ram_interp.c")
+gpu = read("psxrecomp/runtime/src/gpu.c")
 cmake = read("CMakeLists.txt")
 configs = read("game.toml") + read("game-widescreen.toml")
 

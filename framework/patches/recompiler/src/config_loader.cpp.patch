@@ -1,0 +1,633 @@
+diff --git a/recompiler/src/config_loader.cpp b/recompiler/src/config_loader.cpp
+index 246483fe90be378f8baf3e85671b692986823a8e..5f99a3341d999703606af51594b351e0b23a24d3 100644
+--- a/recompiler/src/config_loader.cpp
++++ b/recompiler/src/config_loader.cpp
+@@ -3,12 +3,26 @@
+ #include "config_loader.h"
+ 
+ #include <algorithm>
++#include <atomic>
+ #include <cctype>
++#include <chrono>
++#include <cmath>
+ #include <cstdio>
+ #include <fstream>
++#include <iomanip>
++#include <limits>
+ #include <set>
+ #include <stdexcept>
+ #include <string>
++
++#ifdef _WIN32
++#ifndef NOMINMAX
++#define NOMINMAX
++#endif
++#include <windows.h>
++#else
++#include <unistd.h>
++#endif
+ 
+ #include "bios_rom_alias.h"
+ #include "fmt/format.h"
+@@ -64,6 +78,10 @@
+     h.words("cull_screen_x", c.ws_cull_screen_x_sites);
+     h.words("cull_slti", c.ws_cull_slti_sites);
+     h.words("cull_slti_lower", c.ws_cull_slti_lower_sites);
++    h.words("cull_lower_branch", c.ws_cull_lower_branch_sites);
++    h.words("cull_lower_value", c.ws_cull_lower_value_sites);
++    h.words("cull_upper_value", c.ws_cull_upper_value_sites);
++    h.words("cull_span_value", c.ws_cull_span_value_sites);
+     h.words("cull_bltz", c.ws_cull_bltz_sites);
+     h.words("cull_negsub", c.ws_cull_negsub_sites);
+     h.words("cull_vxrange", c.ws_cull_vxrange_sites);
+@@ -120,6 +138,36 @@
+     h.tag("cull_angle");
+     h.u32((uint32_t)angle_sites.size());
+     for (const auto& site : angle_sites) {
++        h.u32(site.address);
++        h.u32(site.expected);
++    }
++
++    std::vector<WidescreenYawConeSite> yaw_cone_sites =
++        c.ws_cull_yaw_cone_sites;
++    std::sort(yaw_cone_sites.begin(), yaw_cone_sites.end(),
++              [](const auto& a, const auto& b) {
++                  if (a.address != b.address) return a.address < b.address;
++                  if (a.expected != b.expected) return a.expected < b.expected;
++                  return a.full_turn < b.full_turn;
++              });
++    h.tag("cull_yaw_cone");
++    h.u32((uint32_t)yaw_cone_sites.size());
++    for (const auto& site : yaw_cone_sites) {
++        h.u32(site.address);
++        h.u32(site.expected);
++        h.u32(site.full_turn);
++    }
++
++    std::vector<WidescreenHorizontalSltSite> horizontal_slt_sites =
++        c.ws_cull_horizontal_slt_sites;
++    std::sort(horizontal_slt_sites.begin(), horizontal_slt_sites.end(),
++              [](const auto& a, const auto& b) {
++                  if (a.address != b.address) return a.address < b.address;
++                  return a.expected < b.expected;
++              });
++    h.tag("cull_horizontal_slt");
++    h.u32((uint32_t)horizontal_slt_sites.size());
++    for (const auto& site : horizontal_slt_sites) {
+         h.u32(site.address);
+         h.u32(site.expected);
+     }
+@@ -496,9 +544,9 @@
+         const toml::value& video = toml::find(cfg, "video");
+         if (video.contains("supersampling")) {
+             const auto n = toml::find<int64_t>(video, "supersampling");
+-            if (n < 1 || n > 4) {
++            if (n < 1 || n > 8) {
+                 throw std::runtime_error(fmt::format(
+-                    "[video] supersampling out of range (1..4): {}", n));
++                    "[video] supersampling out of range (1..8): {}", n));
+             }
+             rt.video_supersampling = static_cast<int>(n);
+         }
+@@ -1451,6 +1499,10 @@
+     std::vector<uint32_t> ws_cull_screen_x_sites;
+     std::vector<uint32_t> ws_cull_slti_sites;
+     std::vector<uint32_t> ws_cull_slti_lower_sites;
++    std::vector<uint32_t> ws_cull_lower_branch_sites;
++    std::vector<uint32_t> ws_cull_lower_value_sites;
++    std::vector<uint32_t> ws_cull_upper_value_sites;
++    std::vector<uint32_t> ws_cull_span_value_sites;
+     std::vector<uint32_t> ws_cull_bltz_sites;
+     std::vector<uint32_t> ws_cull_negsub_sites;
+     std::vector<uint32_t> ws_cull_vxrange_sites;
+@@ -1459,6 +1511,9 @@
+     std::vector<uint32_t> ws_cull_xclip_load_sites;
+     std::vector<WidescreenCullKeepSite> ws_cull_keep_sites;
+     std::vector<WidescreenAngleSite> ws_cull_angle_sites;
++    std::vector<WidescreenYawConeSite> ws_cull_yaw_cone_sites;
++    std::vector<WidescreenHorizontalSltSite>
++        ws_cull_horizontal_slt_sites;
+     WidescreenAspectConeConfig ws_aspect_cone;
+     int ws_cull_guard_pixels = 0;
+     int ws_cull_activation_guard_pixels = 0;
+@@ -1484,6 +1539,10 @@
+             load_sites("screen_x_sites", ws_cull_screen_x_sites);
+             load_sites("slti_sites",  ws_cull_slti_sites);
+             load_sites("slti_lower_sites", ws_cull_slti_lower_sites);
++            load_sites("lower_branch_sites", ws_cull_lower_branch_sites);
++            load_sites("lower_value_sites", ws_cull_lower_value_sites);
++            load_sites("upper_value_sites", ws_cull_upper_value_sites);
++            load_sites("span_value_sites", ws_cull_span_value_sites);
+             load_sites("bltz_sites",  ws_cull_bltz_sites);
+             load_sites("negsub_sites", ws_cull_negsub_sites);
+             load_sites("vxrange_sites", ws_cull_vxrange_sites);
+@@ -1552,6 +1611,85 @@
+                             "{}: duplicate cull-angle address 0x{:08X}",
+                             config_path.string(), site.address));
+                     ws_cull_angle_sites.push_back(site);
++                }
++            }
++            if (cull.contains("yaw_cone")) {
++                std::set<uint32_t> seen;
++                for (const auto& item :
++                     toml::find<toml::array>(cull, "yaw_cone")) {
++                    WidescreenYawConeSite site;
++                    site.address = parse_hex(
++                        toml::find<std::string>(item, "address"),
++                        "widescreen.cull.yaw_cone.address");
++                    site.expected = parse_hex(
++                        toml::find<std::string>(item, "expected"),
++                        "widescreen.cull.yaw_cone.expected");
++                    const int64_t full_turn =
++                        toml::find<int64_t>(item, "full_turn");
++                    if (full_turn < 16 || full_turn > 65536 ||
++                        (full_turn & 3) != 0) {
++                        throw std::runtime_error(fmt::format(
++                            "{}: [[widescreen.cull.yaw_cone]] full_turn "
++                            "must be a multiple of four in [16, 65536]",
++                            config_path.string()));
++                    }
++                    site.full_turn = (uint32_t)full_turn;
++                    const uint32_t op = site.expected >> 26;
++                    const uint32_t rs = (site.expected >> 21) & 31u;
++                    const int32_t imm =
++                        (int16_t)(site.expected & 0xFFFFu);
++                    const int32_t magnitude = imm < 0 ? -imm : imm;
++                    if ((op != 0x08u && op != 0x09u) || rs == 0u ||
++                        imm == 0 ||
++                        magnitude >= (int32_t)(site.full_turn / 4u)) {
++                        throw std::runtime_error(fmt::format(
++                            "{}: [[widescreen.cull.yaw_cone]] expected must "
++                            "be ADDI/ADDIU rt,rs,+/-half_fov with rs != zero "
++                            "and |half_fov| < full_turn/4",
++                            config_path.string()));
++                    }
++                    if ((site.address & 3u) != 0)
++                        throw std::runtime_error(fmt::format(
++                            "{}: yaw-cone address 0x{:08X} is not "
++                            "instruction-aligned",
++                            config_path.string(), site.address));
++                    if (!seen.insert(site.address & 0x1FFFFFFFu).second)
++                        throw std::runtime_error(fmt::format(
++                            "{}: duplicate yaw-cone address 0x{:08X}",
++                            config_path.string(), site.address));
++                    ws_cull_yaw_cone_sites.push_back(site);
++                }
++            }
++            if (cull.contains("horizontal_slt")) {
++                std::set<uint32_t> seen;
++                for (const auto& item :
++                     toml::find<toml::array>(cull, "horizontal_slt")) {
++                    WidescreenHorizontalSltSite site;
++                    site.address = parse_hex(
++                        toml::find<std::string>(item, "address"),
++                        "widescreen.cull.horizontal_slt.address");
++                    site.expected = parse_hex(
++                        toml::find<std::string>(item, "expected"),
++                        "widescreen.cull.horizontal_slt.expected");
++                    const uint32_t op = site.expected >> 26;
++                    const uint32_t fn = site.expected & 0x3Fu;
++                    const uint32_t shamt = (site.expected >> 6) & 31u;
++                    if (op != 0u || fn != 0x2Au || shamt != 0u) {
++                        throw std::runtime_error(fmt::format(
++                            "{}: [[widescreen.cull.horizontal_slt]] expected "
++                            "must be a signed register-register SLT",
++                            config_path.string()));
++                    }
++                    if ((site.address & 3u) != 0)
++                        throw std::runtime_error(fmt::format(
++                            "{}: horizontal-SLT address 0x{:08X} is not "
++                            "instruction-aligned",
++                            config_path.string(), site.address));
++                    if (!seen.insert(site.address & 0x1FFFFFFFu).second)
++                        throw std::runtime_error(fmt::format(
++                            "{}: duplicate horizontal-SLT address 0x{:08X}",
++                            config_path.string(), site.address));
++                    ws_cull_horizontal_slt_sites.push_back(site);
+                 }
+             }
+             if (cull.contains("aspect_cone")) {
+@@ -1901,6 +2039,10 @@
+         /*ws_cull_screen_x_sites*/ ws_cull_screen_x_sites,
+         /*ws_cull_slti_sites*/    ws_cull_slti_sites,
+         /*ws_cull_slti_lower_sites*/ ws_cull_slti_lower_sites,
++        /*ws_cull_lower_branch_sites*/ ws_cull_lower_branch_sites,
++        /*ws_cull_lower_value_sites*/ ws_cull_lower_value_sites,
++        /*ws_cull_upper_value_sites*/ ws_cull_upper_value_sites,
++        /*ws_cull_span_value_sites*/ ws_cull_span_value_sites,
+         /*ws_cull_bltz_sites*/    ws_cull_bltz_sites,
+         /*ws_cull_negsub_sites*/  ws_cull_negsub_sites,
+         /*ws_cull_vxrange_sites*/ ws_cull_vxrange_sites,
+@@ -1909,6 +2051,8 @@
+         /*ws_cull_xclip_load_sites*/ ws_cull_xclip_load_sites,
+         /*ws_cull_keep_sites*/    ws_cull_keep_sites,
+         /*ws_cull_angle_sites*/   ws_cull_angle_sites,
++        /*ws_cull_yaw_cone_sites*/ ws_cull_yaw_cone_sites,
++        /*ws_cull_horizontal_slt_sites*/ ws_cull_horizontal_slt_sites,
+         /*ws_aspect_cone*/         ws_aspect_cone,
+         /*ws_cull_guard_pixels*/  ws_cull_guard_pixels,
+         /*ws_cull_activation_guard_pixels*/ ws_cull_activation_guard_pixels,
+@@ -1995,7 +2139,7 @@
+     return go;
+ }
+ 
+-// ---- UserSettings (settings.toml) — launcher-written override layer ----
++// ---- UserSettings (settings.toml) — user-interface-written override layer ----
+ 
+ UserSettings load_user_settings(const fs::path& path) {
+     UserSettings s;
+@@ -2004,7 +2148,10 @@
+ 
+     toml::value doc;
+     try {
+-        doc = toml::parse(path.string());
++        // Opened by its wide name: path.string() is UTF-8 under MinGW, which the narrow open reads as the ANSI page.
++        std::ifstream file(path, std::ios::binary);
++        if (!file) throw std::runtime_error("settings.toml could not be opened");
++        doc = toml::parse(file, "settings.toml");
+     } catch (const std::exception&) {
+         // Malformed file: fall back to all-defaults rather than refuse to boot,
+         // but tell the caller so the user hears about it (and so the file can
+@@ -2026,7 +2173,7 @@
+         });
+         if (v.contains("supersampling")) try_get([&]{
+             const auto n = toml::find<int64_t>(v, "supersampling");
+-            if (n >= 1 && n <= 4) { s.supersampling = (int)n; s.has_supersampling = true; }
++            if (n >= 1 && n <= 8) { s.supersampling = (int)n; s.has_supersampling = true; }
+         });
+         if (v.contains("window_width")) try_get([&]{
+             const auto n = toml::find<int64_t>(v, "window_width");
+@@ -2087,8 +2234,16 @@
+         });
+         if (v.contains("frame_interpolation_fps")) try_get([&]{
+             s.frame_interpolation_fps = toml::find<int>(v, "frame_interpolation_fps");
+-            if (s.frame_interpolation_fps == 0 || s.frame_interpolation_fps >= 90)
++            if (s.frame_interpolation_fps == 0 ||
++                (s.frame_interpolation_fps >= 30 && s.frame_interpolation_fps <= 1000))
+                 s.has_frame_interpolation_fps = true;
++        });
++        if (v.contains("frame_interpolation_blend")) try_get([&]{
++            const auto n = toml::find<int64_t>(v, "frame_interpolation_blend");
++            if (n == 0 || n == 1 || n == 2) {
++                s.frame_interpolation_blend = static_cast<int>(n);
++                s.has_frame_interpolation_blend = true;
++            }
+         });
+         if (v.contains("aspect_ratio")) try_get([&]{
+             const auto m = toml::find<std::string>(v, "aspect_ratio");
+@@ -2106,6 +2261,17 @@
+         const toml::value& a = toml::find(doc, "audio");
+         if (a.contains("spu_hq")) try_get([&]{
+             s.spu_hq = toml::find<bool>(a, "spu_hq"); s.has_spu_hq = true;
++        });
++        if (a.contains("master_volume")) try_get([&]{
++            const auto n = toml::find<int64_t>(a, "master_volume");
++            if (n >= 0 && n <= 100) {
++                s.master_volume = static_cast<int>(n);
++                s.has_master_volume = true;
++            }
++        });
++        if (a.contains("muted")) try_get([&]{
++            s.audio_muted = toml::find<bool>(a, "muted");
++            s.has_audio_muted = true;
+         });
+     }
+     if (doc.contains("launcher")) {
+@@ -2230,15 +2396,190 @@
+             if (n >= 0 && n <= 32767) { s.deadzone = (int)n; s.has_deadzone = true; }
+         });
+     }
++    if (doc.contains("disruptor")) {
++        const toml::value& d = toml::find(doc, "disruptor");
++        if (d.contains("mouse_aim")) try_get([&]{
++            s.mouse_aim = toml::find<bool>(d, "mouse_aim");
++            s.has_mouse_aim = true;
++        });
++        if (d.contains("modern_controls")) try_get([&]{
++            s.modern_controls = toml::find<bool>(d, "modern_controls");
++            s.has_modern_controls = true;
++        });
++        if (d.contains("horizontal_sensitivity")) try_get([&]{
++            double n = 0.0;
++            try {
++                n = toml::find<double>(d, "horizontal_sensitivity");
++            } catch (const std::exception&) {
++                n = static_cast<double>(
++                    toml::find<int64_t>(d, "horizontal_sensitivity"));
++            }
++            if (std::isfinite(n) && n >= 0.005 && n <= 2.0) {
++                s.horizontal_sensitivity = n;
++                s.has_horizontal_sensitivity = true;
++            }
++        });
++        if (d.contains("invert_horizontal")) try_get([&]{
++            s.invert_horizontal = toml::find<bool>(d, "invert_horizontal");
++            s.has_invert_horizontal = true;
++        });
++        if (d.contains("vertical_look")) try_get([&]{
++            s.vertical_look = toml::find<bool>(d, "vertical_look");
++            s.has_vertical_look = true;
++        });
++        if (d.contains("vertical_sensitivity")) try_get([&]{
++            double n = 0.0;
++            try {
++                n = toml::find<double>(d, "vertical_sensitivity");
++            } catch (const std::exception&) {
++                n = static_cast<double>(
++                    toml::find<int64_t>(d, "vertical_sensitivity"));
++            }
++            if (std::isfinite(n) && n >= 0.005 && n <= 2.0) {
++                s.vertical_sensitivity = n;
++                s.has_vertical_sensitivity = true;
++            }
++        });
++        if (d.contains("invert_vertical")) try_get([&]{
++            s.invert_vertical = toml::find<bool>(d, "invert_vertical");
++            s.has_invert_vertical = true;
++        });
++        if (d.contains("high_precision_camera")) try_get([&]{
++            s.high_precision_camera = toml::find<bool>(d, "high_precision_camera");
++            s.has_high_precision_camera = true;
++        });
++        if (d.contains("geometry_correction")) try_get([&]{
++            s.geometry_correction = toml::find<bool>(d, "geometry_correction");
++            s.has_geometry_correction = true;
++        });
++        if (d.contains("perspective_textures")) try_get([&]{
++            s.perspective_textures = toml::find<bool>(d, "perspective_textures");
++            s.has_perspective_textures = true;
++        });
++        if (d.contains("frame_unlock")) try_get([&]{
++            s.frame_unlock = toml::find<bool>(d, "frame_unlock");
++            s.has_frame_unlock = true;
++        });
++        if (d.contains("skip_intro")) try_get([&]{
++            s.skip_intro = toml::find<bool>(d, "skip_intro");
++            s.has_skip_intro = true;
++        });
++        if (d.contains("language_disc")) try_get([&]{
++            s.language_disc = toml::find<std::string>(d, "language_disc");
++            s.has_language_disc = true;
++        });
++        if (d.contains("language_discs")) try_get([&]{
++            s.language_discs = toml::find<std::vector<std::string>>(d, "language_discs");
++            s.has_language_discs = true;
++        });
++        if (d.contains("hud_scale")) try_get([&]{
++            const int percent = toml::find<int>(d, "hud_scale");
++            if (percent >= 50 && percent <= 100) {
++                s.hud_scale = percent;
++                s.has_hud_scale = true;
++            }
++        });
++        if (d.contains("improved_shadows")) try_get([&]{
++            s.improved_shadows = toml::find<bool>(d, "improved_shadows");
++            s.has_improved_shadows = true;
++        });
++        if (d.contains("ambient_occlusion")) try_get([&]{
++            s.ambient_occlusion = toml::find<bool>(d, "ambient_occlusion");
++            s.has_ambient_occlusion = true;
++        });
++        if (d.contains("occlusion_reach")) try_get([&]{
++            const int reach = toml::find<int>(d, "occlusion_reach");
++            if (reach >= 50 && reach <= 800) {
++                s.occlusion_reach = reach;
++                s.has_occlusion_reach = true;
++            }
++        });
++        if (d.contains("occlusion_strength")) try_get([&]{
++            const int percent = toml::find<int>(d, "occlusion_strength");
++            if (percent >= 0 && percent <= 300) {
++                s.occlusion_strength = percent;
++                s.has_occlusion_strength = true;
++            }
++        });
++        if (d.contains("gap_filling")) try_get([&]{
++            s.gap_filling = toml::find<bool>(d, "gap_filling");
++            s.has_gap_filling = true;
++        });
++        if (d.contains("depth_sorted_world")) try_get([&]{
++            s.depth_sorted_world = toml::find<bool>(d, "depth_sorted_world");
++            s.has_depth_sorted_world = true;
++        });
++        if (d.contains("diagnostic_view")) try_get([&]{
++            const std::string view = toml::find<std::string>(d, "diagnostic_view");
++            for (int index = 0; index < kDisruptorDiagnosticViewCount; ++index) {
++                if (view == kDisruptorDiagnosticViews[index]) {
++                    s.diagnostic_view = index;
++                    s.has_diagnostic_view = true;
++                }
++            }
++        });
++    }
+     return s;
+ }
++
++namespace {
++
++fs::path user_settings_temp_path(const fs::path& destination) {
++    static std::atomic<uint64_t> sequence{0};
++#ifdef _WIN32
++    const auto process_id = static_cast<uint64_t>(::GetCurrentProcessId());
++#else
++    const auto process_id = static_cast<uint64_t>(::getpid());
++#endif
++    const auto tick = static_cast<uint64_t>(
++        std::chrono::steady_clock::now().time_since_epoch().count());
++
++    fs::path temporary = destination;
++    temporary += fmt::format(".tmp.{}.{}.{}", process_id, tick,
++                             sequence.fetch_add(1, std::memory_order_relaxed));
++    return temporary;
++}
++
++bool atomic_replace_user_settings(const fs::path& temporary,
++                                  const fs::path& destination) {
++#ifdef _WIN32
++    // A reader or antivirus scanner may briefly deny replacement after a save.
++    // Keep the old file intact and allow up to 500 ms for that handle to close.
++    for (unsigned attempt = 0; ; ++attempt) {
++        if (::MoveFileExW(temporary.c_str(), destination.c_str(),
++                         MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) return true;
++        const DWORD error = ::GetLastError();
++        const bool transient = error == ERROR_ACCESS_DENIED ||
++                               error == ERROR_SHARING_VIOLATION ||
++                               error == ERROR_LOCK_VIOLATION;
++        const DWORD attributes = ::GetFileAttributesW(destination.c_str());
++        const bool blocked = attributes != INVALID_FILE_ATTRIBUTES &&
++                             (attributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_READONLY));
++        if (!transient || blocked || attempt == 20) {
++            ::SetLastError(error);
++            return false;
++        }
++        ::Sleep(25);
++    }
++#else
++    return std::rename(temporary.c_str(), destination.c_str()) == 0;
++#endif
++}
++
++void remove_user_settings_temp(const fs::path& temporary) {
++    std::error_code ignored;
++    fs::remove(temporary, ignored);
++}
++
++} // namespace
+ 
+ bool save_user_settings(const fs::path& path, const UserSettings& s) {
+     std::error_code ec;
+     if (!path.parent_path().empty())
+         fs::create_directories(path.parent_path(), ec);  // best-effort
+ 
+-    std::ofstream f(path, std::ios::trunc);
++    const fs::path temporary = user_settings_temp_path(path);
++    std::ofstream f(temporary, std::ios::trunc);
+     if (!f.is_open()) return false;
+ 
+     // TOML strings use forward slashes so backslash escaping is never an issue.
+@@ -2247,7 +2588,21 @@
+         return str;
+     };
+ 
+-    f << "# psxrecomp user settings - written by the launcher. Safe to hand-edit.\n";
++    // A TOML basic string: a quote, a backslash and a control character are escaped.
++    auto quoted = [](const std::string& text) {
++        std::string out = "\"";
++        for (const char letter : text) {
++            const unsigned code = static_cast<unsigned char>(letter);
++            char escape[8];
++            if (letter == '\\' || letter == '"') std::snprintf(escape, sizeof(escape), "\\%c", letter);
++            else if (code < 0x20 || code == 0x7F) std::snprintf(escape, sizeof(escape), "\\u%04X", code);
++            else std::snprintf(escape, sizeof(escape), "%c", letter);
++            out += escape;
++        }
++        return out + "\"";
++    };
++
++    f << "# psxrecomp user settings - written by settings UIs. Safe to hand-edit.\n";
+     f << "# Overrides the bundled game.toml; the command line overrides this file.\n\n";
+ 
+     f << "[video]\n";
+@@ -2287,6 +2642,11 @@
+         f << "frame_interpolation = " << (s.frame_interpolation ? "true" : "false") << "\n";
+     if (s.has_frame_interpolation_fps)
+         f << "frame_interpolation_fps = " << s.frame_interpolation_fps << "\n";
++    if (s.has_frame_interpolation_blend &&
++        (s.frame_interpolation_blend == 0 ||
++         s.frame_interpolation_blend == 1 ||
++         s.frame_interpolation_blend == 2))
++        f << "frame_interpolation_blend = " << s.frame_interpolation_blend << "\n";
+     if (s.has_aspect_ratio)
+         f << "aspect_ratio      = \"" << s.aspect_num << ":" << s.aspect_den << "\"\n";
+     if (s.has_adaptive_view)
+@@ -2294,6 +2654,10 @@
+     f << "\n[audio]\n";
+     if (s.has_spu_hq)
+         f << "spu_hq = " << (s.spu_hq ? "true" : "false") << "\n";
++    if (s.has_master_volume)
++        f << "master_volume = " << s.master_volume << "\n";
++    if (s.has_audio_muted)
++        f << "muted = " << (s.audio_muted ? "true" : "false") << "\n";
+     if (s.has_skip_launcher)
+         f << "\n[launcher]\nskip_launcher = " << (s.skip_launcher ? "true" : "false") << "\n";
+     if ((s.has_netplay_player_name && !s.netplay_player_name.empty()) ||
+@@ -2353,7 +2717,98 @@
+             f << "extra_late = " << s.parappa_timing_extra_late << "\n";
+     }
+ 
+-    return f.good();
++    if (s.has_mouse_aim || s.has_modern_controls ||
++        s.has_horizontal_sensitivity || s.has_invert_horizontal ||
++        s.has_vertical_look || s.has_vertical_sensitivity ||
++        s.has_invert_vertical ||
++        s.has_high_precision_camera || s.has_geometry_correction ||
++        s.has_perspective_textures || s.has_frame_unlock || s.has_improved_shadows ||
++        s.has_ambient_occlusion || s.has_occlusion_reach || s.has_occlusion_strength ||
++        s.has_gap_filling || s.has_depth_sorted_world || s.has_diagnostic_view ||
++        s.has_language_discs ||
++        s.has_language_disc || s.has_skip_intro ||
++        s.has_hud_scale) {
++        f << "\n[disruptor]\n";
++        if (s.has_mouse_aim)
++            f << "mouse_aim = " << (s.mouse_aim ? "true" : "false") << "\n";
++        if (s.has_modern_controls)
++            f << "modern_controls = " << (s.modern_controls ? "true" : "false") << "\n";
++        if (s.has_horizontal_sensitivity &&
++            std::isfinite(s.horizontal_sensitivity) &&
++            s.horizontal_sensitivity >= 0.005 &&
++            s.horizontal_sensitivity <= 2.0) {
++            f << "horizontal_sensitivity = "
++              << std::setprecision(std::numeric_limits<double>::max_digits10)
++              << s.horizontal_sensitivity << "\n";
++        }
++        if (s.has_invert_horizontal)
++            f << "invert_horizontal = " << (s.invert_horizontal ? "true" : "false") << "\n";
++        if (s.has_vertical_look)
++            f << "vertical_look = " << (s.vertical_look ? "true" : "false") << "\n";
++        if (s.has_vertical_sensitivity &&
++            std::isfinite(s.vertical_sensitivity) &&
++            s.vertical_sensitivity >= 0.005 &&
++            s.vertical_sensitivity <= 2.0) {
++            f << "vertical_sensitivity = "
++              << std::setprecision(std::numeric_limits<double>::max_digits10)
++              << s.vertical_sensitivity << "\n";
++        }
++        if (s.has_invert_vertical)
++            f << "invert_vertical = " << (s.invert_vertical ? "true" : "false") << "\n";
++        if (s.has_high_precision_camera)
++            f << "high_precision_camera = " << (s.high_precision_camera ? "true" : "false") << "\n";
++        if (s.has_geometry_correction)
++            f << "geometry_correction = " << (s.geometry_correction ? "true" : "false") << "\n";
++        if (s.has_perspective_textures)
++            f << "perspective_textures = " << (s.perspective_textures ? "true" : "false") << "\n";
++        if (s.has_frame_unlock)
++            f << "frame_unlock = " << (s.frame_unlock ? "true" : "false") << "\n";
++        if (s.has_skip_intro)
++            f << "skip_intro = " << (s.skip_intro ? "true" : "false") << "\n";
++        if (s.has_language_disc)
++            f << "language_disc = " << quoted(s.language_disc) << "\n";
++        if (s.has_language_discs) {
++            f << "language_discs = [";
++            for (size_t index = 0; index < s.language_discs.size(); ++index)
++                f << (index ? ", " : "") << quoted(s.language_discs[index]);
++            f << "]\n";
++        }
++        if (s.has_hud_scale && s.hud_scale >= 50 && s.hud_scale <= 100)
++            f << "hud_scale = " << s.hud_scale << "\n";
++        if (s.has_improved_shadows)
++            f << "improved_shadows = " << (s.improved_shadows ? "true" : "false") << "\n";
++        if (s.has_ambient_occlusion)
++            f << "ambient_occlusion = " << (s.ambient_occlusion ? "true" : "false") << "\n";
++        if (s.has_occlusion_reach && s.occlusion_reach >= 50 && s.occlusion_reach <= 800)
++            f << "occlusion_reach = " << s.occlusion_reach << "\n";
++        if (s.has_occlusion_strength && s.occlusion_strength >= 0 && s.occlusion_strength <= 300)
++            f << "occlusion_strength = " << s.occlusion_strength << "\n";
++        if (s.has_gap_filling)
++            f << "gap_filling = " << (s.gap_filling ? "true" : "false") << "\n";
++        if (s.has_depth_sorted_world)
++            f << "depth_sorted_world = " << (s.depth_sorted_world ? "true" : "false") << "\n";
++        if (s.has_diagnostic_view && s.diagnostic_view >= 0 && s.diagnostic_view < kDisruptorDiagnosticViewCount)
++            f << "diagnostic_view = " << quoted(kDisruptorDiagnosticViews[s.diagnostic_view]) << "\n";
++    }
++
++    f.flush();
++    const bool write_ok = f.good();
++    f.close();
++    if (!write_ok || f.fail()) {
++        remove_user_settings_temp(temporary);
++        return false;
++    }
++    if (!atomic_replace_user_settings(temporary, path)) {
++#ifdef _WIN32
++        const DWORD error = ::GetLastError();
++#endif
++        remove_user_settings_temp(temporary);
++#ifdef _WIN32
++        ::SetLastError(error);
++#endif
++        return false;
++    }
++    return true;
+ }
+ 
+ } // namespace PSXRecompV4

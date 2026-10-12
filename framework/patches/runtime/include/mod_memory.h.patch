@@ -1,0 +1,16 @@
+diff --git a/runtime/include/mod_memory.h b/runtime/include/mod_memory.h
+index 7406c39a683b0a7a9c8df8d80004c46cb2408d7c..c5a5c3f89c56ca8869bc7fb1fd18cfdc129fe1bb 100644
+--- a/runtime/include/mod_memory.h
++++ b/runtime/include/mod_memory.h
+@@ -43,6 +43,11 @@
+ 
+ uint32_t psx_mod_gpu_dma_memory_alloc(uint32_t size, uint32_t alignment);
+ uint32_t psx_mod_gpu_dma_resolve_address(uint32_t address);
++/* Snapshot payload is the allocated byte prefix; restoring its length also
++ * restores the allocation boundary needed by CPU and 24-bit GPU accesses. */
++uint32_t psx_mod_gpu_dma_memory_bytes(void);
++const uint8_t *psx_mod_gpu_dma_memory_data(void);
++int psx_mod_gpu_dma_memory_restore(const uint8_t *data, uint32_t size);
+ 
+ #ifdef __cplusplus
+ }

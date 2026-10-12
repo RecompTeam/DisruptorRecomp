@@ -2,7 +2,7 @@ $ErrorActionPreference = 'Stop'
 
 $Root      = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Framework = Join-Path $Root 'psxrecomp'
-$Pin       = (Get-Content (Join-Path $Root 'PSXRECOMP_PIN') -Raw).Trim()
+$Pin       = (Get-Content (Join-Path $Root 'framework/PIN') -Raw).Trim()
 $Exe       = Join-Path $Root 'input/SLUS_002.24'
 
 # Ninja inherits its target architecture from the active compiler environment.
@@ -101,6 +101,10 @@ foreach ($Command in @('git', 'cmake', 'ctest', 'python')) {
         throw "Missing prerequisite: $Command"
     }
 }
+python -c "import sys; sys.exit(sys.version_info < (3, 10))"
+if ($LASTEXITCODE -ne 0) {
+    throw 'Python 3.10 or newer is required.'
+}
 if (!(Test-Path $Exe)) {
     throw "Copy the verified SLUS_002.24 into input/ before building."
 }
@@ -114,10 +118,7 @@ if ($LASTEXITCODE -ne 0) {
 }
 Invoke-Checked { git -C $Framework checkout --detach $Pin }
 Invoke-Checked {
-    python (Join-Path $Root 'tools/apply_framework_overlay.py') --framework $Framework
-}
-Invoke-Checked {
-    python (Join-Path $Root 'tools/patch_openbios_seeds.py') --framework $Framework
+    python (Join-Path $Root 'tools/framework.py') apply --framework $Framework
 }
 
 $Generator = @()
