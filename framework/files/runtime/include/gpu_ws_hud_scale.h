@@ -31,6 +31,26 @@ static inline int32_t psx_ws_hud_thirds_centre(int32_t x, int32_t w, int32_t str
     return w == strip && 3 * centre > 4 * screen_w && 3 * x <= 2 * screen_w ? screen_w : centre;
 }
 
+/* The column a held weapon's sprite [x, x + w) is squashed about. In the middle third of the screen that is the
+ * screen's centre, as for any sprite there. In an outer third it slides toward that edge and is on it when the sprite
+ * touches it: a picture the screen crops stays cropped by the screen, and nothing jumps as the sprite crosses a third.
+ * A sprite too wide to slide inside an outer third, one over five twelfths of the screen, slides from the centre on. */
+static inline int32_t psx_ws_hud_held_pivot(int32_t x, int32_t w, int32_t screen_w) {
+    int64_t centre, start, reach, gone;
+    int mirrored;
+    if (w <= 0 || screen_w <= 0 || w >= screen_w) return screen_w / 2;
+    centre = 2 * (int64_t)x + w;
+    mirrored = centre < screen_w;
+    if (mirrored) centre = 2 * (int64_t)screen_w - centre;
+    start = 12 * (int64_t)w <= 5 * (int64_t)screen_w ? 4 * (int64_t)screen_w : 3 * (int64_t)screen_w; /* in sixths of a pixel */
+    gone = 3 * centre - start;
+    if (gone <= 0) return screen_w / 2;
+    reach = 3 * (2 * (int64_t)screen_w - w) - start;
+    if (gone > reach) gone = reach;
+    centre = ((int64_t)screen_w * (reach + gone) + reach) / (2 * reach);
+    return (int32_t)(mirrored ? screen_w - centre : centre);
+}
+
 /* Shrinks a screen-space widget toward the edge or corner of the screen it
  * sits at: thirds of the width and of the height pick the pivot, as the stock
  * horizontal squash does. A counter whose pieces all centre in one third keeps
