@@ -15,8 +15,20 @@ struct Frame {
     uint16_t pad[2] = {0xFFFF, 0xFFFF}; /* active low, as the game reads them */
     uint32_t byte_at = 0;               /* a byte a module wrote into the game this frame, 0 for none */
     uint8_t byte = 0;
+    uint32_t byte2_at = 0;              /* a second write, e.g. weapon selection alongside mouse yaw */
+    uint8_t byte2 = 0;
     float pitch = 0.0f;                 /* the vertical look, which lives outside the game */
     uint64_t memory = 0;
+
+    void note_byte(uint32_t address, uint8_t value) {
+        if (byte_at == 0u || byte_at == address) {
+            byte_at = address;
+            byte = value;
+        } else {
+            byte2_at = address;
+            byte2 = value;
+        }
+    }
 };
 
 /* first_cycle: the emulated clock at the first frame's VBlank, which places every later one. */

@@ -63,6 +63,7 @@ folder; these backups can be removed manually once the repaired copy works.
 | Jump / menu cancel | Space |
 | Use | E |
 | Choose weapon / psionic | Q / R |
+| Select weapon directly | 1–9 / 0, or the same keys on the keypad |
 | Map / pause | Tab / P |
 | Settings | Backquote (`` ` ``); Escape closes |
 | Fullscreen | Alt+Enter |
@@ -75,6 +76,11 @@ folder; these backups can be removed manually once the repaired copy works.
 Modern mouse/keyboard controls, geometry correction, and perspective textures
 are enabled initially. Vertical mouse look is experimental and starts off;
 enable it in **Settings → Controls** if desired.
+With modern controls enabled, number keys select weapons you own:
+**1** baton, **2** pistol (18mm Semi), **3** 18mm Auto, **4** Phase Rifle,
+**5** Phase Repeater, **6** Lockon Cannon, **7** AM Blaster, **8** AM Cyclone,
+**9** Zodiac, **0** Plasma Lance. Each press selects once; menus and save-name
+entry keep the number keys for their usual input.
 **Smooth mouse turning** in the same tab turns the picture between the game's
 256 heading steps. It requires captured mouse aim and exact geometry.
 A setting shows its description under the pointer, the same one as in the

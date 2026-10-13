@@ -86,7 +86,9 @@ Press **backquote** (`` ` ``) to open settings; **Escape** closes them. Gameplay
 continues while the menu is open, but game input is blocked.
 
 With modern controls enabled: **WASD** moves, **left mouse** fires, **right
-mouse** uses psionics, **Space** jumps, and **E** interacts. The game holds
+mouse** uses psionics, **Space** jumps, and **E** interacts. Number keys select
+weapons: **1** baton, **2** pistol, then **3–9** and **0** for the remaining
+weapons. The keypad works too. The game holds
 the mouse while its window has focus. Escape or a middle-click releases it,
 and a left-click in the window takes it back. Add `-VerticalLook` to
 enable experimental vertical aim.

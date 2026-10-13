@@ -17,6 +17,10 @@ void draw_controls_tab() {
     }
     draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
 
+    if (modern)
+        ImGui::TextWrapped("Select weapon: 1 baton, 2 pistol, 3-9 and 0 remaining weapons. "
+                           "Number row or keypad; only weapons you own. Q still opens the weapon list.");
+
     float sensitivity =
         static_cast<float>(disruptor_mouse_horizontal_sensitivity());
     if (option_slider("disruptor.horizontal_sensitivity", &sensitivity)) {

@@ -158,7 +158,7 @@ constexpr Option option_list[] = {
     toggle<&Settings::has_modern_controls, &Settings::modern_controls>(
         "disruptor.modern_controls", "Modern keyboard and mouse controls", 1,
         "WASD moves, the left mouse button fires, the right one uses psionics, Space jumps and E "
-        "interacts."),
+        "interacts. Number keys select weapons: 1 baton, 2 pistol, then 3-9 and 0. The keypad works too."),
     slider("disruptor.horizontal_sensitivity", "Horizontal sensitivity", 80,
            "How far the view turns for a movement of the mouse.", 5, 2000, Unit::thousandths,
            saved<&Settings::has_horizontal_sensitivity>, thousandths<&Settings::horizontal_sensitivity>,

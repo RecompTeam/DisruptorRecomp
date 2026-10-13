@@ -35,6 +35,7 @@
 
 extern "C" void mod_register_frame_hook(void (*hook)(void));
 extern "C" uint8_t psx_read_byte(uint32_t address);
+extern "C" uint32_t psx_read_word(uint32_t address);
 extern "C" void psx_write_byte(uint32_t address, uint8_t value);
 extern "C" uint16_t sio_get_pad_buttons_slot(int slot);
 extern "C" void sio_set_pad_state_slot(int slot, uint16_t buttons);
@@ -51,6 +52,20 @@ extern "C" void disruptor_name_entry_keys_for_pad(const uint8_t *keys, uint8_t *
 namespace {
 
 constexpr uint32_t kPlayerYawAddress = 0x80077624u;
+constexpr uint32_t kCurrentWeaponAddress = 0x80077627u;
+constexpr uint32_t kWeaponOwnershipBase = 0x800770F4u;
+constexpr uint32_t kSceneModeAddress = 0x8007145Cu;
+/* Retail weapon IDs follow the HUD names: baton, 18mm Semi, 18mm Auto,
+ * Phase Rifle, Phase Repeater, Lockon Cannon, AM Blaster, AM Cyclone,
+ * Zodiac, Plasma Lance. The last slot is on 0, as in other PC shooters. */
+constexpr std::array<int, 20> kWeaponKeys = {
+    SDL_SCANCODE_1, SDL_SCANCODE_2, SDL_SCANCODE_3, SDL_SCANCODE_4,
+    SDL_SCANCODE_5, SDL_SCANCODE_6, SDL_SCANCODE_7, SDL_SCANCODE_8,
+    SDL_SCANCODE_9, SDL_SCANCODE_0,
+    SDL_SCANCODE_KP_1, SDL_SCANCODE_KP_2, SDL_SCANCODE_KP_3, SDL_SCANCODE_KP_4,
+    SDL_SCANCODE_KP_5, SDL_SCANCODE_KP_6, SDL_SCANCODE_KP_7, SDL_SCANCODE_KP_8,
+    SDL_SCANCODE_KP_9, SDL_SCANCODE_KP_0,
+};
 constexpr double kDefaultHorizontalSensitivity = 0.080;
 constexpr double kDefaultVerticalSensitivity = 0.080;
 constexpr double kMinimumSensitivity = 0.005;
@@ -90,6 +105,7 @@ struct MouseAimState {
     bool left_was_down = false;
     bool middle_was_down = false;
     bool escape_was_down = false;
+    std::array<bool, kWeaponKeys.size()> weapon_was_down{};
     bool invert_horizontal = false;
     bool invert_vertical = false;
     double horizontal_sensitivity = kDefaultHorizontalSensitivity;
@@ -227,7 +243,7 @@ void open_log() {
                  "vertical_pitch_limit=%.6f\n"
                  "capture=middle-click release=middle-click-or-escape\n"
                  "keyboard=W/S:forward/back A/D:strafe Space:jump E:use "
-                 "F:psionic Q:weapon R:psionic-select Tab:map P:pause\n"
+                 "F:psionic Q:weapon 1-9/0:weapon-slot R:psionic-select Tab:map P:pause\n"
                  "mouse=left:fire right:psionic X1:weapon X2:psionic-select\n",
                  kPlayerYawAddress,
                  g_mouse.mouse_aim_enabled ? "true" : "false",
@@ -340,19 +356,60 @@ bool key_down(const Uint8 *keys, int scancode) {
     return keys && scancode >= 0 && keys[scancode] != 0;
 }
 
+/* Track raw keys even when typing, unfocused, or in a menu. A held key must
+ * be released before it can select after gameplay resumes. */
+int sample_weapon_keys(const Uint8 *keys, const Uint8 *pad_keys) {
+    int requested = -1;
+    for (size_t i = 0; i < kWeaponKeys.size(); ++i) {
+        const int key = kWeaponKeys[i];
+        const bool down = key_down(keys, key);
+        if (requested < 0 && down && !g_mouse.weapon_was_down[i] &&
+            key_down(pad_keys, key))
+            requested = static_cast<int>(i % 10);
+        g_mouse.weapon_was_down[i] = down;
+    }
+    return requested;
+}
+
+void select_weapon(int weapon) {
+    if (weapon < 0 || weapon >= 10 || psx_netplay_active() ||
+        !disruptor_vertical_camera_input_allowed() ||
+        psx_read_byte(kSceneModeAddress) != 0u)
+        return;
+
+    /* The retail selector at 0x80039920 checks this same ownership word,
+     * then stores only the selected ID. The normal weapon update notices
+     * the change and owns its animation; ammunition and inventory stay put. */
+    const uint8_t current = psx_read_byte(kCurrentWeaponAddress);
+    if ((current >= 10u && current != 0xFFu) ||
+        psx_read_word(kWeaponOwnershipBase + static_cast<uint32_t>(weapon) * 4u) != 1u ||
+        current == static_cast<uint8_t>(weapon))
+        return;
+    psx_write_byte(kCurrentWeaponAddress, static_cast<uint8_t>(weapon));
+    disruptor_capsule_note_byte(kCurrentWeaponAddress, static_cast<uint8_t>(weapon));
+}
+
 /* Merge host controls into the already sampled port-1 pad word.  This runs
  * after the runtime's final low-latency sample, so releases are naturally
  * refreshed on the next frame and no synthetic button can stick.  Keyboard
  * controls remain live while uncaptured; mouse actions require capture so a
  * desktop click cannot fire into gameplay accidentally. */
 void apply_modern_controls(const Uint8 *keys, uint32_t mouse_buttons) {
-    if (!g_mouse.modern_controls_enabled) return;
+    if (!g_mouse.modern_controls_enabled) {
+        sample_weapon_keys(keys, nullptr);
+        return;
+    }
 
+    const Uint8 *raw_keys = keys;
     std::array<Uint8, 512> pad_keys{};  /* SDL's scancode count, in 2 and 3 alike */
     if (keys) {
         disruptor_name_entry_keys_for_pad(keys, pad_keys.data(), static_cast<int>(pad_keys.size()));
         keys = pad_keys.data();
     }
+
+    const int weapon = sample_weapon_keys(raw_keys, keys);
+    if (sdl_window && (SDL_GetWindowFlags(sdl_window) & SDL_WINDOW_INPUT_FOCUS) != 0)
+        select_weapon(weapon);
 
     uint16_t press = 0;
     if (key_down(keys, SDL_SCANCODE_W) || key_down(keys, SDL_SCANCODE_UP))
@@ -563,6 +620,7 @@ void mouse_aim_frame() {
      * capture or inject a guest action on the following frame. */
     if (psx_host_ui_game_input_captured()) {
         const Uint8 *keys = SDL_GetKeyboardState(nullptr);
+        sample_weapon_keys(keys, nullptr);
         const uint32_t buttons = get_mouse_buttons();
         g_mouse.escape_was_down =
             keys && keys[SDL_SCANCODE_ESCAPE] != 0;
@@ -781,6 +839,7 @@ extern "C" void disruptor_modern_controls_set_enabled(int enabled) {
     const bool next = enabled != 0;
     if (g_mouse.modern_controls_enabled == next) return;
     g_mouse.modern_controls_enabled = next;
+    sample_weapon_keys(SDL_GetKeyboardState(nullptr), nullptr);
     refresh_live_control_state(next ? "settings-modern-controls-on"
                                     : "settings-modern-controls-off");
 }

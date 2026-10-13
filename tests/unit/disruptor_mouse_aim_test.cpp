@@ -12,6 +12,7 @@
 #include <iostream>
 #include <iterator>
 #include <string>
+#include <vector>
 
 namespace {
 
@@ -73,6 +74,13 @@ int psx_host_ui_game_input_captured(void) {
 
 std::uint8_t psx_read_byte(std::uint32_t address) {
     return g_ram[address & 0x001fffffu];
+}
+
+std::uint32_t psx_read_word(std::uint32_t address) {
+    std::uint32_t value = 0;
+    for (unsigned i = 0; i < 4; ++i)
+        value |= static_cast<std::uint32_t>(psx_read_byte(address + i)) << (i * 8);
+    return value;
 }
 
 void psx_write_byte(std::uint32_t address, std::uint8_t value) {
@@ -229,6 +237,9 @@ void reset_state() {
     g_vertical_recenter_calls = 0;
     g_netplay_active = 0;
     g_vertical_input_allowed = 1;
+    g_noted_at = 0;
+    g_noted = 0;
+    g_notes = 0;
     sdl_window = &g_window;
 }
 
@@ -633,6 +644,133 @@ void test_focus_and_the_players_choice() {
     frame(focus, SDL_BUTTON_MMASK);
     expect(!g_mouse.captured, "and the next middle click still gives it up");
     frame(focus, 0);
+}
+
+void prepare_weapon_input() {
+    reset_state();
+    g_mouse.enabled = g_mouse.modern_controls_enabled = g_mouse.configured = true;
+    g_mouse.log = std::tmpfile();
+    for (unsigned weapon = 0; weapon < 10; ++weapon)
+        psx_write_byte(kWeaponOwnershipBase + weapon * 4, 1u);
+    psx_write_byte(kCurrentWeaponAddress, 0xFFu);
+}
+
+void test_direct_weapon_mapping() {
+    /* Exercise the complete digit row and keypad against guest memory. */
+    for (unsigned i = 0; i < 20; ++i) {
+        prepare_weapon_input();
+        const unsigned first_key = i < 10 ? SDL_SCANCODE_1 : SDL_SCANCODE_KP_1;
+        g_keys[first_key + i % 10] = 1;
+        const std::vector<Uint8> before(g_ram.begin(), g_ram.end());
+        mouse_aim_frame();
+        const auto weapon = static_cast<std::uint8_t>(i % 10);
+        expect(psx_read_byte(kCurrentWeaponAddress) == weapon,
+               "each digit and keypad key selects its retail weapon ID");
+        expect(g_noted_at == kCurrentWeaponAddress && g_noted == weapon && g_notes == 1,
+               "direct weapon selection is recorded for replay");
+        auto expected = before;
+        expected[kCurrentWeaponAddress & 0x001fffffu] = weapon;
+        expect(std::equal(g_ram.begin(), g_ram.end(), expected.begin()),
+               "selection changes no ammunition, inventory or other game memory");
+        expect(g_pad_buttons == 0xFFFFu, "direct selection does not press any controller buttons");
+        mouse_aim_frame();
+        expect(g_notes == 1, "holding a digit does not keep selecting");
+    }
+}
+
+void test_weapon_selection_guards() {
+    for (int guard = 0; guard < 9; ++guard) {
+        prepare_weapon_input();
+        psx_write_byte(kCurrentWeaponAddress, 6u);
+        switch (guard) {
+        case 0: psx_write_byte(kWeaponOwnershipBase, 0u); break;
+        case 1: psx_write_byte(kWeaponOwnershipBase, 2u); break;
+        case 2: psx_write_byte(kCurrentWeaponAddress, 10u); break;
+        case 3: g_vertical_input_allowed = 0; break;
+        case 4: g_netplay_active = 1; break;
+        case 5: psx_write_byte(kSceneModeAddress, 1u); break;
+        case 6: psx_write_byte(kSceneModeAddress, 2u); break;
+        case 7: psx_write_byte(kSceneModeAddress, 3u); break;
+        case 8: g_window_flags = 0; break;
+        }
+        g_keys[SDL_SCANCODE_1] = 1;
+        const std::vector<Uint8> before(g_ram.begin(), g_ram.end());
+        mouse_aim_frame();
+        expect(std::equal(g_ram.begin(), g_ram.end(), before.begin()) && g_notes == 0,
+               "unowned weapons, invalid state, menus, netplay and lost focus block selection");
+    }
+
+    prepare_weapon_input();
+    psx_write_byte(kCurrentWeaponAddress, 0u);
+    g_keys[SDL_SCANCODE_1] = 1;
+    mouse_aim_frame();
+    expect(g_notes == 0, "selecting the equipped weapon is a no-op");
+}
+
+void test_weapon_key_edges_through_menus() {
+    prepare_weapon_input();
+    g_host_ui_captured = 1;
+    g_keys[SDL_SCANCODE_2] = 1;
+    mouse_aim_frame();
+    expect(g_notes == 0, "settings consume weapon keys");
+    g_host_ui_captured = 0;
+    mouse_aim_frame();
+    expect(g_notes == 0, "a number held while closing settings cannot select");
+    g_keys[SDL_SCANCODE_2] = 0;
+    mouse_aim_frame();
+    g_keys[SDL_SCANCODE_2] = 1;
+    mouse_aim_frame();
+    expect(psx_read_byte(kCurrentWeaponAddress) == 1u, "a fresh press after closing settings selects the pistol");
+    psx_write_byte(kCurrentWeaponAddress, 6u);
+    mouse_aim_frame();
+    expect(psx_read_byte(kCurrentWeaponAddress) == 6u,
+           "holding a shortcut leaves subsequent native weapon changes alone");
+
+    prepare_weapon_input();
+    g_keys[SDL_SCANCODE_2] = 1;
+    g_typed_with[SDL_SCANCODE_2] = true;
+    mouse_aim_frame();
+    expect(g_notes == 0, "a number typed into a save name cannot select a weapon");
+    g_typed_with[SDL_SCANCODE_2] = false;
+    mouse_aim_frame();
+    expect(g_notes == 0, "a typing key still held when the name screen closes remains inert");
+
+    prepare_weapon_input();
+    g_window_flags = 0;
+    g_keys[SDL_SCANCODE_KP_2] = 1;
+    mouse_aim_frame();
+    g_window_flags = SDL_WINDOW_INPUT_FOCUS;
+    mouse_aim_frame();
+    expect(g_notes == 0, "focus returning cannot turn a held keypad key into a selection");
+}
+
+void test_weapon_keys_follow_modern_controls() {
+    prepare_weapon_input();
+    disruptor_modern_controls_set_enabled(0);
+    g_keys[SDL_SCANCODE_2] = 1;
+    mouse_aim_frame();
+    expect(g_notes == 0, "original controls leave digit keys alone");
+    disruptor_modern_controls_set_enabled(1);
+    mouse_aim_frame();
+    expect(g_notes == 0, "enabling modern controls while a number is held does not select");
+    g_keys[SDL_SCANCODE_2] = 0;
+    mouse_aim_frame();
+    g_keys[SDL_SCANCODE_2] = 1;
+    mouse_aim_frame();
+    expect(psx_read_byte(kCurrentWeaponAddress) == 1u,
+           "modern controls enable fresh direct-selection presses");
+}
+
+void test_weapon_selection_with_mouse_aim() {
+    prepare_weapon_input();
+    g_mouse.mouse_aim_enabled = g_mouse.captured = true;
+    g_relative_mode = true;
+    psx_write_byte(kTestYawAddress, 100u);
+    g_relative_x = 25.0f;
+    g_keys[SDL_SCANCODE_2] = 1;
+    mouse_aim_frame();
+    expect(psx_read_byte(kCurrentWeaponAddress) == 1u && psx_read_byte(kTestYawAddress) == 98u && g_notes == 2,
+           "selecting a weapon and aiming in the same frame apply and record both writes");
 }
 
 void test_high_precision_camera_residual() {
@@ -1047,6 +1185,11 @@ int main(int argc, char **argv) {
         test_focus_and_the_players_choice();
         test_high_precision_camera_residual();
         test_modern_keyboard_mapping_and_merge();
+        test_direct_weapon_mapping();
+        test_weapon_selection_guards();
+        test_weapon_key_edges_through_menus();
+        test_weapon_keys_follow_modern_controls();
+        test_weapon_selection_with_mouse_aim();
         test_modern_mouse_buttons_require_capture();
         test_the_click_that_takes_the_mouse_is_no_shot();
         test_live_settings_api();

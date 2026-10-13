@@ -105,6 +105,11 @@ require(
     "and notes the byte it writes for a capsule recorded inside it",
 )
 require(
+    "        psx_write_byte(frame.byte2_at, frame.byte2);\n        disruptor_capsule_note_byte(frame.byte2_at, frame.byte2);"
+    in replay,
+    "a replay must also restore weapon selection when the same frame holds a mouse yaw write",
+)
+require(
     "    const bool in_step = capsule.same != 0 && capsule.last_same + kInStep >= capsule.replayed.size();\n" in capsule
     and "constexpr size_t kSettle = 120, kInStep = 60, kLongest = 60 * 60 * 10;" in capsule,
     "a replay's exit code must say whether it still had the recording's memory in its last second",
