@@ -24,12 +24,23 @@ add_library(disruptor-launcher-model STATIC
     launcher_flow.cpp
     launcher_settings.cpp
     region_disc.cpp
+    report.cpp
     startup_log.cpp
     "${PROJECT_SOURCE_DIR}/src/game/language/language_disc.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/settings/options.cpp")
 target_include_directories(disruptor-launcher-model PUBLIC "${PROJECT_SOURCE_DIR}/src")
 target_link_libraries(disruptor-launcher-model PUBLIC
     disruptor-disc-import disruptor-launcher-config)
+
+# What a report calls this build: the tag it was cut from, or the commits after it.
+execute_process(COMMAND git describe --tags --always --dirty
+    WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}" OUTPUT_VARIABLE DISRUPTOR_BUILD_VERSION
+    OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET RESULT_VARIABLE DISRUPTOR_DESCRIBE_FAILED)
+if(DISRUPTOR_DESCRIBE_FAILED OR NOT DISRUPTOR_BUILD_VERSION)
+    set(DISRUPTOR_BUILD_VERSION "unknown")
+endif()
+set_property(SOURCE report.cpp APPEND PROPERTY COMPILE_DEFINITIONS
+    "DISRUPTOR_BUILD_VERSION=\"${DISRUPTOR_BUILD_VERSION}\"")
 
 add_executable(disruptor-launcher WIN32 main.cpp)
 set_target_properties(disruptor-launcher PROPERTIES
@@ -92,6 +103,10 @@ if(BUILD_TESTING)
     target_link_libraries(disruptor-launcher-flow-test PRIVATE disruptor-launcher-model)
     add_test(NAME disruptor_launcher_flow COMMAND disruptor-launcher-flow-test)
 
+    add_executable(disruptor-launcher-report-test "${PROJECT_SOURCE_DIR}/tests/unit/launcher_report_test.cpp")
+    target_link_libraries(disruptor-launcher-report-test PRIVATE disruptor-launcher-model)
+    add_test(NAME disruptor_launcher_report COMMAND disruptor-launcher-report-test)
+
     # The synthetic discs include the layout code whole, so this test takes region_disc.cpp and not the library.
     add_executable(disruptor-region-disc-test
         "${PROJECT_SOURCE_DIR}/tests/unit/region_disc_test.cpp" region_disc.cpp)
@@ -99,13 +114,16 @@ if(BUILD_TESTING)
     target_link_libraries(disruptor-region-disc-test PRIVATE disruptor-disc-import)
     add_test(NAME disruptor_region_disc COMMAND disruptor-region-disc-test)
 
-    set_target_properties(disruptor-launcher-settings-test disruptor-launcher-flow-test disruptor-region-disc-test PROPERTIES
+    set_target_properties(disruptor-launcher-settings-test disruptor-launcher-flow-test disruptor-launcher-report-test
+        disruptor-region-disc-test PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
     if(MSVC)
-        set_property(TARGET disruptor-launcher-settings-test disruptor-launcher-flow-test disruptor-region-disc-test
+        set_property(TARGET disruptor-launcher-settings-test disruptor-launcher-flow-test disruptor-launcher-report-test
+                            disruptor-region-disc-test
             PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
         target_compile_options(disruptor-launcher-settings-test PRIVATE /utf-8)
         target_compile_options(disruptor-launcher-flow-test PRIVATE /utf-8)
+        target_compile_options(disruptor-launcher-report-test PRIVATE /utf-8)
         target_compile_options(disruptor-region-disc-test PRIVATE /utf-8)
     endif()
 endif()
