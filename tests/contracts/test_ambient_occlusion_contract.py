@@ -55,7 +55,7 @@ require(
 
 require(
     """static void ssao_mode(void) {
-    const int mode = s_ssao_view ? s_ssao_view + 1 : s_ssao_on;
+    const int mode = s_uv_view ? 0 : s_ssao_view ? s_ssao_view + 1 : s_ssao_on;
     if (mode && !s_ssao) memset(s_wide_depth_shown, 0xFF, sizeof s_wide_depth_shown);
     s_ssao = mode;
 }
@@ -106,11 +106,11 @@ require(
     }
 """ in experimental
     and menu.count('option_toggle("disruptor.ambient_occlusion"') == 1
-    and experimental.count("ImGui::BeginDisabled()") == experimental.count("ImGui::EndDisabled()") == 2
-    and experimental.count("option_toggle(") == 1
+    and experimental.count("ImGui::BeginDisabled()") == experimental.count("ImGui::EndDisabled()") == 5
+    and experimental.count("option_toggle(") == 5
     and "ImGui::Checkbox(" not in experimental
     and '            if (ImGui::BeginTabItem("Experimental")) {\n                draw_experimental_tab();\n' in menu,
-    "the Experimental tab holds the occlusion alone: a switch greyed without geometry correction and two bounded sliders greyed without the switch",
+    "the Experimental tab holds the occlusion, four more switches and a list: a switch greyed without geometry correction and two bounded sliders greyed without the switch",
 )
 
 require(
@@ -178,8 +178,8 @@ require(
     and '    {"disruptor.ambient_occlusion", Page::experimental},\n'
     '    {"disruptor.occlusion_reach", Page::experimental},\n'
     '    {"disruptor.occlusion_strength", Page::experimental},\n' in launcher
-    and launcher.count("Page::experimental") == 3,
-    "the launcher's Experimental page holds these three rows: the switch needs geometry correction, the sliders the switch, "
+    and launcher.count("Page::experimental") == 8,
+    "the launcher's Experimental page holds these three rows and the smooth fade's: the switch needs geometry correction, the sliders the switch, "
     "with the menu's own bounds",
 )
 

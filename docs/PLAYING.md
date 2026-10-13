@@ -91,6 +91,20 @@ leaves the weapon size unchanged.
 alternative to the game's polygon order. Both require exact geometry.
 **Settings → Experimental** adds optional ambient occlusion with adjustable
 reach and strength; it also requires exact geometry and starts off.
+**Smooth distance fade** on the same tab fades walls and floors into the
+distance evenly, where the game steps through twelve shades. It requires
+exact geometry and starts off.
+Three anti-aliasing settings on the same tab start off and can be combined.
+**Multisampling** draws the world with 2, 4, 8 or 16 samples a pixel, which
+smooths the edges of polygons and of the HUD's rectangles. It requires exact
+geometry, and video memory grows with the value and the internal resolution.
+**Supersampling** shades every one of those samples, which smooths textures
+and cut-out outlines too, the HUD's among them. The graphics card shades
+that many times as much. It does nothing while Multisampling is off.
+**Downscale averaging** averages an internal resolution above the screen's
+down to it. **Edge smoothing** smooths the edges left in the world's picture,
+sprite outlines among them. With exact geometry the textured pictures of the
+HUD and of menus stay as they are. Movies are never filtered.
 
 **Skip the logos and the title movie** in Enhancements skips the boot intro
 automatically. It starts off; the other movies still play normally. Escape
@@ -151,7 +165,10 @@ as cheated, including subsequent game saves.
 **Settings → Debug** offers diagnostic views and **Record the screen** for
 rendering bug reports. Close the settings menu to begin the short recording;
 its pictures and timing data are written under `shown/` beside the executable.
-Diagnostic views reset to Off at the next start.
+Diagnostic views reset to Off at the next start. The **Texture coordinates**
+view paints each textured pixel with its place in its texture, so a recording
+shows how a texture sits and moves on its polygons. It needs exact geometry
+and switches ambient occlusion and the anti-aliasing filters off while on.
 
 Press **Ctrl+F12** to start a replay capsule and press it again to finish.
 The capsule is saved under `capsules/` beside the executable. It contains a

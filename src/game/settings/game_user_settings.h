@@ -25,13 +25,19 @@ struct GameUserSettings {
     bool has_ambient_occlusion = false; bool ambient_occlusion = false;
     bool has_occlusion_reach = false; int occlusion_reach = 160;       // camera depth units, 50..800
     bool has_occlusion_strength = false; int occlusion_strength = 80;  // percent, 0..300
+    bool has_smooth_fade = false; bool smooth_fade = false;
+    bool has_multisampling = false; int multisampling = 0;  // samples a pixel, one of kDisruptorSampleCounts
+    bool has_sample_shading = false; bool sample_shading = false;
+    bool has_downscale_averaging = false; bool downscale_averaging = false;
+    bool has_edge_smoothing = false; bool edge_smoothing = false;
     bool has_gap_filling = false; bool gap_filling = true;
     bool has_depth_sorted_world = false; bool depth_sorted_world = false;
     // An index into kDisruptorDiagnosticViews. A session's own: at start only a capsule's replay takes it from the file.
     bool has_diagnostic_view = false; int diagnostic_view = 0;
 };
-inline constexpr const char* kDisruptorDiagnosticViews[] = {"off", "shading", "depth", "normals", "fade", "mesh"};
-inline constexpr int kDisruptorDiagnosticViewCount = 6;
+inline constexpr const char* kDisruptorDiagnosticViews[] = {"off", "shading", "depth", "normals", "fade", "mesh", "uv"};
+inline constexpr int kDisruptorDiagnosticViewCount = 7;
+inline constexpr int kDisruptorSampleCounts[] = {0, 2, 4, 8, 16};
 
 }  // namespace PSXRecompV4
 

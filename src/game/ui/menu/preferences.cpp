@@ -172,6 +172,16 @@ void mark_occlusion_shape(int reach, int strength) {
     mark("disruptor.occlusion_strength", strength);
 }
 
+void mark_smooth_fade(bool value) { mark("disruptor.smooth_fade", value); }
+
+void mark_multisampling(int level) { mark("disruptor.multisampling", level); }
+
+void mark_sample_shading(bool value) { mark("disruptor.sample_shading", value); }
+
+void mark_downscale_averaging(bool value) { mark("disruptor.downscale_averaging", value); }
+
+void mark_edge_smoothing(bool value) { mark("disruptor.edge_smoothing", value); }
+
 void mark_gap_filling(bool value) { mark("disruptor.gap_filling", value); }
 
 void mark_world_depth(bool value) { mark("disruptor.depth_sorted_world", value); }
@@ -180,6 +190,7 @@ void mark_world_depth(bool value) { mark("disruptor.depth_sorted_world", value);
 void apply_diagnostic_view(int view) {
     gl_renderer_set_ssao_view(view >= 1 && view <= 4 ? view : 0);
     gl_renderer_set_mesh_view(view == 5 ? 1 : 0);
+    gl_renderer_set_uv_view(view == 6 ? 1 : 0);
 }
 
 void mark_diagnostic_view(int value) {
@@ -330,6 +341,11 @@ void apply_saved_preferences(const PSXRecompV4::UserSettings &settings) {
         apply_diagnostic_view(settings.has_diagnostic_view && env_override_present("PSX_DISRUPTOR_CAPSULE_REPLAY")
                                   ? settings.diagnostic_view : 0);
     }
+    if (settings.has_smooth_fade) gl_renderer_set_smooth_fade(settings.smooth_fade ? 1 : 0);
+    if (settings.has_multisampling) gl_renderer_set_multisampling(settings.multisampling);
+    if (settings.has_sample_shading) gl_renderer_set_sample_shading(settings.sample_shading ? 1 : 0);
+    if (settings.has_downscale_averaging) gl_renderer_set_downscale_averaging(settings.downscale_averaging ? 1 : 0);
+    if (settings.has_edge_smoothing) gl_renderer_set_edge_smoothing(settings.edge_smoothing ? 1 : 0);
     gl_renderer_set_ssao_shape(
         settings.has_occlusion_reach && !env_override_present("PSX_GL_SSAO_RADIUS")
             ? static_cast<float>(settings.occlusion_reach) : -1.0f,
@@ -405,6 +421,16 @@ void apply_pending_preferences() {
     if (changed("disruptor.occlusion_reach") ||
         changed("disruptor.occlusion_strength"))
         gl_renderer_set_ssao_shape(static_cast<float>(pending.occlusion_reach), pending.occlusion_strength / 100.0f);
+    if (changed("disruptor.smooth_fade"))
+        gl_renderer_set_smooth_fade(pending.smooth_fade ? 1 : 0);
+    if (changed("disruptor.multisampling"))
+        gl_renderer_set_multisampling(pending.multisampling);
+    if (changed("disruptor.sample_shading"))
+        gl_renderer_set_sample_shading(pending.sample_shading ? 1 : 0);
+    if (changed("disruptor.downscale_averaging"))
+        gl_renderer_set_downscale_averaging(pending.downscale_averaging ? 1 : 0);
+    if (changed("disruptor.edge_smoothing"))
+        gl_renderer_set_edge_smoothing(pending.edge_smoothing ? 1 : 0);
     if (changed("disruptor.gap_filling"))
         gl_renderer_set_gap_fill(pending.gap_filling ? 1 : 0);
     if (changed("disruptor.depth_sorted_world"))

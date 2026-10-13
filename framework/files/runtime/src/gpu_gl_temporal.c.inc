@@ -40,6 +40,8 @@ static int s_temp_last_matched, s_temp_last_world, s_temp_last_ready;
 static GLuint s_temp_geo_prog, s_temp_tex_prog, s_temp_present_prog;
 static GLuint s_temp_vao[2], s_temp_vbo, s_temp_fbo, s_temp_tex, s_temp_rb;
 static int s_temp_width, s_temp_scale;
+static GLuint s_temp_ms_fbo, s_temp_ms_rb[2];  /* the surface's multisample twin, drawn through and resolved into it */
+static int s_temp_samples, s_temp_shading;  /* the twin's samples, and whether this context shades every one */
 static int s_temp_underlaying;  /* departed faces are being drawn: they keep the depth rule of their own pass */
 static int s_temp_marked;       /* the textured program is the one that tells fillers apart */
 static int s_temp_part;         /* what temporal_submit draws of a command: 0 all of it, 1 its fillers alone, 2 its polygons alone */
@@ -47,7 +49,7 @@ static GLint s_temp_uPull=-1;
 static int s_temp_fill;         /* departed faces are leaving their depth where the scene left none, see temporal_submit */
 static float s_temp_scratch[TEXBATCH_MAXV * TEXV], s_temp_under[TEXBATCH_MAXV * TEXV];
 typedef struct {
-    GLint shift, xhalf, visual, options, twin, mask, filter, pass, semi;
+    GLint shift, xhalf, visual, options, twin, mask, filter, pass, semi, fade, fade_at;
 } TemporalUniforms;
 static TemporalUniforms s_temp_uniforms[2];
 
@@ -498,6 +500,7 @@ static void temporal_uniforms_init(GLuint p, TemporalUniforms *u) {
     TEMP_U(shift,"u_shift"); TEMP_U(xhalf,"u_xhalf"); TEMP_U(visual,"u_visual");
     TEMP_U(options,"u_visual_options"); TEMP_U(twin,"u_twin"); TEMP_U(mask,"u_maskset");
     TEMP_U(filter,"u_filter"); TEMP_U(pass,"u_semipass"); TEMP_U(semi,"u_semimode");
+    TEMP_U(fade,"u_fade"); TEMP_U(fade_at,"u_fade_at");
 #undef TEMP_U
     p_glUseProgram(p);
     p_glUniform1f(p_glGetUniformLocation(p,"u_xscale"),1);
@@ -535,7 +538,8 @@ static int temporal_worker_init(void) {
             "  if (u_visual_options.w == 0.0 ? grown : u_visual_options.w >= 1.0 ? (grown || !(a_visual_flags > 1.5 && a_order > -0.9999 && a_order < 0.9999))\n"
             "      : (u_visual_options.w > 0.0 && !grown)) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);\n"
             "  v_deep = (a_order > -0.9999 && a_order < 0.9999) ? 1.0 : -1000.0;\n"
-            "  v_bill = (a_visual_flags < 1.5 && a_order > -0.9999 && a_order < 0.9999) ? 2.0 : 1.0; }\n") : NULL;
+            "  v_fade = (a_visual_flags > 1.5 && a_order > -0.9999 && a_order < 0.9999) ? vec2((1.0 - a_order)/32.0, a_visual_pos.x) : vec2(-1.0, 0.0);\n"
+            "  v_bill = a_visual_flags < -0.5 ? 0.75 : (a_visual_flags < 1.5 && a_order > -0.9999 && a_order < 0.9999) ? 2.0 : 1.0; }\n") : NULL;
         char *marked_fs=marked_vs ? sprite_marking_shader(TEX_FS) : NULL;
         s_temp_tex_prog=tex_vs ? build_program_ex(marked_fs ? marked_vs : tex_vs,marked_fs ? marked_fs : TEX_FS,1) : 0;
         s_temp_marked=marked_fs!=NULL;
@@ -565,7 +569,11 @@ static int temporal_worker_init(void) {
     return 1;
 }
 static int temporal_target(int width,int scale) {
-    if (s_temp_fbo && s_temp_width==width && s_temp_scale==scale) return 1;
+    const int samples=s_msaa;
+    if (s_temp_fbo && s_temp_width==width && s_temp_scale==scale && s_temp_samples==samples) return 1;
+    if (s_temp_ms_fbo) p_glDeleteFramebuffers(1,&s_temp_ms_fbo);
+    if (s_temp_ms_rb[0]) p_glDeleteRenderbuffers(2,s_temp_ms_rb);
+    s_temp_ms_fbo=s_temp_ms_rb[0]=s_temp_ms_rb[1]=0;
     if (s_temp_fbo) p_glDeleteFramebuffers(1,&s_temp_fbo);
     if (s_temp_tex) glDeleteTextures(1,&s_temp_tex);
     if (s_temp_rb) p_glDeleteRenderbuffers(1,&s_temp_rb);
@@ -575,7 +583,23 @@ static int temporal_target(int width,int scale) {
     p_glBindRenderbuffer(PSXGL_RENDERBUFFER,s_temp_rb);
     p_glRenderbufferStorage(PSXGL_RENDERBUFFER,PSXGL_DEPTH24_STENCIL8,width*scale,VRAM_H*scale);
     if (!make_fbo(&s_temp_fbo,s_temp_tex,s_temp_rb)) return 0;
-    s_temp_width=width; s_temp_scale=scale;
+    s_temp_width=width; s_temp_scale=scale; s_temp_samples=samples;
+    if (samples>=2) {
+        p_glGenRenderbuffers(2,s_temp_ms_rb);
+        p_glBindRenderbuffer(PSXGL_RENDERBUFFER,s_temp_ms_rb[0]);
+        p_glRenderbufferStorageMultisample(PSXGL_RENDERBUFFER,samples,GL_RGBA8,width*scale,VRAM_H*scale);
+        p_glBindRenderbuffer(PSXGL_RENDERBUFFER,s_temp_ms_rb[1]);
+        p_glRenderbufferStorageMultisample(PSXGL_RENDERBUFFER,samples,PSXGL_DEPTH24_STENCIL8,width*scale,VRAM_H*scale);
+        p_glGenFramebuffers(1,&s_temp_ms_fbo);
+        p_glBindFramebuffer(PSXGL_FRAMEBUFFER,s_temp_ms_fbo);
+        p_glFramebufferRenderbuffer(PSXGL_FRAMEBUFFER,PSXGL_COLOR_ATTACHMENT0,PSXGL_RENDERBUFFER,s_temp_ms_rb[0]);
+        p_glFramebufferRenderbuffer(PSXGL_FRAMEBUFFER,PSXGL_DEPTH_STENCIL_ATTACHMENT,PSXGL_RENDERBUFFER,s_temp_ms_rb[1]);
+        if (p_glCheckFramebufferStatus(PSXGL_FRAMEBUFFER)!=PSXGL_FRAMEBUFFER_COMPLETE) {  /* the plain surface serves until the samples change */
+            p_glDeleteFramebuffers(1,&s_temp_ms_fbo); p_glDeleteRenderbuffers(2,s_temp_ms_rb);
+            s_temp_ms_fbo=s_temp_ms_rb[0]=s_temp_ms_rb[1]=0;
+        }
+        p_glBindFramebuffer(PSXGL_FRAMEBUFFER,0);
+    }
     return 1;
 }
 static int s_temp_filling;  /* a filler is being drawn: it obeys the mask and leaves it as it is */
@@ -590,6 +614,7 @@ static void temporal_mask(int check,int value) {
     glStencilOp(GL_KEEP,GL_KEEP,check ? (value ? GL_INVERT : GL_KEEP) : GL_REPLACE);
 }
 /* Draw part of one retained command with the scene's own state. */
+static float s_temp_fade_nearer=1.0f;  /* a carried face drawn over the scene has its depth handed over that much nearer */
 static void temporal_submit_faces(const TemporalScene *s,const TemporalCommand *c,int height,
                                   const float *vertices,int count);
 /* How the frame being shown was placed, for a screen recording's list. */
@@ -614,6 +639,7 @@ static void temporal_submit(const TemporalScene *s,const TemporalCommand *c,int 
     if (wide<narrow) wide=narrow;
     glEnable(GL_SCISSOR_TEST); glScissor(0,sy*s->scale,s->width*s->scale,sh*s->scale);
     p_glUseProgram(s_temp_tex_prog);
+    smooth_fade_uniforms(u->fade, u->fade_at, s_temp_fade_nearer);
     p_glUniform1f(u->shift,0.5f/s->scale-1.0f/64.0f);
     p_glUniform1f(u->xhalf,s->width/2.0f); p_glUniform1f(u->visual,1);
     p_glUniform4f(u->options,0,0,s->tint,-1.0f);
@@ -645,6 +671,7 @@ static void temporal_submit_faces(const TemporalScene *s,const TemporalCommand *
     if (sh<=0 || count<=0) return;
     glEnable(GL_SCISSOR_TEST); glScissor(0,sy*s->scale,s->width*s->scale,sh*s->scale);
     p_glUseProgram(t?s_temp_tex_prog:s_temp_geo_prog);
+    if (t) smooth_fade_uniforms(u->fade, u->fade_at, s_temp_fade_nearer);
     p_glUniform1f(u->shift,0.5f/s->scale-1.0f/64.0f);
     p_glUniform1f(u->xhalf,s->width/2.0f); p_glUniform1f(u->visual,1);
     p_glUniform4f(u->options,0,0,s->tint,s_temp_underlaying ? -1.0f : 0.0f);
@@ -812,6 +839,7 @@ static int temporal_sprite_replaced(const TemporalScene *s,const GpuTemporalTria
 static void temporal_underlay(float alpha,int covered) {
     const TemporalScene *p=&s_temp_prev, *s=&s_temp_curr;
     if (!s->mesh_stats.departed_faces || p->width!=s->width || p->scale!=s->scale) return;
+    s_temp_fade_nearer=covered ? TEMP_ORDER_CLEARANCE : 1.0f;
     glDepthFunc(covered ? GL_LESS : GL_ALWAYS); glDepthMask(covered ? GL_FALSE : GL_TRUE);
     s_temp_scene_depth=!covered; s_temp_underlaying=1;
     if (s_world_depth && !covered) glDepthMask(GL_FALSE);  /* last frame's faces must not stand in the way of this frame's */
@@ -847,6 +875,7 @@ static void temporal_underlay(float alpha,int covered) {
     }
     glDepthFunc(GL_ALWAYS); glDepthMask(GL_TRUE);
     s_temp_scene_depth=1; s_temp_underlaying=0;
+    s_temp_fade_nearer=1.0f;
 }
 static int temporal_present(float alpha,int lx,int ly,int lw,int lh) {
     TemporalScene *s=&s_temp_curr;
@@ -856,7 +885,8 @@ static int temporal_present(float alpha,int lx,int ly,int lw,int lh) {
     for (first_world=0;first_world<s->nt && !s->triangles[first_world].world;++first_world) {}
     for (last_world=s->nt-1;last_world>=0 && !s->triangles[last_world].world;--last_world) {}
     if (s_interp_fence[s_interp_cur]) p_glWaitSync(s_interp_fence[s_interp_cur],0,PSXGL_TIMEOUT_IGNORED);
-    p_glBindFramebuffer(PSXGL_FRAMEBUFFER,s_temp_fbo);
+    if (s_temp_shading!=s_ssaa) sample_shading(s_temp_shading=s_ssaa);
+    p_glBindFramebuffer(PSXGL_FRAMEBUFFER,s_temp_ms_fbo ? s_temp_ms_fbo : s_temp_fbo);
     glViewport(0,0,s->width*s->scale,VRAM_H*s->scale);
     glDisable(GL_SCISSOR_TEST); glDisable(GL_BLEND);
     glDisable(GL_CULL_FACE); glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
@@ -915,6 +945,13 @@ static int temporal_present(float alpha,int lx,int ly,int lw,int lh) {
     if (underlaid) temporal_underlay(alpha,1);
     s_temp_scene_depth=0;
     glDisable(GL_DEPTH_TEST);
+    if (s_temp_ms_fbo) {
+        p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER,s_temp_ms_fbo); p_glBindFramebuffer(PSXGL_DRAW_FRAMEBUFFER,s_temp_fbo);
+        glDisable(GL_SCISSOR_TEST);
+        p_glBlitFramebuffer(0,0,s->width*s->scale,s->height*s->scale,0,0,s->width*s->scale,s->height*s->scale,
+                            GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT,GL_NEAREST);
+        p_glBindFramebuffer(PSXGL_FRAMEBUFFER,s_temp_fbo);
+    }
 #ifndef PSX_NO_DEBUG_TOOLS
     temporal_dump_frame(0,0,s->width*s->scale,s->height*s->scale,alpha,s->mesh_stats.departed_faces);
     if (temporal_edge_diag())
@@ -931,7 +968,7 @@ static int temporal_present(float alpha,int lx,int ly,int lw,int lh) {
         ++s_temp_replays;
         return 1;
     }
-    p_glBindFramebuffer(PSXGL_FRAMEBUFFER,0); glViewport(lx,ly,lw,lh);
+    const int grown=aa_begin(1,s->height*s->scale,1,lx,ly,lw,lh);
     glBindTexture(GL_TEXTURE_2D,s_temp_tex);
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MIN_FILTER,s_interp_linear?GL_LINEAR:GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D,GL_TEXTURE_MAG_FILTER,s_interp_linear?GL_LINEAR:GL_NEAREST);
@@ -942,6 +979,7 @@ static int temporal_present(float alpha,int lx,int ly,int lw,int lh) {
                   1-0.5f/s->width,(s->height-0.5f)/VRAM_H);
     p_glBindVertexArray(s_interp_thread_vao); glDrawArrays(GL_TRIANGLES,0,3);
     p_glBindVertexArray(0); p_glUseProgram(0);
+    aa_end(1,s_interp_thread_vao,grown,1,lx,ly,lw,lh);
     ++s_temp_replays;
     return 1;
 }
@@ -988,4 +1026,5 @@ static void temporal_release(void) {
     }
     s_temp_ready=NULL;
     s_temp_fbo=s_temp_tex=s_temp_rb=0; s_temp_width=s_temp_scale=0;
+    s_temp_ms_fbo=s_temp_ms_rb[0]=s_temp_ms_rb[1]=0; s_temp_samples=s_temp_shading=0;
 }

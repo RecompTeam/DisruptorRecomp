@@ -19,6 +19,7 @@
 #include <cstdint>
 
 extern "C" void gl_renderer_set_ssao_fade(float from, float to);
+extern "C" void gl_renderer_set_palette_fade(int rows, float start, float step, float side);
 
 namespace {
 constexpr uint32_t kRendererEntry = 0x80040E68u;
@@ -39,6 +40,7 @@ void renderer_entry(CPUState *cpu, uint32_t address) {
     gpu_ws_tell_frame_kind(map);  /* before the margin below is read */
     gl_renderer_set_ssao_fade(kDepthUnit * static_cast<float>(psx_mod_read_word(kFadeStart)),
                               kDepthUnit * static_cast<float>(psx_mod_read_word(kFarDistance)));
+    gl_renderer_set_palette_fade(12, 8.0f * static_cast<float>(psx_mod_read_word(kFadeStart)), 8.0f * 64.0f, 0.375f);
     unsigned index;
     for (index = 0; index < 2u; ++index)
         if (cpu->gpr[4] == kContexts[index]) break;

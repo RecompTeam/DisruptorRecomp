@@ -43,6 +43,11 @@ constexpr Placement placed[] = {
     {"disruptor.ambient_occlusion", Page::experimental},
     {"disruptor.occlusion_reach", Page::experimental},
     {"disruptor.occlusion_strength", Page::experimental},
+    {"disruptor.smooth_fade", Page::experimental},
+    {"disruptor.multisampling", Page::experimental},
+    {"disruptor.sample_shading", Page::experimental},
+    {"disruptor.downscale_averaging", Page::experimental},
+    {"disruptor.edge_smoothing", Page::experimental},
 };
 
 constexpr PresetValue original_values[] = {

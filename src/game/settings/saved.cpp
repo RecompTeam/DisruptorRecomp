@@ -1,5 +1,6 @@
 #include "config_loader.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -109,6 +110,29 @@ void read_game_user_settings(const toml::value& doc, UserSettings& s) {
             s.ambient_occlusion = toml::find<bool>(d, "ambient_occlusion");
             s.has_ambient_occlusion = true;
         });
+        if (d.contains("smooth_fade")) try_get([&]{
+            s.smooth_fade = toml::find<bool>(d, "smooth_fade");
+            s.has_smooth_fade = true;
+        });
+        if (d.contains("multisampling")) try_get([&]{
+            const int samples = toml::find<int>(d, "multisampling");
+            if (std::ranges::find(kDisruptorSampleCounts, samples) != std::end(kDisruptorSampleCounts)) {
+                s.multisampling = samples;
+                s.has_multisampling = true;
+            }
+        });
+        if (d.contains("sample_shading")) try_get([&]{
+            s.sample_shading = toml::find<bool>(d, "sample_shading");
+            s.has_sample_shading = true;
+        });
+        if (d.contains("downscale_averaging")) try_get([&]{
+            s.downscale_averaging = toml::find<bool>(d, "downscale_averaging");
+            s.has_downscale_averaging = true;
+        });
+        if (d.contains("edge_smoothing")) try_get([&]{
+            s.edge_smoothing = toml::find<bool>(d, "edge_smoothing");
+            s.has_edge_smoothing = true;
+        });
         if (d.contains("occlusion_reach")) try_get([&]{
             const int reach = toml::find<int>(d, "occlusion_reach");
             if (reach >= 50 && reach <= 800) {
@@ -164,7 +188,8 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
         s.has_invert_vertical ||
         s.has_high_precision_camera || s.has_geometry_correction ||
         s.has_perspective_textures || s.has_frame_unlock || s.has_improved_shadows ||
-        s.has_ambient_occlusion || s.has_occlusion_reach || s.has_occlusion_strength ||
+        s.has_ambient_occlusion || s.has_occlusion_reach || s.has_occlusion_strength || s.has_smooth_fade ||
+        s.has_multisampling || s.has_sample_shading || s.has_downscale_averaging || s.has_edge_smoothing ||
         s.has_gap_filling || s.has_depth_sorted_world || s.has_diagnostic_view ||
         s.has_language_discs ||
         s.has_language_disc || s.has_skip_intro ||
@@ -224,6 +249,16 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
             f << "occlusion_reach = " << s.occlusion_reach << "\n";
         if (s.has_occlusion_strength && s.occlusion_strength >= 0 && s.occlusion_strength <= 300)
             f << "occlusion_strength = " << s.occlusion_strength << "\n";
+        if (s.has_smooth_fade)
+            f << "smooth_fade = " << (s.smooth_fade ? "true" : "false") << "\n";
+        if (s.has_multisampling)
+            f << "multisampling = " << s.multisampling << "\n";
+        if (s.has_sample_shading)
+            f << "sample_shading = " << (s.sample_shading ? "true" : "false") << "\n";
+        if (s.has_downscale_averaging)
+            f << "downscale_averaging = " << (s.downscale_averaging ? "true" : "false") << "\n";
+        if (s.has_edge_smoothing)
+            f << "edge_smoothing = " << (s.edge_smoothing ? "true" : "false") << "\n";
         if (s.has_gap_filling)
             f << "gap_filling = " << (s.gap_filling ? "true" : "false") << "\n";
         if (s.has_depth_sorted_world)

@@ -15,9 +15,9 @@ void draw_debug_tab() {
     else if (!g_menu.shown_note.empty()) ImGui::TextDisabled("%s", g_menu.shown_note.c_str());
 
     ImGui::Separator();
-    int view = gl_renderer_mesh_view() ? 5 : gl_renderer_ssao_view();
+    int view = gl_renderer_uv_view() ? 6 : gl_renderer_mesh_view() ? 5 : gl_renderer_ssao_view();
     ImGui::SetNextItemWidth(260.0f);
-    if (ImGui::Combo("Diagnostic view", &view, "Off\0Shading alone\0Depth\0Surface normals\0Fog fade\0Mesh\0")) {
+    if (ImGui::Combo("Diagnostic view", &view, "Off\0Shading alone\0Depth\0Surface normals\0Fog fade\0Mesh\0Texture coordinates\0")) {
         apply_diagnostic_view(view);
         mark_diagnostic_view(view);
     }

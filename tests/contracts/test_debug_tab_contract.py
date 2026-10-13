@@ -34,24 +34,25 @@ debug = between(menu, "void draw_debug_tab() {", "void draw_cheats_tab() {")
 require(
     '            if (ImGui::BeginTabItem("Debug")) {\n                draw_debug_tab();\n' in menu
     and "    if (ImGui::Button(\"Record the screen\") && !gl_renderer_recording_shown()) g_menu.record_shown = true;\n" in debug
-    and """    int view = gl_renderer_mesh_view() ? 5 : gl_renderer_ssao_view();
+    and """    int view = gl_renderer_uv_view() ? 6 : gl_renderer_mesh_view() ? 5 : gl_renderer_ssao_view();
 """ in debug
-    and """    if (ImGui::Combo("Diagnostic view", &view, "Off\\0Shading alone\\0Depth\\0Surface normals\\0Fog fade\\0Mesh\\0")) {
+    and """    if (ImGui::Combo("Diagnostic view", &view, "Off\\0Shading alone\\0Depth\\0Surface normals\\0Fog fade\\0Mesh\\0Texture coordinates\\0")) {
         apply_diagnostic_view(view);
         mark_diagnostic_view(view);
     }
 """ in debug
     and menu.count('"Diagnostic view"') == 1
     and menu.count('"Record the screen"') == 1,
-    "the Debug tab holds the recorder's button, which arms nothing while a recording runs, and the six views in the "
+    "the Debug tab holds the recorder's button, which arms nothing while a recording runs, and the seven views in the "
     "order the settings file names them",
 )
 
 require(
-    'inline constexpr const char* kDisruptorDiagnosticViews[] = {"off", "shading", "depth", "normals", "fade", "mesh"};\n' in settings
+    'inline constexpr const char* kDisruptorDiagnosticViews[] = {"off", "shading", "depth", "normals", "fade", "mesh", "uv"};\n' in settings
     and """void apply_diagnostic_view(int view) {
     gl_renderer_set_ssao_view(view >= 1 && view <= 4 ? view : 0);
     gl_renderer_set_mesh_view(view == 5 ? 1 : 0);
+    gl_renderer_set_uv_view(view == 6 ? 1 : 0);
 }
 """ in menu
     and "void gl_renderer_set_mesh_view(int enabled) { s_mesh_view = enabled != 0; }\n" in renderer
@@ -118,6 +119,25 @@ require(
     and "            for (int y = s_shown_h - 1; y >= 0; --y)\n" in renderer,
     "a request out of bounds or during a recording is refused, every swap of a game frame and of an in-between frame is "
     "captured, and the files are a list with a header and pictures written top row first",
+)
+
+require(
+    "static int s_uv_view = 0;\n" in renderer
+    and "void gl_renderer_set_uv_view(int enabled) {\n    s_uv_view = enabled != 0;\n    ssao_mode();\n}\nint gl_renderer_uv_view(void) { return s_uv_view; }\n"
+    in renderer
+    and "    const int mode = s_uv_view ? 0 : s_ssao_view ? s_ssao_view + 1 : s_ssao_on;\n" in renderer
+    and "s_yaw_center_x > 0.0f ? s_yaw_center_x : 160.0f, nearer, s_uv_view ? 1.0f : 0.0f);\n" in renderer
+    and "    const int on = !s_uv_view && (grown > 1 || (s_aa_edges && edges)) && s_aa_prog && lw > 0 && lh > 0;\n" in renderer
+    and '        "  if (v_bill > 0.5 && u_fade_at.w > 0.5) {\\n"\n'
+    '        "    if (blended) discard;\\n"\n'
+    '        "    vec2 cell = floor(mod(sample_uv, 256.0) / 16.0);\\n"\n'
+    '        "    frag.rgb = vec3(abs(fract(sample_uv / 32.0) * 2.0 - 1.0), (cell.x + 16.0 * cell.y) / 255.0);\\n"\n'
+    '        "  }\\n"\n'
+    '        "}\\n";\n' in renderer
+    and "inline constexpr int kDisruptorDiagnosticViewCount = 7;\n" in settings,
+    "the UV view starts off and shows, on the mirror alone, where a textured pixel lies in its texture: u and v as waves of 16 "
+    "texels down and 16 up with no step, and the 16-texel cell, with blended fragments left out, and with the shading and the picture's filters off so "
+    "that a recording keeps the values",
 )
 
 print("Disruptor debug tab source contract: PASS")

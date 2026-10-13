@@ -43,6 +43,15 @@ void set_aspect(Settings& settings, int index) {
 
 int scale(const Settings& settings) { return settings.supersampling - 1; }
 void set_scale(Settings& settings, int index) { settings.has_supersampling = true; settings.supersampling = index + 1; }
+int multisampling(const Settings& settings) {
+    const auto found = std::ranges::find(PSXRecompV4::kDisruptorSampleCounts, settings.multisampling);
+    return found == std::end(PSXRecompV4::kDisruptorSampleCounts) ? 0
+        : static_cast<int>(found - std::begin(PSXRecompV4::kDisruptorSampleCounts));
+}
+void set_multisampling(Settings& settings, int index) {
+    settings.has_multisampling = true;
+    settings.multisampling = PSXRecompV4::kDisruptorSampleCounts[std::clamp(index, 0, 4)];
+}
 int vsync(const Settings& settings) { return std::clamp(settings.vsync + 1, 0, 2); }
 void set_vsync(Settings& settings, int index) { settings.has_vsync = true; settings.vsync = index - 1; }
 
@@ -59,6 +68,7 @@ constexpr const char* aspects[] = {"4:3", "16:9", "21:9", "32:9", "Match window 
 constexpr const char* scales[] = {"1x (native)", "2x", "3x", "4x", "5x", "6x", "7x", "8x"};
 constexpr const char* vsyncs[] = {"Adaptive", "Immediate", "Synchronised"};
 constexpr const char* shadows[] = {"Vanilla", "Improved"};
+constexpr const char* sample_counts[] = {"Off", "2x", "4x", "8x", "16x"};
 
 constexpr const char* geometry_key = "disruptor.geometry_correction";
 constexpr const char* frames_key = "video.frame_interpolation";
@@ -78,9 +88,10 @@ constexpr Option toggle(const char* key, const char* label, int initial, const c
 }
 
 constexpr Option choice(const char* key, const char* label, int initial, const char* hint,
-                        std::span<const char* const> choices, Saved saved, Get get, Set set) {
+                        std::span<const char* const> choices, Saved saved, Get get, Set set,
+                        std::span<const char* const> needs = {}) {
     return {key, Kind::choice, label, saved, get, set, initial, 0, static_cast<int>(choices.size()) - 1,
-            choices, {}, Unit::none, hint};
+            choices, needs, Unit::none, hint};
 }
 
 constexpr Option slider(const char* key, const char* label, int initial, const char* hint,
@@ -200,6 +211,27 @@ constexpr Option option_list[] = {
            "How dark the shade is.", 0, 300, Unit::percent,
            saved<&Settings::has_occlusion_strength>, read<&Settings::occlusion_strength>,
            write<&Settings::has_occlusion_strength, &Settings::occlusion_strength>, needs_occlusion),
+    toggle<&Settings::has_smooth_fade, &Settings::smooth_fade>(
+        "disruptor.smooth_fade", "Smooth distance fade", 0,
+        "Fades walls and floors into the distance evenly, where the game steps through twelve shades. Unfinished.", needs_geometry),
+    choice("disruptor.multisampling", "Multisampling", 0,
+           "Draws the world with this many samples a pixel, which smooths the edges of polygons and of the "
+           "HUD's rectangles. Video memory and the graphics card's work grow with the value, and a card that "
+           "has fewer samples uses its most. Unfinished.", sample_counts,
+           saved<&Settings::has_multisampling>, multisampling, set_multisampling, needs_geometry),
+    toggle<&Settings::has_sample_shading, &Settings::sample_shading>(
+        "disruptor.sample_shading", "Supersampling", 0,
+        "Shades every sample of Multisampling, which smooths textures and cut-out outlines too, the HUD's among "
+        "them. The graphics card shades that many times as much. Does nothing while Multisampling is off. Unfinished.",
+        needs_geometry),
+    toggle<&Settings::has_downscale_averaging, &Settings::downscale_averaging>(
+        "disruptor.downscale_averaging", "Downscale averaging", 0,
+        "Averages an internal resolution above the screen's down to it, where one sample a screen pixel is taken "
+        "without it. Movies stay as they are. Unfinished."),
+    toggle<&Settings::has_edge_smoothing, &Settings::edge_smoothing>(
+        "disruptor.edge_smoothing", "Edge smoothing", 0,
+        "Smooths the jagged edges left in the world's picture, sprite outlines among them. With exact geometry the "
+        "textured pictures of the HUD and of menus stay as they are. Movies stay as they are. Unfinished."),
 };
 } // namespace
 
