@@ -50,7 +50,7 @@ ISOs are not supported, and a PAL or Japanese disc cannot be the game disc itsel
 
 <img width="680" alt="Disruptor Launcher" src="docs/images/launcher.png" />
 
-Join the [community Discord](https://discord.gg/aeTQjaQUr) to discuss the project
+Join the [community Discord](https://discord.gg/FJswMNhT7) to discuss the project
 and share feedback.
 
 ## Build and run
