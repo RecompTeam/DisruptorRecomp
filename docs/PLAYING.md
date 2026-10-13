@@ -57,7 +57,7 @@ folder; these backups can be removed manually once the repaired copy works.
 | --- | --- |
 | Move / strafe | W / S / A / D |
 | Turn | Mouse, after capture; arrow keys also work |
-| Capture / release mouse | Middle-click; Escape also releases |
+| Release / capture mouse | Escape or middle-click releases; a left or middle click captures again |
 | Fire / menu confirm | Left mouse / Enter |
 | Psionic attack | Right mouse / F |
 | Jump / menu cancel | Space |
@@ -202,7 +202,9 @@ for the replay tool and its limits.
 - **Slow rendering:** lower resolution to 2x or 1x in Enhancements and update
   your graphics driver. Try turning off 60 FPS gameplay and in-between
   frames if they are enabled.
-- **Mouse does not turn:** enter gameplay and middle-click to capture it.
+- **Mouse does not turn:** the game holds the mouse while its window has
+  focus and mouse aim or modern controls are on. After Escape or a
+  middle-click, left-click in the window to capture it again.
 - **Other problems:** see [Reporting a problem](#reporting-a-problem). Do not
   attach your game image, game assets, or BIOS files.
 

@@ -237,10 +237,13 @@ require(
     "makes a report at any time, an import or a running game included",
 )
 require(
-    "    const char *card = (const char *)glGetString(GL_RENDERER);\n"
+    '        std::printf("disruptor: mouse %s failed (%s): %s\\n", captured ? "capture" : "release", reason, SDL_GetError());\n' in mouse
+    and '    std::printf("disruptor: mouse %s (%s)\\n", captured ? "captured" : "released", reason);\n' in mouse
+    and "    const char *card = (const char *)glGetString(GL_RENDERER);\n"
     '    fprintf(stdout, "psxrecomp: OpenGL context created (%s, %s)\\n", ver ? ver : "?", card ? card : "?");\n'
     in read("psxrecomp/runtime/src/gpu_gl_renderer.c"),
-    "the game's log names the graphics card beside its driver",
+    "the game's log says each time the mouse is taken or let go and why, a refusal with the system's reason, and names the "
+    "graphics card beside its driver",
 )
 require(
     "    report.cpp\n" in launcher_cmake

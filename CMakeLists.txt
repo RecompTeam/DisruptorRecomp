@@ -263,6 +263,11 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
     set_tests_properties(disruptor_mouse_aim PROPERTIES
         ENVIRONMENT "PSX_DISRUPTOR_MOUSE_AIM=;PSX_DISRUPTOR_VERTICAL_LOOK=;PSX_DISRUPTOR_MODERN_CONTROLS=;PSX_DISRUPTOR_HIGH_PRECISION_CAMERA=")
 
+    add_test(NAME disruptor_mouse_aim_replay
+        COMMAND disruptor-mouse-aim-test --replay)
+    set_tests_properties(disruptor_mouse_aim_replay PROPERTIES
+        ENVIRONMENT "PSX_DISRUPTOR_CAPSULE_REPLAY=capsule;PSX_DISRUPTOR_MOUSE_AIM=;PSX_DISRUPTOR_VERTICAL_LOOK=;PSX_DISRUPTOR_MODERN_CONTROLS=;PSX_DISRUPTOR_HIGH_PRECISION_CAMERA=")
+
     add_test(NAME disruptor_mouse_aim_registration
         COMMAND disruptor-mouse-aim-test --registration)
     set_tests_properties(disruptor_mouse_aim_registration PROPERTIES
