@@ -1,5 +1,5 @@
 diff --git a/runtime/src/gpu_gl_renderer.c b/runtime/src/gpu_gl_renderer.c
-index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..a64ec4f04c975f40f731c1c2e1e2e8a7d4697091 100644
+index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..6b0e245a77066f905a892d5d309c7c9b707cab8e 100644
 --- a/runtime/src/gpu_gl_renderer.c
 +++ b/runtime/src/gpu_gl_renderer.c
 @@ -1,747 +1,1096 @@
@@ -1831,7 +1831,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..a64ec4f04c975f40f731c1c2e1e2e8a7
  static const char *INTERP_FS =
      "#version 330\n"
      "in vec2 v_uv; uniform sampler2D u_prev; uniform sampler2D u_curr;\n"
-@@ -757,2715 +1106,4224 @@
+@@ -757,2715 +1106,4300 @@
      "  }\n"
      "  frag=mix(prev,curr,alpha);\n"
      "}\n";
@@ -6144,6 +6144,50 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..a64ec4f04c975f40f731c1c2e1e2e8a7
 +    return 1;
 +}
 +
++/* The driver's own messages, for the game's detailed log: a driver may call from its own thread, so the call only queues. */
++typedef void (APIENTRY *PFN_glDebugProc)(GLenum, GLenum, GLuint, GLenum, GLsizei, const char *, const void *);
++typedef void (APIENTRY *PFN_glDebugMessageCallback)(PFN_glDebugProc, const void *);
++typedef void (APIENTRY *PFN_glDebugMessageControl)(GLenum, GLenum, GLenum, GLsizei, const GLuint *, GLboolean);
++#define DEBUG_QUEUE 16
++static struct { char text[200]; unsigned id; int severity, context; } s_debug_queue[DEBUG_QUEUE];
++static SDL_SpinLock s_debug_lock;
++static int s_debug_asked, s_debug_active, s_debug_count;
++static unsigned s_debug_lost;
++
++static void APIENTRY debug_message(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length,
++                                   const char *message, const void *presenter) {
++    (void)source; (void)type; (void)length;
++    SDL_AtomicLock(&s_debug_lock);
++    if (s_debug_count < DEBUG_QUEUE) {
++        snprintf(s_debug_queue[s_debug_count].text, sizeof s_debug_queue[0].text, "%s", message ? message : "");
++        s_debug_queue[s_debug_count].id = id;
++        s_debug_queue[s_debug_count].severity = severity == 0x9146 /* GL_DEBUG_SEVERITY_HIGH */ ? 2 : 1;
++        s_debug_queue[s_debug_count].context = presenter != NULL;
++        ++s_debug_count;
++    } else {
++        ++s_debug_lost;
++    }
++    SDL_AtomicUnlock(&s_debug_lock);
++}
++
++/* For the context that is current. KHR_debug is core from GL 4.3 and an extension below it. */
++static void debug_install(int presenter) {
++    static int s_presenter_tag;
++    GLint major = 0, minor = 0;
++    if (!s_debug_asked) return;
++    glGetIntegerv(0x821B /* GL_MAJOR_VERSION */, &major);
++    glGetIntegerv(0x821C /* GL_MINOR_VERSION */, &minor);
++    if (major * 10 + minor < 43 && !SDL_GL_ExtensionSupported("GL_KHR_debug")) return;
++    PFN_glDebugMessageCallback callback = (void *)SDL_GL_GetProcAddress("glDebugMessageCallback");
++    PFN_glDebugMessageControl control = (void *)SDL_GL_GetProcAddress("glDebugMessageControl");
++    if (!callback || !control) return;
++    glEnable(0x92E0 /* GL_DEBUG_OUTPUT */);
++    control(GL_DONT_CARE, GL_DONT_CARE, 0x826B /* GL_DEBUG_SEVERITY_NOTIFICATION */, 0, NULL, GL_FALSE);
++    control(GL_DONT_CARE, GL_DONT_CARE, 0x9148 /* GL_DEBUG_SEVERITY_LOW */, 0, NULL, GL_FALSE);
++    callback(debug_message, presenter ? &s_presenter_tag : NULL);
++    s_debug_active = 1;
++}
++
 +int gl_renderer_init_context(SDL_Window *win) {
 +    s_win = win;
 +    s_present_w = 0;
@@ -6151,6 +6195,11 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..a64ec4f04c975f40f731c1c2e1e2e8a7
 +    SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
 +    SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
 +    s_ctx = SDL_GL_CreateContext(win);
++    if (!s_ctx && s_debug_asked) {  /* a driver with no debug context still has a plain one */
++        s_debug_asked = 0;
++        SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, 0);
++        s_ctx = SDL_GL_CreateContext(win);
++    }
 +    if (!s_ctx) { fprintf(stdout, "psxrecomp: GL context creation failed (%s)\n", SDL_GetError()); return 0; }
 +    if (SDL_GL_MakeCurrent(win, s_ctx) != 0) { fprintf(stdout, "psxrecomp: MakeCurrent failed (%s)\n", SDL_GetError()); SDL_GL_DeleteContext(s_ctx); s_ctx=NULL; return 0; }
 +    /* Swap interval: 1=vsync (tear-free, default), 0=immediate (lowest display
@@ -6162,7 +6211,9 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..a64ec4f04c975f40f731c1c2e1e2e8a7
 +    }
 +    glDisable(GL_DEPTH_TEST); glDisable(GL_CULL_FACE);
 +    const char *ver = (const char *)glGetString(GL_VERSION);
-+    fprintf(stdout, "psxrecomp: OpenGL context created (%s)\n", ver ? ver : "?");
++    const char *card = (const char *)glGetString(GL_RENDERER);
++    fprintf(stdout, "psxrecomp: OpenGL context created (%s, %s)\n", ver ? ver : "?", card ? card : "?");
++    debug_install(0);
 +
 +    /* All-or-nothing: any missing entry point / failed shader / bad FBO means
 +     * the whole GL renderer is unavailable and the runtime stays on the pure
@@ -7852,6 +7903,26 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..a64ec4f04c975f40f731c1c2e1e2e8a7
 +int gl_renderer_downscale_averaging(void) { return s_aa_average; }
 +void gl_renderer_set_edge_smoothing(int enabled) { s_aa_edges = enabled != 0; }
 +int gl_renderer_edge_smoothing(void) { return s_aa_edges; }
++void gl_renderer_set_debug_messages(int enabled) { s_debug_asked = enabled != 0; }
++int gl_renderer_debug_messages(void) { return s_debug_asked; }
++int gl_renderer_debug_messages_active(void) { return s_debug_active; }
++/* The oldest queued message, 0 when there is none. `lost` gets how many found the queue full since the last call. */
++int gl_renderer_debug_message_take(char *text, int size, unsigned *id, int *severity, int *context, unsigned *lost) {
++    int taken = 0;
++    SDL_AtomicLock(&s_debug_lock);
++    *lost = s_debug_lost;
++    s_debug_lost = 0;
++    if (s_debug_count > 0) {
++        snprintf(text, (size_t)size, "%s", s_debug_queue[0].text);
++        *id = s_debug_queue[0].id;
++        *severity = s_debug_queue[0].severity;
++        *context = s_debug_queue[0].context;
++        memmove(&s_debug_queue[0], &s_debug_queue[1], (size_t)(--s_debug_count) * sizeof s_debug_queue[0]);
++        taken = 1;
++    }
++    SDL_AtomicUnlock(&s_debug_lock);
++    return taken;
++}
 +/* The mirror marks its flat pictures and the canonical surface does not: with geometry correction that one shows full-2D frames only. */
 +static int aa_edges_of(int path) { return path == GL_PRES_WIDE || !s_geometry_correction; }
 +
@@ -8108,6 +8179,11 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..a64ec4f04c975f40f731c1c2e1e2e8a7
 +        if (!s_interp_mutex) s_interp_mutex = SDL_CreateMutex();
 +        SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 1);
 +        s_interp_ctx = SDL_GL_CreateContext(s_win);
++        if (!s_interp_ctx && s_debug_asked) {  /* as for the main context: a plain one, shared all the same */
++            SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, 0);
++            s_interp_ctx = SDL_GL_CreateContext(s_win);
++        }
++        if (s_interp_ctx) debug_install(1);
 +        SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 0);
 +        SDL_GL_MakeCurrent(s_win, s_ctx);
 +        /* The wall-clock pacer and interpolation scheduler own cadence. Keeping
@@ -8737,7 +8813,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..a64ec4f04c975f40f731c1c2e1e2e8a7
      uint64_t freq = SDL_GetPerformanceFrequency();
      uint64_t deadline = SDL_GetPerformanceCounter();
      uint64_t diag_start = deadline, diag_swaps = 0, diag_captures = 0;
-@@ -3477,7 +5335,7 @@
+@@ -3477,7 +5411,7 @@
          int uncapped = hz < 0.0;
          uint64_t now = SDL_GetPerformanceCounter();
          if (!uncapped) {
@@ -8746,7 +8822,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..a64ec4f04c975f40f731c1c2e1e2e8a7
              uint64_t period = (uint64_t)((double)freq / hz);
              if (!period) period = 1;
              deadline += period;
-@@ -3492,235 +5350,418 @@
+@@ -3492,235 +5426,418 @@
              }
              while (SDL_GetPerformanceCounter() < deadline) {}
              now = SDL_GetPerformanceCounter();

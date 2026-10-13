@@ -30,6 +30,7 @@ set(DISRUPTOR_EXTRA_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/capsule.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/cheats.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/control_probe.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/diagnostics.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/far_rendering.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/frame/frame_rate.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/host.cpp"
@@ -223,6 +224,7 @@ if(BUILD_TESTING)
     disruptor_contract(smooth_fade)
     disruptor_contract(antialiasing)
     disruptor_contract(debug_tab)
+    disruptor_contract(diagnostics)
     disruptor_contract(instruction_hooks)
     disruptor_contract(state_key)
     disruptor_contract(test_registration)
@@ -264,6 +266,11 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
     set_tests_properties(disruptor_mouse_aim PROPERTIES
         ENVIRONMENT "PSX_DISRUPTOR_MOUSE_AIM=;PSX_DISRUPTOR_VERTICAL_LOOK=;PSX_DISRUPTOR_MODERN_CONTROLS=;PSX_DISRUPTOR_HIGH_PRECISION_CAMERA=")
 
+    add_test(NAME disruptor_mouse_aim_replay
+        COMMAND disruptor-mouse-aim-test --replay)
+    set_tests_properties(disruptor_mouse_aim_replay PROPERTIES
+        ENVIRONMENT "PSX_DISRUPTOR_CAPSULE_REPLAY=capsule;PSX_DISRUPTOR_MOUSE_AIM=;PSX_DISRUPTOR_VERTICAL_LOOK=;PSX_DISRUPTOR_MODERN_CONTROLS=;PSX_DISRUPTOR_HIGH_PRECISION_CAMERA=")
+
     add_test(NAME disruptor_mouse_aim_registration
         COMMAND disruptor-mouse-aim-test --registration)
     set_tests_properties(disruptor_mouse_aim_registration PROPERTIES
@@ -283,6 +290,16 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
         COMMAND disruptor-mouse-aim-test --registration)
     set_tests_properties(disruptor_high_precision_camera_registration PROPERTIES
         ENVIRONMENT "PSX_DISRUPTOR_MOUSE_AIM=;PSX_DISRUPTOR_VERTICAL_LOOK=;PSX_DISRUPTOR_MODERN_CONTROLS=;PSX_DISRUPTOR_HIGH_PRECISION_CAMERA=1")
+
+    disruptor_unit_test(disruptor_diagnostics tests/unit/disruptor_diagnostics_test.cpp
+        SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/diagnostics.cpp"
+        INCLUDES tests/support/stubs
+        DEFINITIONS PSX_SDL3=1)
+    set_tests_properties(disruptor_diagnostics PROPERTIES ENVIRONMENT "PSX_DISRUPTOR_DETAILED_LOGGING=")
+    add_test(NAME disruptor_diagnostics_forced COMMAND disruptor-diagnostics-test --forced)
+    set_tests_properties(disruptor_diagnostics_forced PROPERTIES ENVIRONMENT "PSX_DISRUPTOR_DETAILED_LOGGING=1")
+    add_test(NAME disruptor_diagnostics_refused COMMAND disruptor-diagnostics-test --refused)
+    set_tests_properties(disruptor_diagnostics_refused PROPERTIES ENVIRONMENT "PSX_DISRUPTOR_DETAILED_LOGGING=0")
 
     disruptor_unit_test(disruptor_cheats tests/unit/disruptor_cheats_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_vertical_camera tests/unit/disruptor_vertical_camera_test.cpp RUNTIME_HEADERS)

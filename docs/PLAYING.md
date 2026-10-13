@@ -57,7 +57,7 @@ folder; these backups can be removed manually once the repaired copy works.
 | --- | --- |
 | Move / strafe | W / S / A / D |
 | Turn | Mouse, after capture; arrow keys also work |
-| Capture / release mouse | Middle-click; Escape also releases |
+| Release / capture mouse | Escape or middle-click releases; a left or middle click captures again |
 | Fire / menu confirm | Left mouse / Enter |
 | Psionic attack | Right mouse / F |
 | Jump / menu cancel | Space |
@@ -160,6 +160,28 @@ retain your controls and display preferences.
 God Mode resets off on launch. Granting all weapons and psionics marks the game
 as cheated, including subsequent game saves.
 
+## Reporting a problem
+
+Press **Report a problem** in the launcher. It gathers the game's log of the
+last two runs, the mouse log, your settings, the notes the game leaves of how
+its last run ended and of a freeze, and a note of the system into one
+ZIP under `reports/` beside the executable and shows it in Explorer. Where
+Windows cannot make the ZIP, it is a folder of the same name: attach its
+files. The name of your Windows user folder is cut out of paths, and
+your disc image, BIOS and saves are never
+included. Attach the ZIP to a
+[bug report](https://github.com/micmea668/DisruptorRecomp/issues) with the
+level and the steps that lead to the problem. For a fault in the picture add
+a replay capsule or a screen recording, described below.
+
+For a problem you can repeat, first switch on **Detailed logging** on the
+launcher's **Troubleshooting** page, play until it shows, close the game and
+then make the report. The log then also says every ten seconds how the
+frames ran, each setting changed in the game's menu, controllers connected
+and removed, and what the graphics driver complains of. The switch is in the
+game's menu too, under **Settings → Debug**, where the driver's part starts
+with the next launch.
+
 ## Reports and replay capsules
 
 **Settings → Debug** offers diagnostic views and **Record the screen** for
@@ -197,10 +219,11 @@ for the replay tool and its limits.
 - **Slow rendering:** lower resolution to 2x or 1x in Enhancements and update
   your graphics driver. Try turning off 60 FPS gameplay and in-between
   frames if they are enabled.
-- **Mouse does not turn:** enter gameplay and middle-click to capture it.
-- **Other problems:** include the level, reproduction steps, render settings,
-  and `startup.log` in a [bug report](https://github.com/micmea668/DisruptorRecomp/issues).
-  Do not attach your game image, game assets, or BIOS files.
+- **Mouse does not turn:** the game holds the mouse while its window has
+  focus and mouse aim or modern controls are on. After Escape or a
+  middle-click, left-click in the window to capture it again.
+- **Other problems:** see [Reporting a problem](#reporting-a-problem). Do not
+  attach your game image, game assets, or BIOS files.
 
 This is an early alpha. The first mission and training-level path have been
 tested, including the recent 8x / 32:9 corruption fix. Full campaign coverage

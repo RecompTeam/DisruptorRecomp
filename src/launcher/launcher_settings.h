@@ -15,9 +15,10 @@ using settings::Kind;
 using settings::Option;
 using settings::options;
 using settings::Settings;
+using settings::stored;
 using settings::Unit;
 
-enum class Page { display, enhancements, controls, audio, experimental };
+enum class Page { display, enhancements, controls, audio, experimental, troubleshooting };
 // A row of the settings pages. The rows of a page are shown in the order they are listed.
 struct Placement { const char* key; Page page; };
 

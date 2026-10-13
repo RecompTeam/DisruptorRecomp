@@ -28,6 +28,8 @@ disc revision; the redistributable OpenBIOS backend is used for booting.
 - Experimental vertical mouse look and weapon aim.
 - In-game settings for controls, display, fullscreen, VSync, volume, and mute.
 - Diagnostic views and a screen recorder for reports of a fault in the picture.
+- A launcher button that gathers logs and settings for a bug report, and a
+  detailed log to switch on for one.
 - Memory-card saves and twelve save-state slots.
 - Windows launcher with disc-image browsing, automatic copy/CUE setup,
   full-disc SHA-256 verification, the game's settings with a hint for each,
@@ -87,8 +89,9 @@ Press **backquote** (`` ` ``) to open settings; **Escape** closes them. Gameplay
 continues while the menu is open, but game input is blocked.
 
 With modern controls enabled: **WASD** moves, **left mouse** fires, **right
-mouse** uses psionics, **Space** jumps, and **E** interacts. **Middle-click**
-captures the mouse; middle-click or Escape releases it. Add `-VerticalLook` to
+mouse** uses psionics, **Space** jumps, and **E** interacts. The game holds
+the mouse while its window has focus. Escape or a middle-click releases it,
+and a left-click in the window takes it back. Add `-VerticalLook` to
 enable experimental vertical aim.
 
 **Alt+Enter** toggles fullscreen. **Shift+F1–F12** saves a state;

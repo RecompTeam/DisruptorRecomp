@@ -6,6 +6,7 @@ struct SDL_Window {};
 
 using Uint8 = std::uint8_t;
 using SDL_WindowFlags = std::uint64_t;
+using SDL_JoystickID = std::uint32_t;
 
 constexpr int SDL_SCANCODE_ESCAPE = 41;
 constexpr int SDL_SCANCODE_A = 4;
@@ -30,6 +31,7 @@ constexpr std::uint32_t SDL_BUTTON_RMASK = 0x00000004u;
 constexpr std::uint32_t SDL_BUTTON_X1MASK = 0x00000008u;
 constexpr std::uint32_t SDL_BUTTON_X2MASK = 0x00000010u;
 constexpr SDL_WindowFlags SDL_WINDOW_INPUT_FOCUS = 0x00000200u;
+constexpr SDL_WindowFlags SDL_WINDOW_MINIMIZED = 0x00000040u;
 
 bool SDL_SetWindowRelativeMouseMode(SDL_Window *window, bool enabled);
 std::uint32_t SDL_GetMouseState(float *x, float *y);
@@ -38,3 +40,6 @@ const Uint8 *SDL_GetKeyboardState(int *count);
 SDL_WindowFlags SDL_GetWindowFlags(SDL_Window *window);
 bool SDL_SetWindowTitle(SDL_Window *window, const char *title);
 const char *SDL_GetError();
+int SDL_NumJoysticks();
+SDL_JoystickID SDL_JoystickGetDeviceInstanceID(int index);
+const char *SDL_GetJoystickNameForID(SDL_JoystickID device);

@@ -15,6 +15,7 @@
 #include "game/render/far_rendering.h"
 #include "game/frame/frame_rate.h"
 #include "game/session/capsule.h"
+#include "game/session/diagnostics.h"
 #include "game/session/intro_skip.h"
 #include "game/input/mouse_aim.h"
 #include "game/frame/present_rate.h"
@@ -159,6 +160,7 @@ void mark_multisampling(int level);
 void mark_sample_shading(bool value);
 void mark_downscale_averaging(bool value);
 void mark_edge_smoothing(bool value);
+void mark_detailed_logging(bool value);
 void mark_occlusion_shape(int reach, int strength);
 void mark_gap_filling(bool value);
 void mark_world_depth(bool value);

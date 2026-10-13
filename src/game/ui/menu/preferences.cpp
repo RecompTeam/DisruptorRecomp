@@ -182,6 +182,8 @@ void mark_downscale_averaging(bool value) { mark("disruptor.downscale_averaging"
 
 void mark_edge_smoothing(bool value) { mark("disruptor.edge_smoothing", value); }
 
+void mark_detailed_logging(bool value) { mark("disruptor.detailed_logging", value); }
+
 void mark_gap_filling(bool value) { mark("disruptor.gap_filling", value); }
 
 void mark_world_depth(bool value) { mark("disruptor.depth_sorted_world", value); }
@@ -253,6 +255,8 @@ bool flush_preferences() {
         return false;
     }
 
+    for (const Option *option : g_preferences.changed)
+        disruptor_diagnostics_note("setting %s = %d", option->key, option->get(g_preferences.pending));
     g_preferences.clean();
     g_preferences.save_failed = false;
     g_preferences.status = "Settings saved.";
@@ -431,6 +435,8 @@ void apply_pending_preferences() {
         gl_renderer_set_downscale_averaging(pending.downscale_averaging ? 1 : 0);
     if (changed("disruptor.edge_smoothing"))
         gl_renderer_set_edge_smoothing(pending.edge_smoothing ? 1 : 0);
+    if (changed("disruptor.detailed_logging"))
+        disruptor_diagnostics_set_detailed(pending.detailed_logging ? 1 : 0);
     if (changed("disruptor.gap_filling"))
         gl_renderer_set_gap_fill(pending.gap_filling ? 1 : 0);
     if (changed("disruptor.depth_sorted_world"))
@@ -464,8 +470,10 @@ void load_preferences_for_session() {
         g_preferences.loaded = false;
         g_preferences.status =
             "settings.toml is invalid; saved menu values were not applied.";
+        std::printf("disruptor: settings at start: the settings file is invalid and was not applied\n");
         return;
     }
+    std::printf("disruptor: settings at start: %s\n", disruptor::settings::describe(settings).c_str());
     capture_base_keybinds();
     apply_saved_preferences(settings);
     apply_pending_preferences();

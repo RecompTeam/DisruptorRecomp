@@ -133,6 +133,10 @@ void read_game_user_settings(const toml::value& doc, UserSettings& s) {
             s.edge_smoothing = toml::find<bool>(d, "edge_smoothing");
             s.has_edge_smoothing = true;
         });
+        if (d.contains("detailed_logging")) try_get([&]{
+            s.detailed_logging = toml::find<bool>(d, "detailed_logging");
+            s.has_detailed_logging = true;
+        });
         if (d.contains("occlusion_reach")) try_get([&]{
             const int reach = toml::find<int>(d, "occlusion_reach");
             if (reach >= 50 && reach <= 800) {
@@ -190,7 +194,7 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
         s.has_perspective_textures || s.has_frame_unlock || s.has_improved_shadows ||
         s.has_ambient_occlusion || s.has_occlusion_reach || s.has_occlusion_strength || s.has_smooth_fade ||
         s.has_multisampling || s.has_sample_shading || s.has_downscale_averaging || s.has_edge_smoothing ||
-        s.has_gap_filling || s.has_depth_sorted_world || s.has_diagnostic_view ||
+        s.has_gap_filling || s.has_depth_sorted_world || s.has_diagnostic_view || s.has_detailed_logging ||
         s.has_language_discs ||
         s.has_language_disc || s.has_skip_intro ||
         s.has_hud_scale) {
@@ -259,6 +263,8 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
             f << "downscale_averaging = " << (s.downscale_averaging ? "true" : "false") << "\n";
         if (s.has_edge_smoothing)
             f << "edge_smoothing = " << (s.edge_smoothing ? "true" : "false") << "\n";
+        if (s.has_detailed_logging)
+            f << "detailed_logging = " << (s.detailed_logging ? "true" : "false") << "\n";
         if (s.has_gap_filling)
             f << "gap_filling = " << (s.gap_filling ? "true" : "false") << "\n";
         if (s.has_depth_sorted_world)

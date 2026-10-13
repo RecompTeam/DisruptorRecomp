@@ -12,7 +12,7 @@
 namespace fs = std::filesystem;
 namespace disruptor::launcher {
 namespace {
-constexpr const wchar_t* pages[] = {L"Display", L"Enhancements", L"Controls", L"Audio", L"Experimental"};
+constexpr const wchar_t* pages[] = {L"Display", L"Enhancements", L"Controls", L"Audio", L"Experimental", L"Troubleshooting"};
 constexpr const char* rate_key = "video.frame_interpolation_fps";
 
 constexpr Placement placed[] = {
@@ -48,6 +48,7 @@ constexpr Placement placed[] = {
     {"disruptor.sample_shading", Page::experimental},
     {"disruptor.downscale_averaging", Page::experimental},
     {"disruptor.edge_smoothing", Page::experimental},
+    {"disruptor.detailed_logging", Page::troubleshooting},
 };
 
 constexpr PresetValue original_values[] = {
@@ -62,10 +63,6 @@ constexpr Preset preset_list[] = {{L"Original", original_values}, {L"Enhanced", 
 constexpr const char* shipped_keys[] = {
     "disruptor.mouse_aim", "disruptor.modern_controls", "disruptor.vertical_look", "disruptor.geometry_correction",
     "disruptor.perspective_textures", "disruptor.frame_unlock", "disruptor.improved_shadows", "video.frame_interpolation"};
-
-int stored(const Settings& settings, const Option& option) {
-    return option.saved(settings) ? option.get(settings) : option.initial;
-}
 
 bool listed(const std::vector<std::string>& discs, const std::string& path) {
     return std::find(discs.begin(), discs.end(), path) != discs.end();

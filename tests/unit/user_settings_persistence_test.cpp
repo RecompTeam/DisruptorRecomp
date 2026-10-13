@@ -118,6 +118,8 @@ int main() {
         written.downscale_averaging = true;
         written.has_edge_smoothing = true;
         written.edge_smoothing = true;
+        written.has_detailed_logging = true;
+        written.detailed_logging = true;
         written.has_gap_filling = true;
         written.gap_filling = false;
         written.has_depth_sorted_world = true;
@@ -181,6 +183,7 @@ int main() {
                     loaded.has_sample_shading && loaded.sample_shading &&
                     loaded.has_downscale_averaging && loaded.downscale_averaging &&
                     loaded.has_edge_smoothing && loaded.edge_smoothing &&
+                    loaded.has_detailed_logging && loaded.detailed_logging &&
                     loaded.has_gap_filling && !loaded.gap_filling &&
                     loaded.has_depth_sorted_world && loaded.depth_sorted_world &&
                     loaded.has_diagnostic_view && loaded.diagnostic_view == 3,
