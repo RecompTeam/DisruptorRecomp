@@ -902,6 +902,11 @@ void facing_and_camera_bounds() {
     auto ghost = current;
     ghost.w[0] = static_cast<float>(GPU_TEMPORAL_MIN_WEIGHT) * 0.5f;
     expect(!gpu_temporal_mesh_facing(&current, &ghost), "a corner not yet in front of the viewer hides its face");
+    auto behind = current, crossing = current;
+    behind.w[0] = -1.0f;
+    gpu_temporal_lerp(&behind, &current, 0.5f, &crossing);
+    expect(crossing.w[0] < 0.0f && !gpu_temporal_mesh_facing(&current, &crossing),
+           "a corner in the viewer's own plane hides its face, its weight of nothing is not a missing weight");
     auto broken = current;
     broken.x[1] = std::numeric_limits<float>::infinity();
     expect(gpu_temporal_mesh_camera_safe(&current, &flipped) && !gpu_temporal_mesh_camera_safe(&current, &broken),

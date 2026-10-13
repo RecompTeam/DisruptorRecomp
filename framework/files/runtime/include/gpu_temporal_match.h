@@ -272,7 +272,7 @@ static inline void gpu_temporal_lerp(const GpuTemporalTriangle *prev,
                 ((double)curr->x[vertex] - prev->x[vertex]) * alpha) * scale);
             result.y[vertex] = (float)(((double)prev->y[vertex] +
                 ((double)curr->y[vertex] - prev->y[vertex]) * alpha) * scale);
-            result.w[vertex] = (float)weight;
+            result.w[vertex] = (float)weight != 0.0f ? (float)weight : -1e-30f; /* 0 would read as a corner without a weight */
             result.q[vertex] = (float)((double)prev->q[vertex] +
                 ((double)curr->q[vertex] - prev->q[vertex]) * alpha);
             continue;
@@ -285,6 +285,14 @@ static inline void gpu_temporal_lerp(const GpuTemporalTriangle *prev,
             ((double)curr->q[vertex] - prev->q[vertex]) * alpha);
     }
     *out = result;
+}
+
+/* The depth of a corner gpu_temporal_lerp placed: a weight is the corner's depth there over its depth at an unweighted end. */
+static inline float gpu_temporal_lerp_depth(const GpuTemporalTriangle *curr,
+                                            const GpuTemporalTriangle *lerped, int vertex) {
+    const float after = curr->w[vertex] != 0.0f ? curr->w[vertex] : 1.0f;
+    const float here = lerped->w[vertex] != 0.0f ? lerped->w[vertex] : 1.0f;
+    return here > 0.0f ? curr->depth[vertex] * here / after : curr->depth[vertex];
 }
 
 #endif /* PSXRECOMP_GPU_TEMPORAL_MATCH_H */
