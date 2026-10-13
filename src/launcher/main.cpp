@@ -2,6 +2,7 @@
 #include "launcher_flow.h"
 #include "launcher_settings.h"
 #include "region_disc.h"
+#include "report.h"
 #include "startup_log.h"
 
 #include <windows.h>
@@ -19,6 +20,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -30,7 +32,7 @@ namespace {
 constexpr UINT progress_message = WM_APP + 1;
 constexpr UINT finished_message = WM_APP + 2;
 constexpr int browse_id = 100, play_id = 101, cancel_id = 102, help_id = 103;
-constexpr int language_id = 104, add_disc_id = 105, remove_disc_id = 106, reset_id = 107, saves_id = 108;
+constexpr int language_id = 104, add_disc_id = 105, remove_disc_id = 106, reset_id = 107, saves_id = 108, report_id = 109;
 constexpr int preset_base = 200, option_base = 1000;
 constexpr int client_width = 680, client_height = 664;
 constexpr size_t log_lines = 8;
@@ -43,6 +45,8 @@ constexpr const wchar_t* page_notes[] = {
     L"Perspective textures and in-between frames need exact geometry.",
     L"Key bindings are in keybinds.ini beside the launcher.",
     L"",
+    L"",
+    L"Switch on, play until the problem shows, close the game, then press Report a problem.",
 };
 
 fs::path executable_directory() {
@@ -69,6 +73,8 @@ HANDLE start_game(const fs::path& root, const VerifiedDisc& disc) {
     const auto executable = root / "DisruptorRecompiled.exe";
     std::wstring command = game_command(root, disc);
     SECURITY_ATTRIBUTES security{sizeof(security), nullptr, TRUE};
+    std::error_code kept;  // a report takes the run before as well: a crash is often seen after a second start
+    fs::rename(root / "startup.log", root / "startup.previous.log", kept);
     HANDLE log = CreateFileW((root / "startup.log").c_str(), GENERIC_WRITE, FILE_SHARE_READ,
                              &security, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
     HANDLE input = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
@@ -78,6 +84,11 @@ HANDLE start_game(const fs::path& root, const VerifiedDisc& disc) {
         if (input != INVALID_HANDLE_VALUE) CloseHandle(input);
         throw std::runtime_error("Cannot create startup.log. Put the extracted build in a writable Games folder.");
     }
+    std::string heading = started_line();
+    for (const auto line : std::views::split(system_note(), std::string_view("\r\n")))
+        if (!line.empty()) heading += "launcher: " + std::string(line.begin(), line.end()) + "\r\n";
+    DWORD written = 0;
+    WriteFile(log, heading.data(), static_cast<DWORD>(heading.size()), &written, nullptr);
     STARTUPINFOW startup{};
     startup.cb = sizeof(startup);
     startup.dwFlags = STARTF_USESTDHANDLES;
@@ -141,6 +152,7 @@ struct App {
     std::atomic_bool cancelled{false};
     bool busy = false, closing = false, unwritten = false;
     HANDLE game = nullptr;
+    ULONGLONG game_started = 0;
     VerifiedDisc verified;
 
     explicit App(fs::path folder) : root(std::move(folder)), settings(root / "settings.toml") {}
@@ -296,7 +308,7 @@ struct App {
         // A row scrolled away with the keyboard on it would leave Tab nowhere to go from.
         if (HWND focus = GetFocus(); focus && GetParent(focus) == tabs && !IsWindowVisible(focus))
             SetFocus(page_rows[page] > page_slots ? scroll : tabs);
-        SetWindowTextW(page_note, page_notes[std::clamp(page, 0, 3)]);
+        SetWindowTextW(page_note, page_notes[std::clamp(page, 0, static_cast<int>(std::size(page_notes)) - 1)]);
     }
     void controls() {
         EnableWindow(browse, !busy && !game);
@@ -364,6 +376,7 @@ struct App {
     void launch() {
         try {
             game = start_game(root, verified);
+            game_started = GetTickCount64();
             say(running_text(environment_overrides(), unwritten));
             SetTimer(window, 1, 500, nullptr);
         } catch (const std::exception& error) {
@@ -479,10 +492,11 @@ void create_controls(App& app) {
     app.status = app.add(window, L"EDIT", L"", ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL,
                          WS_EX_CLIENTEDGE, 30, 520, 620, 66);
     app.progress = app.add(window, PROGRESS_CLASSW, L"", 0, 0, 30, 592, 620, 12);
-    app.play = app.add(window, L"BUTTON", L"Play game", BS_DEFPUSHBUTTON | WS_TABSTOP, 0, 30, 612, 150, 38, play_id);
-    app.cancel = app.add(window, L"BUTTON", L"Cancel", BS_PUSHBUTTON | WS_TABSTOP, 0, 190, 612, 100, 38, cancel_id);
-    app.add(window, L"BUTTON", L"Saves folder", BS_PUSHBUTTON | WS_TABSTOP, 0, 394, 612, 126, 38, saves_id);
-    app.add(window, L"BUTTON", L"Help", BS_PUSHBUTTON | WS_TABSTOP, 0, 530, 612, 120, 38, help_id);
+    app.play = app.add(window, L"BUTTON", L"Play game", BS_DEFPUSHBUTTON | WS_TABSTOP, 0, 30, 612, 130, 38, play_id);
+    app.cancel = app.add(window, L"BUTTON", L"Cancel", BS_PUSHBUTTON | WS_TABSTOP, 0, 168, 612, 84, 38, cancel_id);
+    app.add(window, L"BUTTON", L"Report a problem", BS_PUSHBUTTON | WS_TABSTOP, 0, 260, 612, 134, 38, report_id);
+    app.add(window, L"BUTTON", L"Saves folder", BS_PUSHBUTTON | WS_TABSTOP, 0, 402, 612, 118, 38, saves_id);
+    app.add(window, L"BUTTON", L"Help", BS_PUSHBUTTON | WS_TABSTOP, 0, 528, 612, 122, 38, help_id);
 }
 
 void command(App& app, int id, int code) {
@@ -509,6 +523,18 @@ void command(App& app, int id, int code) {
             app.say(L"Open GETTING_STARTED.md in the build folder for setup and troubleshooting help.");
     } else if (id == saves_id) {
         ShellExecuteW(window, L"open", app.settings.saves_folder().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    } else if (id == report_id) {
+        try {
+            const Report report = make_report(app.root, system_note(), report_stamp());
+            const std::wstring shown = L"/select,\"" + report.path.wstring() + L"\"";
+            ShellExecuteW(window, L"open", L"explorer.exe", shown.c_str(), nullptr, SW_SHOWNORMAL);
+            app.say((report.archived ? L"Report saved as " : L"Report saved in the folder ") + report.path.wstring() +
+                    L".\nAttach it to a bug report at github.com/micmea668/DisruptorRecomp/issues with the level and the steps. "
+                    L"It holds the game's logs, your settings and a note of the system, with user names cut out of "
+                    L"paths. Your disc image, BIOS and saves are never included.");
+        } catch (const std::exception& error) {
+            app.say(wide(error.what()));
+        }
     } else if (!app.editable()) {
         return;
     } else if (id == language_id && code == CBN_SELCHANGE) {
@@ -685,6 +711,7 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lp
                     app->say(tail.empty() ? std::wstring(heading) + L"\nSee GETTING_STARTED.md."
                                           : std::wstring(heading) + L"\nThe end of startup.log:\n" + tail);
                 }
+                note_exit(app->root / "startup.log", code, (GetTickCount64() - app->game_started) / 1000);
                 app->controls();
                 app->look();
             }

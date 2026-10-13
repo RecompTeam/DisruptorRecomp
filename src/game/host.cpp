@@ -5,6 +5,7 @@
 #include "game/render/far_rendering.h"
 #include "game/render/precision_routes.h"
 #include "game/session/capsule.h"
+#include "game/session/diagnostics.h"
 #include "gpu.h"
 
 #include <cstddef>
@@ -18,6 +19,7 @@ extern "C" int disruptor_grown_quad_sources(uint32_t command_address, const uint
                                             uint32_t source_word[4]);
 
 bool psx_game_settings_loaded(const PSXRecompV4::UserSettings &settings) {
+    disruptor_diagnostics_configure(settings.has_detailed_logging && settings.detailed_logging);
     if (settings.has_language_disc && !std::getenv("PSX_DISRUPTOR_LANGUAGE_DISC"))
         disruptor_language_set_disc(settings.language_disc.c_str());
     return settings.has_skip_intro && settings.skip_intro && !std::getenv("PSX_DISRUPTOR_SKIP_INTRO");

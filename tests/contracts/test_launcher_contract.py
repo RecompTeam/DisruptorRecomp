@@ -53,7 +53,7 @@ ROW = r'\b(toggle|choice|slider)(?:<[^>]*>)?\(\s*"([\w.]+)", "([^"]+)", (-?\d+)'
 rows = re.findall(ROW, options)
 keys = [key for _, key, _, _ in rows]
 initial = {key: int(value) for _, key, _, value in rows}
-require(len(rows) == 27 and len(set(keys)) == 27, "the shared table must hold its 27 options, each key once")
+require(len(rows) == 28 and len(set(keys)) == 28, "the shared table must hold its 28 options, each key once")
 placed = re.findall(r'^    \{"([\w.]+)", Page::\w+\},$', table, re.MULTILINE)
 require(
     sorted(placed) == sorted(keys)
@@ -206,6 +206,52 @@ require(
     and "add_test(NAME disruptor_region_disc COMMAND disruptor-region-disc-test)" in launcher_cmake
     and "    disruptor_contract(launcher)\n" in cmake,
     "the launcher's tests must remain registered",
+)
+
+report = read("src/launcher/report.cpp")
+playing = read("docs/PLAYING.md")
+require(
+    'constexpr std::array<const char*, 6> gathered = {"startup.log", "startup.previous.log", "disruptor-mouse-aim.log", "settings.toml",\n'
+    in report
+    and '        if (present) write(folder / name, without_user_names(end_of(root / name)));\n' in report
+    and '    write(folder / "system.txt", without_user_names(note));\n' in report
+    and "    if (!archive || !run_tar(folder, zip)) {\n        fs::remove(zip, failed);\n        return {folder, false};\n    }\n"
+    "    fs::remove_all(folder, failed);\n    return {zip, true};\n" in report
+    and '    std::string note = "Disruptor Recompiled " DISRUPTOR_BUILD_VERSION "\\r\\n";\n' in report
+    and '    note += "Windows: " + windows_name(windows_value(L"ProductName"), windows_value(L"CurrentBuildNumber")) + ", version " +\n' in report,
+    "a report takes the game's log of two runs, the mouse log and the settings, each with user names cut out, and a note "
+    "of the system: one ZIP where Windows' tar makes it, with no folder and no half-made ZIP left beside it",
+)
+require(
+    '    fs::rename(root / "startup.log", root / "startup.previous.log", kept);\n'
+    '    HANDLE log = CreateFileW((root / "startup.log").c_str(), GENERIC_WRITE, FILE_SHARE_READ,\n' in window
+    and '        if (!line.empty()) heading += "launcher: " + std::string(line.begin(), line.end()) + "\\r\\n";\n'
+    "    DWORD written = 0;\n"
+    "    WriteFile(log, heading.data(), static_cast<DWORD>(heading.size()), &written, nullptr);\n" in window
+    and '    app.add(window, L"BUTTON", L"Report a problem", BS_PUSHBUTTON | WS_TABSTOP, 0, 260, 612, 134, 38, report_id);\n' in window
+    and "    } else if (id == report_id) {\n        try {\n"
+    "            const Report report = make_report(app.root, system_note(), report_stamp());\n" in window
+    and window.count("report_id") == 3
+    and window.index("} else if (id == report_id) {") < window.index("} else if (!app.editable()) {"),
+    "the launcher keeps the log of the run before, heads a new log with the build and the system, and has a button that "
+    "makes a report at any time, an import or a running game included",
+)
+require(
+    "    const char *card = (const char *)glGetString(GL_RENDERER);\n"
+    '    fprintf(stdout, "psxrecomp: OpenGL context created (%s, %s)\\n", ver ? ver : "?", card ? card : "?");\n'
+    in read("psxrecomp/runtime/src/gpu_gl_renderer.c"),
+    "the game's log names the graphics card beside its driver",
+)
+require(
+    "    report.cpp\n" in launcher_cmake
+    and "execute_process(COMMAND git describe --tags --always --dirty\n" in launcher_cmake
+    and 'set_property(SOURCE report.cpp APPEND PROPERTY COMPILE_DEFINITIONS\n    "DISRUPTOR_BUILD_VERSION=\\"${DISRUPTOR_BUILD_VERSION}\\"")\n'
+    in launcher_cmake
+    and "    add_test(NAME disruptor_launcher_report COMMAND disruptor-launcher-report-test)\n" in launcher_cmake
+    and "Press **Report a problem** in the launcher." in playing
+    and "your disc image, BIOS and saves are never\nincluded" in playing,
+    "the report is built into the launcher with the build's version, its test is registered, and the guide tells a player "
+    "of the button and of what it leaves out",
 )
 
 print("Disruptor launcher source contract: PASS")

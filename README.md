@@ -25,6 +25,8 @@ disc revision; the redistributable OpenBIOS backend is used for booting.
 - Experimental vertical mouse look and weapon aim.
 - In-game settings for controls, display, fullscreen, VSync, volume, and mute.
 - Diagnostic views and a screen recorder for reports of a fault in the picture.
+- A launcher button that gathers logs and settings for a bug report, and a
+  detailed log to switch on for one.
 - Memory-card saves and twelve save-state slots.
 - Windows launcher with disc-image browsing, automatic copy/CUE setup,
   full-disc SHA-256 verification, the game's settings with a hint for each,

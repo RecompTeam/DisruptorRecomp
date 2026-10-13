@@ -27,6 +27,7 @@ struct GameUserSettings {
     bool has_occlusion_strength = false; int occlusion_strength = 80;  // percent, 0..300
     bool has_gap_filling = false; bool gap_filling = true;
     bool has_depth_sorted_world = false; bool depth_sorted_world = false;
+    bool has_detailed_logging = false; bool detailed_logging = false;
     // An index into kDisruptorDiagnosticViews. A session's own: at start only a capsule's replay takes it from the file.
     bool has_diagnostic_view = false; int diagnostic_view = 0;
 };

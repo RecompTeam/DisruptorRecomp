@@ -1,11 +1,22 @@
 #include "game/ui/menu/menu.h"
 
 namespace disruptor::menu {
+namespace {
+constexpr const char *driver_words[] = {"off", "on", "from the next launch", "not offered by this driver"};
+}  // namespace
 
 void draw_debug_tab() {
-    ImGui::TextDisabled("Tools for a report of a fault in the picture.");
+    ImGui::TextDisabled("Tools for a report of a fault.");
     ImGui::Spacing();
 
+    bool detailed = disruptor_diagnostics_detailed() != 0;
+    if (option_toggle("disruptor.detailed_logging", &detailed)) {
+        disruptor_diagnostics_set_detailed(detailed ? 1 : 0);
+        mark_detailed_logging(detailed);
+    }
+    if (detailed) ImGui::TextDisabled("Driver messages: %s.", driver_words[disruptor_diagnostics_driver_state()]);
+
+    ImGui::Separator();
     if (ImGui::Button("Record the screen") && !gl_renderer_recording_shown()) g_menu.record_shown = true;
     draw_status_badge("SESSION", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
     ImGui::TextDisabled(
