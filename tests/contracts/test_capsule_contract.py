@@ -110,14 +110,14 @@ require(
     "a replay's exit code must say whether it still had the recording's memory in its last second",
 )
 require(
-    "    if (capsule.recording != Recording::kOff || capsule.replay == Replay::kAsked || capsule.replay == Replay::kLoading || savestate_pending()) return;\n"
-    in capsule
+    "    if (capsule.recording != Recording::kOff || capsule.replay == Replay::kAsked || capsule.replay == Replay::kLoading || !capsule.loading.empty() ||\n"
+    "        savestate_pending())\n        return;\n" in capsule
     and "    if (psx_netplay_active()) return refuse_recording(" in capsule
     and capsule.index("    if (psx_netplay_active()) return refuse_recording(")
     < capsule.index("turn_states_to(capsule.made)")
     and "    if (!savestate_request_save(0)) {\n        turn_states_back();\n" in capsule
     and "        if (const bool saved = savestate_slot_exists(0) != 0; turn_states_back(), !saved) {\n" in capsule
-    and capsule.count("turn_states_back()") == 4
+    and capsule.count("turn_states_back()") == 6
     and "        made = fs::create_directory(capsule.made, failed);\n" in capsule
     and "    if (failed || !made || !turn_states_to(capsule.made)) return refuse_recording(" in capsule,
     "the save state folder is the capsule's for one save or load only, and is turned back whatever came of it",
@@ -130,11 +130,33 @@ require(
     "the heading the mouse writes into the game must be told to a recording, and a replay must be able to put the pitch back",
 )
 require(
-    "    if (!g_menu.open && scancode_event(event, SDL_SCANCODE_F12) && (SDL_GetModState() & KMOD_CTRL) != 0) {\n"
-    "        disruptor_capsule_toggle();\n"
+    "    if (!g_menu.open && key_down(event, SDL_SCANCODE_F12)) {\n"
+    "        const int held = key_held(event);\n"
+    "        disruptor_capsule_key(event->key.repeat ? 1 : 0, (held & KMOD_CTRL) != 0, (held & KMOD_SHIFT) != 0);\n"
     "        return 1;\n"
-    "    }\n" in menu,
-    "Ctrl+F12 must start and end a recording and must not reach the save state keys",
+    "    }\n" in menu
+    and "    for (int key = SDL_SCANCODE_F1; !g_menu.open && key <= SDL_SCANCODE_F11; ++key)\n"
+    "        if (key_down(event, static_cast<SDL_Scancode>(key)) && disruptor_capsule_holds_states()) return 1;\n" in menu
+    and "    capsule.states_turned = true;\n    return true;\n" in capsule
+    and "    savestate_configure(g_capsule.states_before.c_str(), g_capsule.bios, g_capsule.entry);\n    g_capsule.states_turned = false;\n" in capsule
+    and 'extern "C" int disruptor_capsule_holds_states(void) { return g_capsule.states_turned ? 1 : 0; }\n' in capsule
+    and "bool key_down(const SDL_Event *event, SDL_Scancode scancode) {\n    if (!event || event->type != SDL_KEYDOWN) return false;\n" in menu
+    and "    switch (disruptor::capsule::press(repeat != 0, ctrl != 0, shift != 0, g_capsule.recording != Recording::kOff)) {\n" in capsule
+    and "    if (repeat || (shift && !ctrl)) return Press::kNothing;\n" in capsule
+    and "    case disruptor::capsule::Press::kRecord:\n        disruptor_capsule_toggle();\n        break;\n" in capsule
+    and "    return ctrl || recording ? Press::kRecord : Press::kLoad;\n" in capsule
+    and "int key_held(const SDL_Event *event) {\n#if defined(PSX_SDL3)\n    return event->key.mod;\n#else\n    return event->key.keysym.mod;\n#endif\n}\n" in menu
+    and menu.count("KMOD_") == 2
+    and "    if (capsule.recording == Recording::kSaving) capsule.end_asked = true;\n"
+    "    if (capsule.recording != Recording::kOff ||" in capsule
+    and "    capsule.recorded.clear();\n    capsule.end_asked = false;\n    capsule.recording = Recording::kSaving;\n" in capsule
+    and "    case Recording::kOn:\n        if (capsule.end_asked) {\n            finish_recording(\"the key\");\n            break;\n        }\n" in capsule
+    and "} else if (!ui_consumed && ev.type == SDL_KEYDOWN) {" in host
+    and host.index("const int ui_consumed = psx_host_ui_handle_event(&ev);") < host.index("if (key >= SDLK_F1 && key <= SDLK_F12) {"),
+    "every F12 press outside the menu and the repeats of the held key are the capsule's and never reach the save state keys: the frontend "
+    "loads a state on a repeat too. Ctrl, read from the event itself, records, a press without it loads unless a recording runs, and "
+    "Shift alone does nothing. While the slot folder is a capsule's the save state keys are held back. A press while the recording's "
+    "state is still being saved ends the recording at its first frame",
 )
 require(
     '    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/capsule.cpp"\n' in cmake
@@ -163,8 +185,121 @@ require(
 )
 guide = read("docs/BUILD.md")
 require(
-    "Ctrl+F12" in guide and "tools/replay_capsule.py" in guide and "PSX_DISRUPTOR_CAPSULE_REPLAY" in capsule,
-    "the build guide must say how a capsule is made and replayed",
+    "Ctrl+F12 in the game starts a recording" in guide and "tools/replay_capsule.py" in guide
+    and "PSX_DISRUPTOR_CAPSULE_REPLAY" in capsule
+    and "| Save / load state | Shift+F1–F11 / F1–F11 |" in read("docs/PLAYING.md")
+    and "| Start / end a replay capsule | Ctrl+F12 |\n| Load the newest replay capsule | F12 |" in read("docs/PLAYING.md")
+    and "**F1–F11** loads it." in read("README.md")
+    and "**F12** loads the newest one." in read("README.md"),
+    "the build guide must say how a capsule is made and replayed, and the guides give Ctrl+F12 to recording, F12 to loading the newest "
+    "capsule and F1 to F11 to the save states",
+)
+require(
+    "    const bool free_now = capsule.recording == Recording::kOff && capsule.replay == Replay::kOff && capsule.loading.empty() && !savestate_pending() &&\n"
+    "                          !psx_netplay_active();\n"
+    "    if (!free_now || !stored_name(name, began) || fs::is_symlink(folder, failed) || failed || !fs::is_directory(folder, failed) || failed ||\n"
+    "        !begins(folder, pitch) || !turn_states_to(folder)) {\n" in capsule
+    and "    if (noted == 0 || !decode(whole_file(folder / \"input.bin\", kInputBytes), frames, first_cycle) || frames.size() != noted) return false;\n"
+    in capsule
+    and "    if (capsule.load_done) disruptor_mouse_set_vertical_pitch(capsule.load_pitch);\n" in capsule
+    and "    if (!savestate_slot_exists(0) || !savestate_request_load(0)) {\n        turn_states_back();\n" in capsule
+    and "    capsule.loading = folder;\n    capsule.load_pitch = pitch;\n    capsule.load_done = false;\n    return true;\n" in capsule
+    and "    if (!g_capsule.loading.empty()) g_capsule.load_done = true;\n" in capsule
+    and "    if (!capsule.loading.empty() && !savestate_pending()) finish_load();\n" in capsule
+    and "static void finish_load() {\n    Capsule &capsule = g_capsule;\n    turn_states_back();\n" in capsule
+    and "    capsule.loading.clear();\n}\n" in capsule
+    and "capsule.replay == Replay::kLoading || !capsule.loading.empty() ||\n        savestate_pending())\n        return;\n" in capsule
+    and "        if (const std::string name = disruptor::capsule::newest(disruptor::capsule::stored(disruptor::capsule::home())); name.empty()) "
+    'say("no capsule");\n        else disruptor::capsule::load(name);\n' in capsule
+    and "        if (kept.name != recording && kept.frames != 0) {\n"
+    '            if (ImGui::SmallButton("Load")) {\n'
+    "                if (capsule::load(kept.name)) set_menu_open(false);\n" in menu,
+    "a capsule's state is loaded only when nothing records, replays or loads, only from a folder named as a capsule, never a link, whose "
+    "note and input are whole, the slot folder goes back whatever came of it, no recording starts meanwhile, and both the key and the "
+    "list's button load through it",
+)
+
+playing = read("docs/PLAYING.md")
+require(
+    "    if (!digits(second) || second.size() > 18 || second[0] == '0') return false;\n" in capsule
+    and "    if (!stored_name(name, began)) return false;\n" in capsule
+    and "    if (std::filesystem::is_symlink(folder, failed) || failed || !std::filesystem::is_directory(folder, failed) || failed) return false;\n"
+    "    std::filesystem::remove_all(folder, failed);\n    return !failed;\n" in capsule
+    and "    const fs::path all = disruptor::capsule::home();\n    fs::create_directories(all, failed);\n" in capsule
+    and "    return g_capsule.recording == Recording::kOff ? std::string() : utf8(g_capsule.made.filename());\n" in capsule,
+    "only a folder named as a capsule is listed or removed, never through a link, the list reads the folder recordings go into, "
+    "and the capsule being recorded is known by its name",
+)
+require(
+    "    if (g_menu.capsules_read < 0.0 || ImGui::GetTime() - g_menu.capsules_read > 1.0) {\n" in menu
+    and "        if (kept.name != recording && ImGui::SmallButton(asked ? \"Delete for good?\" : \"Delete\")) {\n"
+    "            if (asked) {\n" in menu
+    and "            g_menu.capsule_asked = asked ? std::string() : kept.name;\n" in menu
+    and "    ImGui::Separator();\n    draw_capsules();\n" in menu
+    and "**Settings → Debug** lists them, the newest on top," in playing,
+    "the Debug tab lists the capsules, read once a second, deletes one only on a second press and never the one being recorded, "
+    "and the player's guide says the list is there",
+)
+
+renderer = read("psxrecomp/runtime/src/gpu_gl_renderer.c")
+require(
+    "    if (s_snap_state == SNAP_NONE || s_snap_state == SNAP_WAITING) {\n        s_snap_width = width;\n        s_snap_state = SNAP_ASKED;\n" in renderer
+    and "    if (s_snap_state == SNAP_READING) s_snap_dropped = 1;\n    else s_snap_state = SNAP_NONE;\n" in renderer
+    and "    if (s_snap_state == SNAP_WAITING) {\n        s_snap_state = SNAP_NONE;\n        if (s_snap_w * s_snap_h * 3 <= room) {\n"
+    "            memcpy(rgb, s_snap_pixels, (size_t)s_snap_w * s_snap_h * 3);\n" in renderer
+    and "    mine = s_snap_state == SNAP_ASKED;\n    if (mine) s_snap_state = SNAP_READING;\n    width = s_snap_width;\n    SDL_AtomicUnlock(&s_snap_lock);\n"
+    "    if (!mine) return;\n" in renderer
+    and "        for (int y = 0; y < height; ++y) memcpy(down + (size_t)y * width * 3, up + (size_t)(height - 1 - y) * width * 3, (size_t)width * 3);\n"
+    in renderer
+    and "    s_snap_state = down && !s_snap_dropped ? SNAP_WAITING : SNAP_NONE;\n    s_snap_dropped = 0;\n    SDL_AtomicUnlock(&s_snap_lock);\n" in renderer
+    and renderer.count("SDL_AtomicLock(&s_snap_lock);") == 5
+    and renderer.count("SDL_AtomicUnlock(&s_snap_lock);") == 5
+    and "static void shown_capture(int kind, float alpha) {\n    int ww = 0, wh = 0;\n    shown_snap();\n    if (s_shown_left <= 0) return;\n" in renderer
+    and "    if (!rgb || width <= 0 || height <= 0 || width > 4096 || height > 4096) return 0;\n" in renderer
+    and "    if (texture) glDeleteTextures(1, &texture);\n" in renderer,
+    "the renderer takes one picture of what reaches the screen when asked, one thread at a time and under a lock, copies it out "
+    "rows top down, drops one that was cancelled, and makes a picture for the menu in the context that asks",
+)
+require(
+    "    if (!capsule.preview_asked || !gl_renderer_snap_taken(capsule.preview.data(), static_cast<int>(capsule.preview.size()), &width, &height)) return;\n"
+    "    capsule.preview_asked = false;\n" in capsule
+    and "    if (write(capsule.made / disruptor::capsule::preview_name(disruptor::capsule::preview_slot(capsule.previews)),\n" in capsule
+    and "        ++capsule.previews;\n" in capsule
+    and "    keep_preview();\n    gl_renderer_snap_cancel();\n    capsule.preview_asked = false;\n    char about[256];\n" in capsule
+    and "        gl_renderer_snap_cancel();\n        capsule.previews = 0;\n        capsule.preview_asked = false;\n        capsule.recording = Recording::kOn;\n"
+    in capsule
+    and "        keep_preview();\n"
+    "        if (disruptor::capsule::preview_due(capsule.recorded.size()) && gl_renderer_snap_shown(static_cast<int>(disruptor::capsule::kPreviewWidth)))\n"
+    "            capsule.preview_asked = true;\n"
+    "        close_frame();\n" in capsule
+    and "inline constexpr uint32_t kPreviewWidth = 240, kPreviewFirst = 60, kPreviewEvery = 30, kPreviewMost = 80;\n" in read("src/game/session/capsule.h"),
+    "a recording asks for a picture every half second from its first second on, keeps each under the next number and the eightieth "
+    "again, and cancels the one it waits for when it starts and when it ends",
+)
+require(
+    "        if (each->is_symlink(unread) || unread || !each->is_directory(unread) || unread || !stored_name(one.name, one.began)) continue;\n" in capsule
+    and "        if (std::filesystem::is_regular_file(note, unread)) about.open(note, std::ios::binary);\n" in capsule
+    and "    if (!std::filesystem::is_regular_file(file, failed) || failed) return {};\n" in capsule
+    and "    if (failed || size == 0 || size > most) return {};\n" in capsule
+    and "std::string preview_read(const std::filesystem::path &file) { return whole_file(file, kPreviewBytes); }\n" in capsule,
+    "a linked folder is no capsule, and a capsule's note and pictures are read only from regular files of a bounded size",
+)
+require(
+    "        if (thumb.pictures != kept.pictures || thumb.revised != kept.revised) {\n            gl_renderer_picture_free(thumb.picture);\n" in menu
+    and "            thumb.picture = kept.pictures ? load_picture(all / kept.name / capsule::preview_name(kept.pictures - 1), &thumb.tall) : 0;\n" in menu
+    and "        if (thumb.picture && ImGui::IsItemHovered()) draw_film(all / kept.name, kept, thumb.tall);\n" in menu
+    and "    if (g_menu.capsule_film_of != kept.name || g_menu.capsule_film_pictures != kept.pictures || g_menu.capsule_film_revised != kept.revised) {\n"
+    "        drop_film();\n" in menu
+    and "    for (const unsigned picture : g_menu.capsule_film) gl_renderer_picture_free(picture);\n" in menu
+    and "[](const capsule::Stored &kept) { return kept.name == g_menu.capsule_film_of; })) drop_film();\n" in menu
+    and "            if (!listed) gl_renderer_picture_free(thumb->second.picture);\n" in menu
+    and "    const std::string bytes = disruptor::capsule::preview_read(file);\n" in menu
+    and "    if (!disruptor::capsule::preview_decode(bytes, width, height, rgb)) return 0;\n" in menu
+    and "        else ImGui::Text(\"%u s\", capsule::stored_seconds(kept.frames));\n" in menu
+    and "with the last picture, time and length of each" in playing
+    and "Hold the mouse over a picture to see that capsule play." in playing,
+    "the list shows each capsule's last picture and loads it again when it is replaced, plays its pictures under the mouse, frees "
+    "what it no longer shows, takes no file that is not a whole picture, and the player's guide says so",
 )
 
 print("Disruptor replay capsule source contract: PASS")

@@ -4,6 +4,7 @@
 /* Measured: a loaded state takes its interrupts a few instructions apart, so one frame in four differs in a few bytes, nine in a row at most. */
 #include "game/session/capsule.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -30,6 +31,9 @@ extern "C" double disruptor_mouse_vertical_pitch(void);
 extern "C" void disruptor_mouse_set_vertical_pitch(double pitch);
 extern "C" const char *psx_host_user_settings_path(void);
 extern "C" int psx_netplay_active(void);
+extern "C" int gl_renderer_snap_shown(int width);
+extern "C" void gl_renderer_snap_cancel(void);
+extern "C" int gl_renderer_snap_taken(unsigned char *rgb, int room, int *width, int *height);
 #endif
 
 namespace disruptor::capsule {
@@ -130,6 +134,152 @@ std::string bitmap(const std::vector<uint8_t> &rgb, uint32_t width, uint32_t hei
     return out;
 }
 
+Press press(bool repeat, bool ctrl, bool shift, bool recording) {
+    if (repeat || (shift && !ctrl)) return Press::kNothing;
+    return ctrl || recording ? Press::kRecord : Press::kLoad;
+}
+
+std::string newest(const std::vector<Stored> &kept) {
+    for (const Stored &one : kept)
+        if (one.frames != 0) return one.name;
+    return {};
+}
+
+bool stored_name(std::string_view name, int64_t &began) {
+    const size_t dash = name.find('-');
+    const std::string_view second = name.substr(0, dash), copy = dash == std::string_view::npos ? std::string_view() : name.substr(dash + 1);
+    const auto digits = [](std::string_view text) { return !text.empty() && std::all_of(text.begin(), text.end(), [](char c) { return c >= '0' && c <= '9'; }); };
+    if (!digits(second) || second.size() > 18 || second[0] == '0') return false;
+    if (dash != std::string_view::npos && (!digits(copy) || copy.size() > 2 || copy[0] == '0' || copy == "1")) return false;
+    began = 0;
+    for (const char c : second) began = began * 10 + (c - '0');
+    return true;
+}
+
+uint32_t stored_frames(std::string_view about) {
+    constexpr std::string_view key = "frames = ";
+    for (size_t line = 0; line < about.size(); line = about.find('\n', line) == std::string_view::npos ? about.size() : about.find('\n', line) + 1) {
+        if (about.substr(line, key.size()) != key) continue;
+        uint64_t frames = 0;
+        size_t at = line + key.size();
+        for (; at < about.size() && about[at] >= '0' && about[at] <= '9' && frames <= UINT32_MAX; ++at) frames = frames * 10 + static_cast<uint64_t>(about[at] - '0');
+        const bool whole = at == about.size() || about[at] == '\n' || about[at] == '\r';
+        return whole && frames <= UINT32_MAX ? static_cast<uint32_t>(frames) : 0u;
+    }
+    return 0u;
+}
+
+uint32_t stored_seconds(uint32_t frames) { return frames / 60u + (frames % 60u >= 30u ? 1u : 0u); }
+
+std::vector<Stored> stored(const std::filesystem::path &all) {
+    std::vector<Stored> found;
+    std::error_code failed;
+    for (std::filesystem::directory_iterator each(all, failed), end; !failed && each != end; each.increment(failed)) {
+        Stored one;
+        const std::u8string name = each->path().filename().u8string();
+        one.name.assign(name.begin(), name.end());
+        std::error_code unread;
+        if (each->is_symlink(unread) || unread || !each->is_directory(unread) || unread || !stored_name(one.name, one.began)) continue;
+        const std::filesystem::path note = each->path() / "capsule.toml";
+        std::ifstream about;
+        if (std::filesystem::is_regular_file(note, unread)) about.open(note, std::ios::binary);
+        char text[512] = {};
+        about.read(text, sizeof(text) - 1);
+        one.frames = stored_frames(std::string_view(text, static_cast<size_t>(about.gcount())));
+        while (one.pictures < kPreviewMost && std::filesystem::exists(each->path() / preview_name(one.pictures), unread) && !unread) ++one.pictures;
+        if (one.pictures != 0) {
+            const auto written = std::filesystem::last_write_time(each->path() / preview_name(one.pictures - 1), unread);
+            one.revised = unread ? 0 : static_cast<int64_t>(written.time_since_epoch().count());
+        }
+        found.push_back(std::move(one));
+    }
+    std::sort(found.begin(), found.end(), [](const Stored &one, const Stored &other) {
+        if (one.began != other.began) return one.began > other.began;
+        return one.name.size() != other.name.size() ? one.name.size() > other.name.size() : one.name > other.name;
+    });
+    return found;
+}
+
+bool discard(const std::filesystem::path &all, std::string_view name) {
+    int64_t began = 0;
+    std::error_code failed;
+    if (!stored_name(name, began)) return false;
+    const std::filesystem::path folder = all / std::filesystem::path(std::u8string(name.begin(), name.end()));
+    if (std::filesystem::is_symlink(folder, failed) || failed || !std::filesystem::is_directory(folder, failed) || failed) return false;
+    std::filesystem::remove_all(folder, failed);
+    return !failed;
+}
+
+bool preview_due(size_t frame) { return frame >= kPreviewFirst && (frame - kPreviewFirst) % kPreviewEvery == 0; }
+
+uint32_t preview_slot(uint32_t taken) { return std::min(taken, kPreviewMost - 1u); }
+
+std::string preview_name(uint32_t number) {
+    char name[32];
+    std::snprintf(name, sizeof(name), "preview_%03u.ppm", static_cast<unsigned>(number));
+    return name;
+}
+
+std::string preview(const uint8_t *rgb, uint32_t width, uint32_t height) {
+    char head[40];
+    std::snprintf(head, sizeof(head), "P6\n%u %u\n255\n", static_cast<unsigned>(width), static_cast<unsigned>(height));
+    std::string file = head;
+    file.append(reinterpret_cast<const char *>(rgb), static_cast<size_t>(width) * height * 3);
+    return file;
+}
+
+bool preview_decode(std::string_view file, uint32_t &width, uint32_t &height, std::string_view &rgb) {
+    uint64_t size[2] = {0, 0};
+    size_t at = 3;
+    if (file.substr(0, 3) != "P6\n") return false;
+    for (int which = 0; which < 2; ++which) {
+        const size_t first = at;
+        for (; at < file.size() && file[at] >= '0' && file[at] <= '9' && size[which] <= 4096; ++at) size[which] = size[which] * 10 + static_cast<uint64_t>(file[at] - '0');
+        if (at == first || at >= file.size() || file[at] != (which == 0 ? ' ' : '\n') || size[which] == 0 || size[which] > 4096) return false;
+        ++at;
+    }
+    if (file.substr(at, 4) != "255\n" || file.size() - at - 4 != size[0] * size[1] * 3) return false;
+    width = static_cast<uint32_t>(size[0]);
+    height = static_cast<uint32_t>(size[1]);
+    rgb = file.substr(at + 4);
+    return true;
+}
+
+static std::string whole_file(const std::filesystem::path &file, uintmax_t most) {
+    std::error_code failed;
+    if (!std::filesystem::is_regular_file(file, failed) || failed) return {};
+    const uintmax_t size = std::filesystem::file_size(file, failed);
+    if (failed || size == 0 || size > most) return {};
+    std::string bytes(static_cast<size_t>(size), '\0');
+    std::ifstream in(file, std::ios::binary);
+    in.read(bytes.data(), static_cast<std::streamsize>(bytes.size()));
+    return static_cast<uintmax_t>(in.gcount()) == size ? bytes : std::string();
+}
+
+std::string preview_read(const std::filesystem::path &file) { return whole_file(file, kPreviewBytes); }
+
+bool begins(const std::filesystem::path &folder, float &pitch) {
+    std::vector<Frame> frames;
+    uint64_t first_cycle = 0;
+    const uint32_t noted = stored_frames(whole_file(folder / "capsule.toml", 4096));
+    if (noted == 0 || !decode(whole_file(folder / "input.bin", kInputBytes), frames, first_cycle) || frames.size() != noted) return false;
+    pitch = frames[0].pitch;
+    return true;
+}
+
+std::string folder_url(const std::filesystem::path &folder) {
+    static constexpr char hex[] = "0123456789ABCDEF";
+    const std::u8string text = folder.generic_u8string();
+    std::string url = !text.empty() && text[0] == u8'/' ? "file://" : "file:///";
+    for (const char8_t unit : text) {
+        const unsigned char c = static_cast<unsigned char>(unit);
+        const bool plain = (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' || c == '.' || c == '_' || c == '~' || c == '/' || c == ':';
+        if (plain) url += static_cast<char>(c);
+        else url.append({'%', hex[c >> 4], hex[c & 15]});
+    }
+    return url;
+}
+
 }  /* namespace disruptor::capsule */
 
 #ifndef DISRUPTOR_CAPSULE_NO_HOST
@@ -157,6 +307,7 @@ struct Capsule {
     Replay replay = Replay::kOff;
     fs::path made, played, pictures;
     std::string states_before;
+    bool states_turned = false;  /* the frontend's slot folder is a capsule's now */
     uint32_t bios = 0, entry = 0;
     std::vector<Frame> recorded, replayed;
     std::vector<uint64_t> seen;
@@ -169,6 +320,13 @@ struct Capsule {
     const char *notice = nullptr;
     std::chrono::steady_clock::time_point notice_until{};
     bool loaded = false;
+    bool end_asked = false;  /* the key came again while the recording's state was still being saved */
+    fs::path loading;        /* the capsule whose state was asked for, empty when none is */
+    bool load_done = false;
+    float load_pitch = 0.0f; /* the look up or down its recording began with, which no state holds */
+    uint32_t previews = 0;   /* pictures kept for the list so far */
+    bool preview_asked = false;
+    std::vector<unsigned char> preview = std::vector<unsigned char>(disruptor::capsule::kPreviewWidth * disruptor::capsule::kPreviewWidth * 3u);
 
     Capsule() {
         if (const char *record = std::getenv("PSX_DISRUPTOR_CAPSULE_RECORD"); record && record[0])
@@ -196,11 +354,13 @@ bool turn_states_to(const fs::path &folder) {
     savestate_get_integrity(&capsule.bios, &capsule.entry);
     if (capsule.states_before.empty() || capsule.entry == 0u) return false;
     savestate_configure(utf8(folder).c_str(), capsule.bios, capsule.entry);
+    capsule.states_turned = true;
     return true;
 }
 
 void turn_states_back() {
     savestate_configure(g_capsule.states_before.c_str(), g_capsule.bios, g_capsule.entry);
+    g_capsule.states_turned = false;
 }
 
 bool write(const fs::path &path, const std::string &bytes) {
@@ -244,9 +404,23 @@ void refuse_recording(const char *why) {
     std::_Exit(2);  /* a script waits for the run to end */
 }
 
+/* The renderer hands a picture over a VBlank or two after it is asked: it is kept under the next number, the last number again once all are used. */
+void keep_preview() {
+    Capsule &capsule = g_capsule;
+    int width = 0, height = 0;
+    if (!capsule.preview_asked || !gl_renderer_snap_taken(capsule.preview.data(), static_cast<int>(capsule.preview.size()), &width, &height)) return;
+    capsule.preview_asked = false;
+    if (write(capsule.made / disruptor::capsule::preview_name(disruptor::capsule::preview_slot(capsule.previews)),
+              disruptor::capsule::preview(capsule.preview.data(), static_cast<uint32_t>(width), static_cast<uint32_t>(height))))
+        ++capsule.previews;
+}
+
 /* Writes what was recorded. Its last frame is there for its memory alone: a replay ends on it. */
 void store_recording(const char *why) {
     Capsule &capsule = g_capsule;
+    keep_preview();
+    gl_renderer_snap_cancel();
+    capsule.preview_asked = false;
     char about[256];
     std::snprintf(about, sizeof(about), "frames = %zu\ncodegen_hash = \"0x%08X\"\nentry_pc = \"0x%08X\"\nended = \"%s\"\n",
                   capsule.recorded.size(), static_cast<unsigned>(PSX_OVERLAY_CODEGEN_HASH), static_cast<unsigned>(capsule.entry), why);
@@ -336,6 +510,40 @@ void replay_frame() {
 
 }  /* namespace */
 
+std::filesystem::path disruptor::capsule::home() {
+    std::error_code failed;
+    const char *settings = psx_host_user_settings_path();
+    return fs::absolute((settings ? from_utf8(settings).parent_path() : fs::path()) / "capsules", failed);
+}
+
+std::string disruptor::capsule::recording() {
+    return g_capsule.recording == Recording::kOff ? std::string() : utf8(g_capsule.made.filename());
+}
+
+bool disruptor::capsule::load(std::string_view name) {
+    Capsule &capsule = g_capsule;
+    int64_t began = 0;
+    float pitch = 0.0f;
+    std::error_code failed;
+    const fs::path folder = home() / fs::path(std::u8string(name.begin(), name.end()));
+    const bool free_now = capsule.recording == Recording::kOff && capsule.replay == Replay::kOff && capsule.loading.empty() && !savestate_pending() &&
+                          !psx_netplay_active();
+    if (!free_now || !stored_name(name, began) || fs::is_symlink(folder, failed) || failed || !fs::is_directory(folder, failed) || failed ||
+        !begins(folder, pitch) || !turn_states_to(folder)) {
+        say("capsule NOT loaded");
+        return false;
+    }
+    if (!savestate_slot_exists(0) || !savestate_request_load(0)) {
+        turn_states_back();
+        say("capsule NOT loaded");
+        return false;
+    }
+    capsule.loading = folder;
+    capsule.load_pitch = pitch;
+    capsule.load_done = false;
+    return true;
+}
+
 extern "C" const char *disruptor_capsule_notice(void) {
     return std::chrono::steady_clock::now() < g_capsule.notice_until ? g_capsule.notice : nullptr;
 }
@@ -346,6 +554,7 @@ extern "C" void disruptor_capsule_note_byte(uint32_t address, uint8_t value) {
 }
 
 extern "C" void disruptor_capsule_state_loaded(void) {
+    if (!g_capsule.loading.empty()) g_capsule.load_done = true;
     if (g_capsule.recording == Recording::kOn) {  /* a capsule holds one state: the recording ends at the last VBlank before this one */
         if (g_capsule.recorded.empty()) refuse_recording("a state was loaded before its first frame");
         else store_recording("a state was loaded");
@@ -368,12 +577,14 @@ extern "C" void disruptor_capsule_toggle(void) {
         finish_recording("the key");
         return;
     }
-    if (capsule.recording != Recording::kOff || capsule.replay == Replay::kAsked || capsule.replay == Replay::kLoading || savestate_pending()) return;
+    if (capsule.recording == Recording::kSaving) capsule.end_asked = true;
+    if (capsule.recording != Recording::kOff || capsule.replay == Replay::kAsked || capsule.replay == Replay::kLoading || !capsule.loading.empty() ||
+        savestate_pending())
+        return;
     if (psx_netplay_active()) return refuse_recording("a network game is not recorded");  /* the frame loop does not call the capsule there */
     const auto now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
     std::error_code failed;
-    const char *settings = psx_host_user_settings_path();
-    const fs::path all = fs::absolute((settings ? from_utf8(settings).parent_path() : fs::path()) / "capsules", failed);
+    const fs::path all = disruptor::capsule::home();
     fs::create_directories(all, failed);
     bool made = false;  /* a folder of its own: two recordings may start within one second */
     for (int copy = 1; copy < 100 && !failed && !made; ++copy) {
@@ -386,7 +597,24 @@ extern "C" void disruptor_capsule_toggle(void) {
         return refuse_recording("a save state is refused now");
     }
     capsule.recorded.clear();
+    capsule.end_asked = false;
     capsule.recording = Recording::kSaving;
+}
+
+extern "C" int disruptor_capsule_holds_states(void) { return g_capsule.states_turned ? 1 : 0; }
+
+extern "C" void disruptor_capsule_key(int repeat, int ctrl, int shift) {
+    switch (disruptor::capsule::press(repeat != 0, ctrl != 0, shift != 0, g_capsule.recording != Recording::kOff)) {
+    case disruptor::capsule::Press::kNothing:
+        break;
+    case disruptor::capsule::Press::kRecord:
+        disruptor_capsule_toggle();
+        break;
+    case disruptor::capsule::Press::kLoad:
+        if (const std::string name = disruptor::capsule::newest(disruptor::capsule::stored(disruptor::capsule::home())); name.empty()) say("no capsule");
+        else disruptor::capsule::load(name);
+        break;
+    }
 }
 
 extern "C" void disruptor_capsule_before_input(void) {
@@ -403,24 +631,46 @@ extern "C" void disruptor_capsule_before_input(void) {
             break;
         }
         std::fprintf(stderr, "disruptor: capsule: recording into %s\n", utf8(capsule.made).c_str());
+        gl_renderer_snap_cancel();
+        capsule.previews = 0;
+        capsule.preview_asked = false;
         capsule.recording = Recording::kOn;
         say("REC");
         capsule.first_cycle = psx_get_cycle_count();
         open_frame();
         break;
     case Recording::kOn:
+        if (capsule.end_asked) {
+            finish_recording("the key");
+            break;
+        }
         if (capsule.recorded.size() + 2 >= (capsule.scripted != 0 ? capsule.scripted : kLongest)) {
             finish_recording(capsule.scripted != 0 ? "the asked length" : "the longest recording");
             break;
         }
+        keep_preview();
+        if (disruptor::capsule::preview_due(capsule.recorded.size()) && gl_renderer_snap_shown(static_cast<int>(disruptor::capsule::kPreviewWidth)))
+            capsule.preview_asked = true;
         close_frame();
         open_frame();
         break;
     }
 }
 
+/* The state asked for was loaded or refused: the slot folder goes back, and the look up or down is the recording's first. */
+static void finish_load() {
+    Capsule &capsule = g_capsule;
+    turn_states_back();
+    if (capsule.load_done) disruptor_mouse_set_vertical_pitch(capsule.load_pitch);
+    std::fprintf(stderr, "disruptor: capsule: the state of %s %s\n", utf8(capsule.loading).c_str(),
+                 capsule.load_done ? "is loaded" : "was refused: it is of another build or disc");
+    say(capsule.load_done ? "capsule loaded" : "capsule NOT loaded");
+    capsule.loading.clear();
+}
+
 extern "C" void disruptor_capsule_after_input(void) {
     Capsule &capsule = g_capsule;
+    if (!capsule.loading.empty() && !savestate_pending()) finish_load();
     if (capsule.replay == Replay::kAsked) {
         if (!turn_states_to(capsule.played) || !savestate_request_load(0)) {
             std::fprintf(stderr, "disruptor: capsule: the state of %s cannot be loaded\n", utf8(capsule.played).c_str());

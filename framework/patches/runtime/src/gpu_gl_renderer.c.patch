@@ -1,5 +1,5 @@
 diff --git a/runtime/src/gpu_gl_renderer.c b/runtime/src/gpu_gl_renderer.c
-index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..144876dc0ee58c415968dd0cb1d9bff7ff57fcac 100644
+index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..a4f6da0e6247f64d2a1c014f67e80e243aa212dd 100644
 --- a/runtime/src/gpu_gl_renderer.c
 +++ b/runtime/src/gpu_gl_renderer.c
 @@ -1,747 +1,1127 @@
@@ -1862,7 +1862,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..144876dc0ee58c415968dd0cb1d9bff7
  static const char *INTERP_FS =
      "#version 330\n"
      "in vec2 v_uv; uniform sampler2D u_prev; uniform sampler2D u_curr;\n"
-@@ -757,2715 +1137,4358 @@
+@@ -757,2715 +1137,4463 @@
      "  }\n"
      "  frag=mix(prev,curr,alpha);\n"
      "}\n";
@@ -8767,11 +8767,138 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..144876dc0ee58c415968dd0cb1d9bff7
 +
 +/* Called with the finished picture in the back buffer, right before its swap. kind: 0 a game frame's own swap, 1 the
 + * in-between presenter's, whose alpha is the picture's place between the last two game frames (1 is the later one). */
-+static void shown_capture(int kind, float alpha) {
-+    int ww = 0, wh = 0;
++static void shown_read(int ww, int wh, int width, int height, uint8_t *into) {
 +    GLint bound = 0;
 +    GLuint fbo = 0, texture = 0;
 +    const GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
++    glGetIntegerv(GL_TEXTURE_BINDING_2D, &bound);
++    glGenTextures(1, &texture);
++    glBindTexture(GL_TEXTURE_2D, texture);
++    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
++    p_glGenFramebuffers(1, &fbo);
++    p_glBindFramebuffer(PSXGL_DRAW_FRAMEBUFFER, fbo);
++    p_glFramebufferTexture2D(PSXGL_DRAW_FRAMEBUFFER, PSXGL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
++    p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, 0);
++    glReadBuffer(GL_BACK);
++    glDisable(GL_SCISSOR_TEST);
++    p_glBlitFramebuffer(0, 0, ww, wh, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_LINEAR);
++    p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, fbo);
++    glPixelStorei(GL_PACK_ALIGNMENT, 1);
++    glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, into);
++    glPixelStorei(GL_PACK_ALIGNMENT, 4);
++    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, 0);
++    p_glDeleteFramebuffers(1, &fbo);
++    glBindTexture(GL_TEXTURE_2D, (GLuint)bound);
++    glDeleteTextures(1, &texture);
++    if (scissor) glEnable(GL_SCISSOR_TEST);
++}
++
++/* A replay capsule's preview: one picture of what reaches the screen, read back the asked width wide and copied out once, rows top down.
++ * The game's thread asks and takes, whichever thread presents reads: every change of the state and of the picture is under the lock. */
++enum { SNAP_NONE, SNAP_ASKED, SNAP_READING, SNAP_WAITING };
++static SDL_SpinLock s_snap_lock;
++static int          s_snap_state = SNAP_NONE, s_snap_dropped = 0, s_snap_width = 0, s_snap_w = 0, s_snap_h = 0;
++static uint8_t     *s_snap_pixels = NULL;
++
++int gl_renderer_snap_shown(int width) {
++    int asked = 0;
++    if (width < 64 || width > 1920) return 0;
++    SDL_AtomicLock(&s_snap_lock);
++    if (s_snap_state == SNAP_NONE || s_snap_state == SNAP_WAITING) {
++        s_snap_width = width;
++        s_snap_state = SNAP_ASKED;
++        asked = 1;
++    }
++    SDL_AtomicUnlock(&s_snap_lock);
++    return asked;
++}
++
++/* A picture asked for and no longer wanted is not handed over: one being read is dropped when its reading ends. */
++void gl_renderer_snap_cancel(void) {
++    SDL_AtomicLock(&s_snap_lock);
++    if (s_snap_state == SNAP_READING) s_snap_dropped = 1;
++    else s_snap_state = SNAP_NONE;
++    SDL_AtomicUnlock(&s_snap_lock);
++}
++
++int gl_renderer_snap_taken(unsigned char *rgb, int room, int *width, int *height) {
++    int taken = 0;
++    if (!rgb || !width || !height) return 0;
++    SDL_AtomicLock(&s_snap_lock);
++    if (s_snap_state == SNAP_WAITING) {
++        s_snap_state = SNAP_NONE;
++        if (s_snap_w * s_snap_h * 3 <= room) {
++            memcpy(rgb, s_snap_pixels, (size_t)s_snap_w * s_snap_h * 3);
++            *width = s_snap_w;
++            *height = s_snap_h;
++            taken = 1;
++        }
++    }
++    SDL_AtomicUnlock(&s_snap_lock);
++    return taken;
++}
++
++static void shown_snap(void) {
++    int ww = 0, wh = 0, width = 0, height = 0, mine;
++    uint8_t *up = NULL, *down = NULL;
++    SDL_AtomicLock(&s_snap_lock);
++    mine = s_snap_state == SNAP_ASKED;
++    if (mine) s_snap_state = SNAP_READING;
++    width = s_snap_width;
++    SDL_AtomicUnlock(&s_snap_lock);
++    if (!mine) return;
++    gl_visible_size(&ww, &wh);
++    if (ww > 0 && wh > 0) {
++        width = width < ww ? width : ww;
++        height = width * wh / ww > 0 ? width * wh / ww : 1;
++        up = (uint8_t *)malloc((size_t)width * height * 3);
++        down = (uint8_t *)malloc((size_t)width * height * 3);
++    }
++    if (up && down) {
++        shown_read(ww, wh, width, height, up);
++        for (int y = 0; y < height; ++y) memcpy(down + (size_t)y * width * 3, up + (size_t)(height - 1 - y) * width * 3, (size_t)width * 3);
++    } else {
++        free(down);
++        down = NULL;
++    }
++    free(up);
++    SDL_AtomicLock(&s_snap_lock);
++    free(s_snap_pixels);
++    s_snap_pixels = down;
++    s_snap_w = width;
++    s_snap_h = height;
++    s_snap_state = down && !s_snap_dropped ? SNAP_WAITING : SNAP_NONE;
++    s_snap_dropped = 0;
++    SDL_AtomicUnlock(&s_snap_lock);
++}
++
++/* A picture for the host's menu to show, made in the context that calls: 0 when it cannot be made. */
++unsigned gl_renderer_picture(const unsigned char *rgb, int width, int height) {
++    GLint bound = 0;
++    GLuint texture = 0;
++    if (!rgb || width <= 0 || height <= 0 || width > 4096 || height > 4096) return 0;
++    glGetIntegerv(GL_TEXTURE_BINDING_2D, &bound);
++    glGenTextures(1, &texture);
++    glBindTexture(GL_TEXTURE_2D, texture);
++    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
++    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGB, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, rgb);
++    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
++    glBindTexture(GL_TEXTURE_2D, (GLuint)bound);
++    return texture;
++}
++
++void gl_renderer_picture_free(unsigned picture) {
++    GLuint texture = picture;
++    if (texture) glDeleteTextures(1, &texture);
++}
++
++static void shown_capture(int kind, float alpha) {
++    int ww = 0, wh = 0;
++    shown_snap();
 +    if (s_shown_left <= 0) return;
 +    if (s_shown_skip > 0) { --s_shown_skip; return; }
 +    gl_visible_size(&ww, &wh);
@@ -8792,29 +8919,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..144876dc0ee58c415968dd0cb1d9bff7
 +            return;
 +        }
 +    }
-+    glGetIntegerv(GL_TEXTURE_BINDING_2D, &bound);
-+    glGenTextures(1, &texture);
-+    glBindTexture(GL_TEXTURE_2D, texture);
-+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, s_shown_w, s_shown_h, 0, GL_RGBA, GL_UNSIGNED_BYTE, NULL);
-+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
-+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-+    p_glGenFramebuffers(1, &fbo);
-+    p_glBindFramebuffer(PSXGL_DRAW_FRAMEBUFFER, fbo);
-+    p_glFramebufferTexture2D(PSXGL_DRAW_FRAMEBUFFER, PSXGL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
-+    p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, 0);
-+    glReadBuffer(GL_BACK);
-+    glDisable(GL_SCISSOR_TEST);
-+    p_glBlitFramebuffer(0, 0, ww, wh, 0, 0, s_shown_w, s_shown_h, GL_COLOR_BUFFER_BIT, GL_LINEAR);
-+    p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, fbo);
-+    glPixelStorei(GL_PACK_ALIGNMENT, 1);
-+    glReadPixels(0, 0, s_shown_w, s_shown_h, GL_RGB, GL_UNSIGNED_BYTE,
-+                 s_shown_pixels + (size_t)s_shown_count * s_shown_w * s_shown_h * 3);
-+    glPixelStorei(GL_PACK_ALIGNMENT, 4);
-+    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, 0);
-+    p_glDeleteFramebuffers(1, &fbo);
-+    glBindTexture(GL_TEXTURE_2D, (GLuint)bound);
-+    glDeleteTextures(1, &texture);
-+    if (scissor) glEnable(GL_SCISSOR_TEST);
++    shown_read(ww, wh, s_shown_w, s_shown_h, s_shown_pixels + (size_t)s_shown_count * s_shown_w * s_shown_h * 3);
 +    s_shown_meta[s_shown_count].tick = SDL_GetPerformanceCounter();
 +    s_shown_meta[s_shown_count].alpha = alpha;
 +    s_shown_meta[s_shown_count].kind = kind;
@@ -8902,7 +9007,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..144876dc0ee58c415968dd0cb1d9bff7
      uint64_t freq = SDL_GetPerformanceFrequency();
      uint64_t deadline = SDL_GetPerformanceCounter();
      uint64_t diag_start = deadline, diag_swaps = 0, diag_captures = 0;
-@@ -3477,7 +5500,7 @@
+@@ -3477,7 +5605,7 @@
          int uncapped = hz < 0.0;
          uint64_t now = SDL_GetPerformanceCounter();
          if (!uncapped) {
@@ -8911,7 +9016,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..144876dc0ee58c415968dd0cb1d9bff7
              uint64_t period = (uint64_t)((double)freq / hz);
              if (!period) period = 1;
              deadline += period;
-@@ -3492,235 +5515,420 @@
+@@ -3492,235 +5620,420 @@
              }
              while (SDL_GetPerformanceCounter() < deadline) {}
              now = SDL_GetPerformanceCounter();

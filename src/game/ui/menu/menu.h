@@ -43,7 +43,11 @@
 #include <cstdlib>
 #include <cstdint>
 #include <cstdio>
+#include <ctime>
 #include <filesystem>
+#include <fstream>
+#include <iterator>
+#include <map>
 #include <set>
 #include <string>
 #include <string_view>
@@ -55,6 +59,8 @@ extern "C" int gl_renderer_world_depth(void);
 extern "C" void gl_renderer_set_full_yaw(int enabled);
 extern "C" void gl_renderer_set_mesh_view(int enabled);
 extern "C" void gl_renderer_set_one_layer(int enabled);
+extern "C" unsigned gl_renderer_picture(const unsigned char *rgb, int width, int height);
+extern "C" void gl_renderer_picture_free(unsigned picture);
 extern "C" int gl_renderer_one_layer(void);
 extern "C" void gl_renderer_set_smooth_fade(int enabled);
 extern "C" int gl_renderer_smooth_fade(void);
@@ -95,6 +101,20 @@ struct DevMenuState {
     bool base_keybinds_valid = false;
     bool record_shown = false;  // armed in the menu, started when it closes
     std::string shown_note;
+    std::vector<disruptor::capsule::Stored> capsules;  // read again once a second while the Debug tab shows them
+    double capsules_read = -1.0;
+    std::string capsule_asked, capsule_note;  // the one whose Delete was pressed once, and what came of the second press
+    struct CapsuleThumb {
+        uint32_t pictures = 0;  // how many the capsule had when its last was loaded, and that one's time
+        int64_t revised = 0;
+        unsigned picture = 0;
+        float tall = 0.5625f;
+    };
+    std::map<std::string, CapsuleThumb> capsule_thumbs;  // by capsule: its last picture
+    std::string capsule_film_of;         // the capsule under the mouse, as it was when its pictures were loaded
+    uint32_t capsule_film_pictures = 0;
+    int64_t capsule_film_revised = 0;
+    std::vector<unsigned> capsule_film;  // its pictures in order, loaded a few a frame
     int selected_wide_aspect = 0;
     std::string cheat_status;
     std::array<SDL_Scancode, PSX_KB_COUNT> base_keybinds{};

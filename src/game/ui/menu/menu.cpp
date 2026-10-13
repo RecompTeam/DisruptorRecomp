@@ -133,13 +133,26 @@ void set_menu_open(bool open) {
 
 namespace {
 
-bool scancode_event(const SDL_Event *event, SDL_Scancode scancode) {
-    if (!event || event->type != SDL_KEYDOWN || event->key.repeat) return false;
+bool key_down(const SDL_Event *event, SDL_Scancode scancode) {
+    if (!event || event->type != SDL_KEYDOWN) return false;
 #if defined(PSX_SDL3)
     return event->key.scancode == scancode;
 #else
     return event->key.keysym.scancode == scancode;
 #endif
+}
+
+/* The modifiers the event carries: the keyboard's state now may be a release later. */
+int key_held(const SDL_Event *event) {
+#if defined(PSX_SDL3)
+    return event->key.mod;
+#else
+    return event->key.keysym.mod;
+#endif
+}
+
+bool scancode_event(const SDL_Event *event, SDL_Scancode scancode) {
+    return key_down(event, scancode) && !event->key.repeat;
 }
 
 void draw_menu() {
@@ -241,10 +254,14 @@ int on_sdl_event(void *, const SDL_Event *event) {
     }
     if (!g_menu.open && scancode_event(event, SDL_SCANCODE_ESCAPE))
         disruptor_intro_skip_request();
-    if (!g_menu.open && scancode_event(event, SDL_SCANCODE_F12) && (SDL_GetModState() & KMOD_CTRL) != 0) {
-        disruptor_capsule_toggle();
+    if (!g_menu.open && key_down(event, SDL_SCANCODE_F12)) {
+        const int held = key_held(event);
+        disruptor_capsule_key(event->key.repeat ? 1 : 0, (held & KMOD_CTRL) != 0, (held & KMOD_SHIFT) != 0);
         return 1;
     }
+    /* While a capsule's state is saved or loaded the save state keys would act in its folder. */
+    for (int key = SDL_SCANCODE_F1; !g_menu.open && key <= SDL_SCANCODE_F11; ++key)
+        if (key_down(event, static_cast<SDL_Scancode>(key)) && disruptor_capsule_holds_states()) return 1;
     if (!g_menu.open || !g_menu.imgui_ready) return 0;
     imgui_sdl_process_event(event);
     return 1;

@@ -94,8 +94,9 @@ the mouse while its window has focus. Escape or a middle-click releases it,
 and a left-click in the window takes it back. Add `-VerticalLook` to
 enable experimental vertical aim.
 
-**Alt+Enter** toggles fullscreen. **Shift+F1–F12** saves a state;
-**F1–F12** loads it. Save states require a matching build and supported game.
+**Alt+Enter** toggles fullscreen. **Shift+F1–F11** saves a state;
+**F1–F11** loads it. Save states require a matching build and supported game.
+**Ctrl+F12** records a replay capsule for a bug report and **F12** loads the newest one.
 
 Controls, Enhancements, Experimental, Language, System, Debug, and Cheats are
 the available settings tabs.

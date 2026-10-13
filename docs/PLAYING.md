@@ -68,9 +68,10 @@ folder; these backups can be removed manually once the repaired copy works.
 | Fullscreen | Alt+Enter |
 | Skip a logo or movie | Escape |
 | Fast-forward | Hold ] |
-| Save / load state | Shift+F1–F12 / F1–F12 |
+| Save / load state | Shift+F1–F11 / F1–F11 |
 | Name a save | Type it: letters, digits, Space, Backspace and Delete. Enter moves to DONE |
 | Start / end a replay capsule | Ctrl+F12 |
+| Load the newest replay capsule | F12 |
 
 Modern mouse/keyboard controls, geometry correction, and perspective textures
 are enabled initially. Vertical mouse look is experimental and starts off;
@@ -193,6 +194,12 @@ shows how a texture sits and moves on its polygons. It needs exact geometry
 and switches ambient occlusion and the anti-aliasing filters off while on.
 
 Press **Ctrl+F12** to start a replay capsule and press it again to finish.
+**F12** alone loads the newest capsule: the game stands where that
+recording began. While a capsule records, F12 alone ends it. The save
+states have F1 to F11.
+Every capsule is kept. **Settings → Debug** lists them, the newest on top,
+with the last picture, time and length of each, and can load one, open their
+folder or delete one. Hold the mouse over a picture to see that capsule play.
 The capsule is saved under `capsules/` beside the executable. It contains a
 save state, inputs, settings, and build details so a run can be replayed for
 investigation. Capsules are specific to their build and are not recorded in

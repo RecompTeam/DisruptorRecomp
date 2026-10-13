@@ -10,7 +10,7 @@ validation is incomplete.
 | Rendering | OpenGL supports 1x–8x resolution, widescreen, geometry correction, and perspective textures. Minor edge gaps and localized texture wobble can remain. |
 | Controls | Modern keyboard/mouse controls, optional smooth mouse turning, and keyboard save naming are available. Vertical look and weapon aim remain experimental. |
 | Settings | Controls, Enhancements, Experimental, Language, System, Debug, and Cheats tabs; supported preferences persist between runs. Launcher settings scroll and offer hover hints. |
-| Interpolation and diagnostics | In-between frames start off. The Debug tab offers diagnostic views and screen recording; Ctrl+F12 records replay capsules. |
+| Interpolation and diagnostics | In-between frames start off. The Debug tab offers diagnostic views and screen recording; Ctrl+F12 records replay capsules and F12 loads the newest. |
 | Ultrawide corruption | Fixed primitive-buffer overflow. The user's 8x / 32:9 training retest stayed correct through 8,934 frames and closed normally. |
 | Save states | Save states require a matching build and language. The alpha.3 code-generation changes make alpha.1 and alpha.2 states incompatible; use memory-card saves for progress across releases. |
 | Automated checks | Alpha.4 Windows x64 Release build, code-generation audit, and all 77 root CTests passed. |
