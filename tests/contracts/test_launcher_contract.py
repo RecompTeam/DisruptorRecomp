@@ -217,7 +217,8 @@ require(
     and '    write(folder / "system.txt", without_user_names(note));\n' in report
     and "    if (!archive || !run_tar(folder, zip)) {\n        fs::remove(zip, failed);\n        return {folder, false};\n    }\n"
     "    fs::remove_all(folder, failed);\n    return {zip, true};\n" in report
-    and '    std::string note = "Disruptor Recompiled " DISRUPTOR_BUILD_VERSION "\\r\\n";\n' in report,
+    and '    std::string note = "Disruptor Recompiled " DISRUPTOR_BUILD_VERSION "\\r\\n";\n' in report
+    and '    note += "Windows: " + windows_name(windows_value(L"ProductName"), windows_value(L"CurrentBuildNumber")) + ", version " +\n' in report,
     "a report takes the game's log of two runs, the mouse log and the settings, each with user names cut out, and a note "
     "of the system: one ZIP where Windows' tar makes it, with no folder and no half-made ZIP left beside it",
 )

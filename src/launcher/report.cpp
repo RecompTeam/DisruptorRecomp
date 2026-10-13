@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <charconv>
 #include <cstdint>
 #include <cstdio>
 #include <ctime>
@@ -226,9 +227,19 @@ Report make_report(const fs::path& root, std::string_view system, std::string_vi
     return {zip, true};
 }
 
+std::string windows_name(std::string_view product, std::string_view build) {
+    constexpr std::string_view ten = "Windows 10";
+    std::string name(product);
+    int number = 0;
+    const auto read = std::from_chars(build.data(), build.data() + build.size(), number);
+    if (read.ec == std::errc() && number >= 22000 && name.starts_with(ten)) name.replace(ten.size() - 2, 2, "11");
+    return name;
+}
+
 std::string system_note() {
     std::string note = "Disruptor Recompiled " DISRUPTOR_BUILD_VERSION "\r\n";
-    note += "Windows: " + windows_value(L"ProductName") + ", version " + windows_value(L"DisplayVersion") + ", build " +
+    note += "Windows: " + windows_name(windows_value(L"ProductName"), windows_value(L"CurrentBuildNumber")) + ", version " +
+            windows_value(L"DisplayVersion") + ", build " +
             windows_value(L"CurrentBuildNumber") + "\r\n";
     DEVMODEW mode{};
     mode.dmSize = sizeof(mode);

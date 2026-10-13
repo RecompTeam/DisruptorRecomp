@@ -26,6 +26,10 @@ struct Report {
 /// Throws std::runtime_error when the folder cannot be written.
 Report make_report(const std::filesystem::path& root, std::string_view system, std::string_view stamp, bool archive = true);
 
+/// Windows' own product name with the 10 of a Windows 11 put right: the registry still says 10 there, and its builds
+/// begin at 22000.
+std::string windows_name(std::string_view product, std::string_view build);
+
 /// The build's version, the Windows version, the display and the graphics adapters, a line each.
 std::string system_note();
 

@@ -199,6 +199,14 @@ void test_the_notes_have_their_shape() {
     const std::string line = started_line();
     expect(line.rfind("launcher: started 20", 0) == 0 && line.size() == 43 && line.ends_with(" UTC\r\n"),
            "the line that heads a log says when the run began");
+    expect(windows_name("Windows 10 Pro", "26200") == "Windows 11 Pro" && windows_name("Windows 10 Home", "22000") == "Windows 11 Home",
+           "Windows 11 is named so, though its registry says 10");
+    expect(windows_name("Windows 10 Pro", "21999") == "Windows 10 Pro" && windows_name("Windows 10 Pro", "19045") == "Windows 10 Pro",
+           "and Windows 10 stays 10");
+    expect(windows_name("Windows Server 2025 Standard", "26100") == "Windows Server 2025 Standard" &&
+               windows_name("My Windows 10", "26200") == "My Windows 10" && windows_name("Windows 10 Pro", "?") == "Windows 10 Pro" &&
+               windows_name("", "26200").empty(),
+           "another name and a build that is no number are left as they are");
     const std::string note = system_note();
     expect(note.rfind("Disruptor Recompiled ", 0) == 0 && note.find("Windows: ") != std::string::npos,
            "the system note begins with the build's version and names the Windows version");
