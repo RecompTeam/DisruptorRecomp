@@ -4,7 +4,7 @@ This Windows x64 alpha requires your own **Disruptor (USA, SLUS-00224)** disc
 image. Game assets are not included. You do not need to build the project,
 extract its executable, or supply a PlayStation BIOS to use the release.
 
-Join the [community Discord](https://discord.gg/aeTQjaQUr) to discuss the project
+Join the [community Discord](https://discord.gg/hWbFatkXpU) to discuss the project
 and share feedback.
 
 ## Setup
