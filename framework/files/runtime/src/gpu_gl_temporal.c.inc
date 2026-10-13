@@ -575,8 +575,8 @@ static int temporal_worker_init(void) {
     s_temp_geo_prog=geo_vs ? build_program(geo_vs,GEO_FS) : 0;
     {   /* As the frame loop's programs: what a fragment is goes into the alpha for the shading to tell sprites and blends by. */
         char *marked_vs=tex_vs ? shader_variant(tex_vs,"flat out float v_bill; noperspective out float v_deep; uniform float u_pull;\n","a_order, 1.0); }\n",
-            "u_visual_options.w >= 1.0 ? 0.99999 : ((u_visual_options.w > 0.0 && a_order > -0.9999 && a_order < 0.9999) ? "
-            "1.0 - (1.0 - a_order)/(1.0 + u_visual_options.w) : (u_pull > 0.0 && a_order > -0.99999 && a_order < 0.99999) ? "
+            "u_visual_options.w >= 1.0 ? 0.99999 : (u_visual_options.w > 0.0 ? 0.9999995 "
+            ": (u_pull > 0.0 && a_order > -0.99999 && a_order < 0.99999) ? "
             "max(1.0 - (1.0 - a_order)*(1.0 + u_pull), -1.0) : a_order), 1.0);\n"
             "  bool grown = a_visual_flags > 5.5;\n"
             "  if (u_visual_options.w == 0.0 ? grown : u_visual_options.w >= 1.0 ? (grown || !(a_visual_flags > 1.5 && a_order > -0.9999 && a_order < 0.9999))\n"
@@ -780,7 +780,7 @@ static void temporal_submit_faces(const TemporalScene *s,const TemporalCommand *
     for (int round=fillers;round>=(s_temp_part==1);--round) {  /* its grown copies first, then the batch over them */
     const int shaded=shaded_scene && !round;
     if (round) {
-        p_glUniform4f(u->options,0,0,s->tint,GROWN_COPY_MARGIN); glDepthFunc(GL_LESS); glDepthMask(GL_FALSE);
+        p_glUniform4f(u->options,0,0,s->tint,GROWN_COPY_PASS); glDepthFunc(GL_LESS); glDepthMask(GL_FALSE);
         glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_FALSE); s_temp_filling=1;
     } else if (fillers) {
         glDepthFunc(GL_ALWAYS); glDepthMask(GL_TRUE); p_glUniform4f(u->options,0,0,s->tint,0);

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Source contract for gap filling: what a filler is, how the mirror draws one under its batch, and the setting."""
 
+import re
+import struct
 from pathlib import Path
 
 from menu_sources import menu_text
@@ -47,7 +49,7 @@ require(
     and "    return (world || sprite || unpinned ? 1 : 0) | (exact ? 2 : 0) | (filler ? 4 : 0);\n" in renderer
     and "            s_tb_fillers = 0;\n" in renderer
     and "        if (visual_flags & 4) s_tb_fillers++;\n" in renderer
-    and "#define GROWN_COPY_MARGIN 0.03f\n" in renderer
+    and "#define GROWN_COPY_PASS 0.5f\n" in renderer
     and "static float s_crack_fill = 0.5f, s_crack_width = 0.5f;\n" in renderer
     and "static int   s_grown_under = 1;\n" in renderer,
     "the game's grown copy of an exact polygon is flagged as a filler and counted in its batch, and both fillers start on",
@@ -112,7 +114,7 @@ flush = between(renderer, "static void flush_tex_batch(void) {\n    if (s_tb_n =
 outline = flush.index("            if (mirror_depth() && s_crack_fill > 0.0f) tex_batch_outline(nverts, semi);\n")
 copies = flush.index(
     """            if (mirror_depth() && fillers) {  /* in sequence each copy would break the batch: 135 batches a frame against 2 */
-                filler_pass_begin(GROWN_COPY_MARGIN);
+                filler_pass_begin(GROWN_COPY_PASS);
                 tex_batch_draw_passes(nverts, semi);
                 filler_pass_end();
             }
@@ -192,6 +194,34 @@ require(
     and options.count('"disruptor.gap_filling"') == launcher.count('"disruptor.gap_filling"') == 1
     and '    {"disruptor.gap_filling", Page::enhancements},\n' in launcher,
     "the launcher offers it on the Enhancements page, on at first and only with geometry correction",
+)
+
+presenter = read("psxrecomp/runtime/src/gpu_gl_temporal.c.inc")
+
+
+def depth_step(clip_z: str) -> int:
+    """Returns the step of a 24-bit depth buffer a clip-space z lands on, each product rounded to a float as a GPU has it."""
+    single = lambda value: struct.unpack("f", struct.pack("f", value))[0]
+    return round(single((single(float(clip_z)) + 1.0) * 0.5) * (2**24 - 1))
+
+
+copy_frame = re.findall(r"u_visual_options\.w >= 1\.0 \? ([0-9.]+) : u_visual_options\.w > 0\.0 \? ([0-9.]+) : \(\(u_visual > 0\.5", renderer)
+copy_between = re.findall(r'u_visual_options\.w >= 1\.0 \? ([0-9.]+) : \(u_visual_options\.w > 0\.0 \? ([0-9.]+) "', presenter)
+require(
+    len(copy_frame) == 1
+    and copy_frame == copy_between
+    and ") : 0.999999), 1.0);\\n\"\n" in renderer
+    and renderer.count("glClearDepth(1.0);") == 2
+    and "glClearDepth(1.0);" in presenter
+    and "PSXGL_DEPTH24_STENCIL8" in renderer
+    and depth_step("0.999999") + 2 <= depth_step(copy_frame[0][1]) <= depth_step("1.0") - 2
+    and depth_step(copy_frame[0][0]) < depth_step("0.999999")
+    and depth_step(repr(1.0 - 32.0 / 65535.0)) < depth_step("0.999999")
+    and "#define TEMP_ORDER_FAR 0.999999f\n" in presenter
+    and "        p_glUniform4f(u->options,0,0,s->tint,GROWN_COPY_PASS); glDepthFunc(GL_LESS); glDepthMask(GL_FALSE);\n" in presenter,
+    "a grown copy stands a sixteenth past its polygon, so in both shaders its depth lies between that of what has no depth and the "
+    "cleared one, two steps of a 24-bit buffer from each, and the farthest depth a 16-bit camera depth stores is nearer than both: a copy "
+    "fills only what nothing has left a depth on, where an outline also covers what has no depth of its own",
 )
 
 print("Disruptor gap filling source contract: PASS")

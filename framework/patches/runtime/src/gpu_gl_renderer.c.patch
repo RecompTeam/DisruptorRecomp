@@ -1,5 +1,5 @@
 diff --git a/runtime/src/gpu_gl_renderer.c b/runtime/src/gpu_gl_renderer.c
-index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..a4f6da0e6247f64d2a1c014f67e80e243aa212dd 100644
+index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0041d88a44749f13eeeed71264919b63b57eacca 100644
 --- a/runtime/src/gpu_gl_renderer.c
 +++ b/runtime/src/gpu_gl_renderer.c
 @@ -1,747 +1,1127 @@
@@ -1346,10 +1346,10 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..a4f6da0e6247f64d2a1c014f67e80e24
 +static int   s_grown_under = 1;
 +static int   s_tb_fillers = 0;   /* grown copies in the open batch */
 +static int   s_draw_filler = 0;  /* the batch being recorded for the in-between presenter holds grown copies */
-+/* What the mirror draws of a batch: 0 its polygons, between 0 and 1 its grown copies pushed back by that share, 2 the outlines,
++/* What the mirror draws of a batch: 0 its polygons, between 0 and 1 its grown copies where nothing is drawn, 2 the outlines,
 + * -1 all of it as it comes. */
 +static float s_fill_pass = 0.0f;
-+#define GROWN_COPY_MARGIN 0.03f
++#define GROWN_COPY_PASS 0.5f
 +
 +/* Experimental: exact world polygons are drawn by depth, not by the game's order alone. A batch of them first writes the
 + * depth of its opaque fragments, then draws its colours in the game's order where they lie within s_world_margin of the
@@ -1862,7 +1862,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..a4f6da0e6247f64d2a1c014f67e80e24
  static const char *INTERP_FS =
      "#version 330\n"
      "in vec2 v_uv; uniform sampler2D u_prev; uniform sampler2D u_curr;\n"
-@@ -757,2715 +1137,4463 @@
+@@ -757,2715 +1137,4464 @@
      "  }\n"
      "  frag=mix(prev,curr,alpha);\n"
      "}\n";
@@ -3939,7 +3939,8 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..a4f6da0e6247f64d2a1c014f67e80e24
 +    /* A near face is drawn with the scene alone: its depth by its w, then the w itself, which makes the rasterizer clip it. */
 +    static const char closing[] = "  if (close) { v_deep = 1.0; v_fade = vec2(-1.0, 0.0);\n"
 +                                  "    if (u_visual_options.w <= 0.0) { gl_Position.z = 1.0 - 32.0*(1.0 + u_pull)/hw; gl_Position *= hw; } else gl_Position = vec4(2.0, 2.0, 2.0, 1.0); }\n";
-+    static const char deep[] = "u_visual_options.w >= 1.0 ? 0.99999 : ((u_visual > 0.5 && abs(a_camz) > 16.0) ? max(1.0 - 32.0*(1.0 + u_pull)/(abs(a_camz)*(1.0 + max(u_visual_options.w, 0.0))), -1.0) : 0.999999), 1.0);\n"
++    /* The game grows a copy a sixteenth past its polygon: at 0.9999995 it passes the cleared depth alone and hides nothing drawn (a lamp behind a lintel was). */
++    static const char deep[] = "u_visual_options.w >= 1.0 ? 0.99999 : u_visual_options.w > 0.0 ? 0.9999995 : ((u_visual > 0.5 && abs(a_camz) > 16.0) ? max(1.0 - 32.0*(1.0 + u_pull)/(abs(a_camz)*(1.0 + max(u_visual_options.w, 0.0))), -1.0) : 0.999999), 1.0);\n"
 +                               "  bool grown = a_visual_flags > 5.5;\n"
 +                               "  if (u_visual > 0.5 && (u_visual_options.w == 0.0 ? grown : u_visual_options.w >= 1.0 ? (grown || a_visual_flags < 1.5) : (u_visual_options.w > 0.0 && !grown)))\n"
 +                               "    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);\n"
@@ -4865,7 +4866,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..a4f6da0e6247f64d2a1c014f67e80e24
 +        if (s_ws_ablate != 2) {
 +            if (mirror_depth() && s_crack_fill > 0.0f) tex_batch_outline(nverts, semi);
 +            if (mirror_depth() && fillers) {  /* in sequence each copy would break the batch: 135 batches a frame against 2 */
-+                filler_pass_begin(GROWN_COPY_MARGIN);
++                filler_pass_begin(GROWN_COPY_PASS);
 +                tex_batch_draw_passes(nverts, semi);
 +                filler_pass_end();
 +            }
@@ -9007,7 +9008,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..a4f6da0e6247f64d2a1c014f67e80e24
      uint64_t freq = SDL_GetPerformanceFrequency();
      uint64_t deadline = SDL_GetPerformanceCounter();
      uint64_t diag_start = deadline, diag_swaps = 0, diag_captures = 0;
-@@ -3477,7 +5605,7 @@
+@@ -3477,7 +5606,7 @@
          int uncapped = hz < 0.0;
          uint64_t now = SDL_GetPerformanceCounter();
          if (!uncapped) {
@@ -9016,7 +9017,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..a4f6da0e6247f64d2a1c014f67e80e24
              uint64_t period = (uint64_t)((double)freq / hz);
              if (!period) period = 1;
              deadline += period;
-@@ -3492,235 +5620,420 @@
+@@ -3492,235 +5621,420 @@
              }
              while (SDL_GetPerformanceCounter() < deadline) {}
              now = SDL_GetPerformanceCounter();
