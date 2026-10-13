@@ -19,7 +19,18 @@ void draw_controls_tab() {
 
     if (modern)
         ImGui::TextWrapped("Select weapon: 1 baton, 2 pistol, 3-9 and 0 remaining weapons. "
-                           "Number row or keypad; only weapons you own. Q still opens the weapon list.");
+                           "Number row or keypad; only weapons you own.");
+
+    bool wheels = disruptor_selection_wheels_enabled() != 0;
+    if (option_toggle("disruptor.selection_wheels", &wheels)) {
+        disruptor_selection_wheels_set_enabled(wheels ? 1 : 0);
+        mark("disruptor.selection_wheels", wheels ? 1 : 0);
+    }
+    draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
+    if (wheels)
+        ImGui::TextWrapped("Hold the weapon or psionic selection binding, choose with the mouse, "
+                           "left stick, arrow keys or D-pad, then release to equip. "
+                           "Escape or right-click cancels. The game keeps running.");
 
     float sensitivity =
         static_cast<float>(disruptor_mouse_horizontal_sensitivity());

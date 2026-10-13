@@ -159,6 +159,10 @@ constexpr Option option_list[] = {
         "disruptor.modern_controls", "Modern keyboard and mouse controls", 1,
         "WASD moves, the left mouse button fires, the right one uses psionics, Space jumps and E "
         "interacts. Number keys select weapons: 1 baton, 2 pistol, then 3-9 and 0. The keypad works too."),
+    toggle<&Settings::has_selection_wheels, &Settings::selection_wheels>(
+        "disruptor.selection_wheels", "Weapon and psionic wheels", 0,
+        "Replaces both selection lists. Hold the selection binding (Q/R in modern controls), point with mouse "
+        "or left stick, then release to equip. Arrows/D-pad cycle; Escape/right-click cancels. The game keeps running."),
     slider("disruptor.horizontal_sensitivity", "Horizontal sensitivity", 80,
            "How far the view turns for a movement of the mouse.", 5, 2000, Unit::thousandths,
            saved<&Settings::has_horizontal_sensitivity>, thousandths<&Settings::horizontal_sensitivity>,

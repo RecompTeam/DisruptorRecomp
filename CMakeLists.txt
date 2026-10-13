@@ -43,6 +43,7 @@ set(DISRUPTOR_EXTRA_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/restart.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/mouse_aim.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/name_entry.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/selection_wheel.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/precision_routes.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/render_arena.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/grown_quad.cpp"
@@ -106,7 +107,8 @@ if(DISRUPTOR_DEV_MENU)
         "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/tab_cheats.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/tab_system.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/tab_language.cpp"
-        "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/menu.cpp")
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/menu.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/selection_wheel.cpp")
     if(DISRUPTOR_FRAME_INTERPOLATION)
         list(APPEND DISRUPTOR_EXTRA_SOURCES
             "${CMAKE_CURRENT_SOURCE_DIR}/src/game/frame/present_rate.cpp")
@@ -200,6 +202,7 @@ if(BUILD_TESTING)
     disruptor_contract(save_point)
     disruptor_contract(cheats)
     disruptor_contract(weapon_selection)
+    disruptor_contract(selection_wheel)
     disruptor_contract(vertical_camera)
     disruptor_contract(far_rendering)
     disruptor_contract(frame_kind)
@@ -261,6 +264,8 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
     disruptor_unit_test(disruptor_mouse_aim tests/unit/disruptor_mouse_aim_test.cpp
         INCLUDES tests/support/stubs
         DEFINITIONS PSX_SDL3=1)
+    disruptor_unit_test(disruptor_selection_wheel tests/unit/disruptor_selection_wheel_test.cpp
+        INCLUDES tests/support/stubs DEFINITIONS PSX_SDL3=1)
     set_tests_properties(disruptor_mouse_aim PROPERTIES
         ENVIRONMENT "PSX_DISRUPTOR_MOUSE_AIM=;PSX_DISRUPTOR_VERTICAL_LOOK=;PSX_DISRUPTOR_MODERN_CONTROLS=;PSX_DISRUPTOR_HIGH_PRECISION_CAMERA=")
 

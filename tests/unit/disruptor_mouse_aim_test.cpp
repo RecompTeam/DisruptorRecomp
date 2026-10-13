@@ -45,6 +45,7 @@ int g_vertical_pitch_calls = 0;
 int g_vertical_recenter_calls = 0;
 int g_netplay_active = 0;
 int g_vertical_input_allowed = 1;
+bool g_wheel_consuming = false;
 
 constexpr std::uint32_t kTestYawAddress = 0x80077624u;
 
@@ -133,6 +134,9 @@ int disruptor_vertical_camera_input_allowed() {
 int psx_netplay_active() {
     return g_netplay_active;
 }
+
+int disruptor_selection_wheel_frame() { return g_wheel_consuming ? 1 : 0; }
+std::uint16_t disruptor_selection_wheel_filter_press(std::uint16_t press) { return press; }
 
 void gpu_geometry_correction_stats(std::uint64_t *world_triangles,
                                    std::uint64_t *precise_triangles) {
@@ -237,6 +241,7 @@ void reset_state() {
     g_vertical_recenter_calls = 0;
     g_netplay_active = 0;
     g_vertical_input_allowed = 1;
+    g_wheel_consuming = false;
     g_noted_at = 0;
     g_noted = 0;
     g_notes = 0;
@@ -773,6 +778,23 @@ void test_weapon_selection_with_mouse_aim() {
            "selecting a weapon and aiming in the same frame apply and record both writes");
 }
 
+void test_wheel_consumes_camera_and_keyboard_input() {
+    prepare_weapon_input();
+    g_mouse.mouse_aim_enabled = g_mouse.captured = true;
+    g_relative_mode = true;
+    psx_write_byte(kTestYawAddress, 100u);
+    g_relative_x = 25.0f;
+    g_keys[SDL_SCANCODE_2] = g_keys[SDL_SCANCODE_W] = g_keys[SDL_SCANCODE_ESCAPE] = 1;
+    g_wheel_consuming = true;
+    mouse_aim_frame();
+    expect(psx_read_byte(kTestYawAddress) == 100u && g_pad_buttons == 0xFFFFu && g_notes == 0,
+           "wheel input cannot turn the camera, move the player or select by a held number key");
+    g_wheel_consuming = false;
+    mouse_aim_frame();
+    expect(g_mouse.captured && g_notes == 0,
+           "closing a wheel leaves Escape and number keys already held inert until their next press");
+}
+
 void test_high_precision_camera_residual() {
     reset_state();
     g_mouse.enabled = true;
@@ -1190,6 +1212,7 @@ int main(int argc, char **argv) {
         test_weapon_key_edges_through_menus();
         test_weapon_keys_follow_modern_controls();
         test_weapon_selection_with_mouse_aim();
+        test_wheel_consumes_camera_and_keyboard_input();
         test_modern_mouse_buttons_require_capture();
         test_the_click_that_takes_the_mouse_is_no_shot();
         test_live_settings_api();

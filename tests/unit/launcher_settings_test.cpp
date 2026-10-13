@@ -128,6 +128,9 @@ void described() {
     Settings settings;
     const Option& logging = *find_option("disruptor.detailed_logging");
     const Option& volume = *find_option("audio.master_volume");
+    const Option& wheels = *find_option("disruptor.selection_wheels");
+    require(wheels.kind == Kind::toggle && wheels.initial == 0 && stored(settings, wheels) == 0,
+            "one option controls both wheels and starts disabled");
     require(logging.kind == Kind::toggle && logging.initial == 0 && stored(settings, logging) == 0 && stored(settings, volume) == 100,
             "an option the file does not name has a fresh installation's value, and the detailed log starts off");
     logging.set(settings, 1);

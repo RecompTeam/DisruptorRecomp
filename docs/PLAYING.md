@@ -81,6 +81,14 @@ With modern controls enabled, number keys select weapons you own:
 **5** Phase Repeater, **6** Lockon Cannon, **7** AM Blaster, **8** AM Cyclone,
 **9** Zodiac, **0** Plasma Lance. Each press selects once; menus and save-name
 entry keep the number keys for their usual input.
+**Weapon and psionic wheels** is a single option in **Settings → Controls**,
+off by default. Turning it on replaces both original selection lists. Hold the
+existing weapon or psionic binding (**Q / R** with modern controls, or the
+mapped controller buttons); point with the mouse or left stick, then release
+to equip. Arrow keys and the D-pad cycle through owned items. Left-click or
+Enter also confirms; Escape, right-click or the controller's cancel button
+cancels. Locked items cannot be equipped. The game continues while a wheel
+is open. Turn the option off to use the original selectors again.
 **Smooth mouse turning** in the same tab turns the picture between the game's
 256 heading steps. It requires captured mouse aim and exact geometry.
 A setting shows its description under the pointer, the same one as in the

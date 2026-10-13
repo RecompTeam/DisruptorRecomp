@@ -5,10 +5,12 @@
 struct SDL_Window {};
 
 using Uint8 = std::uint8_t;
+using SDL_Scancode = int;
 using SDL_WindowFlags = std::uint64_t;
 using SDL_JoystickID = std::uint32_t;
 
 constexpr int SDL_SCANCODE_ESCAPE = 41;
+constexpr int SDL_SCANCODE_UNKNOWN = 0;
 constexpr int SDL_SCANCODE_A = 4;
 constexpr int SDL_SCANCODE_D = 7;
 constexpr int SDL_SCANCODE_E = 8;

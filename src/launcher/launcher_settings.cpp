@@ -32,6 +32,7 @@ constexpr Placement placed[] = {
     {"disruptor.skip_intro", Page::enhancements},
     {"disruptor.mouse_aim", Page::controls},
     {"disruptor.modern_controls", Page::controls},
+    {"disruptor.selection_wheels", Page::controls},
     {"disruptor.horizontal_sensitivity", Page::controls},
     {"disruptor.invert_horizontal", Page::controls},
     {"disruptor.high_precision_camera", Page::controls},

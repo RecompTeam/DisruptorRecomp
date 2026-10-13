@@ -53,7 +53,7 @@ ROW = r'\b(toggle|choice|slider)(?:<[^>]*>)?\(\s*"([\w.]+)", "([^"]+)", (-?\d+)'
 rows = re.findall(ROW, options)
 keys = [key for _, key, _, _ in rows]
 initial = {key: int(value) for _, key, _, value in rows}
-require(len(rows) == 28 and len(set(keys)) == 28, "the shared table must hold its 28 options, each key once")
+require(len(rows) == 29 and len(set(keys)) == 29, "the shared table must hold its 29 options, each key once")
 placed = re.findall(r'^    \{"([\w.]+)", Page::\w+\},$', table, re.MULTILINE)
 require(
     sorted(placed) == sorted(keys)

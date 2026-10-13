@@ -269,6 +269,7 @@ void apply_saved_preferences(const PSXRecompV4::UserSettings &settings) {
     if (settings.has_modern_controls &&
         !env_override_present("PSX_DISRUPTOR_MODERN_CONTROLS"))
         set_modern_controls_live(settings.modern_controls);
+    disruptor_selection_wheels_set_enabled(settings.has_selection_wheels && settings.selection_wheels);
     if (settings.has_horizontal_sensitivity &&
         !env_override_present("PSX_DISRUPTOR_MOUSE_SENSITIVITY"))
         (void)disruptor_mouse_set_horizontal_sensitivity(
@@ -356,6 +357,8 @@ void apply_pending_preferences() {
         disruptor_mouse_aim_set_enabled(pending.mouse_aim ? 1 : 0);
     if (changed("disruptor.modern_controls"))
         set_modern_controls_live(pending.modern_controls);
+    if (changed("disruptor.selection_wheels"))
+        disruptor_selection_wheels_set_enabled(pending.selection_wheels);
     if (changed("disruptor.horizontal_sensitivity"))
         (void)disruptor_mouse_set_horizontal_sensitivity(
             pending.horizontal_sensitivity);

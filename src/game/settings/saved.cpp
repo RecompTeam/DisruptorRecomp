@@ -28,6 +28,10 @@ void read_game_user_settings(const toml::value& doc, UserSettings& s) {
             s.modern_controls = toml::find<bool>(d, "modern_controls");
             s.has_modern_controls = true;
         });
+        if (d.contains("selection_wheels")) try_get([&]{
+            s.selection_wheels = toml::find<bool>(d, "selection_wheels");
+            s.has_selection_wheels = true;
+        });
         if (d.contains("horizontal_sensitivity")) try_get([&]{
             double n = 0.0;
             try {
@@ -162,7 +166,7 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
         return out + "\"";
     };
 
-    if (s.has_mouse_aim || s.has_modern_controls ||
+    if (s.has_mouse_aim || s.has_modern_controls || s.has_selection_wheels ||
         s.has_horizontal_sensitivity || s.has_invert_horizontal ||
         s.has_vertical_look || s.has_vertical_sensitivity ||
         s.has_invert_vertical ||
@@ -178,6 +182,8 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
             f << "mouse_aim = " << (s.mouse_aim ? "true" : "false") << "\n";
         if (s.has_modern_controls)
             f << "modern_controls = " << (s.modern_controls ? "true" : "false") << "\n";
+        if (s.has_selection_wheels)
+            f << "selection_wheels = " << (s.selection_wheels ? "true" : "false") << "\n";
         if (s.has_horizontal_sensitivity &&
             std::isfinite(s.horizontal_sensitivity) &&
             s.horizontal_sensitivity >= 0.005 &&

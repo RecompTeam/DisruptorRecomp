@@ -21,6 +21,7 @@
 #include "game/input/mouse_aim.h"
 #include "game/session/capsule.h"
 #include "game/input/vertical_camera.h"
+#include "game/input/selection_wheel.h"
 #include "../../../psxrecomp/runtime/include/gpu.h"
 
 #include <algorithm>
@@ -436,6 +437,7 @@ void apply_modern_controls(const Uint8 *keys, uint32_t mouse_buttons) {
         if ((mouse_buttons & SDL_BUTTON_X2MASK) != 0) press |= kPadR1;
     }
 
+    press = disruptor_selection_wheel_filter_press(press);
     if (press != 0) {
         const uint16_t sampled = sio_get_pad_buttons_slot(0);
         sio_set_pad_state_slot(0, static_cast<uint16_t>(sampled & ~press));
@@ -602,6 +604,17 @@ void log_geometry_diagnostics_scope(
 }
 
 void mouse_aim_frame() {
+    if (disruptor_selection_wheel_frame()) {
+        const Uint8 *keys = SDL_GetKeyboardState(nullptr);
+        sample_weapon_keys(keys, nullptr);
+        g_mouse.escape_was_down = key_down(keys, SDL_SCANCODE_ESCAPE);
+        const uint32_t buttons = get_mouse_buttons();
+        g_mouse.middle_was_down = (buttons & SDL_BUTTON_MMASK) != 0;
+        g_mouse.left_was_down = (buttons & SDL_BUTTON_LMASK) != 0;
+        discard_relative_motion();
+        gpu_geometry_camera_yaw_residual_set(0.0);
+        return;
+    }
     if (!g_mouse.enabled || !sdl_window) return;
     ++g_mouse.frame;
 #ifndef PSX_NO_DEBUG_TOOLS

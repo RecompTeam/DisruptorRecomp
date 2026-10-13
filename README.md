@@ -93,6 +93,11 @@ the mouse while its window has focus. Escape or a middle-click releases it,
 and a left-click in the window takes it back. Add `-VerticalLook` to
 enable experimental vertical aim.
 
+**Settings → Controls → Weapon and psionic wheels** enables both radial
+selectors with one toggle, off by default. Hold the existing selection binding
+(**Q / R** in modern controls), choose with the mouse or controller, and release
+to equip. Turning it off restores the original selection lists.
+
 **Alt+Enter** toggles fullscreen. **Shift+F1–F12** saves a state;
 **F1–F12** loads it. Save states require a matching build and supported game.
 

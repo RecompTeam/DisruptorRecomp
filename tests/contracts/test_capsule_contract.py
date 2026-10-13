@@ -41,7 +41,7 @@ require(
     in host
     and host.count("psx_game_before_input();") == host.count("psx_game_after_input();") == 1
     and "void psx_game_before_input(void) { disruptor_capsule_before_input(); }\n" in game_side
-    and "void psx_game_after_input(void) { disruptor_capsule_after_input(); }\n" in game_side
+    and "void psx_game_after_input(void) {\n    disruptor_capsule_after_input();\n    disruptor_selection_wheel_guard_input();\n}\n" in game_side
     and game_side.count("disruptor_capsule_before_input();") == game_side.count("disruptor_capsule_after_input();") == 1
     and game_side.count("disruptor_capsule_state_loaded();") == 1
     and "disruptor_capsule_" not in host,

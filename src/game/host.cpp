@@ -2,6 +2,7 @@
 
 #include "config_loader.h"
 #include "game/language/language.h"
+#include "game/input/selection_wheel.h"
 #include "game/render/far_rendering.h"
 #include "game/render/precision_routes.h"
 #include "game/session/capsule.h"
@@ -41,6 +42,7 @@ void psx_game_states_configured(void) { disruptor_language_settle(); }
 
 void psx_game_state_loaded(void) {
     disruptor_capsule_state_loaded();
+    disruptor_selection_wheel_cancel();
     disruptor_name_entry_state_loaded();
     disruptor_far_rendering_abandon_metrics();
 }
@@ -60,6 +62,9 @@ void psx_game_keys_for_pad(const uint8_t *keys, uint8_t *kept, int count) {
 
 void psx_game_before_input(void) { disruptor_capsule_before_input(); }
 
-void psx_game_after_input(void) { disruptor_capsule_after_input(); }
+void psx_game_after_input(void) {
+    disruptor_capsule_after_input();
+    disruptor_selection_wheel_guard_input();
+}
 
 }  // extern "C"
