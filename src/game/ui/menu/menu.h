@@ -15,6 +15,7 @@
 #include "game/render/far_rendering.h"
 #include "game/frame/frame_rate.h"
 #include "game/session/capsule.h"
+#include "game/session/diagnostics.h"
 #include "game/session/intro_skip.h"
 #include "game/input/mouse_aim.h"
 #include "game/frame/present_rate.h"
@@ -143,6 +144,7 @@ void mark_occlusion(bool value);
 void mark_occlusion_shape(int reach, int strength);
 void mark_gap_filling(bool value);
 void mark_world_depth(bool value);
+void mark_detailed_logging(bool value);
 void apply_diagnostic_view(int view);
 void mark_diagnostic_view(int value);
 void apply_smooth_turn(bool enabled);

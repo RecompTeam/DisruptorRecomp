@@ -53,7 +53,7 @@ ROW = r'\b(toggle|choice|slider)(?:<[^>]*>)?\(\s*"([\w.]+)", "([^"]+)", (-?\d+)'
 rows = re.findall(ROW, options)
 keys = [key for _, key, _, _ in rows]
 initial = {key: int(value) for _, key, _, value in rows}
-require(len(rows) == 27 and len(set(keys)) == 27, "the shared table must hold its 27 options, each key once")
+require(len(rows) == 28 and len(set(keys)) == 28, "the shared table must hold its 28 options, each key once")
 placed = re.findall(r'^    \{"([\w.]+)", Page::\w+\},$', table, re.MULTILINE)
 require(
     sorted(placed) == sorted(keys)
@@ -211,10 +211,10 @@ require(
 report = read("src/launcher/report.cpp")
 playing = read("docs/PLAYING.md")
 require(
-    'constexpr std::array<const char*, 4> gathered = {"startup.log", "startup.previous.log", "disruptor-mouse-aim.log", "settings.toml"};\n'
+    'constexpr std::array<const char*, 6> gathered = {"startup.log", "startup.previous.log", "disruptor-mouse-aim.log", "settings.toml",\n'
     in report
-    and '        if (fs::is_regular_file(root / name, missing)) write(folder / name, without_user_names(end_of(root / name)));\n' in report
-    and '    write(folder / "system.txt", without_user_names(system));\n' in report
+    and '        if (present) write(folder / name, without_user_names(end_of(root / name)));\n' in report
+    and '    write(folder / "system.txt", without_user_names(note));\n' in report
     and "    if (!archive || !run_tar(folder, zip)) {\n        fs::remove(zip, failed);\n        return {folder, false};\n    }\n"
     "    fs::remove_all(folder, failed);\n    return {zip, true};\n" in report
     and '    std::string note = "Disruptor Recompiled " DISRUPTOR_BUILD_VERSION "\\r\\n";\n' in report,

@@ -45,6 +45,8 @@ constexpr const wchar_t* page_notes[] = {
     L"Perspective textures and in-between frames need exact geometry.",
     L"Key bindings are in keybinds.ini beside the launcher.",
     L"",
+    L"",
+    L"Switch on, play until the problem shows, close the game, then press Report a problem.",
 };
 
 fs::path executable_directory() {
@@ -82,7 +84,7 @@ HANDLE start_game(const fs::path& root, const VerifiedDisc& disc) {
         if (input != INVALID_HANDLE_VALUE) CloseHandle(input);
         throw std::runtime_error("Cannot create startup.log. Put the extracted build in a writable Games folder.");
     }
-    std::string heading;
+    std::string heading = started_line();
     for (const auto line : std::views::split(system_note(), std::string_view("\r\n")))
         if (!line.empty()) heading += "launcher: " + std::string(line.begin(), line.end()) + "\r\n";
     DWORD written = 0;
@@ -150,6 +152,7 @@ struct App {
     std::atomic_bool cancelled{false};
     bool busy = false, closing = false, unwritten = false;
     HANDLE game = nullptr;
+    ULONGLONG game_started = 0;
     VerifiedDisc verified;
 
     explicit App(fs::path folder) : root(std::move(folder)), settings(root / "settings.toml") {}
@@ -305,7 +308,7 @@ struct App {
         // A row scrolled away with the keyboard on it would leave Tab nowhere to go from.
         if (HWND focus = GetFocus(); focus && GetParent(focus) == tabs && !IsWindowVisible(focus))
             SetFocus(page_rows[page] > page_slots ? scroll : tabs);
-        SetWindowTextW(page_note, page_notes[std::clamp(page, 0, 3)]);
+        SetWindowTextW(page_note, page_notes[std::clamp(page, 0, static_cast<int>(std::size(page_notes)) - 1)]);
     }
     void controls() {
         EnableWindow(browse, !busy && !game);
@@ -373,6 +376,7 @@ struct App {
     void launch() {
         try {
             game = start_game(root, verified);
+            game_started = GetTickCount64();
             say(running_text(environment_overrides(), unwritten));
             SetTimer(window, 1, 500, nullptr);
         } catch (const std::exception& error) {
@@ -707,6 +711,7 @@ LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lp
                     app->say(tail.empty() ? std::wstring(heading) + L"\nSee GETTING_STARTED.md."
                                           : std::wstring(heading) + L"\nThe end of startup.log:\n" + tail);
                 }
+                note_exit(app->root / "startup.log", code, (GetTickCount64() - app->game_started) / 1000);
                 app->controls();
                 app->look();
             }

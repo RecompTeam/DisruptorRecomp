@@ -112,6 +112,8 @@ int main() {
         written.gap_filling = false;
         written.has_depth_sorted_world = true;
         written.depth_sorted_world = true;
+        written.has_detailed_logging = true;
+        written.detailed_logging = true;
         written.has_diagnostic_view = true;
         written.diagnostic_view = 3;
         written.has_language = true;
@@ -168,6 +170,7 @@ int main() {
                     loaded.has_occlusion_strength && loaded.occlusion_strength == 130 &&
                     loaded.has_gap_filling && !loaded.gap_filling &&
                     loaded.has_depth_sorted_world && loaded.depth_sorted_world &&
+                    loaded.has_detailed_logging && loaded.detailed_logging &&
                     loaded.has_diagnostic_view && loaded.diagnostic_view == 3,
                 "Disruptor preferences did not round-trip");
         require(loaded.has_language && loaded.language == "en",

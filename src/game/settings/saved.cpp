@@ -140,6 +140,10 @@ void read_game_user_settings(const toml::value& doc, UserSettings& s) {
                 }
             }
         });
+        if (d.contains("detailed_logging")) try_get([&]{
+            s.detailed_logging = toml::find<bool>(d, "detailed_logging");
+            s.has_detailed_logging = true;
+        });
     }
 }
 
@@ -165,7 +169,7 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
         s.has_high_precision_camera || s.has_geometry_correction ||
         s.has_perspective_textures || s.has_frame_unlock || s.has_improved_shadows ||
         s.has_ambient_occlusion || s.has_occlusion_reach || s.has_occlusion_strength ||
-        s.has_gap_filling || s.has_depth_sorted_world || s.has_diagnostic_view ||
+        s.has_gap_filling || s.has_depth_sorted_world || s.has_diagnostic_view || s.has_detailed_logging ||
         s.has_language_discs ||
         s.has_language_disc || s.has_skip_intro ||
         s.has_hud_scale) {
@@ -230,6 +234,8 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
             f << "depth_sorted_world = " << (s.depth_sorted_world ? "true" : "false") << "\n";
         if (s.has_diagnostic_view && s.diagnostic_view >= 0 && s.diagnostic_view < kDisruptorDiagnosticViewCount)
             f << "diagnostic_view = " << quoted(kDisruptorDiagnosticViews[s.diagnostic_view]) << "\n";
+        if (s.has_detailed_logging)
+            f << "detailed_logging = " << (s.detailed_logging ? "true" : "false") << "\n";
     }
 }
 

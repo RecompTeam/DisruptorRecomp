@@ -16,15 +16,24 @@ struct Report {
 
 /// Gathers what a bug report needs from the build folder `root` into `reports\disruptor-report-<stamp>`.
 ///
-/// Taken are the game's log of the last two runs, the mouse log and the settings, each with user names cut out, and
-/// `system` as `system.txt`. The disc image, the BIOS and saves are never taken. With `archive` the folder becomes a
-/// ZIP of the same name when Windows' own tar can make one.
+/// Taken are the game's log of the last two runs, the mouse log, the settings, the framework's notes of how the last
+/// run ended and of its freezes, each with user names cut out, and `system` as `system.txt` with a line for every
+/// file: its size and when it was written, or that there is none. A freeze dump is taken when its name says it was
+/// made since the last run began, as the log's first line tells, and the newest two of those. A link is never
+/// followed. The disc image, the BIOS and saves are never taken. With `archive` the folder becomes a ZIP of the
+/// same name when Windows' own tar can make one.
 ///
 /// Throws std::runtime_error when the folder cannot be written.
 Report make_report(const std::filesystem::path& root, std::string_view system, std::string_view stamp, bool archive = true);
 
 /// The build's version, the Windows version, the display and the graphics adapters, a line each.
 std::string system_note();
+
+/// Now as `YYYY-MM-DD HH:MM:SS UTC`.
+std::string utc_now();
+
+/// The line the launcher heads the game's log with: when the run began. A report tells the run's freeze dumps by it.
+std::string started_line();
 
 /// The local time as `YYYYMMDD-HHMMSS`, for a report's name.
 std::string report_stamp();

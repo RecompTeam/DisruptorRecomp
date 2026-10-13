@@ -1,5 +1,5 @@
 diff --git a/runtime/src/gpu_gl_renderer.c b/runtime/src/gpu_gl_renderer.c
-index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54f6786455 100644
+index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c40006a9fc560ec447076073c5069909f11c44bf 100644
 --- a/runtime/src/gpu_gl_renderer.c
 +++ b/runtime/src/gpu_gl_renderer.c
 @@ -67,6 +67,9 @@
@@ -1489,7 +1489,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54
      }
  
      p_glGenVertexArrays(1, &s_blit_vao);
-@@ -2433,6 +3318,12 @@
+@@ -2433,9 +3318,80 @@
      gl_perf_init();   /* frame_perf GPU/CPU phase timing (no-op if queries absent) */
      fprintf(stdout, "psxrecomp: GL GPU pipeline ready (internal scale %dx, "
              "mask-bit stencil, texture window, GPU copy/upload)\n", s_scale);
@@ -1502,17 +1502,98 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54
      return 1;
  }
  
-@@ -2454,7 +3345,8 @@
++/* The driver's own messages, for the game's detailed log: a driver may call from its own thread, so the call only queues. */
++typedef void (APIENTRY *PFN_glDebugProc)(GLenum, GLenum, GLuint, GLenum, GLsizei, const char *, const void *);
++typedef void (APIENTRY *PFN_glDebugMessageCallback)(PFN_glDebugProc, const void *);
++typedef void (APIENTRY *PFN_glDebugMessageControl)(GLenum, GLenum, GLenum, GLsizei, const GLuint *, GLboolean);
++#define DEBUG_QUEUE 16
++static struct { char text[200]; unsigned id; int severity, context; } s_debug_queue[DEBUG_QUEUE];
++static SDL_SpinLock s_debug_lock;
++static int s_debug_asked, s_debug_active, s_debug_count;
++static unsigned s_debug_lost;
++
++static void APIENTRY debug_message(GLenum source, GLenum type, GLuint id, GLenum severity, GLsizei length,
++                                   const char *message, const void *presenter) {
++    (void)source; (void)type; (void)length;
++    SDL_AtomicLock(&s_debug_lock);
++    if (s_debug_count < DEBUG_QUEUE) {
++        snprintf(s_debug_queue[s_debug_count].text, sizeof s_debug_queue[0].text, "%s", message ? message : "");
++        s_debug_queue[s_debug_count].id = id;
++        s_debug_queue[s_debug_count].severity = severity == 0x9146 /* GL_DEBUG_SEVERITY_HIGH */ ? 2 : 1;
++        s_debug_queue[s_debug_count].context = presenter != NULL;
++        ++s_debug_count;
++    } else {
++        ++s_debug_lost;
++    }
++    SDL_AtomicUnlock(&s_debug_lock);
++}
++
++/* For the context that is current. KHR_debug is core from GL 4.3 and an extension below it. */
++static void debug_install(int presenter) {
++    static int s_presenter_tag;
++    GLint major = 0, minor = 0;
++    if (!s_debug_asked) return;
++    glGetIntegerv(0x821B /* GL_MAJOR_VERSION */, &major);
++    glGetIntegerv(0x821C /* GL_MINOR_VERSION */, &minor);
++    if (major * 10 + minor < 43 && !SDL_GL_ExtensionSupported("GL_KHR_debug")) return;
++    PFN_glDebugMessageCallback callback = (void *)SDL_GL_GetProcAddress("glDebugMessageCallback");
++    PFN_glDebugMessageControl control = (void *)SDL_GL_GetProcAddress("glDebugMessageControl");
++    if (!callback || !control) return;
++    glEnable(0x92E0 /* GL_DEBUG_OUTPUT */);
++    control(GL_DONT_CARE, GL_DONT_CARE, 0x826B /* GL_DEBUG_SEVERITY_NOTIFICATION */, 0, NULL, GL_FALSE);
++    control(GL_DONT_CARE, GL_DONT_CARE, 0x9148 /* GL_DEBUG_SEVERITY_LOW */, 0, NULL, GL_FALSE);
++    callback(debug_message, presenter ? &s_presenter_tag : NULL);
++    s_debug_active = 1;
++}
++
++void gl_renderer_set_debug_messages(int enabled) { s_debug_asked = enabled != 0; }
++int gl_renderer_debug_messages(void) { return s_debug_asked; }
++int gl_renderer_debug_messages_active(void) { return s_debug_active; }
++/* The oldest queued message, 0 when there is none. `lost` gets how many found the queue full since the last call. */
++int gl_renderer_debug_message_take(char *text, int size, unsigned *id, int *severity, int *context, unsigned *lost) {
++    int taken = 0;
++    SDL_AtomicLock(&s_debug_lock);
++    *lost = s_debug_lost;
++    s_debug_lost = 0;
++    if (s_debug_count > 0) {
++        snprintf(text, (size_t)size, "%s", s_debug_queue[0].text);
++        *id = s_debug_queue[0].id;
++        *severity = s_debug_queue[0].severity;
++        *context = s_debug_queue[0].context;
++        memmove(&s_debug_queue[0], &s_debug_queue[1], (size_t)(--s_debug_count) * sizeof s_debug_queue[0]);
++        taken = 1;
++    }
++    SDL_AtomicUnlock(&s_debug_lock);
++    return taken;
++}
++
+ int gl_renderer_init_context(SDL_Window *win) {
+     s_win = win;
+     s_present_w = 0;
+@@ -2443,6 +3399,11 @@
+     SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
+     SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
+     s_ctx = SDL_GL_CreateContext(win);
++    if (!s_ctx && s_debug_asked) {  /* a driver with no debug context still has a plain one */
++        s_debug_asked = 0;
++        SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, 0);
++        s_ctx = SDL_GL_CreateContext(win);
++    }
+     if (!s_ctx) { fprintf(stdout, "psxrecomp: GL context creation failed (%s)\n", SDL_GetError()); return 0; }
+     if (SDL_GL_MakeCurrent(win, s_ctx) != 0) { fprintf(stdout, "psxrecomp: MakeCurrent failed (%s)\n", SDL_GetError()); SDL_GL_DeleteContext(s_ctx); s_ctx=NULL; return 0; }
+     /* Swap interval: 1=vsync (tear-free, default), 0=immediate (lowest display
+@@ -2454,7 +3415,9 @@
      }
      glDisable(GL_DEPTH_TEST); glDisable(GL_CULL_FACE);
      const char *ver = (const char *)glGetString(GL_VERSION);
 -    fprintf(stdout, "psxrecomp: OpenGL context created (%s)\n", ver ? ver : "?");
 +    const char *card = (const char *)glGetString(GL_RENDERER);
 +    fprintf(stdout, "psxrecomp: OpenGL context created (%s, %s)\n", ver ? ver : "?", card ? card : "?");
++    debug_install(0);
  
      /* All-or-nothing: any missing entry point / failed shader / bad FBO means
       * the whole GL renderer is unavailable and the runtime stays on the pure
-@@ -2467,11 +3359,60 @@
+@@ -2467,11 +3430,60 @@
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
          glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
          s_present_prog = build_program(PRESENT_VS, PRESENT_FS);
@@ -1573,7 +1654,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54
              s_interp_uPrev = p_glGetUniformLocation(s_interp_prog, "u_prev");
              s_interp_uCurr = p_glGetUniformLocation(s_interp_prog, "u_curr");
              s_interp_uAlpha = p_glGetUniformLocation(s_interp_prog, "u_alpha");
-@@ -2484,6 +3425,7 @@
+@@ -2484,6 +3496,7 @@
                  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
                  glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
              }
@@ -1581,7 +1662,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54
          } else ok = 0;
      }
      if (ok) ok = init_gpu_raster();
-@@ -2496,20 +3438,28 @@
+@@ -2496,20 +3509,28 @@
      return 1;
  }
  
@@ -1623,7 +1704,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54
      if (s_interp_thread) {
          SDL_AtomicSet(&s_interp_thread_run, 0);
          SDL_WaitThread(s_interp_thread, NULL);
-@@ -2532,12 +3482,25 @@
+@@ -2532,12 +3553,25 @@
              }
          }
          ensure_cpu();
@@ -1649,7 +1730,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54
      free(s_conv); s_conv = NULL;
      s_raster_ok = 0;
      /* New context regenerates s_present_tex empty; a stale size makes
-@@ -2549,16 +3512,36 @@
+@@ -2549,16 +3583,36 @@
      rect_clear(&s_d24_skip_fb);
  }
  
@@ -1687,7 +1768,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54
      glDisable(GL_SCISSOR_TEST);
      glViewport(0, 0, ww, wh);
      glClearColor(0.f,0.f,0.f,1.f); glClear(GL_COLOR_BUFFER_BIT);
-@@ -2608,6 +3591,8 @@
+@@ -2608,6 +3662,8 @@
      p_glBindVertexArray(s_present_vao); glDrawArrays(GL_TRIANGLES, 0, 3);
      p_glBindVertexArray(0); p_glUseProgram(0);
      pres_record(GL_PRES_CPU, 0, 0, src_w, src_h, lx, ly, lw, lh);
@@ -1696,7 +1777,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54
      latency_ring_mark(LAT_SWAP_BEGIN);
      SDL_GL_SwapWindow(s_win);
      latency_ring_mark(LAT_SWAP_END);
-@@ -2618,10 +3603,12 @@
+@@ -2618,10 +3674,12 @@
  void gl_renderer_present_blank(void) {
      if (!s_ctx) return;
      interp_reset_history();
@@ -1710,7 +1791,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54
      latency_ring_mark(LAT_SWAP_BEGIN);
      SDL_GL_SwapWindow(s_win);
      latency_ring_mark(LAT_SWAP_END);
-@@ -2749,6 +3736,7 @@
+@@ -2749,6 +3807,7 @@
   * ------------------------------------------------------------------------- */
  
  static void wide_free_all(void) {
@@ -1718,7 +1799,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54
      for (int i = 0; i < WIDE_MAX_SURF; i++) {
          if (s_wide_fbo[i]) { p_glDeleteFramebuffers(1, &s_wide_fbo[i]); s_wide_fbo[i] = 0; }
          if (s_wide_tex[i]) { glDeleteTextures(1, &s_wide_tex[i]); s_wide_tex[i] = 0; }
-@@ -2802,9 +3790,11 @@
+@@ -2802,9 +3861,11 @@
  static void glb_wide_configure(int wide_w, int offset) {
      if (!s_raster_ok) return;
      double t0 = cw_ms(); s_cw_wide_cfgs++;
@@ -1730,7 +1811,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54
      g_wide_w = wide_w;
      g_wide_off = offset;
      s_cw_wide_ms += cw_ms() - t0;
-@@ -2814,6 +3804,7 @@
+@@ -2814,6 +3875,7 @@
  static void glb_wide_set_target(int base_x) {
      if (!s_raster_ok) { g_wide_cur = 0; return; }
      double t0 = cw_ms(); s_cw_wide_sets++;
@@ -1738,7 +1819,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54
      flush_tex_batch();   /* drain into the OLD target before switching */
      g_wide_cur = wide_fbo_for(base_x);
      g_wide_cur_base = base_x;
-@@ -2821,7 +3812,7 @@
+@@ -2821,7 +3883,7 @@
  }
  
  /* Stop mirroring (offscreen draws that don't target a framebuffer). */
@@ -1747,7 +1828,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54
  
  /* Mirror a framebuffer clear: fill the full wide width over [y, y+h) of the
   * surface for base_x, so the revealed margins are clean. Mirrors sw_wide_clear:
-@@ -2829,9 +3820,11 @@
+@@ -2829,9 +3891,11 @@
  static void glb_wide_clear(int base_x, int y, int h, uint16_t color) {
      if (!s_raster_ok || s_ws_ablate == 1) return;
      double t0 = cw_ms(); s_cw_wide_clears++;
@@ -1759,7 +1840,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54
      gl_perf_mirror_begin();
      int H = VRAM_H * s_scale;
      int y0 = y * s_scale, y1 = (y + h) * s_scale;
-@@ -2849,6 +3842,13 @@
+@@ -2849,6 +3913,13 @@
      glClearColor(r, g, b, a);
      glClearStencil((color >> 15) & 1);   /* stencil mirrors bit15, like the color alpha */
      glStencilMask(0xFF);
@@ -1773,7 +1854,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54
      glClear(GL_COLOR_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
      glDisable(GL_SCISSOR_TEST);
      p_glBindFramebuffer(PSXGL_FRAMEBUFFER, 0);
-@@ -2861,9 +3861,11 @@
+@@ -2861,9 +3932,11 @@
  static void glb_wide_clear_margins(int base_x, int y, int h, uint16_t color, int sides) {
      if (!s_raster_ok || s_ws_ablate == 1 || g_wide_off <= 0) return;
      double t0 = cw_ms(); s_cw_wide_clears++;
@@ -1785,7 +1866,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54
      gl_perf_mirror_begin();
      int H = VRAM_H * s_scale;
      int W = g_wide_w * s_scale;
-@@ -3236,10 +4238,153 @@
+@@ -3236,10 +4309,153 @@
  }
  
  /* Native-wide mirror ablation (perf attribution): see s_ws_ablate. */
@@ -1940,7 +2021,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54
      s_interp_valid = 0;
      s_interp_w = s_interp_h = 0;
      s_interp_start = s_interp_last_capture = 0;
-@@ -3257,9 +4402,10 @@
+@@ -3257,15 +4473,21 @@
                                     int blend_mode) {
      double effective_hz = target_hz < 0.0
          ? -1.0
@@ -1953,7 +2034,18 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54
      const char *diag = getenv("PSX_GL_INTERP_DIAG");
      s_interp_diag = diag && diag[0] && diag[0] != '0';
      if (active && !s_interp_ctx && s_ctx) {
-@@ -3273,6 +4419,7 @@
+         if (!s_interp_mutex) s_interp_mutex = SDL_CreateMutex();
+         SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 1);
+         s_interp_ctx = SDL_GL_CreateContext(s_win);
++        if (!s_interp_ctx && s_debug_asked) {  /* as for the main context: a plain one, shared all the same */
++            SDL_GL_SetAttribute(SDL_GL_CONTEXT_FLAGS, 0);
++            s_interp_ctx = SDL_GL_CreateContext(s_win);
++        }
++        if (s_interp_ctx) debug_install(1);
+         SDL_GL_SetAttribute(SDL_GL_SHARE_WITH_CURRENT_CONTEXT, 0);
+         SDL_GL_MakeCurrent(s_win, s_ctx);
+         /* The wall-clock pacer and interpolation scheduler own cadence. Keeping
+@@ -3273,6 +4495,7 @@
           * FMV temporarily suspends interpolation and the main context presents. */
          SDL_GL_SetSwapInterval(0);
          if (s_interp_ctx && s_interp_mutex) {
@@ -1961,7 +2053,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54
              SDL_AtomicSet(&s_interp_thread_run, 1);
              s_interp_thread = SDL_CreateThread(interp_thread_main,
                                                 "psx-gl-interp", NULL);
-@@ -3284,31 +4431,52 @@
+@@ -3284,31 +4507,52 @@
              active = 0;
          }
      }
@@ -2023,7 +2115,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54
  }
  
  void gl_renderer_interpolation_diag(int *enabled, int *suspended,
-@@ -3325,12 +4493,69 @@
+@@ -3325,12 +4569,69 @@
      if (s_interp_mutex) SDL_UnlockMutex(s_interp_mutex);
  }
  
@@ -2093,7 +2185,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54
      /* The presentation context may still have a draw queued which samples one
       * of the shared history textures.  Order this context's next allocation or
       * copy after that draw before recycling a texture.  glWaitSync keeps the
-@@ -3343,6 +4568,7 @@
+@@ -3343,6 +4644,7 @@
      int pw = w * s_scale, ph = h * s_scale;
      if (pw != s_interp_w || ph != s_interp_h ||
          source_path != s_interp_source_path || force_4_3 != s_interp_force_4_3) {
@@ -2101,7 +2193,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54
          s_interp_valid = 0;
          s_interp_w = pw; s_interp_h = ph;
          s_interp_prev = s_interp_cur = 0;
-@@ -3365,6 +4591,22 @@
+@@ -3365,6 +4667,22 @@
      glBindTexture(GL_TEXTURE_2D, s_interp_tex[dst]);
      glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0,
                          x * s_scale, y * s_scale, pw, ph);
@@ -2124,7 +2216,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54
      s_interp_fence[dst] = p_glFenceSync(PSXGL_SYNC_GPU_COMMANDS_COMPLETE, 0);
      glFlush();
      p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, 0);
-@@ -3388,21 +4630,41 @@
+@@ -3388,21 +4706,41 @@
          s_interp_cur = dst;
          s_interp_valid = 2;
      }
@@ -2167,7 +2259,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54
      p_glBindFramebuffer(PSXGL_FRAMEBUFFER, 0);
      glViewport(lx, ly, lw, lh);
      p_glActiveTexture(PSXGL_TEXTURE0);
-@@ -3418,12 +4680,135 @@
+@@ -3418,12 +4756,135 @@
      p_glUniform1i(s_interp_uCurr, 1);
      p_glUniform1f(s_interp_uAlpha, alpha);
      p_glUniform1i(s_interp_uBlendMode, s_interp_blend_mode);
@@ -2304,7 +2396,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54
  }
  
  static int interp_present(void) {
-@@ -3438,7 +4823,7 @@
+@@ -3438,7 +4899,7 @@
      if (a > 1.0) a = 1.0;
      if (a < 0.0) a = 0.0;
  
@@ -2313,7 +2405,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54
      int lx, ly, lw, lh;
      if (s_interp_force_4_3)
          letterbox_rect_aspect(ww, wh, 4, 3, &lx, &ly, &lw, &lh);
-@@ -3450,22 +4835,44 @@
+@@ -3450,22 +4911,44 @@
          glClearColor(0.f, 0.f, 0.f, 1.f);
          glClear(GL_COLOR_BUFFER_BIT);
      }
@@ -2360,7 +2452,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54
      uint64_t freq = SDL_GetPerformanceFrequency();
      uint64_t deadline = SDL_GetPerformanceCounter();
      uint64_t diag_start = deadline, diag_swaps = 0, diag_captures = 0;
-@@ -3477,7 +4884,7 @@
+@@ -3477,7 +4960,7 @@
          int uncapped = hz < 0.0;
          uint64_t now = SDL_GetPerformanceCounter();
          if (!uncapped) {
@@ -2369,7 +2461,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54
              uint64_t period = (uint64_t)((double)freq / hz);
              if (!period) period = 1;
              deadline += period;
-@@ -3492,20 +4899,80 @@
+@@ -3492,20 +4975,80 @@
              }
              while (SDL_GetPerformanceCounter() < deadline) {}
              now = SDL_GetPerformanceCounter();
@@ -2450,7 +2542,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54
              fflush(stdout);
              diag_start = now;
              diag_captures = s_interp_captures;
-@@ -3518,6 +4985,33 @@
+@@ -3518,6 +5061,33 @@
      SDL_GL_MakeCurrent(s_win, NULL);
      return 0;
  }
@@ -2484,7 +2576,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54
  
  static void present_target_quad(GLuint tex, int tex_w, int tex_h,
                                  int x, int y, int w, int h, int linear,
-@@ -3553,13 +5047,14 @@
+@@ -3553,13 +5123,14 @@
          s_last_present_path == GL_PRES_VRAM &&
          s_last_dx == disp_x && s_last_dy == disp_y &&
          s_last_dw == w && s_last_dh == h &&
@@ -2501,7 +2593,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54
      int lx, ly, lw, lh;
      if (force_4_3)
          letterbox_rect_aspect(ww, wh, 4, 3, &lx, &ly, &lw, &lh);
-@@ -3588,6 +5083,8 @@
+@@ -3588,6 +5159,8 @@
      present_target_quad(s_hr_tex, VRAM_W, VRAM_H,
                          disp_x, disp_y, w, h, linear, lx, ly, lw, lh);
      pres_record(GL_PRES_VRAM, disp_x, disp_y, w, h, lx, ly, lw, lh);
@@ -2510,7 +2602,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54
      latency_ring_mark(LAT_SWAP_BEGIN);
      SDL_GL_SwapWindow(s_win);
      latency_ring_mark(LAT_SWAP_END);
-@@ -3607,7 +5104,9 @@
+@@ -3607,7 +5180,9 @@
   * x-translated by the reveal offset. No-op when s_wide_fast is off (then the
   * mirror drew the full surface, as before). Shared by both present paths. */
  static void wide_blit_center(GLuint wide_fbo, int base_x, int disp_y, int disp_h) {
@@ -2521,7 +2613,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54
      int native_w = g_wide_w - 2 * g_wide_off;
      if (native_w <= 0) return;
      int S = s_scale;
-@@ -3638,6 +5137,71 @@
+@@ -3638,6 +5213,71 @@
   * disp_y+disp_h] region into the letterbox, V-flipped like present_vram (FBO y
   * bottom-origin → window top). Returns 0 if there's no wide surface for base_x
   * (caller falls back). disp_x is the displayed buffer base (the wide-surface key). */
@@ -2593,7 +2685,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54
  int gl_renderer_present_wide_fbo(int disp_x, int disp_y, int disp_h, int linear) {
      if (!s_ctx || !s_raster_ok || g_wide_w <= 0) return 0;
      GLuint fbo = 0, tex = 0;
-@@ -3653,13 +5217,14 @@
+@@ -3653,13 +5293,14 @@
          s_last_present_path == GL_PRES_WIDE &&
          s_last_dx == disp_x && s_last_dy == disp_y &&
          s_last_dw == g_wide_w && s_last_dh == disp_h &&
@@ -2610,7 +2702,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54
      int lx, ly, lw, lh;
      letterbox_rect(ww, wh, &lx, &ly, &lw, &lh);
      wide_blit_center(fbo, disp_x, disp_y, disp_h);   /* fast-path: authoritative centre */
-@@ -3681,9 +5246,13 @@
+@@ -3681,9 +5322,13 @@
          s_last_dw = g_wide_w; s_last_dh = disp_h;
          return 1;
      }
@@ -2626,7 +2718,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..2fd8376f511c435871821b3208a68f54
      latency_ring_mark(LAT_SWAP_BEGIN);
      SDL_GL_SwapWindow(s_win);
      latency_ring_mark(LAT_SWAP_END);
-@@ -3702,6 +5271,21 @@
+@@ -3702,6 +5347,21 @@
      .set_texture_filter = glb_set_texture_filter, .texture_filter = glb_texture_filter,
      .set_semi_transparency = glb_set_semi_transparency, .set_mask_bits = glb_set_mask_bits,
      .set_texture_window = glb_set_texture_window, .set_color_modulation = glb_set_color_modulation,

@@ -188,6 +188,10 @@ constexpr Option option_list[] = {
            write<&Settings::has_master_volume, &Settings::master_volume>),
     toggle<&Settings::has_audio_muted, &Settings::audio_muted>("audio.muted", "Mute all audio", 0,
         "Silences the game and keeps the volume setting."),
+    toggle<&Settings::has_detailed_logging, &Settings::detailed_logging>(
+        "disruptor.detailed_logging", "Detailed logging", 0,
+        "Writes more into the game's log for a bug report: how the frames ran, settings changed in the menu, "
+        "controllers coming and going, the graphics driver's complaints. The driver's part starts with the next launch."),
 
     toggle<&Settings::has_ambient_occlusion, &Settings::ambient_occlusion>(
         "disruptor.ambient_occlusion", "Ambient occlusion", 0,
@@ -216,6 +220,19 @@ bool applies(const Option& option, const std::function<bool(const Option&)>& on)
         const Option* needed = find_option(key);
         return needed && on(*needed) && applies(*needed, on);
     });
+}
+
+int stored(const Settings& settings, const Option& option) {
+    return option.saved(settings) ? option.get(settings) : option.initial;
+}
+
+std::string describe(const Settings& settings) {
+    std::string text;
+    for (const auto& option : option_list) {
+        if (!text.empty()) text += ' ';
+        text += std::string(option.key) + '=' + std::to_string(stored(settings, option));
+    }
+    return text;
 }
 
 } // namespace disruptor::settings

@@ -149,7 +149,8 @@ as cheated, including subsequent game saves.
 ## Reporting a problem
 
 Press **Report a problem** in the launcher. It gathers the game's log of the
-last two runs, the mouse log, your settings and a note of the system into one
+last two runs, the mouse log, your settings, the notes the game leaves of how
+its last run ended and of a freeze, and a note of the system into one
 ZIP under `reports/` beside the executable and shows it in Explorer. Where
 Windows cannot make the ZIP, it is a folder of the same name: attach its
 files. The name of your Windows user folder is cut out of paths, and
@@ -158,6 +159,14 @@ included. Attach the ZIP to a
 [bug report](https://github.com/micmea668/DisruptorRecomp/issues) with the
 level and the steps that lead to the problem. For a fault in the picture add
 a replay capsule or a screen recording, described below.
+
+For a problem you can repeat, first switch on **Detailed logging** on the
+launcher's **Troubleshooting** page, play until it shows, close the game and
+then make the report. The log then also says every ten seconds how the
+frames ran, each setting changed in the game's menu, controllers connected
+and removed, and what the graphics driver complains of. The switch is in the
+game's menu too, under **Settings → Debug**, where the driver's part starts
+with the next launch.
 
 ## Reports and replay capsules
 

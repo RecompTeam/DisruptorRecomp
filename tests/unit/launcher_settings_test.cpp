@@ -124,6 +124,27 @@ void needed() {
             "and only when what it needs applies itself");
 }
 
+void described() {
+    Settings settings;
+    const Option& logging = *find_option("disruptor.detailed_logging");
+    const Option& volume = *find_option("audio.master_volume");
+    require(logging.kind == Kind::toggle && logging.initial == 0 && stored(settings, logging) == 0 && stored(settings, volume) == 100,
+            "an option the file does not name has a fresh installation's value, and the detailed log starts off");
+    logging.set(settings, 1);
+    volume.set(settings, 40);
+    require(stored(settings, logging) == 1 && stored(settings, volume) == 40, "a named one has the file's");
+    const std::string text = disruptor::settings::describe(settings);
+    size_t at = 0, count = 0;
+    for (const auto& option : options()) {
+        const std::string entry = std::string(count++ ? " " : "") + option.key + "=" + std::to_string(stored(settings, option));
+        require(text.compare(at, entry.size(), entry) == 0, "the settings line names every option with its value, in the table's order");
+        at += entry.size();
+    }
+    require(at == text.size() && text.find(" audio.master_volume=40 ") != std::string::npos &&
+                text.find(" disruptor.detailed_logging=1 ") != std::string::npos,
+            "and nothing else");
+}
+
 void placements() {
     std::set<std::string> placed;
     for (const auto& row : layout()) {
@@ -132,6 +153,10 @@ void placements() {
         require(static_cast<size_t>(row.page) < page_labels().size(), "a row is on no page");
     }
     require(placed.size() == options().size(), "an option is on no page");
+    require(page_labels().size() == 6 && std::wstring_view(page_labels()[5]) == L"Troubleshooting", "the sixth page is Troubleshooting");
+    for (const auto& row : layout())
+        require((std::string_view(row.key) == "disruptor.detailed_logging") == (row.page == Page::troubleshooting),
+                "the Troubleshooting page holds the detailed log's switch and nothing else");
     require(wide("caf\xC3\xA9") == L"café" && wide("").empty(), "an option's text is read as UTF-8");
 }
 
@@ -407,6 +432,21 @@ void log(const fs::path& folder) {
     require(log_tail(file, 1) == L"caf�\r\n", "a log that is not UTF-8 is still shown");
     write(file, std::string(20000, 'x') + "\xD0\x94\nlast\n");
     require(log_tail(file, 5) == L"last\r\n", "a line cut by the read is not shown");
+    write(file, "the game's last line\n");
+    note_exit(file, 0, 125);
+    require(log_tail(file, 2) == L"the game's last line\r\nlauncher: the game ended with code 0x00000000 after 125 s\r\n",
+            "the launcher adds how the game ended to its log");
+    std::string raw(200, '\0');
+    raw.resize(static_cast<size_t>(std::ifstream(file, std::ios::binary).read(raw.data(), 200).gcount()));
+    require(raw == "the game's last line\nlauncher: the game ended with code 0x00000000 after 125 s\r\n",
+            "straight after a whole line, with no empty one between");
+    write(file, "cut mid-li");
+    note_exit(file, 0xC0000005ul, 3);
+    require(log_tail(file, 2) == L"cut mid-li\r\nlauncher: the game ended with code 0xC0000005 after 3 s\r\n",
+            "on a line of its own where the game was cut mid-line");
+    fs::remove(file);
+    note_exit(file, 1, 0);
+    require(log_tail(file, 2) == L"launcher: the game ended with code 0x00000001 after 0 s\r\n", "and in a log that was not there");
     fs::remove(file);
 }
 
@@ -493,6 +533,7 @@ int main() {
         carried();
         needed();
         placements();
+        described();
         absent(folder);
         one_change(folder);
         round_trip(folder);

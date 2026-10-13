@@ -765,7 +765,7 @@ shared_keys = set(re.findall(r'\b(?:toggle|choice|slider)(?:<[^>]*>)?\(\s*"([\w.
 staged_keys = set(re.findall(r'\bmark\("([\w.]+)"', menu)) | set(
     re.findall(r'g_preferences\.changed\.insert\(\s*find_option\("([\w.]+)"\)\)', menu))
 applied_keys = set(re.findall(r'\bchanged\("([\w.]+)"\)', function_body(menu, "apply_pending_preferences")))
-require(len(shared_keys) == 27 and staged_keys == shared_keys and applied_keys == shared_keys and
+require(len(shared_keys) == 28 and staged_keys == shared_keys and applied_keys == shared_keys and
         set(re.findall(r'\bfind_option\("([\w.]+)"', menu)) <= shared_keys,
         "the menu must stage every shared option, apply every one it staged and name no key the table lacks")
 require('void mark_vsync(int value) { mark("video.vsync", value + 1); }\n' in menu and
@@ -839,7 +839,7 @@ drawn_keys = set(re.findall(r'\boption_(?:toggle|slider|list)\("([\w.]+)"', menu
     re.findall(r'find_option\("([\w.]+)"\)->label', menu))
 present = read("src/game/frame/present_rate.cpp")
 require(HELPERS in menu and "bool option_list(const char *key, int *index, size_t skipped = 0);\n" in menu and
-        len(shared_labels) == 27 and drawn_keys == shared_keys and
+        len(shared_labels) == 28 and drawn_keys == shared_keys and
         not [text for text in [*shared_labels, *shared_choices] if f'"{text}"' in menu + present] and
         "    static constexpr int kScaleCount = 8;\n" in menu and
         '"1x (native)", "2x", "3x", "4x", "5x", "6x", "7x", "8x"' in options and
@@ -937,7 +937,7 @@ shared_hints = [
         r'\b(?:toggle<[^>]*>|choice|slider)\(\s*"[\w.]+",\s*"[^"]+",\s*-?\d+,\s*((?:"(?:[^"\\]|\\.)*"\s*)+)', options)
 ]
 written = "".join(re.findall(LITERAL, menu + present))
-require(HINT in read("src/game/ui/hint.h") and len(shared_hints) == 27 and
+require(HINT in read("src/game/ui/hint.h") and len(shared_hints) == 28 and
         all(20 <= len(text) <= 240 for text in shared_hints) and
         not [text for text in shared_hints if text[:32] in written] and
         "Needs mouse aim and exact geometry." in shared_hints[

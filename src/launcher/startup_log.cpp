@@ -3,6 +3,8 @@
 #include "launcher_settings.h"
 
 #include <algorithm>
+#include <array>
+#include <cstdio>
 #include <fstream>
 #include <vector>
 
@@ -36,6 +38,18 @@ std::wstring log_tail(const fs::path& log, size_t lines) {
     std::string joined;
     for (auto line = kept.rbegin(); line != kept.rend(); ++line) joined += *line + "\r\n";
     return wide(joined);
+}
+
+void note_exit(const fs::path& log, unsigned long code, unsigned long long seconds) {
+    bool mid_line = false;
+    if (std::ifstream file(log, std::ios::binary | std::ios::ate); file && file.tellg() > 0) {
+        file.seekg(-1, std::ios::end);
+        mid_line = file.get() != '\n';
+    }
+    std::array<char, 96> line{};
+    std::snprintf(line.data(), line.size(), "%slauncher: the game ended with code 0x%08lX after %llu s\r\n",
+                  mid_line ? "\r\n" : "", code, seconds);
+    std::ofstream(log, std::ios::binary | std::ios::app) << line.data();
 }
 
 } // namespace disruptor::launcher

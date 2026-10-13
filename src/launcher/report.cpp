@@ -5,11 +5,17 @@
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstdint>
+#include <cstdio>
 #include <ctime>
 #include <fstream>
+#include <functional>
+#include <optional>
 #include <set>
 #include <stdexcept>
 #include <system_error>
+#include <utility>
+#include <vector>
 
 #ifndef DISRUPTOR_BUILD_VERSION
 #define DISRUPTOR_BUILD_VERSION "unknown"
@@ -19,7 +25,11 @@ namespace fs = std::filesystem;
 namespace disruptor::launcher {
 namespace {
 
-constexpr std::array<const char*, 4> gathered = {"startup.log", "startup.previous.log", "disruptor-mouse-aim.log", "settings.toml"};
+constexpr std::array<const char*, 6> gathered = {"startup.log", "startup.previous.log", "disruptor-mouse-aim.log", "settings.toml",
+                                                 "psx_last_run_report.json", "psx_freeze_heartbeat.json"};
+constexpr std::wstring_view freeze_dump = L"psx_freeze_dump_";
+constexpr size_t most_freeze_dumps = 2;
+constexpr std::string_view started = "launcher: started ";
 constexpr std::streamoff most_bytes = 4 * 1024 * 1024;  // of a log's end: GitHub takes attachments of 25 MB
 
 bool separates(char letter) { return letter == '\\' || letter == '/'; }
@@ -75,6 +85,83 @@ std::string narrow(std::wstring_view text) {
     return out;
 }
 
+std::string utc_text(const SYSTEMTIME& time) {
+    std::array<char, 40> text{};
+    std::snprintf(text.data(), text.size(), "%04u-%02u-%02u %02u:%02u:%02u UTC", time.wYear, time.wMonth, time.wDay,
+                  time.wHour, time.wMinute, time.wSecond);
+    return text.data();
+}
+
+std::string listed(const fs::path& file) {
+    WIN32_FILE_ATTRIBUTE_DATA found{};
+    if (!GetFileAttributesExW(file.c_str(), GetFileExInfoStandard, &found)) return "none";
+    SYSTEMTIME written{};
+    FileTimeToSystemTime(&found.ftLastWriteTime, &written);
+    const std::uint64_t bytes = (std::uint64_t{found.nFileSizeHigh} << 32) | found.nFileSizeLow;
+    return std::to_string(bytes) + " bytes, written " + utc_text(written) +
+           (bytes > static_cast<std::uint64_t>(most_bytes) ? ", its end taken" : "");
+}
+
+bool plain_file(const fs::path& file) {
+    std::error_code missing;
+    return fs::is_regular_file(fs::symlink_status(file, missing));
+}
+
+// The unix time the last run began, from the line the launcher heads the log with.
+std::optional<std::int64_t> run_began(const fs::path& log) {
+    constexpr std::array<size_t, 6> places = {0, 5, 8, 11, 14, 17}, widths = {4, 2, 2, 2, 2, 2};  // YYYY-MM-DD HH:MM:SS
+    std::string head(started.size() + 19, '\0');
+    std::ifstream input(log, std::ios::binary);
+    input.read(head.data(), static_cast<std::streamsize>(head.size()));
+    if (!plain_file(log) || !head.starts_with(started)) return std::nullopt;
+    std::array<int, 6> parts{};
+    for (size_t part = 0; part < parts.size(); ++part)
+        for (size_t at = 0; at < widths[part]; ++at) {
+            const char digit = head[started.size() + places[part] + at];
+            if (digit < '0' || digit > '9') return std::nullopt;
+            parts[part] = parts[part] * 10 + (digit - '0');
+        }
+    std::tm time{};
+    time.tm_year = parts[0] - 1900;
+    time.tm_mon = parts[1] - 1;
+    time.tm_mday = parts[2];
+    time.tm_hour = parts[3];
+    time.tm_min = parts[4];
+    time.tm_sec = parts[5];
+    const std::int64_t began = _mkgmtime64(&time);
+    return began < 0 ? std::nullopt : std::optional(began);
+}
+
+// The unix time in a dump's name, which the framework writes as `psx_freeze_dump_<backend>_<seconds>.json`.
+std::optional<std::int64_t> dump_time(const std::wstring& name) {
+    constexpr std::wstring_view ending = L".json";
+    if (!name.starts_with(freeze_dump) || !name.ends_with(ending)) return std::nullopt;
+    const size_t end = name.size() - ending.size(), under = name.rfind(L'_', end);
+    if (under < freeze_dump.size() || end - under < 2 || end - under > 13) return std::nullopt;
+    std::int64_t seconds = 0;
+    for (size_t at = under + 1; at < end; ++at) {
+        if (name[at] < L'0' || name[at] > L'9') return std::nullopt;
+        seconds = seconds * 10 + (name[at] - L'0');
+    }
+    return seconds;
+}
+
+// The newest dumps made since the last run began: an older run's would be read as this one's.
+std::vector<fs::path> freeze_dumps(const fs::path& root, std::int64_t began) {
+    std::vector<std::pair<std::int64_t, fs::path>> found;
+    std::error_code failed;
+    for (fs::directory_iterator entry(root, failed), end; !failed && entry != end; entry.increment(failed)) {
+        const fs::path name = entry->path().filename();
+        const std::optional<std::int64_t> made = dump_time(name.native());
+        if (made && *made >= began && plain_file(entry->path())) found.emplace_back(*made, name);
+    }
+    std::ranges::sort(found, std::greater{});
+    if (found.size() > most_freeze_dumps) found.resize(most_freeze_dumps);
+    std::vector<fs::path> names;
+    for (auto& dump : found) names.push_back(std::move(dump.second));
+    return names;
+}
+
 std::string windows_value(const wchar_t* name) {
     std::array<wchar_t, 128> value{};
     DWORD bytes = static_cast<DWORD>(sizeof(wchar_t) * (value.size() - 1));
@@ -116,11 +203,20 @@ Report make_report(const fs::path& root, std::string_view system, std::string_vi
     std::error_code failed;
     fs::remove_all(folder, failed);  // one of the same second: what tar packs is what is written here and nothing older
     fs::create_directories(folder, failed);
-    write(folder / "system.txt", without_user_names(system));
-    for (const char* name : gathered) {
-        std::error_code missing;
-        if (fs::is_regular_file(root / name, missing)) write(folder / name, without_user_names(end_of(root / name)));
+    std::vector<fs::path> names(gathered.begin(), gathered.end());
+    const std::optional<std::int64_t> began = run_began(root / "startup.log");
+    if (began)
+        for (auto& dump : freeze_dumps(root, *began)) names.push_back(std::move(dump));
+    std::string note(system);
+    if (!note.empty() && note.back() != '\n') note += "\r\n";
+    note += "Report made " + utc_now() + "\r\n";
+    if (!began) note += "Freeze dumps: none taken, the log does not say when its run began\r\n";
+    for (const fs::path& name : names) {
+        const bool present = plain_file(root / name);
+        note += narrow(name.native()) + ": " + (present ? listed(root / name) : "none") + "\r\n";
+        if (present) write(folder / name, without_user_names(end_of(root / name)));
     }
+    write(folder / "system.txt", without_user_names(note));
     const fs::path zip = fs::path(folder).concat(".zip");
     if (!archive || !run_tar(folder, zip)) {
         fs::remove(zip, failed);
@@ -147,6 +243,14 @@ std::string system_note() {
     for (const auto& adapter : adapters) note += "Graphics: " + adapter + "\r\n";
     return note;
 }
+
+std::string utc_now() {
+    SYSTEMTIME now{};
+    GetSystemTime(&now);
+    return utc_text(now);
+}
+
+std::string started_line() { return std::string(started) + utc_now() + "\r\n"; }
 
 std::string report_stamp() {
     const std::time_t now = std::time(nullptr);

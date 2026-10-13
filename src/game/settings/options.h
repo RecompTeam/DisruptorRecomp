@@ -4,6 +4,7 @@
 
 #include <functional>
 #include <span>
+#include <string>
 
 // The settings a player can change, said once for the launcher and for the in-game menu.
 namespace disruptor::settings {
@@ -34,5 +35,9 @@ std::span<const Option> options();
 const Option* find_option(const char* key);
 // Whether every toggle the option needs is on, as `on` tells, and every toggle those need in turn.
 bool applies(const Option& option, const std::function<bool(const Option&)>& on);
+// The option's value in `settings`, or the one a fresh installation runs with where the file does not name it.
+int stored(const Settings& settings, const Option& option);
+// Every option as `key=value` in the table's order, for the game's log.
+std::string describe(const Settings& settings);
 
 } // namespace disruptor::settings
