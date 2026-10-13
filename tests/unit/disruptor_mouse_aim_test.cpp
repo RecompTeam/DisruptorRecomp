@@ -463,12 +463,10 @@ void test_capture_release_and_frame_motion() {
     g_mouse.log = std::tmpfile();
     psx_write_byte(kTestYawAddress, 100);
 
-    g_buttons = SDL_BUTTON_MMASK;
     mouse_aim_frame();
     expect(g_mouse.captured && g_relative_mode,
-           "middle-click captures the relative mouse");
+           "the game holds the mouse as soon as its window has focus, with no click");
 
-    g_buttons = 0;
     g_relative_x = 25.0f;
     mouse_aim_frame();
     expect(psx_read_byte(kTestYawAddress) == 98,
@@ -480,24 +478,30 @@ void test_capture_release_and_frame_motion() {
     g_buttons = SDL_BUTTON_MMASK;
     mouse_aim_frame();
     expect(!g_mouse.captured && !g_relative_mode,
-           "second middle-click releases the mouse");
+           "a middle click releases the mouse");
     expect_close(g_mouse.vertical_pitch, 2.0,
                  "capture release preserves the requested vertical view");
-
     g_buttons = 0;
     mouse_aim_frame();
+    mouse_aim_frame();
+    expect(!g_mouse.captured, "a mouse the player let go stays free while the window keeps focus");
+
     g_buttons = SDL_BUTTON_MMASK;
     mouse_aim_frame();
+    expect(g_mouse.captured && g_relative_mode, "the next middle click takes it back");
     g_buttons = 0;
     mouse_aim_frame();
     g_keys[SDL_SCANCODE_ESCAPE] = 1;
     mouse_aim_frame();
     expect(!g_mouse.captured && !g_relative_mode,
            "Escape releases a captured mouse");
-
     g_keys[SDL_SCANCODE_ESCAPE] = 0;
-    g_buttons = SDL_BUTTON_MMASK;
     mouse_aim_frame();
+    expect(!g_mouse.captured, "and it stays free after Escape");
+
+    g_buttons = SDL_BUTTON_LMASK;
+    mouse_aim_frame();
+    expect(g_mouse.captured && g_relative_mode, "a left click in the window takes the mouse back");
     g_buttons = 0;
     mouse_aim_frame();
     g_window_flags = 0;
@@ -506,120 +510,129 @@ void test_capture_release_and_frame_motion() {
            "focus loss releases a captured mouse");
 }
 
-void test_focus_return_restores_a_capture_lost_to_focus() {
+void test_focus_and_the_players_choice() {
     reset_state();
     g_mouse.enabled = true;
     g_mouse.mouse_aim_enabled = true;
     g_mouse.configured = true;
     g_mouse.log = std::tmpfile();
-    const auto frame = [](SDL_WindowFlags focus, std::uint32_t buttons, bool escape = false) {
-        g_window_flags = focus;
+    const SDL_WindowFlags focus = SDL_WINDOW_INPUT_FOCUS;
+    const auto frame = [](SDL_WindowFlags flags, std::uint32_t buttons, bool escape = false) {
+        g_window_flags = flags;
         g_buttons = buttons;
         g_keys[SDL_SCANCODE_ESCAPE] = escape ? 1 : 0;
         mouse_aim_frame();
     };
-    const auto capture = [&frame] {
-        frame(SDL_WINDOW_INPUT_FOCUS, SDL_BUTTON_MMASK);
-        frame(SDL_WINDOW_INPUT_FOCUS, 0);
-    };
 
     frame(0, 0);
-    frame(SDL_WINDOW_INPUT_FOCUS, 0);
-    expect(!g_mouse.captured && !g_relative_mode,
-           "focus coming back captures nothing that was not captured");
-
-    capture();
+    expect(!g_mouse.captured && !g_relative_mode, "a window without focus leaves the mouse alone");
+    frame(focus, 0);
+    expect(g_mouse.captured && g_relative_mode, "focus coming takes the mouse");
     frame(0, 0);
     expect(!g_mouse.captured && !g_relative_mode, "focus loss releases the mouse");
     frame(0, 0);
     expect(!g_mouse.captured, "the mouse stays free while the window has no focus");
-    frame(SDL_WINDOW_INPUT_FOCUS, 0);
-    expect(g_mouse.captured && g_relative_mode,
-           "focus coming back takes the mouse again");
+    frame(focus, 0);
+    expect(g_mouse.captured && g_relative_mode, "focus coming back takes the mouse again");
 
-    frame(SDL_WINDOW_INPUT_FOCUS, SDL_BUTTON_MMASK);
+    frame(focus, SDL_BUTTON_MMASK);
     expect(!g_mouse.captured, "a middle click gives the mouse up");
-    frame(SDL_WINDOW_INPUT_FOCUS, 0);
+    frame(focus, SDL_BUTTON_MMASK);
+    expect(!g_mouse.captured, "the held button toggles nothing on the next frame");
+    frame(focus, 0);
     frame(0, 0);
-    frame(SDL_WINDOW_INPUT_FOCUS, 0);
+    frame(focus, 0);
     expect(!g_mouse.captured && !g_relative_mode,
            "a mouse given up by a middle click stays free when focus comes back");
+    frame(focus, SDL_BUTTON_MMASK);
+    frame(focus, 0);
+    expect(g_mouse.captured, "a middle click takes it back");
 
-    capture();
-    frame(SDL_WINDOW_INPUT_FOCUS, 0, true);
+    frame(focus, 0, true);
     expect(!g_mouse.captured, "Escape gives the mouse up");
-    frame(SDL_WINDOW_INPUT_FOCUS, 0);
+    frame(focus, 0);
     frame(0, 0);
-    frame(SDL_WINDOW_INPUT_FOCUS, 0);
+    frame(focus, 0);
     expect(!g_mouse.captured && !g_relative_mode,
            "a mouse given up by Escape stays free when focus comes back");
 
-    capture();
+    frame(0, SDL_BUTTON_LMASK);
+    expect(!g_mouse.captured, "a click seen while the window has no focus takes nothing");
     frame(0, 0);
-    frame(SDL_WINDOW_INPUT_FOCUS, SDL_BUTTON_MMASK);
-    expect(!g_mouse.captured && !g_relative_mode,
-           "a middle click as focus comes back gives up the capture that waited for it");
-    frame(SDL_WINDOW_INPUT_FOCUS, SDL_BUTTON_MMASK);
-    expect(!g_mouse.captured, "the held button toggles nothing on the next frame");
-    frame(SDL_WINDOW_INPUT_FOCUS, 0);
-    expect(!g_mouse.captured, "and nothing waits for focus any more");
+    frame(focus, SDL_BUTTON_LMASK);
+    expect(g_mouse.captured && g_relative_mode, "a click in the focused window takes the mouse back");
+    frame(focus, 0);
 
-    capture();
     frame(0, 0);
     frame(0, SDL_BUTTON_MMASK);
-    expect(!g_mouse.captured, "a middle click seen while the capture waits gives it up too");
     frame(0, 0);
-    frame(SDL_WINDOW_INPUT_FOCUS, 0);
-    expect(!g_mouse.captured && !g_relative_mode, "and focus coming back takes nothing");
-
-    capture();
-    frame(0, SDL_BUTTON_MMASK);
-    expect(!g_mouse.captured, "a middle click on the frame focus goes releases the mouse");
-    frame(0, 0);
-    frame(SDL_WINDOW_INPUT_FOCUS, 0);
+    frame(focus, 0);
     expect(!g_mouse.captured && !g_relative_mode,
-           "and that was the player giving it up, not the focus taking it");
+           "a middle click seen while the window has no focus gives the mouse up too");
+    frame(0, 0);
+    frame(0, SDL_BUTTON_MMASK);
+    expect(!g_mouse.captured && !g_relative_mode, "a middle click without focus takes nothing yet");
+    frame(0, 0);
+    frame(focus, 0);
+    expect(g_mouse.captured, "but the mouse is wanted again and focus brings it");
 
-    capture();
+    frame(focus, SDL_BUTTON_LMASK);
+    frame(focus, SDL_BUTTON_LMASK, true);
+    expect(!g_mouse.captured, "Escape lets the mouse go while the left button is down");
+    frame(focus, SDL_BUTTON_LMASK);
+    expect(!g_mouse.captured, "and the button still held takes nothing back");
+    frame(focus, 0);
+    frame(focus, SDL_BUTTON_LMASK);
+    frame(focus, 0);
+    expect(g_mouse.captured, "a new click does");
+
     frame(0, 0, true);
     expect(!g_mouse.captured, "Escape on the frame focus goes releases the mouse");
-    frame(SDL_WINDOW_INPUT_FOCUS, 0);
+    frame(focus, 0);
     expect(!g_mouse.captured && !g_relative_mode,
-           "and that was the player giving it up as well");
+           "and that was the player giving it up, not the focus taking it");
+    frame(focus, SDL_BUTTON_LMASK);
+    frame(focus, 0);
+    expect(g_mouse.captured, "a click takes it back after that as well");
 
-    capture();
     frame(0, 0);
-    frame(SDL_WINDOW_INPUT_FOCUS, 0, true);
+    frame(focus, 0, true);
     expect(!g_mouse.captured && !g_relative_mode,
-           "Escape on the frame focus comes back keeps a waiting capture from returning");
-    frame(SDL_WINDOW_INPUT_FOCUS, 0);
-    expect(!g_mouse.captured, "and it does not return on the next frame either");
+           "Escape on the frame focus comes back keeps the mouse from being taken");
+    frame(focus, 0);
+    expect(!g_mouse.captured, "and it is not taken on the next frame either");
+    frame(focus, SDL_BUTTON_LMASK);
+    frame(focus, 0);
 
-    capture();
-    frame(0, 0);
-    frame(0, 0, true);
-    frame(0, 0);
-    frame(SDL_WINDOW_INPUT_FOCUS, 0);
-    expect(!g_mouse.captured && !g_relative_mode,
-           "Escape seen while the capture waits for focus gives it up as well");
-
-    capture();
     frame(0, 0);
     g_relative_mode_succeeds = false;
-    frame(SDL_WINDOW_INPUT_FOCUS, 0);
+    frame(focus, 0);
     expect(!g_mouse.captured, "a capture the host refuses is not claimed");
     g_relative_mode_succeeds = true;
-    frame(SDL_WINDOW_INPUT_FOCUS, 0);
+    frame(focus, 0);
     expect(!g_mouse.captured, "and it is not tried again on every frame");
+    frame(focus, SDL_BUTTON_LMASK);
+    expect(g_mouse.captured && g_relative_mode, "a click asks again");
+    frame(focus, 0);
 
-    capture();
+    g_relative_mode_succeeds = false;
+    frame(focus, 0, true);
+    expect(g_mouse.captured, "an Escape release the host refuses leaves the mouse captured");
+    frame(focus, 0);
+    g_relative_mode_succeeds = true;
+    frame(focus, 0, true);
+    expect(!g_mouse.captured && !g_relative_mode, "and the next Escape lets it go");
+    frame(focus, 0);
+    frame(focus, SDL_BUTTON_LMASK);
+    frame(focus, 0);
+
     g_relative_mode_succeeds = false;
     frame(0, 0);
     expect(g_mouse.captured, "a release the host refuses leaves the mouse captured");
     g_relative_mode_succeeds = true;
-    frame(SDL_WINDOW_INPUT_FOCUS, SDL_BUTTON_MMASK);
+    frame(focus, SDL_BUTTON_MMASK);
     expect(!g_mouse.captured, "and the next middle click still gives it up");
-    frame(SDL_WINDOW_INPUT_FOCUS, 0);
+    frame(focus, 0);
 }
 
 void test_high_precision_camera_residual() {
@@ -632,12 +645,10 @@ void test_high_precision_camera_residual() {
     g_mouse.log = std::tmpfile();
     psx_write_byte(kTestYawAddress, 100);
 
-    g_buttons = SDL_BUTTON_MMASK;
     mouse_aim_frame();
     expect_close(g_camera_yaw_residual, 0.0,
                  "capture starts with zero presentation residual");
 
-    g_buttons = 0;
     g_relative_x = 6.0f;
     mouse_aim_frame();
     expect(psx_read_byte(kTestYawAddress) == 100,
@@ -746,6 +757,73 @@ void test_modern_mouse_buttons_require_capture() {
     expect_pressed(kPadSquare, "right mouse maps to psionic attack");
     expect_pressed(kPadL1, "mouse X1 maps to weapon selection");
     expect_pressed(kPadR1, "mouse X2 maps to psionic selection");
+}
+
+void test_the_click_that_takes_the_mouse_is_no_shot() {
+    reset_state();
+    g_mouse.enabled = true;
+    g_mouse.modern_controls_enabled = true;
+    g_mouse.configured = true;
+    g_mouse.log = std::tmpfile();
+    const auto frame = [](std::uint32_t buttons, bool escape = false, SDL_WindowFlags flags = SDL_WINDOW_INPUT_FOCUS) {
+        g_pad_buttons = 0xFFFFu;
+        g_window_flags = flags;
+        g_buttons = buttons;
+        g_keys[SDL_SCANCODE_ESCAPE] = escape ? 1 : 0;
+        mouse_aim_frame();
+    };
+
+    frame(0);
+    expect(g_mouse.captured, "modern controls alone hold the mouse");
+    frame(SDL_BUTTON_LMASK);
+    expect_pressed(kPadCross, "a left click of a held mouse fires");
+    frame(0, true);
+    frame(0);
+    expect(!g_mouse.captured, "Escape lets the mouse go");
+    frame(SDL_BUTTON_LMASK);
+    expect(g_mouse.captured, "a left click takes it back");
+    expect_released(kPadCross, "and that click does not fire");
+    frame(SDL_BUTTON_LMASK);
+    expect_released(kPadCross, "nor while the button stays down");
+    frame(0);
+    frame(SDL_BUTTON_LMASK);
+    expect_pressed(kPadCross, "the next click fires");
+    frame(0);
+
+    frame(0, false, 0);
+    expect(!g_mouse.captured, "the mouse is free without focus");
+    frame(SDL_BUTTON_LMASK);
+    expect(g_mouse.captured, "the click that brings focus back takes the mouse with it");
+    expect_released(kPadCross, "and is no shot either");
+    frame(0);
+
+    g_buttons = SDL_BUTTON_LMASK;
+    (void)disruptor_mouse_set_captured(0);
+    (void)disruptor_mouse_set_captured(1);
+    frame(SDL_BUTTON_LMASK);
+    expect(g_mouse.captured, "a menu that closes hands the mouse back");
+    expect_released(kPadCross, "and the click that closed it is no shot");
+    frame(0);
+    frame(SDL_BUTTON_LMASK);
+    expect_pressed(kPadCross, "the click after it fires");
+    frame(0);
+
+    g_mouse.modern_controls_enabled = false;
+    refresh_live_control_state("test-off");
+    expect(!g_mouse.captured && !g_relative_mode, "switching every mouse feature off frees the mouse");
+    frame(0);
+    frame(SDL_BUTTON_LMASK);
+    frame(0);
+    expect(!g_mouse.captured && !g_relative_mode, "with every mouse feature off nothing takes the mouse, a click neither");
+    g_mouse.high_precision_camera = true;
+    refresh_live_control_state("test-camera-alone");
+    frame(0);
+    frame(0);
+    expect(!g_mouse.captured && !g_relative_mode, "smooth turning alone, with nothing to turn by, takes no mouse");
+    g_mouse.modern_controls_enabled = true;
+    refresh_live_control_state("test-on");
+    frame(0);
+    expect(g_mouse.captured && g_relative_mode, "and switching a feature on again takes it, with no click");
 }
 
 void test_live_settings_api() {
@@ -936,7 +1014,19 @@ void test_gameplay_gate_discards_new_vertical_motion() {
 }  // namespace
 
 int main(int argc, char **argv) {
-    if (argc == 2 && std::strcmp(argv[1], "--registration") == 0) {
+    if (argc == 2 && std::strcmp(argv[1], "--replay") == 0) {
+        const bool given_up = g_mouse.given_up;
+        reset_state();
+        g_mouse.given_up = given_up;
+        g_mouse.enabled = g_mouse.mouse_aim_enabled = g_mouse.configured = true;
+        g_mouse.log = std::tmpfile();
+        mouse_aim_frame();
+        mouse_aim_frame();
+        expect(!g_mouse.captured && !g_relative_mode, "a capsule's replay leaves the mouse alone though its window has focus");
+        g_buttons = SDL_BUTTON_MMASK;
+        mouse_aim_frame();
+        expect(g_mouse.captured && g_relative_mode, "until the viewer clicks for it");
+    } else if (argc == 2 && std::strcmp(argv[1], "--registration") == 0) {
         expect(g_registered_hook != nullptr,
                "environment opt-in registers the frame hook");
     } else {
@@ -954,10 +1044,11 @@ int main(int argc, char **argv) {
         test_vertical_direction_inversion_and_clamp();
         test_simultaneous_relative_axes_sample();
         test_capture_release_and_frame_motion();
-    test_focus_return_restores_a_capture_lost_to_focus();
+        test_focus_and_the_players_choice();
         test_high_precision_camera_residual();
         test_modern_keyboard_mapping_and_merge();
         test_modern_mouse_buttons_require_capture();
+        test_the_click_that_takes_the_mouse_is_no_shot();
         test_live_settings_api();
         test_vertical_only_capture();
         test_host_ui_blocks_polled_mod_input();

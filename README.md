@@ -86,8 +86,9 @@ Press **backquote** (`` ` ``) to open settings; **Escape** closes them. Gameplay
 continues while the menu is open, but game input is blocked.
 
 With modern controls enabled: **WASD** moves, **left mouse** fires, **right
-mouse** uses psionics, **Space** jumps, and **E** interacts. **Middle-click**
-captures the mouse; middle-click or Escape releases it. Add `-VerticalLook` to
+mouse** uses psionics, **Space** jumps, and **E** interacts. The game holds
+the mouse while its window has focus. Escape or a middle-click releases it,
+and a left-click in the window takes it back. Add `-VerticalLook` to
 enable experimental vertical aim.
 
 **Alt+Enter** toggles fullscreen. **Shift+F1–F12** saves a state;

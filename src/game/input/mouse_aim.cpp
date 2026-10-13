@@ -85,7 +85,9 @@ struct MouseAimState {
     bool high_precision_camera = false;
     bool configured = false;
     bool captured = false;
-    bool recapture_on_focus = false;
+    bool given_up = false;      // the player let the mouse go with Escape or a middle click: only a click takes it back
+    bool swallow_left = false;  // the click that took the mouse is no shot: the left button waits for its release
+    bool left_was_down = false;
     bool middle_was_down = false;
     bool escape_was_down = false;
     bool invert_horizontal = false;
@@ -309,6 +311,7 @@ void set_capture(bool captured, const char *reason) {
     if (captured == g_mouse.captured) return;
     if (!set_relative_mouse_mode(captured)) {
         set_title("ERROR enabling relative mode; see log");
+        std::printf("disruptor: mouse %s failed (%s): %s\n", captured ? "capture" : "release", reason, SDL_GetError());
         if (g_mouse.log) {
             std::fprintf(g_mouse.log, "event=relative-mode-error requested=%s error=%s\n",
                          captured ? "capture" : "release", SDL_GetError());
@@ -323,12 +326,13 @@ void set_capture(bool captured, const char *reason) {
     gpu_geometry_camera_yaw_residual_set(0.0);
     discard_relative_motion();
     log_event(reason);
+    std::printf("disruptor: mouse %s (%s)\n", captured ? "captured" : "released", reason);
     if (captured) {
         set_title(g_mouse.modern_controls_enabled
             ? "CAPTURED - LMB fire, RMB psionic; middle-click or Esc releases"
             : "CAPTURED - move to aim; middle-click or Esc releases");
     } else {
-        set_title("released - middle-click in live gameplay to capture");
+        set_title("released - left-click in the window to capture");
     }
 }
 
@@ -563,6 +567,7 @@ void mouse_aim_frame() {
         g_mouse.escape_was_down =
             keys && keys[SDL_SCANCODE_ESCAPE] != 0;
         g_mouse.middle_was_down = (buttons & SDL_BUTTON_MMASK) != 0;
+        g_mouse.left_was_down = (buttons & SDL_BUTTON_LMASK) != 0;
         discard_relative_motion();
         gpu_geometry_camera_yaw_residual_set(0.0);
         return;
@@ -571,7 +576,7 @@ void mouse_aim_frame() {
     static bool announced = false;
     if (!announced) {
         announced = true;
-        set_title("middle-click in live gameplay to capture");
+        set_title("ready");
         log_event("ready");
     }
 
@@ -579,35 +584,38 @@ void mouse_aim_frame() {
     const bool escape_down = keys && keys[SDL_SCANCODE_ESCAPE] != 0;
     const uint32_t buttons = get_mouse_buttons();
     const bool middle_down = (buttons & SDL_BUTTON_MMASK) != 0;
+    const bool left_down = (buttons & SDL_BUTTON_LMASK) != 0;
 
     const bool focused =
         (SDL_GetWindowFlags(sdl_window) & SDL_WINDOW_INPUT_FOCUS) != 0;
-    if (escape_down && !g_mouse.escape_was_down &&
-        (g_mouse.captured || g_mouse.recapture_on_focus)) {
-        /* The player's key and click come before the focus branches: on the
-         * frame focus goes or comes back those would take them and the mouse
-         * would return uncalled. */
-        g_mouse.recapture_on_focus = false;
+    const bool usable = g_mouse.mouse_aim_enabled || g_mouse.vertical_look_enabled || g_mouse.modern_controls_enabled;
+    const bool was_captured = g_mouse.captured;
+    /* The mouse is held whenever the window has focus, with no click asked for. The player's key and clicks come before the
+     * focus branches: on the frame focus goes or comes back those would take them. */
+    if (escape_down && !g_mouse.escape_was_down && (g_mouse.captured || !g_mouse.given_up)) {
+        g_mouse.given_up = true;
         set_capture(false, "escape-release");
     } else if (middle_down && !g_mouse.middle_was_down) {
-        /* A capture that waits for focus counts as held: the click gives it up. */
-        const bool held = g_mouse.captured || g_mouse.recapture_on_focus;
-        g_mouse.recapture_on_focus = false;
-        set_capture(!held, held ? "middle-release" : "middle-capture");
+        g_mouse.given_up = !g_mouse.given_up;
+        set_capture(!g_mouse.given_up && focused, g_mouse.given_up ? "middle-release" : "middle-capture");
+    } else if (left_down && !g_mouse.left_was_down && g_mouse.given_up && focused) {
+        g_mouse.given_up = false;
+        set_capture(true, "click-capture");
     } else if (g_mouse.captured && !focused) {
         set_capture(false, "focus-lost-release");
-        g_mouse.recapture_on_focus = !g_mouse.captured;
-    } else if (g_mouse.recapture_on_focus && focused) {
-        /* The player's own choice stands across Alt+Tab: only a middle click
-         * or Escape gives the mouse up for good. */
-        g_mouse.recapture_on_focus = false;
-        set_capture(true, "focus-regained-capture");
+    } else if (!g_mouse.captured && !g_mouse.given_up && focused && usable) {
+        set_capture(true, "focus-capture");
+        /* Relative mode refused: asking again every frame would fill the log. A click asks again. */
+        if (!g_mouse.captured) g_mouse.given_up = true;
     }
+    if (g_mouse.captured && !was_captured && left_down) g_mouse.swallow_left = true;
+    if (!left_down) g_mouse.swallow_left = false;
 
     g_mouse.middle_was_down = middle_down;
     g_mouse.escape_was_down = escape_down;
+    g_mouse.left_was_down = left_down;
 
-    apply_modern_controls(keys, buttons);
+    apply_modern_controls(keys, g_mouse.swallow_left ? buttons & ~static_cast<uint32_t>(SDL_BUTTON_LMASK) : buttons);
     if (g_mouse.captured &&
         (g_mouse.mouse_aim_enabled || g_mouse.vertical_look_enabled)) {
         /* SDL drains both relative axes in one call.  Keep this a single
@@ -686,6 +694,8 @@ void mouse_aim_frame() {
 
 struct MouseAimRegistration {
     MouseAimRegistration() {
+        // A replay's turns are the recording's: its run takes the mouse only when the viewer clicks for it.
+        g_mouse.given_up = std::getenv("PSX_DISRUPTOR_CAPSULE_REPLAY") != nullptr;
         g_mouse.mouse_aim_enabled =
             env_enabled("PSX_DISRUPTOR_MOUSE_AIM");
         g_mouse.vertical_look_enabled =
@@ -895,7 +905,6 @@ extern "C" int disruptor_mouse_captured(void) {
 extern "C" int disruptor_mouse_set_captured(int captured) {
     load_configuration();
     const bool next = captured != 0;
-    g_mouse.recapture_on_focus = false;
     if (next && !g_mouse.mouse_aim_enabled &&
         !g_mouse.vertical_look_enabled &&
         !g_mouse.modern_controls_enabled) {
@@ -912,6 +921,7 @@ extern "C" int disruptor_mouse_set_captured(int captured) {
         g_mouse.escape_was_down =
             keys && keys[SDL_SCANCODE_ESCAPE] != 0;
         g_mouse.middle_was_down = (buttons & SDL_BUTTON_MMASK) != 0;
+        g_mouse.left_was_down = g_mouse.swallow_left = (buttons & SDL_BUTTON_LMASK) != 0;
     }
     return g_mouse.captured == next ? 1 : 0;
 }
