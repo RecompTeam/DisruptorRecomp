@@ -598,36 +598,22 @@ static inline int gpu_temporal_mesh_pairs(const GpuTemporalTriangle *prev, int p
     return best_twins;
 }
 
-/* Which corner of its rectangle each vertex of a billboard half stands on. */
-static inline unsigned gpu_temporal_sprite_half(const GpuTemporalTriangle *face) {
-    float left = face->x[0], top = face->y[0];
-    unsigned kind = 0;
-    for (int vertex = 1; vertex < 3; ++vertex) {
-        if (face->x[vertex] < left) left = face->x[vertex];
-        if (face->y[vertex] < top) top = face->y[vertex];
-    }
-    for (int vertex = 0; vertex < 3; ++vertex)
-        kind |= ((face->x[vertex] > left ? 1u : 0u) | (face->y[vertex] > top ? 2u : 0u)) << (2 * vertex);
-    return kind;
-}
-
 #define GPU_TEMPORAL_SPRITE_DEPTH_RATIO 0.75
-/* Corner codes of the renderer's two rectangle halves: {x, x+w, x},{y, y, y+h} and {x+w, x, x+w},{y, y+h, y+h}. */
-#define GPU_TEMPORAL_SPRITE_UPPER_LEFT 0x24u
-#define GPU_TEMPORAL_SPRITE_LOWER_RIGHT 0x39u
 
 typedef struct GpuTemporalSpriteBox {
     double left, top, right, bottom;
 } GpuTemporalSpriteBox;
 
-/* The rectangle of the billboard whose upper left half is `first`, when the next face is its lower right half. */
+/* The rectangle of the billboard whose upper left half {x, x+w, x},{y, y, y+h} is `first`, when the next face is its lower right half {x+w, x, x+w},{y, y+h, y+h}. A part-step turn scales a corner's row and depth by its column: both are asked for side by side. */
 static inline int gpu_temporal_sprite_box(const GpuTemporalTriangle *faces, int count, int first,
                                           GpuTemporalSpriteBox *box) {
     const GpuTemporalTriangle *upper = &faces[first], *lower = upper + 1;
     if (first + 1 >= count || !upper->sprite || !lower->sprite ||
-        !gpu_temporal_mesh_known_depth(upper->depth[0]) || lower->depth[0] != upper->depth[0] ||
-        gpu_temporal_sprite_half(upper) != GPU_TEMPORAL_SPRITE_UPPER_LEFT ||
-        gpu_temporal_sprite_half(lower) != GPU_TEMPORAL_SPRITE_LOWER_RIGHT ||
+        !gpu_temporal_mesh_known_depth(upper->depth[0]) || !gpu_temporal_mesh_known_depth(upper->depth[1]) ||
+        upper->depth[2] != upper->depth[0] || lower->depth[1] != upper->depth[0] ||
+        lower->depth[0] != upper->depth[1] || lower->depth[2] != upper->depth[1] ||
+        !(upper->x[0] < upper->x[1]) || upper->x[2] != upper->x[0] || !(upper->y[0] < upper->y[2]) ||
+        lower->x[2] != upper->x[1] || !(lower->y[0] < lower->y[2]) ||
         lower->x[0] != upper->x[1] || lower->y[0] != upper->y[1] ||
         lower->x[1] != upper->x[2] || lower->y[1] != upper->y[2]) return 0;
     box->left = upper->x[0]; box->top = upper->y[0];

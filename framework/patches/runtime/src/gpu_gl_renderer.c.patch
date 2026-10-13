@@ -1,8 +1,8 @@
 diff --git a/runtime/src/gpu_gl_renderer.c b/runtime/src/gpu_gl_renderer.c
-index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..6b0e245a77066f905a892d5d309c7c9b707cab8e 100644
+index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..144876dc0ee58c415968dd0cb1d9bff7ff57fcac 100644
 --- a/runtime/src/gpu_gl_renderer.c
 +++ b/runtime/src/gpu_gl_renderer.c
-@@ -1,747 +1,1096 @@
+@@ -1,747 +1,1127 @@
 -/* gpu_gl_renderer.c — hardware OpenGL renderer backend.
 - *
 - * ARCHITECTURE (v2 — GPU-authoritative VRAM)
@@ -146,6 +146,9 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..6b0e245a77066f905a892d5d309c7c9b
 +#include "gpu_turned_perspective.h"
 +#include "gpu_turn_clip.h"
 +#include "gpu_world_depth.h"
++#include "gpu_world_texel.h"
++#include "gpu_ws_screen_tile.h"
++#include "gpu_near_face.h"
 +#include "host_ui.h"
 +#include "latency_ring.h"
 +
@@ -417,6 +420,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..6b0e245a77066f905a892d5d309c7c9b
 +#define PSXGL_LINK_STATUS           0x8B82
 +#define PSXGL_TEXTURE0              0x84C0
 +#define PSXGL_ARRAY_BUFFER          0x8892
++#define PSXGL_DEPTH_CLAMP           0x864F
 +#define PSXGL_STREAM_DRAW           0x88E0
 +#define PSXGL_FRAMEBUFFER           0x8D40
 +#define PSXGL_READ_FRAMEBUFFER      0x8CA8
@@ -1158,6 +1162,10 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..6b0e245a77066f905a892d5d309c7c9b
 +static float         s_next_sprite_depth = 0.0f, s_sprite_depth = 0.0f;
 +static float         s_next_sprite_sides[4], s_sprite_sides[4]; /* left, top, right, bottom */
 +static int           s_sprite_x, s_sprite_y;
++static PsxWsPlacedTile s_next_tile, s_tile;  /* the backdrop tile the next rectangle is, and the one being drawn */
++static int           s_next_tile_set = 0, s_tile_set = 0;
++static float         s_next_near[3][3], s_near[3][3];  /* a near face's corners: place and w, see gpu_near_face.h */
++static int           s_next_near_set = 0, s_near_set = 0, s_near_shader = 0;
 +static float         s_yaw_sin = 0.0f, s_yaw_cos = 1.0f;
 +static float         s_yaw_center_x = 160.0f;
 +static float         s_yaw_center_y_relative = 120.0f;
@@ -1376,6 +1384,26 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..6b0e245a77066f905a892d5d309c7c9b
 +    return visual_flags == 0 && (s_world_begun || gpu_ws_drawing_flat()) ? -1.0f : (float)visual_flags;
 +}
 +
++/* A placed backdrop tile's corner at whole pixel x with texture coordinate u, `across` texels from the tile's other
++ * side. A free edge moves with the panorama (mark -2). An end of the game's span stays and slides its texture: marks -3
++ * for the left end and -4 for the right. */
++static int tile_placed(void) { return s_geometry_correction && s_tile_set; }
++static void tile_corner(int x, float u, float across, float *place, float *mark, float *slide, float *want) {
++    const int end = x == s_sprite_x ? 0 : 1;
++    const float offset = end ? s_tile.right : s_tile.left;
++    if (s_tile.pins & (end ? 2u : 1u)) {
++        *place = (float)x;
++        *mark = end ? -4.0f : -3.0f;
++        *slide = psx_ws_screen_tile_slide(offset, s_tile.moved, s_tile.scale, end,
++                                          psx_ws_screen_tile_room(u, s_tile.column, end), across > 1.0f ? across - 1.0f : 0.0f);
++        *want = psx_ws_screen_tile_want(offset, s_tile.moved, s_tile.scale);
++    } else {
++        *place = (float)x + offset + s_tile.moved;
++        *mark = -2.0f;
++        *slide = *want = 0.0f;
++    }
++}
++
 +/* Capture the one-shot metadata queued by gpu.c for the next polygon. `xs/ys`
 + * remain the exact GP0 coordinates used for canonical dirty tracking and
 + * guest-visible rasterization. The returned floats are consumed only by the
@@ -1413,6 +1441,9 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..6b0e245a77066f905a892d5d309c7c9b
 +                        : s_sprite_depth > 0.0f ? TEMPORAL_SPRITE_IDENTITY : 0u;
 +        s_next_identity[i] = 0u;
 +    }
++    s_near_set = exact && s_next_near_set && s_near_shader;
++    s_next_near_set = 0;
++    if (s_near_set) memcpy(s_near, s_next_near, sizeof(s_near));
 +    const int filler = s_grown_under && exact && s_next_world == 2;
 +    s_next_world = 0;
 +    s_next_precise = 0;
@@ -1831,7 +1862,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..6b0e245a77066f905a892d5d309c7c9b
  static const char *INTERP_FS =
      "#version 330\n"
      "in vec2 v_uv; uniform sampler2D u_prev; uniform sampler2D u_curr;\n"
-@@ -757,2715 +1106,4300 @@
+@@ -757,2715 +1137,4358 @@
      "  }\n"
      "  frag=mix(prev,curr,alpha);\n"
      "}\n";
@@ -3641,6 +3672,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..6b0e245a77066f905a892d5d309c7c9b
 +    "uniform vec4 u_visual_options; /* focal-x, full-yaw, tint-strength, unused */\n"
 +    "noperspective out vec2 v_uv; noperspective out vec3 v_uvq;\n"
 +    "noperspective out vec4 v_col; flat out int v_perspective;\n"
++    "out vec2 v_uvw;  /* with a real w the rasterizer gives it perspective */\n"
 +    "noperspective out float v_tint;\n"
 +    "noperspective out vec2 v_fade;\n"
 +    "flat out ivec2 v_tpage; flat out ivec2 v_clut; flat out int v_depth;\n"
@@ -3653,20 +3685,35 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..6b0e245a77066f905a892d5d309c7c9b
 +    "  /* u_shift: align GL's center-sample grid with the PS1 integer grid (see\n"
 +    "   * GEO_VS) so interpolated uv at a fragment equals the PS1 DDA value. */\n"
 +    "  bool corrected = u_visual > 0.5 && a_visual_flags > 0.5;\n"
++    "  /* A backdrop tile on the mirror: put where the panorama stands, never turned. For it a_q is how far the texture\n"
++    "   * slides at an end that stays, within its column of the panorama. */\n"
++    "  bool placed = u_visual > 0.5 && a_visual_flags < -1.5;\n"
++    "  /* A face with a corner at or behind the viewer's plane: a_visual_pos is where a corner projects and a_q its w. */\n"
++    "  bool close = corrected && a_visual_flags > 3.5 && a_visual_flags < 4.5;\n"
++    "  float hw = close ? a_q : 1.0;\n"
 +    "  vec2 p = corrected ? a_visual_pos : a_pos;\n"
++    "  if (placed) { p = vec2(a_visual_pos.x, a_pos.y); v_uv.x += a_q; v_limits.x -= 64; v_limits.z += 64; }\n"
++    "  /* The whole-pixel rule for mirrored pictures flips a moving world face by a texel: the mirror takes back what is marked. */\n"
++    "  vec4 took = corrected ? step(0.125, a_limits - floor(a_limits + 0.5)) : vec4(0.0);\n"
++    "  v_uv -= took.xy; v_limits += ivec4(vec4(-took.xy, took.zw));\n"
 +    "  float xb = p.x, yb = p.y;\n"
 +    "  v_tint = (u_visual > 0.5 && a_visual_flags > 1.5) ? u_visual_options.z : 0.0;\n"
 +    "  if (corrected && abs(u_camera.x) > 0.0000001 && u_visual_options.x > 0.0) {\n"
 +    "    float ux = (xb-u_camera.z)/u_visual_options.x;\n"
 +    "    float den = u_camera.y-ux*u_camera.x;\n"
-+    "    if (abs(den) > 0.01) {\n"
++    "    if (close && abs(den) < 0.01) den = den < 0.0 ? -0.01 : 0.01;  /* as psx_near_turn */\n"
++    "    if (abs(den) > 0.01 || close) {\n"
 +    "      xb = u_camera.z + u_visual_options.x*((ux*u_camera.y+u_camera.x)/den);\n"
 +    "      if (u_visual_options.y > 0.5) yb = u_camera.w + (yb-u_camera.w)/den;\n"
++    "      if (close) hw *= den;\n"
 +    "    }\n"
 +    "  }\n"
 +    "  /* Under a fractional yaw a_q comes divided by the turn's denominator, or 0 for the whole triangle. */\n"
 +    "  float q = (u_visual > 0.5 && a_visual_flags > 1.5 && a_q > 0.0) ? a_q : 0.0;\n"
 +    "  v_uvq = vec3(a_uv*q, q); v_perspective = q > 0.0 ? 1 : 0;\n"
++    "  v_uvq.xy -= took.xy*q;\n"
++    "  if (close) { v_uvq = vec3(0.0); v_perspective = 2; }\n"
++    "  v_uvw = v_uv;\n"
 +    "  if (u_xscale < 0.0) {\n"
 +    "    float s = -u_xscale; float h = u_xhalf / s;\n"
 +    "    float l = u_xcenter - h, r = u_xcenter + h;\n"
@@ -3677,6 +3724,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..6b0e245a77066f905a892d5d309c7c9b
 +    "#version 330\n"
 +    "noperspective in vec2 v_uv; noperspective in vec3 v_uvq;\n"
 +    "noperspective in vec4 v_col; flat in int v_perspective;\n"
++    "in vec2 v_uvw;\n"
 +    "noperspective in float v_tint;\n"
 +    "noperspective in vec2 v_fade;\n"
 +    "out vec4 frag; out vec4 blend_factor;\n"
@@ -3756,6 +3804,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..6b0e245a77066f905a892d5d309c7c9b
 +    "void main(){\n"
 +    "  vec2 sample_uv = v_uv;\n"
 +    "  if (v_perspective != 0 && v_uvq.z > 1.0e-12) sample_uv = v_uvq.xy/v_uvq.z;\n"
++    "  if (v_perspective == 2) sample_uv = v_uvw;\n"
 +    "  int stp; vec3 rgb;\n"
 +    "  g_row = v_clut.y;\n"
 +    "  int rows = int(u_fade.z + 0.5); float level = -1.0;\n"
@@ -3887,13 +3936,16 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..6b0e245a77066f905a892d5d309c7c9b
 +static char *depth_writing_shader(const char *source, int location, int fade) {
 +    static const char fading[] = "  v_fade = (u_visual > 0.5 && abs(a_camz) > 16.0 && a_visual_flags > 1.5) ? vec2(1.0/abs(a_camz), a_pos.x) : vec2(-1.0, 0.0);\n";
 +    static const char flat[] = "0.0, 1.0); }\n";
++    /* A near face is drawn with the scene alone: its depth by its w, then the w itself, which makes the rasterizer clip it. */
++    static const char closing[] = "  if (close) { v_deep = 1.0; v_fade = vec2(-1.0, 0.0);\n"
++                                  "    if (u_visual_options.w <= 0.0) { gl_Position.z = 1.0 - 32.0*(1.0 + u_pull)/hw; gl_Position *= hw; } else gl_Position = vec4(2.0, 2.0, 2.0, 1.0); }\n";
 +    static const char deep[] = "u_visual_options.w >= 1.0 ? 0.99999 : ((u_visual > 0.5 && abs(a_camz) > 16.0) ? max(1.0 - 32.0*(1.0 + u_pull)/(abs(a_camz)*(1.0 + max(u_visual_options.w, 0.0))), -1.0) : 0.999999), 1.0);\n"
 +                               "  bool grown = a_visual_flags > 5.5;\n"
 +                               "  if (u_visual > 0.5 && (u_visual_options.w == 0.0 ? grown : u_visual_options.w >= 1.0 ? (grown || a_visual_flags < 1.5) : (u_visual_options.w > 0.0 && !grown)))\n"
 +                               "    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);\n"
 +                               "  v_deep = abs(a_camz) > 16.0 ? 1.0 : -1000.0;\n"
-+                               "  v_bill = u_visual > 0.5 ? (a_visual_flags < -0.5 ? 0.75 : (abs(a_camz) > 16.0 && a_visual_flags < 1.5) ? 2.0 : 1.0) : 0.0;\n";
-+    const size_t length = strlen(source), tail = sizeof(flat) - 1, room = length + sizeof(deep) + sizeof(fading) + 160;
++                               "  v_bill = u_visual > 0.5 ? (a_visual_flags < -0.5 && a_visual_flags > -1.5 ? 0.75 : (abs(a_camz) > 16.0 && a_visual_flags < 1.5) ? 2.0 : 1.0) : 0.0;\n";
++    const size_t length = strlen(source), tail = sizeof(flat) - 1, room = length + sizeof(deep) + sizeof(fading) + sizeof(closing) + 160;
 +    const char *body = strchr(source, '\n');
 +    char *out;
 +    int written;
@@ -3904,6 +3956,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..6b0e245a77066f905a892d5d309c7c9b
 +    memcpy(out + written, body + 1, (size_t)(source + length - tail - (body + 1)));
 +    strcpy(out + written + (source + length - tail - (body + 1)), deep);
 +    if (fade) strcat(out, fading);
++    if (fade) strcat(out, closing);
 +    strcat(out, " }\n");
 +    return out;
 +}
@@ -4768,6 +4821,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..6b0e245a77066f905a892d5d309c7c9b
 +static void flush_tex_batch(void) {
 +    if (s_tb_n == 0) return;
 +    int nverts = s_one_layer ? tex_batch_drop_redrawn(s_tb_n) : s_tb_n, semi = s_tb_semi;
++    glEnable(PSXGL_DEPTH_CLAMP);  /* a near face is clipped by its w alone, its depth stops at the nearest */
 +    const int fillers = s_tb_fillers;
 +    const int world = s_tb_world;
 +    s_tb_n = 0;                             /* clear first: re-entrancy safe */
@@ -5039,11 +5093,13 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..6b0e245a77066f905a892d5d309c7c9b
 +    uint64_t pid[3];
 +    const int visual_flags = take_visual_triangle(xs, ys, px, py, pq, pz, pid);
 +    PsxTurnCorner cut[PSX_TURN_CLIP_MAX];
-+    const int cut_corners = turn_clip(px, py, visual_flags, cut);
++    const int near_face = s_near_set;
++    const int cut_corners = near_face ? -1 : turn_clip(px, py, visual_flags, cut);
 +    const float whole_q[3] = {pq[0], pq[1], pq[2]};
 +    turned_perspective(px, pq, visual_flags);
 +    int lim_buf[4];
 +    int uv_buf[6];
++    int plain_lim[4], marked_lim = 0;
 +    if (!lim) {
 +        /* Poly path: exact sampled bounds from the ORIGINAL uvs, then the
 +         * center-sampling mirror compensation (rect prims arrive with their
@@ -5052,6 +5108,11 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..6b0e245a77066f905a892d5d309c7c9b
 +        for (int i = 0; i < 3; i++) { mu[i] = us[i]; mv[i] = vs[i]; }
 +        psx_uv_tri_limits(xs, ys, mu, mv, lim_buf);
 +        psx_uv_tri_mirror_offset(xs, ys, mu, mv);
++        if (visual_flags) {
++            static const int nowhere[3] = {0, 0, 0};
++            psx_uv_tri_limits(nowhere, nowhere, us, vs, plain_lim);  /* without an area a mapping runs neither way */
++            marked_lim = 1;
++        }
 +        us = mu; vs = mv;
 +        lim = lim_buf;
 +    }
@@ -5075,7 +5136,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..6b0e245a77066f905a892d5d309c7c9b
 +                                   turned_depth(px[2], pz[2], visual_flags)};
 +        const uint64_t cut_id = pid[0] == pid[1] && pid[1] == pid[2] ? pid[0] : 0u;  /* a sprite's pieces stay a sprite's */
 +        float cut_z[PSX_TURN_CLIP_MAX];
-+        int world = psx_world_depth_class(s_world_depth, visual_flags, turned_z, s_world_margin);
++        int world = near_face ? 0 : psx_world_depth_class(s_world_depth, visual_flags, turned_z, s_world_margin);
 +        for (int k = 0; k < cut_corners; ++k) cut_z[k] = turned_depth(cut[k].x, psx_turn_depth(&cut[k], pz), visual_flags);
 +        for (int piece = 0; world && piece + 2 < cut_corners; ++piece) {  /* a cut triangle is of the class all its pieces are */
 +            const float piece_z[3] = {cut_z[0], cut_z[piece + 1], cut_z[piece + 2]};
@@ -5136,12 +5197,19 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..6b0e245a77066f905a892d5d309c7c9b
 +            vp[12] = (float)depth;   vp[13] = (float)rawtex;        /* a_depth, a_raw */
 +            vp[14] = (float)lim[0];  vp[15] = (float)lim[1];        /* a_limits */
 +            vp[16] = (float)lim[2];  vp[17] = (float)lim[3];
++            if (marked_lim) psx_world_texel_mark(lim, plain_lim, &vp[14]);
 +            vp[18] = semi >= 0 ? (float)(semi + 1) : 0.0f;          /* a_semi code */
 +            vp[19] = flat_picture_flags(visual_flags);               /* a_visual_flags */
 +            vp[20] = visual_flags ? px[cut_corners >= 0 ? 0 : i] : (float)xs[i];  /* a_visual_pos: a cut triangle is one point, nothing in the mirror */
 +            vp[21] = visual_flags ? py[cut_corners >= 0 ? 0 : i] : (float)ys[i];
 +            vp[22] = pq[i];                                          /* a_q (0 = affine) */
++            if (!visual_flags && tile_placed()) {
++                const int low = us[0] < us[1] ? (us[0] < us[2] ? us[0] : us[2]) : (us[1] < us[2] ? us[1] : us[2]);
++                const int high = us[0] > us[1] ? (us[0] > us[2] ? us[0] : us[2]) : (us[1] > us[2] ? us[1] : us[2]);
++                tile_corner(xs[i], (float)us[i], (float)(high - low), &vp[20], &vp[19], &vp[22], &vp[21]);  /* y's slot: the mirror takes a_pos.y */
++            }
 +            vp[23] = turned_z[i]; /* temporal identity only; no shader attribute */
++            if (near_face) { vp[19] = 4.0f; vp[20] = s_near[i][0]; vp[21] = s_near[i][1]; vp[22] = s_near[i][2]; }
 +            s_tb_identity[s_tb_n + i] = cut_corners >= 0 ? TEMPORAL_CUT_IDENTITY : pid[i];
 +        }
 +        if (visual_flags & 4) s_tb_fillers++;
@@ -5276,6 +5344,9 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..6b0e245a77066f905a892d5d309c7c9b
 +    s_next_unpinned = 0;
 +    s_next_perspective = 0;
 +    s_next_temporal_depth = 0;
++    s_tile_set = s_next_tile_set && w > 0 && h > 0;  /* as a sprite's depth: for this rectangle alone */
++    s_next_tile_set = 0;
++    s_tile = s_next_tile;
 +    s_sprite_depth = s_next_sprite_depth;
 +    s_next_sprite_depth = 0.0f;
 +    memcpy(s_sprite_sides, s_next_sprite_sides, sizeof(s_sprite_sides));
@@ -5297,6 +5368,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..6b0e245a77066f905a892d5d309c7c9b
 +    int xs2[3]={x+w, x, x+w},  ys2[3]={y, y+h, y+h};
 +    int us2[3]={u1,u0,u1},     vs2[3]={v0,v1,v1};
 +    gpu_textured_triangle(xs2,ys2,us2,vs2,col,tp,clut_x,clut_y,s_mod_raw,semi,lim);
++    s_tile_set = 0;
 +    s_sprite_depth = 0.0f;
 +}
 +
@@ -5451,6 +5523,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..6b0e245a77066f905a892d5d309c7c9b
 +        return;
 +    }
 +    s_next_precise = enabled ? 1 : 0;
++    s_next_near_set = 0;  /* a near triangle that was never drawn must not lend its corners to this one */
 +    if (!enabled) s_next_temporal_depth = 0;
 +    s_next_x16[0] = x0; s_next_y16[0] = y0;
 +    s_next_x16[1] = x1; s_next_y16[1] = y1;
@@ -5499,6 +5572,21 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..6b0e245a77066f905a892d5d309c7c9b
 +    s_next_surface_z[0] = usable ? z0 : 0.0f;
 +    s_next_surface_z[1] = usable ? z1 : 0.0f;
 +    s_next_surface_z[2] = usable ? z2 : 0.0f;
++}
++static void glb_set_screen_tile(const PsxWsPlacedTile *tile) {
++    if (!s_raster_ok || !tile || !isfinite(tile->left + tile->right + tile->moved) || !(tile->scale > 0.0f) ||
++        fabsf(tile->left) > 1.0f || fabsf(tile->right) > 1.0f || fabsf(tile->moved) > 64.0f) return;
++    s_next_tile = *tile;
++    s_next_tile_set = 1;
++}
++static void glb_set_near_triangle(const float a[3], const float b[3], const float c[3]) {
++    const float *corner[3] = {a, b, c};
++    if (!s_raster_ok) return;
++    for (int i = 0; i < 3; ++i) {
++        if (!isfinite(corner[i][0] + corner[i][1] + corner[i][2]) || corner[i][2] == 0.0f) return;
++        memcpy(s_next_near[i], corner[i], sizeof(s_next_near[i]));
++    }
++    s_next_near_set = 1;
 +}
 +static void glb_set_temporal_identity_triangle(uint64_t id0, uint64_t id1, uint64_t id2) {
 +    s_next_identity[0] = id0; s_next_identity[1] = id1; s_next_identity[2] = id2;
@@ -5948,6 +6036,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..6b0e245a77066f905a892d5d309c7c9b
 +        char *tex_fs = tex_vs ? sprite_marking_shader(TEX_FS) : NULL;
 +        s_geo_prog  = build_program(geo_vs ? geo_vs : GEO_VS, GEO_FS);
 +        s_tex_prog  = build_program_ex(tex_fs ? tex_vs : TEX_VS, tex_fs ? tex_fs : TEX_FS, 1);
++        s_near_shader = tex_fs != NULL;
 +        free(geo_vs);
 +        free(tex_vs);
 +        free(tex_fs);
@@ -8813,7 +8902,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..6b0e245a77066f905a892d5d309c7c9b
      uint64_t freq = SDL_GetPerformanceFrequency();
      uint64_t deadline = SDL_GetPerformanceCounter();
      uint64_t diag_start = deadline, diag_swaps = 0, diag_captures = 0;
-@@ -3477,7 +5411,7 @@
+@@ -3477,7 +5500,7 @@
          int uncapped = hz < 0.0;
          uint64_t now = SDL_GetPerformanceCounter();
          if (!uncapped) {
@@ -8822,7 +8911,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..6b0e245a77066f905a892d5d309c7c9b
              uint64_t period = (uint64_t)((double)freq / hz);
              if (!period) period = 1;
              deadline += period;
-@@ -3492,235 +5426,418 @@
+@@ -3492,235 +5515,420 @@
              }
              while (SDL_GetPerformanceCounter() < deadline) {}
              now = SDL_GetPerformanceCounter();
@@ -9428,6 +9517,8 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..6b0e245a77066f905a892d5d309c7c9b
 +    .set_precise_triangle = glb_set_precise_triangle,
 +    .set_unpinned_triangle = glb_set_unpinned_triangle,
 +    .set_perspective_triangle = glb_set_perspective_triangle,
++    .set_near_triangle = glb_set_near_triangle,
++    .set_screen_tile = glb_set_screen_tile,
 +#ifndef PSX_DISABLE_FRAME_INTERPOLATION
 +    .set_temporal_depth_triangle = glb_set_temporal_depth_triangle,
 +    .set_surface_depth_triangle = glb_set_surface_depth_triangle,

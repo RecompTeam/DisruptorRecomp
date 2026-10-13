@@ -141,7 +141,8 @@ require(
     "static int ws_menu_rect(int32_t *x0, int w) { return ws_menu_frame() ? psx_ws_menu_squash_rect(x0, w, ws_xnum, ws_xden) : w; }\n"
     in gpu
     and "    if (ws_menu_frame()) {\n        if (!menu_half) ws_w = ws_menu_rect(&x0, w);" in rect
-    and "    } else if (ws_active() && w > 0) {\n" in rect
+    and "    } else if (w > 0 && (ws_active() || ws_backdrop_placed())) {\n" in rect
+    and "        } else if (!ws_active()) {\n" in rect
     and rect.index("    if (ws_menu_frame()) {") < rect.index("ws_hud_widget_rect(") < rect.index("ws_hud_user_scale(")
     and "    *out_h = 0;\n    if (ws_menu_frame()) return ws_menu_rect(x0, w);\n    if (!ws_active()) return 0;\n"
     in gpu

@@ -2,6 +2,7 @@
 #include "gpu_ws_screen_tile.h"
 
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <iostream>
 #include <memory>
@@ -38,6 +39,9 @@ auto g_marks = std::make_unique<PsxWsScreenTiles>();
 Aspect g_aspect{1, 1};
 bool g_widescreen = false;
 std::uint32_t g_now = 0;
+std::int32_t g_told_scroll = 0, g_told_period = 0, g_told_column = 0, g_told_left = 0, g_told_right = 0;
+int g_scrolls = 0, g_spans = 0;
+std::uint32_t g_taken_pins = 0;
 int g_failures = 0;
 
 std::size_t physical(std::uint32_t address) {
@@ -80,7 +84,23 @@ void gpu_ws_tag_screen_tile(CPUState *cpu, std::uint32_t primitive_addr) {
     std::uint32_t words[PSX_WS_SCREEN_TILE_WORDS];
     for (std::uint32_t i = 0; i < PSX_WS_SCREEN_TILE_WORDS; i++)
         words[i] = cpu->read_word(primitive_addr + 4u + i * 4u);
-    psx_ws_screen_tile_mark(g_marks.get(), primitive_addr, words, g_now);
+    psx_ws_screen_tile_mark(g_marks.get(), primitive_addr, words, g_now,
+                            g_spans ? psx_ws_screen_tile_pins(static_cast<std::int16_t>(words[1] & 0xFFFFu),
+                                                              static_cast<std::int16_t>(words[3] & 0xFFFFu), g_told_left, g_told_right)
+                                    : 3u);
+}
+
+void gpu_ws_backdrop_scroll(std::int32_t scroll, std::int32_t period, std::int32_t column) {
+    g_told_scroll = scroll;
+    g_told_period = period;
+    g_told_column = column;
+    ++g_scrolls;
+}
+
+void gpu_ws_backdrop_span(std::int32_t left, std::int32_t right) {
+    g_told_left = left;
+    g_told_right = right;
+    ++g_spans;
 }
 
 }  // extern "C"
@@ -311,7 +331,7 @@ void seed_packet(std::uint32_t address, const std::array<std::uint32_t, 4> &word
 }
 
 int take(std::uint32_t address, const std::array<std::uint32_t, 4> &words) {
-    return psx_ws_screen_tile_take(g_marks.get(), address, words.data(), g_now);
+    return psx_ws_screen_tile_take(g_marks.get(), address, words.data(), g_now, &g_taken_pins);
 }
 
 void queue_tile(std::uint32_t address, const std::array<std::uint32_t, 4> &words) {
@@ -435,6 +455,87 @@ void test_widening_rounds_outward() {
            "the squash must round to nearest like the renderer's other paths");
 }
 
+void test_the_panorama_is_placed_between_pixels() {
+    expect(psx_ws_screen_tile_pins(-54, 48, -54, 374) == 1u && psx_ws_screen_tile_pins(326, 48, -54, 374) == 2u &&
+               psx_ws_screen_tile_pins(-6, 48, -54, 374) == 0u && psx_ws_screen_tile_pins(-54, 428, -54, 374) == 3u &&
+               psx_ws_screen_tile_pins(-53, 48, -54, 374) == 0u && psx_ws_screen_tile_pins(325, 48, -54, 374) == 0u,
+           "a tile's edge is pinned where it is an end of the span the game fills, and nowhere else");
+    expect(psx_ws_screen_tile_edge(162, 160, 3, 4) == 161.5 && psx_ws_screen_tile_edge(-54, 160, 3, 4) == -0.5 &&
+               psx_ws_screen_tile_edge(100, 160, 1, 1) == 100.0 && psx_ws_screen_tile_edge(374, 160, 3, 4) == 320.5,
+           "an edge stands where the squash puts it, not rounded");
+    expect(psx_ws_screen_tile_room(27.0f, 64.0f, 0) == 27.0f && psx_ws_screen_tile_room(64.0f, 64.0f, 0) == 0.0f &&
+               psx_ws_screen_tile_room(130.5f, 64.0f, 0) == 2.5f && psx_ws_screen_tile_room(33.0f, 64.0f, 1) == 31.0f &&
+               psx_ws_screen_tile_room(64.0f, 64.0f, 1) == 0.0f && psx_ws_screen_tile_room(128.25f, 64.0f, 1) == 63.75f &&
+               psx_ws_screen_tile_room(27.0f, 0.0f, 0) == 0.0f,
+           "an end has the texels of its own column beyond it, to the left of a left end and to the right of a right one");
+    expect(psx_ws_screen_tile_slide(0.0f, 1.5f, 0.75f, 0, 27.0f, 40.0f) == -2.0f &&
+               psx_ws_screen_tile_slide(0.0f, -1.5f, 0.75f, 0, 27.0f, 40.0f) == 2.0f &&
+               psx_ws_screen_tile_slide(0.0f, 1.5f, 0.75f, 1, 31.0f, 40.0f) == -2.0f &&
+               psx_ws_screen_tile_slide(0.375f, 0.375f, 0.75f, 1, 31.0f, 40.0f) == -1.0f,
+           "an end that stays shows the texel that lies there: the panorama's move and the end's own rounding, in texels, backwards");
+    expect(psx_ws_screen_tile_slide(0.0f, 30.0f, 0.75f, 0, 27.0f, 40.0f) == -27.0f &&
+               psx_ws_screen_tile_slide(0.0f, -60.0f, 0.75f, 0, 27.0f, 40.0f) == 40.0f &&
+               psx_ws_screen_tile_slide(0.0f, -30.0f, 0.75f, 1, 31.0f, 40.0f) == 31.0f &&
+               psx_ws_screen_tile_slide(0.0f, 60.0f, 0.75f, 1, 31.0f, 40.0f) == -40.0f &&
+               psx_ws_screen_tile_slide(0.0f, 30.0f, 0.75f, 0, 0.0f, 40.0f) == 0.0f,
+           "no farther out than its column has texels, and no farther in than the tile is wide");
+    expect(psx_ws_screen_tile_slide(0.0f, 1.5f, 0.0f, 0, 27.0f, 40.0f) == 0.0f &&
+               psx_ws_screen_tile_slide(0.0f, NAN, 0.75f, 0, 27.0f, 40.0f) == 0.0f,
+           "a tile with no scale, or a move that is no number, slides nothing");
+    expect(psx_ws_screen_tile_want(0.375f, 0.375f, 0.75f) == -1.0f && psx_ws_screen_tile_want(0.0f, -1.5f, 0.75f) == 2.0f &&
+               psx_ws_screen_tile_want(0.0f, 1.5f, 0.0f) == 0.0f && psx_ws_screen_tile_want(0.0f, NAN, 0.75f) == 0.0f,
+           "what an end wants is that slide before any bound");
+    const float wanted = psx_ws_screen_tile_want(0.0f, 2.5f, 1.0f);
+    expect(psx_ws_screen_tile_slide(0.0f, 2.5f, 1.0f, 0, 1.0f, 40.0f) == -1.0f &&
+               psx_ws_screen_tile_slide(0.0f, 0.0f - wanted, 1.0f, 0, 1.0f, 40.0f) == -1.0f &&
+               psx_ws_screen_tile_slide(0.0f, -2.5f - wanted, 1.0f, 0, 1.0f, 40.0f) == 0.0f &&
+               psx_ws_screen_tile_slide(0.0f, -2.0f - wanted, 1.0f, 0, 1.0f, 40.0f) == -0.5f &&
+               psx_ws_screen_tile_slide(0.0f, -1.0f - wanted, 1.0f, 0, 1.0f, 40.0f) == -1.0f,
+           "a left end a texel into its column that wants 2.5 out gets one, and the presenter's way back is bounded together with that want: none of it gives the mirror's slide, all of it the game's own corner");
+    expect(psx_ws_backdrop_back(10.0f, 7.0f, 960.0f, 12.0f) == 3.0f && psx_ws_backdrop_back(7.0f, 10.0f, 960.0f, 12.0f) == -3.0f,
+           "the panorama stood as far back as its origin was off a frame earlier");
+    expect(psx_ws_backdrop_back(2.0f, 958.0f, 960.0f, 12.0f) == 4.0f && psx_ws_backdrop_back(958.0f, 2.0f, 960.0f, 12.0f) == -4.0f,
+           "by the short way round its period");
+    expect(psx_ws_backdrop_back(40.0f, 0.0f, 960.0f, 12.0f) == 12.0f && psx_ws_backdrop_back(-40.0f, 0.0f, 960.0f, 12.0f) == -12.0f &&
+               psx_ws_backdrop_back(12.0f, 0.0f, 960.0f, 12.0f) == 12.0f,
+           "and no farther than the bound it is given");
+    expect(psx_ws_backdrop_back(10.0f, 7.0f, 0.0f, 12.0f) == 0.0f && psx_ws_backdrop_back(NAN, 7.0f, 960.0f, 12.0f) == 0.0f &&
+               psx_ws_backdrop_back(10.0f, INFINITY, 960.0f, 12.0f) == 0.0f,
+           "a panorama with no period, or an origin that is no number, stood nowhere else");
+
+    g_widescreen = true;
+    g_aspect = {3, 4};
+    g_scrolls = g_spans = 0;
+    CPUState cpu = make_cpu();
+    cpu.gpr[24] = 0;
+    run_seam(cpu, kLeftSeam, kLeftWord);
+    cpu.gpr[3] = 10u;
+    run_seam(cpu, kScrollSeam, kScrollWord);
+    expect(g_scrolls == 1 && g_told_scroll == 10 + 0x500 && g_told_period == 0x500 && g_told_column == kColumnWidth && g_spans == 0,
+           "the scroll seam tells the panorama's scroll as the routine goes on with it, its period and its column width");
+    cpu.gpr[24] = 320;
+    run_seam(cpu, kRightSeam, kRightWord);
+    expect(g_spans == 1 && g_told_left == -54 && g_told_right == 374, "the right edge's seam tells the widened span");
+    run_seam(cpu, kScrollSeam, kLeftWord);
+    run_seam(cpu, kRightSeam, kLeftWord);
+    expect(g_scrolls == 1 && g_spans == 1, "a foreign word tells nothing");
+
+    const auto left_end = std::array<std::uint32_t, 4>{0x64808080u, 0x0010FFCAu, 0x7FC02000u, 0x00400030u};
+    queue_tile(kPacket, left_end);
+    expect(take(kPacket, left_end) == 1 && g_taken_pins == 1u, "a tile at the span's left end carries that pin to its draw");
+    const auto inner = std::array<std::uint32_t, 4>{0x64808080u, 0x00100010u, 0x7FC02000u, 0x00400030u};
+    queue_tile(kPacket, inner);
+    expect(take(kPacket, inner) == 1 && g_taken_pins == 0u, "an inner tile carries none");
+    expect(take(kPacket, inner) == 0 && g_taken_pins == 0u, "and a draw that matches no mark takes none");
+    queue_tile(kPacket, left_end);
+    g_taken_pins = 7u;
+    expect(take(kPacket, inner) == 0 && g_taken_pins == 0u, "nor does a draw of other words at a marked address");
+    g_spans = 0;
+    queue_tile(kPacket, inner);
+    expect(take(kPacket, inner) == 1 && g_taken_pins == 3u, "with no span told, both edges stay where they are");
+    g_widescreen = false;
+}
+
 }  // namespace
 
 int main() {
@@ -446,6 +547,7 @@ int main() {
     test_seams_are_guarded_by_their_instruction_words();
     test_mark_buys_one_draw_of_the_same_packet();
     test_marks_expire_and_survive_collisions();
+    test_the_panorama_is_placed_between_pixels();
     if (g_failures != 0) {
         std::cerr << g_failures << " backdrop tile check(s) failed\n";
         return 1;

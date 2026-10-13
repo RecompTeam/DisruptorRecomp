@@ -78,6 +78,15 @@ require(
     and gte.count("exact_x16 : projection->x16") == 1,
     "only a corner the game pinned may leave the pixel the GTE gave it for the exact projection",
 )
+weight = body(gte, 'extern "C" GtePrecisionLookupResult gte_precision_load_perspective_word_ex(')
+require(
+    "    if (!projection->perspective_valid && !(projection->clamped && projection->unbounded == 2 && precision_unpin()))\n"
+    "        return GTE_PRECISION_LOOKUP_PERSPECTIVE_INVALID;\n" in weight
+    and gte.count("!projection->perspective_valid") == 1
+    and "                s_precise_sxy[2].unbounded = nearer >= 1.0 && gte->H != 0 && gte->MAC3 > 0 && gte->MAC3 <= 0xFFFF ? 2 : 1;\n" in gte,
+    "a corner drawn at its exact place is textured by the depth that place was divided by, when the place was not brought "
+    "nearer and the depth is the camera's own, and no other corner the GTE gave no depth",
+)
 switch = body(gte, "static int precision_unpin()")
 require(
     "        s_precision_unpin = 1;\n#ifndef PSX_NO_DEBUG_TOOLS\n" in switch

@@ -59,7 +59,8 @@ require(
 """ in renderer
     and "    const int visual_flags = take_visual_triangle(xs, ys, px, py, pq, pz, pid);\n"
     "    PsxTurnCorner cut[PSX_TURN_CLIP_MAX];\n"
-    "    const int cut_corners = turn_clip(px, py, visual_flags, cut);\n"
+    "    const int near_face = s_near_set;\n"
+    "    const int cut_corners = near_face ? -1 : turn_clip(px, py, visual_flags, cut);\n"
     "    const float whole_q[3] = {pq[0], pq[1], pq[2]};\n"
     "    turned_perspective(px, pq, visual_flags);\n" in renderer
     and renderer.count("turned_perspective(px, pq, visual_flags);") == 1,
@@ -135,7 +136,7 @@ require(
     and "        const int cut = identities && identities[i]==TEMPORAL_CUT_IDENTITY &&\n"
     "            identities[i+1]==TEMPORAL_CUT_IDENTITY && identities[i+2]==TEMPORAL_CUT_IDENTITY;\n"
     "        t->world = !cut;\n" in temporal
-    and "        t->modelled = !sprite && !partial && !cut && identities && identities[i] && identities[i+1] && identities[i+2];\n"
+    and "        t->modelled = !sprite && !partial && !cut && identities && identities[i] && identities[i+1] && identities[i+2] &&\n"
     in temporal,
     "the whole of a cut triangle is marked, and the in-between presenter takes a marked triangle for no world face",
 )

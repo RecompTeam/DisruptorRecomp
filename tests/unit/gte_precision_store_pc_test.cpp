@@ -15,6 +15,7 @@ extern "C" void gte_test_set_precise_perspective_valid(
     uint32_t index, int valid);
 extern "C" void gte_test_set_precise_exact(uint32_t index, int saturated, int unbounded, int32_t exact_x16, int32_t exact_y16);
 extern "C" void gte_test_get_precise_exact(uint32_t index, int *saturated, int *unbounded, int32_t *exact_x16, int32_t *exact_y16);
+extern "C" void gte_test_set_precise_perspective_valid(uint32_t index, int valid);
 extern "C" void gte_test_get_precise_projection(
     uint32_t index, uint32_t *packed, int32_t *x16, int32_t *y16, uint16_t *z, uint8_t *valid);
 extern "C" void gte_execute(CPUState *cpu, uint32_t cmd);
@@ -849,6 +850,42 @@ bool at_kept(const Arrival &seen, bool pinned) {
     return seen.result == GTE_PRECISION_LOOKUP_ACCEPTED && seen.kept && !seen.exact && seen.pinned == pinned;
 }
 
+/* As arrive, for a corner so near the viewer's plane that the GTE's divide gave no depth to texture by. */
+GtePrecisionLookupResult near_corner_depth(uint32_t index, uint32_t gte_packed, uint32_t stored, int unbounded, uint16_t *depth) {
+    const int32_t kept_x16 = static_cast<int16_t>(gte_packed & 0xFFFFu) * 65536 + 0x4000;
+    const int32_t kept_y16 = static_cast<int16_t>(gte_packed >> 16) * 65536 + 0x8000;
+    gte_test_seed_precise_projection(2, gte_packed, kept_x16, kept_y16, kZ);
+    gte_test_set_precise_exact(2, 0, unbounded, 1060 * 65536, 130 * 65536);
+    gte_test_set_precise_perspective_valid(2, 0);
+    if (deliver(index, gte_packed, stored, kept_x16, kept_y16, 1060 * 65536, 130 * 65536, kZ).result != GTE_PRECISION_LOOKUP_ACCEPTED)
+        return GTE_PRECISION_LOOKUP_STORE_MISS;
+    return perspective_lookup(0x00163000u + index * 4u, stored, depth);
+}
+
+int test_pinned_near_corner_has_the_depth_of_its_exact_place() {
+    reset_fixture();
+    if (!add_capture(kOtherMfc2Pc) || !add_scratch_store())
+        return fail("scratch route registration failed");
+    if (!gte_precision_scratch_store_pc_route_clamp(kScratchStorePc, kStoreInsn, -0x100, 0x240, -0x100, 0x1F0))
+        return fail("the guard band of the reviewed route was refused");
+    const uint32_t short_of = pack(610, 130), band_edge = pack(0x240, 130);
+    uint16_t depth = 0;
+    if (near_corner_depth(0, short_of, band_edge, 2, &depth) != GTE_PRECISION_LOOKUP_ACCEPTED || depth != kZ)
+        return fail("a pinned corner drawn at its exact place did not give the depth that place was divided by");
+    if (near_corner_depth(1, short_of, short_of, 2, nullptr) != GTE_PRECISION_LOOKUP_PERSPECTIVE_INVALID)
+        return fail("a near corner the game did not pin, which stays on the pixel the GTE gave it, was given a depth to texture by");
+    if (near_corner_depth(2, pack(600, 130), band_edge, 0, nullptr) != GTE_PRECISION_LOOKUP_PERSPECTIVE_INVALID)
+        return fail("a pinned near corner without an exact place was given a depth to texture by");
+    gte_precision_unpin_set(0);
+    const GtePrecisionLookupResult left_pinned = near_corner_depth(3, short_of, band_edge, 2, nullptr);
+    gte_precision_unpin_set(1);
+    if (near_corner_depth(4, short_of, band_edge, 1, nullptr) != GTE_PRECISION_LOOKUP_PERSPECTIVE_INVALID)
+        return fail("a pinned corner whose exact place does not fit its depth was given that depth to texture by");
+    if (left_pinned == GTE_PRECISION_LOOKUP_ACCEPTED)
+        return fail("with unpinning off a pinned near corner, which stays on its pin, was given a depth to texture by");
+    return 0;
+}
+
 int test_pinned_corner_takes_the_exact_projection() {
     reset_fixture();
     if (!add_capture(kOtherMfc2Pc) || !add_scratch_store())
@@ -897,11 +934,12 @@ struct Projected {
 };
 
 /* One vertex through the GTE itself: identity rotation, a focal length of 160, the screen centre at 160, 120 unless given. */
-Projected project(int x, int y, int z, int centre_x = 160, int centre_y = 120) {
+Projected project(int x, int y, int z, int centre_x = 160, int centre_y = 120, int ahead = 0) {
     CPUState cpu{};
     const uint32_t rotation[5] = {0x1000u, 0u, 0x1000u, 0u, 0x1000u};
     for (uint8_t reg = 0; reg < 5; ++reg) gte_write_ctrl(&cpu, reg, rotation[reg]);
-    for (uint8_t reg = 5; reg < 8; ++reg) gte_write_ctrl(&cpu, reg, 0u);
+    for (uint8_t reg = 5; reg < 7; ++reg) gte_write_ctrl(&cpu, reg, 0u);
+    gte_write_ctrl(&cpu, 7, static_cast<uint32_t>(ahead));
     gte_write_ctrl(&cpu, 24, static_cast<uint32_t>(centre_x * 65536));
     gte_write_ctrl(&cpu, 25, static_cast<uint32_t>(centre_y * 65536));
     gte_write_ctrl(&cpu, 26, 160u);
@@ -923,7 +961,74 @@ bool keeps_the_gte_projection(const Projected &seen) {
     return (seen.x16 >> 16) == static_cast<int16_t>(seen.packed & 0xFFFFu) || seen.saturated;
 }
 
+/* A corner through the GTE itself, read by the game and stored in RAM: the view its stored word gives. */
+bool view_of(uint32_t addr, int x, int y, int z, GtePrecisionView *view, uint32_t *packed = nullptr) {
+    const Projected seen = project(x, y, z);
+    capture(kMfc2Pc, seen.packed);
+    commit(addr);
+    store(kStorePc, addr, seen.packed);
+    if (packed) *packed = seen.packed;
+    return gte_precision_load_view_word(addr, seen.packed, view) != 0;
+}
+
+int test_view_of_a_stored_corner() {
+    reset_fixture();
+    if (!add_capture() || !add_store()) return fail("the routes of the view test were not registered");
+    gte_set_display_aspect(4, 3);
+    GtePrecisionView view{};
+    uint32_t packed = 0;
+    constexpr uint32_t first = 0x00164000u;
+    if (!view_of(first, 100, 50, 400, &view, &packed) || view.w != 400 || view.focal != 160 || view.hx != 100.0 * 160.0 ||
+        view.hy != 50.0 * 160.0 || view.centre_x != 160.0 || view.centre_y != 120.0)
+        return fail("a corner the GTE divided in full has no view, or not its own");
+    if (gte_precision_load_view_word(first, packed ^ 1u, &view) || gte_precision_load_view_word(first + 2u, packed, &view) ||
+        gte_precision_load_view_word(first + 4u, packed, &view) || gte_precision_load_view_word(first, packed, nullptr))
+        return fail("a view was given for another word, an odd address, an address nothing was stored at, or to nowhere");
+    gte_precision_speculative_begin();
+    const int speculative = gte_precision_load_view_word(first, packed, &view);
+    gte_precision_speculative_end();
+    if (speculative || !gte_precision_load_view_word(first, packed, &view)) return fail("a view was given while the CPU speculates, or not after");
+
+    if (!view_of(first + 8u, 300, 10, 40, &view) || view.w != 40 || view.hx != 300.0 * 160.0 || view.hy != 10.0 * 160.0)
+        return fail("a corner where the GTE's divide stops has no view, or not its own");
+    if (!view_of(first + 12u, 300, 10, -20, &view) || view.w != -20 || view.hx != 300.0 * 160.0 || view.hy != 10.0 * 160.0)
+        return fail("a corner behind the viewer has no view, or not its own");
+    if (!view_of(first + 16u, 300, 10, 0, &view) || view.w != 0) return fail("a corner on the viewer's plane has no view");
+    const Projected shifted = project(100, 50, 400, 200, 100);
+    capture(kMfc2Pc, shifted.packed);
+    commit(first + 20u);
+    store(kStorePc, first + 20u, shifted.packed);
+    if (!gte_precision_load_view_word(first + 20u, shifted.packed, &view) || view.centre_x != 200.0 || view.centre_y != 100.0)
+        return fail("a view does not carry its projection's own centre");
+
+    gte_set_display_aspect(16, 9);
+    uint32_t wide = 0;
+    const bool squashed = view_of(first + 24u, 100, 50, 400, &view, &wide);
+    GtePrecisionView plain{};
+    const bool plain_kept = gte_precision_load_view_word(first, packed, &plain) != 0;
+    gte_set_display_aspect(4, 3);
+    if (!squashed || view.hx != 100.0 * 160.0 * 3.0 / 4.0 || view.hy != 50.0 * 160.0 || view.w != 400)
+        return fail("a corner of the squashed wide picture is not squashed across in its view");
+    GtePrecisionView kept{};
+    if (!gte_precision_load_view_word(first + 24u, wide, &kept) || kept.hx != 100.0 * 160.0 * 3.0 / 4.0 || !plain_kept || plain.hx != 100.0 * 160.0)
+        return fail("a view takes the squash of the moment it is read, not the one it was projected under");
+
+    gte_test_seed_precise_projection(2, kPacked, kX16, kY16, kZ);
+    capture();
+    commit(first + 28u);
+    store(kStorePc, first + 28u);
+    if (!lookup(first + 28u) || gte_precision_load_view_word(first + 28u, kPacked, &view))
+        return fail("a projection that came with no view was given one");
+    return 0;
+}
+
 int test_exact_projection_where_the_gte_stops_short() {
+    if (project(600, 0, 40).unbounded != 2 || project(300, 10, 80).unbounded != 2)
+        return fail("a corner the divide stopped short of has an exact place that does not fit its depth");
+    if (project(30000, 15000, 1).unbounded != 1)
+        return fail("a place brought nearer along its ray is said to fit its depth");
+    if (project(32767, 0, 30000, 1000, 120, 40000).unbounded != 1)
+        return fail("a corner beyond the depth SZ3 holds, with a place past the screen's end, is said to fit its depth");
     constexpr int32_t kCentreX = 160 << 16, kCentreY = 120 << 16;
     constexpr int32_t kLimit = INT32_C(1) << 30;
     gte_set_display_aspect(4, 3);
@@ -1281,7 +1386,9 @@ int main() {
     if (int rc = test_scratch_nine_slots_and_fail_closed_domains()) return rc;
     if (int rc = test_scratch_guard_band_keeps_the_projection()) return rc;
     if (int rc = test_pinned_corner_takes_the_exact_projection()) return rc;
+    if (int rc = test_pinned_near_corner_has_the_depth_of_its_exact_place()) return rc;
     if (int rc = test_exact_projection_where_the_gte_stops_short()) return rc;
+    if (int rc = test_view_of_a_stored_corner()) return rc;
     if (int rc = test_scratch_twenty_routes_are_independent_one_shot()) return rc;
     if (int rc = test_scratch_replay_speculation_and_timeline()) return rc;
     if (int rc = test_perspective_depth_validity_propagates()) return rc;

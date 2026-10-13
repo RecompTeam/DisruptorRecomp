@@ -809,6 +809,99 @@ void billboards_keep_their_motion_through_a_new_picture() {
                starts_at(from[other], right.before[0]) && starts_at(from[other + 1], right.before[1]),
            "look-alike billboards keep their own past, whatever the picture matcher picked");
 
+    /* Two bodies side by side whose pictures step a palette row in one frame, each to the row the other had, under a part-step
+     * turn: every rectangle's right side stands lower, by a few thousandths of a pixel or by more than the body is tall,
+     * and lies deeper, and the picture matcher gave the left its neighbour's past. */
+    for (const float skew : {0.0f, 0.004f, -0.004f, 0.4f, 40.0f}) for (const float deeper : {1.0f, 1.003f, 0.997f, 1.05f}) {
+        Scene bodies = room(kStep);
+        Billboard near_body = billboard(kStep, {-60, 20, 900}, {0, 0, 0}, {8, 29}, {8, 29}, 800, 700);
+        Billboard far_body = billboard(kStep, {19, 18, 980}, {0, 0, 0}, {7, 27}, {7, 27}, 900, 800);
+        for (Billboard *body : {&near_body, &far_body})
+            for (auto *halves : {&body->now, &body->before})
+                for (auto &half : *halves) {
+                    const float middle = (std::min({half.x[0], half.x[1], half.x[2]}) + std::max({half.x[0], half.x[1], half.x[2]})) / 2;
+                    for (int vertex = 0; vertex < 3; ++vertex)
+                        if (half.x[vertex] > middle) half.y[vertex] += skew, half.depth[vertex] *= deeper;
+                }
+        const int near_first = add_billboard(bodies, near_body);
+        const int far_first = add_billboard(bodies, far_body);
+        const int far_past = static_cast<int>(bodies.previous.size()) - 2;
+        for (int half = 0; half < 2; ++half) bodies.matches[near_first + half] = far_past + half;
+        bodies.prepare(from, stats);
+        expect(starts_at(from[near_first], near_body.before[0]) && starts_at(from[near_first + 1], near_body.before[1]) &&
+                   starts_at(from[far_first], far_body.before[0]) && starts_at(from[far_first + 1], far_body.before[1]),
+               "a body whose rectangle a part-step turn left off square keeps its own past, not its look-alike's");
+    }
+    {
+        /* The renderer's two halves, the right side lower by `skew`: {left top, right top, left bottom} and {right top, left bottom, right bottom}. */
+        const auto rectangle = [](float skew, float height) {
+            std::array<GpuTemporalTriangle, 2> halves{};
+            const float xs[2][3] = {{10, 18, 10}, {18, 10, 18}};
+            const float ys[2][3] = {{200, 200 + skew, 200 + height}, {200 + skew, 200 + height, 200 + height + skew}};
+            for (int half = 0; half < 2; ++half) {
+                halves[half].sprite = halves[half].world = 1;
+                for (int vertex = 0; vertex < 3; ++vertex) {
+                    halves[half].x[vertex] = xs[half][vertex];
+                    halves[half].y[vertex] = ys[half][vertex];
+                    halves[half].depth[vertex] = 900.0f;
+                }
+            }
+            return halves;
+        };
+        GpuTemporalSpriteBox box{};
+        /* The last two: a flat rectangle whose right side a turn put lower, or higher, than the rectangle is tall. */
+        const float shapes[][2] = {{0.0f, 29.0f}, {0.004f, 29.0f}, {-0.004f, 29.0f}, {0.2f, 0.1f}, {-0.2f, 0.1f}};
+        for (const auto &shape : shapes) {
+            const auto halves = rectangle(shape[0], shape[1]);
+            expect(gpu_temporal_sprite_box(halves.data(), 2, 0, &box) && box.left == 10 && box.right == 18 && box.top == 200 &&
+                       box.bottom == halves[0].y[2],
+                   "a rectangle whose right side a turn moved along its column is a billboard, with its left side's rows");
+        }
+        /* Each line breaks one thing: {half, corner, 0 for x and 1 for y, value}, twice where the halves share the corner. */
+        const float nan = std::numeric_limits<float>::quiet_NaN();
+        const struct { int half, corner, axis; float value; int half2, corner2; } broken[] = {
+            {0, 2, 0, 10.5f, 1, 1}, {1, 2, 0, 18.5f, -1, 0}, {1, 2, 0, 17.5f, -1, 0},
+            {0, 2, 1, 200.0f, 1, 1}, {0, 2, 1, 190.0f, 1, 1}, {1, 2, 1, 200.004f, -1, 0}, {1, 2, 1, 190.0f, -1, 0},
+            {1, 0, 0, 18.5f, -1, 0}, {1, 0, 1, 200.5f, -1, 0}, {1, 1, 0, 10.5f, -1, 0}, {1, 1, 1, 229.5f, -1, 0},
+            {0, 0, 0, nan, -1, 0}, {0, 0, 1, nan, -1, 0}, {0, 1, 0, nan, 1, 0}, {0, 1, 1, nan, 1, 0},
+            {0, 2, 0, nan, 1, 1}, {0, 2, 1, nan, 1, 1}, {1, 2, 0, nan, -1, 0}, {1, 2, 1, nan, -1, 0},
+        };
+        for (const auto &change : broken) {
+            auto halves = rectangle(0.004f, 29.0f);
+            (change.axis ? halves[change.half].y : halves[change.half].x)[change.corner] = change.value;
+            if (change.half2 >= 0) (change.axis ? halves[change.half2].y : halves[change.half2].x)[change.corner2] = change.value;
+            expect(!gpu_temporal_sprite_box(halves.data(), 2, 0, &box),
+                   "a side off its column, without a height or upside down, or halves that do not share their corners: no billboard");
+        }
+        for (const float right : {10.0f, 2.0f}) {
+            auto halves = rectangle(0.004f, 29.0f);
+            halves[0].x[1] = halves[1].x[0] = halves[1].x[2] = right;
+            expect(!gpu_temporal_sprite_box(halves.data(), 2, 0, &box), "a rectangle without a width, or with its right side on the left, is no billboard");
+        }
+        auto pair = rectangle(0.004f, 29.0f);
+        const auto sides = [&pair](float left, float right) {
+            const float depths[2][3] = {{left, right, left}, {right, left, right}};
+            for (int half = 0; half < 2; ++half)
+                for (int vertex = 0; vertex < 3; ++vertex) pair[half].depth[vertex] = depths[half][vertex];
+        };
+        for (const float right : {900.0f, 902.7f, 897.3f, 990.0f}) {
+            sides(900.0f, right);
+            expect(gpu_temporal_sprite_box(pair.data(), 2, 0, &box), "a billboard has one depth down each side, whatever a turn made of the two");
+            for (int half = 0; half < 2; ++half)
+                for (int vertex = 0; vertex < 3; ++vertex) {
+                    sides(900.0f, right);
+                    pair[half].depth[vertex] += 0.25f;
+                    expect(!gpu_temporal_sprite_box(pair.data(), 2, 0, &box), "and none of its corners stands at a depth of its own");
+                }
+        }
+        for (const float none : {0.0f, -900.0f, 65535.0f, std::numeric_limits<float>::quiet_NaN(), std::numeric_limits<float>::infinity()}) {
+            sides(none, 900.0f);
+            expect(!gpu_temporal_sprite_box(pair.data(), 2, 0, &box), "a rectangle without a depth on its left is no billboard");
+            sides(900.0f, none);
+            expect(!gpu_temporal_sprite_box(pair.data(), 2, 0, &box), "and neither is one without a depth on its right");
+        }
+    }
+
     /* Two level units a frame is about half a pixel here, less than the camera's tolerance. */
     Scene slow = room(kStep);
     const Billboard drifting = billboard(kStep, centre, {2, 0, 0}, {20, 30}, {20, 30}, 800, 800);

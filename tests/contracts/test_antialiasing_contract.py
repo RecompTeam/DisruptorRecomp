@@ -131,8 +131,8 @@ require(
     "not: a frame runs from one present to the next that something was drawn before",
 )
 require(
-    '"  v_bill = u_visual > 0.5 ? (a_visual_flags < -0.5 ? 0.75 : (abs(a_camz) > 16.0 && a_visual_flags < 1.5) ? 2.0 : 1.0) : 0.0;\\n";\n' in renderer
-    and '            "  v_bill = a_visual_flags < -0.5 ? 0.75 : (a_visual_flags < 1.5 && a_order > -0.9999 && a_order < 0.9999) ? 2.0 : 1.0; }\\n") : NULL;\n'
+    '"  v_bill = u_visual > 0.5 ? (a_visual_flags < -0.5 && a_visual_flags > -1.5 ? 0.75 : (abs(a_camz) > 16.0 && a_visual_flags < 1.5) ? 2.0 : 1.0) : 0.0;\\n";\n' in renderer
+    and '            "  v_bill = a_visual_flags < -0.5 && a_visual_flags > -1.5 ? 0.75 : (a_visual_flags < 1.5 && a_order > -0.9999 && a_order < 0.9999) ? 2.0 : 1.0; }\\n") : NULL;\n'
     in presenter
     and '        "  if (v_bill > 0.5 && v_bill < 0.9) frag.a = (!blended && frag.a > 0.5) ? 0.95 : 0.75;\\n"\n'
     '        "  else if (v_bill > 0.5 && blended) frag.a = 0.25; else if (v_bill > 1.5) frag.a = 0.5;\\n"\n' in renderer

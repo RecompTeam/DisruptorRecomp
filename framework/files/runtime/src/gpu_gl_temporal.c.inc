@@ -9,6 +9,8 @@
 #define TEMP_MAX_VERTS 24576
 #define TEMP_MAX_COMMANDS 2048
 #define TEMP_MAX_TEXTURES 16
+#define TEMP_NEAR_CORNERS 384 /* of near faces in one frame, kept by the level's point: 30 were the most seen */
+#define TEMP_BACKDROP_MOST 12.0f /* frame pixels the panorama is carried between two frames: a faster turn steps the rest */
 typedef struct {
     int first, count, first_tri, textured, mode, semi, mask, check, filter;
     int twin[4], sy, sh, texture;
@@ -27,6 +29,14 @@ typedef struct {
     int *matches;
     int nv, nt, nc, active, bad, clear_y, clear_h, width, height, scale;
     int origin_y, texture_count, matched, world, moving;
+    int backdrop;  /* it has placed backdrop tiles: the panorama's numbers below are theirs, see PsxWsPlacedTile */
+    float backdrop_origin, backdrop_period, backdrop_scale, backdrop_column;
+    float backdrop_back;  /* where the panorama stood a frame earlier, from where it stands */
+    GpuTemporalCamera camera;  /* the camera fitted to the frame before, for a near face's corners */
+    GpuTemporalCamera onward;  /* its inverse, for the corners of a near face the game dropped */
+    PsxNearCorner near_corners[TEMP_NEAR_CORNERS];  /* in the order drawn: where each stands, and its w */
+    int near_count;
+    int onward_ok;
     float clear[4], tint;
     GLuint textures[TEMP_MAX_TEXTURES];
     uint64_t texture_generation[TEMP_MAX_TEXTURES];
@@ -207,6 +217,8 @@ static void temporal_begin(GLuint fbo, int y, int h, uint16_t color) {
     s->active = 0;
     if (!temporal_recording() || !temporal_allocate(s)) return;
     s->active = 1; s->bad = 0; s->nv = s->nt = s->nc = 0;
+    s->backdrop = 0; s->backdrop_back = 0.0f;
+    s->near_count = 0;
     s->texture_count = 0; s->clear_y = y; s->clear_h = h;
     s->width = g_wide_w; s->scale = s_scale;
     s->clear[0] = (color & 31) / 31.0f;
@@ -251,22 +263,33 @@ static uint64_t temporal_hash(uint64_t h, const void *data, size_t n) {
 /* Bake the mirror's projection into local screen coordinates. Both the
  * canonical and precise slots get the baked value; texture perspective and
  * coverage flags remain exactly those selected for the original draw. */
+static int temporal_near_find(const TemporalScene *own,int vertex,const TemporalScene *s,const int step[3],int sign,
+                              double nx,double ny,double weight,double w,float place[3]) {
+    return psx_near_find(own->near_corners,own->near_count,vertex,s->near_corners,s->near_count,step,sign,nx,ny,weight,w,place);
+}
 static void temporal_position(float *v, int textured, int gate, int direct) {
     int flags_at = textured ? 19 : 6, pos_at = textured ? 20 : 7;
     int corrected = !direct && s_geometry_correction && v[flags_at] > 0.5f;
-    float x = corrected ? v[pos_at] : v[0], y = corrected ? v[pos_at+1] : v[1];
+    int placed = !direct && s_geometry_correction && textured && v[flags_at] < -1.5f;  /* a backdrop tile, see tile_corner */
+    float x = corrected || placed ? v[pos_at] : v[0], y = corrected ? v[pos_at+1] : v[1];
+    const float want = placed ? v[pos_at+1] : 0.0f;  /* a tile's y slot: the slide its end wants, see tile_corner */
+    if (textured) psx_world_texel_settle(corrected, &v[2], &v[14]);
     if (corrected && fabsf(s_yaw_sin) > 0.0000001f && s_yaw_focal_x > 0) {
         float cx = g_wide_cur_base + s_yaw_center_x;
         float cy = s_off_y + s_yaw_center_y_relative;
         float ux = (x - cx) / s_yaw_focal_x;
+        const int near_corner = textured && v[flags_at] > 3.5f && v[flags_at] < 4.5f;
         float den = s_yaw_cos - ux * s_yaw_sin;
-        if (fabsf(den) > 0.01f) {
+        if (near_corner) den = psx_near_turn(den);
+        if (fabsf(den) > 0.01f || near_corner) {
             x = cx + s_yaw_focal_x * (ux*s_yaw_cos+s_yaw_sin) / den;
             if (s_geometry_full_yaw) y = cy + (y-cy)/den;
+            if (near_corner) v[22] *= den;  /* a near face's w turns with its place */
         }
     }
     if (textured && (!corrected || v[flags_at] <= 1.5f))
         v[22] = 0;
+    if (placed) v[22] = want;
     if (!direct) {
         if (gate && g_ws_bd_stretch_on) {
             extern int g_ws_tex_edge_pct;
@@ -324,6 +347,10 @@ static void temporal_draw(const float *vertices, const uint64_t *identities, int
         float *v = &s->vertices[(s->nv+i)*TEXV];
         memset(v, 0, TEXV*sizeof(float));
         memcpy(v, vertices+i*stride, stride*sizeof(float));
+        if (textured && v[19] < -1.5f) {
+            s->backdrop=1; s->backdrop_origin=s_tile.origin; s->backdrop_period=s_tile.period;
+            s->backdrop_scale=s_tile.scale; s->backdrop_column=s_tile.column;
+        }
         temporal_position(v, textured, gate, direct);
     }
     if (mode == GL_TRIANGLES) for (int i=0; i<n; i+=3) {
@@ -343,13 +370,20 @@ static void temporal_draw(const float *vertices, const uint64_t *identities, int
             identities[i+1]==TEMPORAL_CUT_IDENTITY && identities[i+2]==TEMPORAL_CUT_IDENTITY;
         t->world = !cut;
         t->sprite = sprite;
-        t->modelled = !sprite && !partial && !cut && identities && identities[i] && identities[i+1] && identities[i+2];
+        t->modelled = !sprite && !partial && !cut && identities && identities[i] && identities[i+1] && identities[i+2] &&
+            !((identities[i] | identities[i+1] | identities[i+2]) & PSX_NEAR_IDENTITY);
         for (int j=0; t->modelled && j<3; ++j)
             for (int axis=0; axis<3; ++axis)
                 t->model[j][axis]=(int16_t)(identities[i+j]>>(16*axis));
         for (int j=0; j<3; ++j) {
             float *v=&s->vertices[(s->nv+i+j)*TEXV];
             t->x[j]=v[0]; t->y[j]=v[1]; t->q[j]=textured ? v[22] : 0;
+            if (textured && v[19]>3.5f && v[19]<4.5f && identities && identities[i+j]>>63 && s->near_count<TEMP_NEAR_CORNERS) {
+                s->near_corners[s->near_count].vertex=s->nv+i+j;
+                for (int axis=0; axis<3; ++axis) s->near_corners[s->near_count].model[axis]=(int16_t)(identities[i+j]>>(16*axis));
+                s->near_corners[s->near_count].place[0]=v[0]; s->near_corners[s->near_count].place[1]=v[1];
+                s->near_corners[s->near_count++].place[2]=v[22];
+            }
             t->depth[j]=v[textured ? 23 : 9]>0.0f ? v[textured ? 23 : 9] : 0.0f;  /* negative: the display mirror's own, see take_visual_triangle */
             if (v[textured ? 19 : 6] <= 0.5f && !sprite && !partial) t->world=0;
             if (textured) {
@@ -357,6 +391,8 @@ static void temporal_draw(const float *vertices, const uint64_t *identities, int
                 hash=temporal_hash(hash,v+8,11*sizeof(float));
             } else hash=temporal_hash(hash,v+2,4*sizeof(float));
         }
+        /* A near face is paired corner by corner, see temporal_near_find: a weight under zero keeps it out of the matching by look. */
+        if (textured && s->vertices[(s->nv+i)*TEXV+19]>3.5f && s->vertices[(s->nv+i)*TEXV+19]<4.5f) t->q[0]=t->q[1]=t->q[2]=-1.0f;
         t->material=hash;
     }
     s->nv+=n;
@@ -437,6 +473,7 @@ static void temporal_prepare(GLuint fbo, int y, int w, int h) {
         s->clear_y > y || s->clear_y+s->clear_h < y+h ||
         s->width != w || s->scale != s_scale || !s->nc) return;
     s->origin_y=y; s->height=h; s->matched=s->world=s->moving=0;
+    s->backdrop_back=0.0f;
     memset(&s->mesh_stats,0,sizeof(s->mesh_stats));
     for (int i=0; i<s->nc; ++i) {
         TemporalCommand *c=&s->commands[i];
@@ -446,6 +483,7 @@ static void temporal_prepare(GLuint fbo, int y, int w, int h) {
             v[1]-=y; v[c->textured ? 21 : 8]-=y;
         }
     }
+    for (int i=0; i<s->near_count; ++i) s->near_corners[i].place[1]-=y;
     for (int i=0; i<s->nt; ++i) {
         for (int j=0; j<3; ++j) s->triangles[i].y[j]-=y;
         s->matches[i]=-1;
@@ -461,8 +499,14 @@ static void temporal_prepare(GLuint fbo, int y, int w, int h) {
             s_temp_curr.triangles,s_temp_curr.nt,s->triangles,s->nt,s->matches,s->from,
             &s->mesh_stats,s_temp_curr.start,s_temp_curr.gone_to,s_temp_curr.gone,
             &s_temp_camera);
+        s->camera=s_temp_camera;
+        s->onward_ok=s->camera.inliers>=GPU_TEMPORAL_CAMERA_MIN_INLIERS && gpu_temporal_camera_invert(&s->camera,&s->onward);
+        if (s->backdrop && s_temp_curr.backdrop)
+            s->backdrop_back=psx_ws_backdrop_back(s_temp_curr.backdrop_origin,s->backdrop_origin,s->backdrop_period,TEMP_BACKDROP_MOST);
     } else {
         s_temp_camera.inliers=0;
+        s->camera.inliers=0;
+        s->onward_ok=0;
     }
     s_temp_ready=s;
 }
@@ -539,7 +583,9 @@ static int temporal_worker_init(void) {
             "      : (u_visual_options.w > 0.0 && !grown)) gl_Position = vec4(2.0, 2.0, 2.0, 1.0);\n"
             "  v_deep = (a_order > -0.9999 && a_order < 0.9999) ? 1.0 : -1000.0;\n"
             "  v_fade = (a_visual_flags > 1.5 && a_order > -0.9999 && a_order < 0.9999) ? vec2((1.0 - a_order)/32.0, a_visual_pos.x) : vec2(-1.0, 0.0);\n"
-            "  v_bill = a_visual_flags < -0.5 ? 0.75 : (a_visual_flags < 1.5 && a_order > -0.9999 && a_order < 0.9999) ? 2.0 : 1.0; }\n") : NULL;
+            "  if (close) { v_deep = 1.0; v_fade = vec2(-1.0, 0.0);\n"
+            "    if (u_visual_options.w <= 0.0) { gl_Position.z = 1.0 - 32.0*(1.0 + u_pull)/hw; gl_Position *= hw; } else gl_Position = vec4(2.0, 2.0, 2.0, 1.0); }\n"
+            "  v_bill = a_visual_flags < -0.5 && a_visual_flags > -1.5 ? 0.75 : (a_visual_flags < 1.5 && a_order > -0.9999 && a_order < 0.9999) ? 2.0 : 1.0; }\n") : NULL;
         char *marked_fs=marked_vs ? sprite_marking_shader(TEX_FS) : NULL;
         s_temp_tex_prog=tex_vs ? build_program_ex(marked_fs ? marked_vs : tex_vs,marked_fs ? marked_fs : TEX_FS,1) : 0;
         s_temp_marked=marked_fs!=NULL;
@@ -804,6 +850,7 @@ static void temporal_submit_faces(const TemporalScene *s,const TemporalCommand *
 /* Over the scene a departed face must be this much nearer than what it covers: the game paints a coarse wall quad
  * and then its finer pieces over it, and the coarse one, never seen, lies in the same plane (0 of 1306 points on top). */
 #define TEMP_ORDER_CLEARANCE 1.03f
+#define TEMP_ORDER_OVER_NEAREST 0.000001 /* window depth, twice TEMP_ORDER_NEAR's: a dropped face drawn over the scene never beats what has no depth */
 static float temporal_order(float depth) {
     return depth>16.0f ? 1.0f-32.0f/depth : TEMP_ORDER_NEAR;
 }
@@ -813,7 +860,7 @@ static float temporal_order(float depth) {
  * an opaque face with model coordinates goes under the current world and
  * again over the scene wherever it is nearer by TEMP_ORDER_CLEARANCE than the
  * current face that covered it. An opaque face without them (a grown copy) or with a held corner goes under the world
- * only. A sprite goes over the scene only, and only when no current sprite
+ * only, unless it is a near face. A sprite goes over the scene only, and only when no current sprite
  * stands in its place. A translucent current face writes its depth too, so
  * behind one the second pass is lost and the far face shows. */
 static void temporal_bounds(const GpuTemporalTriangle *face,float box[4]) {
@@ -841,6 +888,7 @@ static void temporal_underlay(float alpha,int covered) {
     if (!s->mesh_stats.departed_faces || p->width!=s->width || p->scale!=s->scale) return;
     s_temp_fade_nearer=covered ? TEMP_ORDER_CLEARANCE : 1.0f;
     glDepthFunc(covered ? GL_LESS : GL_ALWAYS); glDepthMask(covered ? GL_FALSE : GL_TRUE);
+    if (covered) glDepthRange(TEMP_ORDER_OVER_NEAREST,1.0);
     s_temp_scene_depth=!covered; s_temp_underlaying=1;
     if (s_world_depth && !covered) glDepthMask(GL_FALSE);  /* last frame's faces must not stand in the way of this frame's */
     for (int i=0;i<p->nc;++i) {
@@ -864,6 +912,25 @@ static void temporal_underlay(float alpha,int covered) {
                 gpu_temporal_lerp(&p->start[ti],&p->gone_to[ti],alpha,&out);
                 show=gpu_temporal_mesh_facing(&p->triangles[ti],&out);
             }
+            if (t && s_temp_under[j*TEXV+19]>3.5f && s_temp_under[j*TEXV+19]<4.5f) {
+                /* A near face the game dropped goes under the scene and over it where nearer, whatever the mesh carried of it: each corner goes by its own w as the scene's do, to this frame's or by the camera. */
+                double nx[3], ny[3], weight[3];
+                show=p->gone[ti] && opaque && s->onward_ok;
+                for (int k=0;k<3 && show;++k) {
+                    const float *v=&s_temp_under[(j+k)*TEXV];
+                    show=gpu_temporal_camera_project_h(&s->onward,v[20],v[21],v[22],&nx[k],&ny[k],&weight[k]);
+                }
+                for (int k=0;k<3;++k) {
+                    float *v=&s_temp_under[(j+k)*TEXV], after[3];
+                    if (!show) psx_near_hide(&v[20]);
+                    else if (temporal_near_find(p,c->first+j+k,s,s->camera.shift,-1,nx[k],ny[k],weight[k],v[22],after)) psx_near_towards(after,1.0f-alpha,&v[20]);
+                    else psx_near_between(nx[k],ny[k],weight[k],1.0f-alpha,&v[20]);
+                    if (covered) psx_near_farther(&v[20],TEMP_ORDER_CLEARANCE);
+                    v[0]=v[20]; v[1]=v[21];
+                }
+                any|=show;
+                continue;
+            }
             for (int k=0;k<3;++k) {
                 float *v=&s_temp_under[(j+k)*TEXV];
                 v[0]=v[t?20:7]=show?out.x[k]:0; v[1]=v[t?21:8]=show?out.y[k]:0;
@@ -873,7 +940,7 @@ static void temporal_underlay(float alpha,int covered) {
         }
         if (any) temporal_submit(p,c,s->height,s_temp_under,c->count);
     }
-    glDepthFunc(GL_ALWAYS); glDepthMask(GL_TRUE);
+    glDepthFunc(GL_ALWAYS); glDepthMask(GL_TRUE); glDepthRange(0.0,1.0);
     s_temp_scene_depth=1; s_temp_underlaying=0;
     s_temp_fade_nearer=1.0f;
 }
@@ -893,6 +960,7 @@ static int temporal_present(float alpha,int lx,int ly,int lw,int lh) {
     glStencilMask(0xFF); glClearStencil(s->clear[3]>0.5f ? 1:0);
     glClearColor(s->clear[0],s->clear[1],s->clear[2],s->clear[3]);
     glEnable(GL_DEPTH_TEST); glDepthFunc(GL_ALWAYS); glDepthMask(GL_TRUE); glClearDepth(1.0);
+    glEnable(PSXGL_DEPTH_CLAMP);
     glClear(GL_COLOR_BUFFER_BIT|GL_STENCIL_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
     s_temp_scene_depth=1;
     s_temp_shown_stats=s->mesh_stats; s_temp_shown_faces=s->nt;
@@ -902,6 +970,23 @@ static int temporal_present(float alpha,int lx,int ly,int lw,int lh) {
         const int t=c->textured;
         int split=0;
         memcpy(s_temp_scratch,s->vertices+c->first*TEXV,c->count*TEXV*sizeof(float));
+        /* The panorama on its way from where it stood a frame earlier. A free edge moves, an end of the span slides its
+         * texture by what the frame wants and that way together, as far as its column and the tile itself go. */
+        if (t && c->mode==GL_TRIANGLES && s->backdrop) for (int j=0;j+2<c->count;j+=3) {
+            const float moved=(1.0f-alpha)*s->backdrop_back;
+            float *v=&s_temp_scratch[j*TEXV], low=v[2], high=v[2];
+            if (!(v[19]<-1.5f)) continue;
+            for (int k=1;k<3;++k) { if (v[k*TEXV+2]<low) low=v[k*TEXV+2]; if (v[k*TEXV+2]>high) high=v[k*TEXV+2]; }
+            for (int k=0;k<3;++k) {
+                float *corner=v+k*TEXV;
+                if (corner[19]>-2.5f) { corner[0]=corner[20]=corner[0]+moved; continue; }
+                const int end=corner[19]<-3.5f;
+                corner[2]+=psx_ws_screen_tile_slide(0.0f,moved-corner[22]*s->backdrop_scale,s->backdrop_scale,end,
+                                                    psx_ws_screen_tile_room(corner[2],s->backdrop_column,end),
+                                                    high-low>1.0f ? high-low-1.0f : 0.0f);
+                corner[22]=0.0f;
+            }
+        }
         if (c->mode==GL_TRIANGLES) for (int j=0;j<c->count;j+=3) {
             int ti=c->first_tri+j/3;
             const GpuTemporalTriangle *now=&s->triangles[ti];
@@ -915,6 +1000,23 @@ static int temporal_present(float alpha,int lx,int ly,int lw,int lh) {
                 for (int k=0;k<3;++k)
                     if (!(now->world && now->depth[k]>0.0f)) s_temp_scratch[(j+k)*TEXV+(t?23:9)]=TEMP_ORDER_FAR;
             if (!now->world) continue;
+            if (t && s_temp_scratch[j*TEXV+19]>3.5f && s_temp_scratch[j*TEXV+19]<4.5f) {
+                /* A near face's corner comes from where the frame before had the same point of the level, or by the camera: all three or none. */
+                double nx[3], ny[3], weight[3];
+                int carried=s->camera.inliers>=GPU_TEMPORAL_CAMERA_MIN_INLIERS;
+                for (int k=0;k<3 && carried;++k) {
+                    const float *v=&s_temp_scratch[(j+k)*TEXV];
+                    carried=gpu_temporal_camera_project_h(&s->camera,v[20],v[21],v[22],&nx[k],&ny[k],&weight[k]);
+                }
+                for (int k=0;k<3 && carried;++k) {
+                    float *v=&s_temp_scratch[(j+k)*TEXV], before[3];
+                    if (temporal_near_find(s,c->first+j+k,&s_temp_prev,s->camera.shift,1,nx[k],ny[k],weight[k],v[22],before))
+                        psx_near_towards(before,alpha,&v[20]);
+                    else psx_near_between(nx[k],ny[k],weight[k],alpha,&v[20]);
+                    v[0]=v[20]; v[1]=v[21];
+                }
+                continue;
+            }
             GpuTemporalTriangle out;
             gpu_temporal_lerp(&s->from[ti],now,alpha,&out);
             const int facing=gpu_temporal_mesh_facing(now,&out);

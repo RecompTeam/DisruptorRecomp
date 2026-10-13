@@ -1,8 +1,8 @@
 diff --git a/runtime/include/gpu_render.h b/runtime/include/gpu_render.h
-index 4953270aaccd4c606f5320f949befcdc544261e6..6cb1779203723b8aa120fc1109cf32325b244a29 100644
+index 4953270aaccd4c606f5320f949befcdc544261e6..248192cab36f701c678367a4846919cd102d34d2 100644
 --- a/runtime/include/gpu_render.h
 +++ b/runtime/include/gpu_render.h
-@@ -38,6 +38,41 @@
+@@ -38,6 +38,46 @@
  void gr_set_mask_bits(int set_bit, int check_bit);
  void gr_set_texture_window(uint32_t raw);
  void gr_set_color_modulation(int r, int g, int b, int raw_texture);
@@ -36,6 +36,11 @@ index 4953270aaccd4c606f5320f949befcdc544261e6..6cb1779203723b8aa120fc1109cf3232
 +void gr_set_temporal_identity_triangle(uint64_t id0, uint64_t id1, uint64_t id2);
 +/* The next textured rectangle is a world sprite at this camera depth (0 = none). */
 +void gr_set_temporal_sprite(float depth, const float sides[4]);
++/* The next textured rectangle is a backdrop tile placed so in the display's picture. */
++struct PsxWsPlacedTile;
++void gr_set_screen_tile(const struct PsxWsPlacedTile *tile);
++/* The next textured triangle has a corner at or behind the viewer's plane: where each corner projects, and its w. */
++void gr_set_near_triangle(const float a[3], const float b[3], const float c[3]);
 +/* center_y is relative to the active drawing band; a backend which stores
 + * absolute VRAM positions must combine it with its current draw offset. */
 +void gr_set_presentation_yaw(double yaw_units, double full_turn,
@@ -44,7 +49,7 @@ index 4953270aaccd4c606f5320f949befcdc544261e6..6cb1779203723b8aa120fc1109cf3232
  
  /* Primitives */
  void gr_fill_rect(int x, int y, int w, int h, uint16_t color);
-@@ -119,6 +154,22 @@
+@@ -119,6 +159,24 @@
      void (*set_mask_bits)(int set_bit, int check_bit);
      void (*set_texture_window)(uint32_t raw);
      void (*set_color_modulation)(int r, int g, int b, int raw_texture);
@@ -61,13 +66,15 @@ index 4953270aaccd4c606f5320f949befcdc544261e6..6cb1779203723b8aa120fc1109cf3232
 +    void (*set_surface_depth_triangle)(float z0, float z1, float z2);
 +    void (*set_temporal_identity_triangle)(uint64_t id0, uint64_t id1, uint64_t id2);
 +    void (*set_temporal_sprite)(float depth, const float sides[4]);
++    void (*set_screen_tile)(const struct PsxWsPlacedTile *tile);
++    void (*set_near_triangle)(const float a[3], const float b[3], const float c[3]);
 +    void (*set_presentation_yaw)(double yaw_units, double full_turn,
 +                                 double center_x, double center_y,
 +                                 double focal_x);
      void (*fill_rect)(int x, int y, int w, int h, uint16_t color);
      void (*copy_rect)(int src_x, int src_y, int dst_x, int dst_y, int w, int h);
      void (*draw_flat_triangle)(int x0, int y0, int x1, int y1, int x2, int y2,
-@@ -176,6 +227,7 @@
+@@ -176,6 +234,7 @@
       * pixel count, writes width/height to ow/oh. NULL if unsupported. */
      int  (*wide_dump_full)(uint32_t *out, int cap_pixels, int *ow, int *oh,
                             int base_x);

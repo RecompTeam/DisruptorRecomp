@@ -22,9 +22,11 @@ runtime/include/gpu.h
 +runtime/include/gpu_temporal_match.h
 +runtime/include/gpu_temporal_mesh.h
 +runtime/include/gpu_pinned_corner.h
++runtime/include/gpu_near_face.h
 +runtime/include/gpu_turned_perspective.h
 +runtime/include/gpu_turn_clip.h
 +runtime/include/gpu_world_depth.h
++runtime/include/gpu_world_texel.h
 runtime/include/gpu_render.h
 runtime/include/gpu_sw_renderer.h
 +runtime/include/host_borderless.h

@@ -59,7 +59,7 @@ require(
 )
 
 require(
-    "        int world = psx_world_depth_class(s_world_depth, visual_flags, turned_z, s_world_margin);\n" in renderer
+    "        int world = near_face ? 0 : psx_world_depth_class(s_world_depth, visual_flags, turned_z, s_world_margin);\n" in renderer
     and "            world = psx_world_depth_class(s_world_depth, visual_flags, piece_z, s_world_margin);\n"
     "        }\n"
     "        if (s_tb_n > 0 && world != s_tb_world) flush_tex_batch();\n" in renderer

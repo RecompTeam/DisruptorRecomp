@@ -51,6 +51,15 @@ GtePrecisionLookupResult gte_precision_load_perspective_word_ex(
 GtePrecisionLookupResult gte_precision_load_identity(
     uint32_t addr, uint32_t packed, uint64_t *identity);
 
+/* A corner before the divide, behind the viewer too: its place is (centre_x + hx / w, centre_y + hy / w) while w is not 0. */
+typedef struct GtePrecisionView {
+    double hx, hy, centre_x, centre_y;
+    int32_t w;
+    uint16_t focal;
+    uint64_t identity; /* as gte_precision_load_identity gives it */
+} GtePrecisionView;
+int gte_precision_load_view_word(uint32_t addr, uint32_t packed, GtePrecisionView *view);
+
 /* Retained boolean ABI used by older runtime code and out-of-tree modules. */
 int gte_precision_load_word(uint32_t addr, uint32_t packed,
                             int32_t *x16, int32_t *y16, uint16_t *z);
