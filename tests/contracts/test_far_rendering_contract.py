@@ -37,7 +37,7 @@ require(configs.count('callback = "disruptor_far_rendering_instruction_hook"\n')
 # The far renderer shares the already-generated renderer-entry fan-out.  A
 # second config entry would emit a duplicate guest callback.
 require(configs.count(
-    'mod_function_entry_funcs = ["0x80011888", "0x8001A46C", "0x8001C484", "0x80020DD8", "0x80040E68", "0x80044A10", "0x80044BDC", "0x8004B3D4", "0x8004D348", "0x8004D410"]') == 2,
+    'mod_function_entry_funcs = ["0x80011888", "0x8001A46C", "0x8001C484", "0x80020DD8", "0x80039450", "0x8003B78C", "0x80040E68", "0x80044A10", "0x80044BDC", "0x80046134", "0x8004B3D4", "0x8004D348", "0x8004D410"]') == 2,
     "both configs must retain exactly one audited renderer-entry seam")
 require("disruptor.far_rendering.renderer" in source and
         "psx_mod_register_function_entry_plugin" in source and

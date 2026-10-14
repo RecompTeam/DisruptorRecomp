@@ -36,10 +36,12 @@ runtime/include/interrupts.h
 +runtime/include/iso_overlay.h
 runtime/include/mod_memory.h
 runtime/include/psx_cyc.h
+runtime/include/savestate.h
 +runtime/include/save_point.h
 runtime/include/overlay_dispatch_preamble.c.inc
 runtime/include/ws_aspect_cone_math.h
 runtime/src/boot_state.c
+runtime/src/savestate.c
 runtime/src/dirty_ram_interp.c
 runtime/src/gpu.c
 runtime/src/gpu_gl_renderer.c

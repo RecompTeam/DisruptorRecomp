@@ -1,0 +1,13 @@
+diff --git a/runtime/include/savestate.h b/runtime/include/savestate.h
+index ca1c9d23f0a92b79b076facef8545f08a20f75ac..307c11120c2cd0e2b56eb9f861c08cbb5bb28faf 100644
+--- a/runtime/include/savestate.h
++++ b/runtime/include/savestate.h
+@@ -66,6 +66,8 @@
+ 
+ /* Frontend hook (main.cpp): restage VRAM present path after a successful load. */
+ void psx_frontend_on_savestate_loaded(void);
++/* Called before a state is written: what is in memory only for the frame being drawn is taken out. */
++void psx_frontend_before_savestate_save(void);
+ 
+ /* Called every block from psx_check_interrupts (in_exception == 0). If a save is
+  * pending, serialize with cpu->pc = resume_pc; if a load is pending, restore and

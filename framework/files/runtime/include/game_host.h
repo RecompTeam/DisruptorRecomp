@@ -23,6 +23,8 @@ int psx_game_fast_boot_forced(void);
 void psx_game_states_configured(void);
 /* Called after a save state is restored. */
 void psx_game_state_loaded(void);
+/* Called before a save state is written. */
+void psx_game_state_saving(void);
 /* A key went down or up. `plain` is set for a press without Ctrl, Alt or the system key and for every release. Nonzero when the game took a press. */
 int psx_game_key(int scancode, uint32_t keycode, int down, int plain);
 /* The keyboard's state as a pad may read it: `count` keys, nonzero for down, copied from `keys` to `kept` with the keys

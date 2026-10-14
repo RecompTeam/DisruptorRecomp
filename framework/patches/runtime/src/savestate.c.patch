@@ -1,0 +1,12 @@
+diff --git a/runtime/src/savestate.c b/runtime/src/savestate.c
+index b04e4ac0a7a80eac7201e3217e1a2982bda9ce33..eb28ad251414ddae3c9d7ed0516c007e78e37a89 100644
+--- a/runtime/src/savestate.c
++++ b/runtime/src/savestate.c
+@@ -210,6 +210,7 @@
+         if (savestate_slot_path(slot, path, sizeof(path))) {
+             /* Save the exact resume PC (cpu->pc is 0 mid-block; resume_pc is the
+              * block leader the interrupt path would resume at). */
++            psx_frontend_before_savestate_save();
+             CPUState snap = *cpu;
+             snap.pc = resume_pc;
+             int ok = boot_state_save(&snap, s_bios_checksum, s_entry_pc, path);

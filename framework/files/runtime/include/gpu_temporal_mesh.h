@@ -253,7 +253,7 @@ static inline int gpu_temporal_camera_fit(
     for (int pass = 0; pass < 2; ++pass)
     for (int triangle = 0; triangle < curr_n; ++triangle) {
         const int previous = pairs[triangle];
-        if (trusted && trusted[triangle] == 2) continue; /* a moving object says nothing about the camera */
+        if (trusted && trusted[triangle] >= 2) continue; /* a moving object says nothing about the camera */
         if ((trusted && trusted[triangle] == 1) != (pass == 0)) continue;
         if (previous < 0 || previous >= prev_n ||
             !gpu_temporal_camera_pair_valid(&prev[previous], &curr[triangle]) ||
@@ -439,8 +439,8 @@ static inline int gpu_temporal_twin_count(GpuTemporalTwinEntry *table, unsigned 
 
 /* A candidate previous face for every current one. `trusted` is 1 for the
  * ones that may vote for the camera (twins, or without them faces whose
- * material is unique in both frames) and 2 for twins under a second shift,
- * which is a moving object. Once a frame has twins, a modelled face without
+ * material is unique in both frames), 2 for twins under a second shift,
+ * which is a moving object, and 3 for a rider. Once a frame has twins, a modelled face without
  * one has no previous self: the matcher's pick for it was a look-alike.
  * `shift` carries the previous interval's shift in and this one's out. */
 static inline int gpu_temporal_mesh_pairs(const GpuTemporalTriangle *prev, int prev_n,
@@ -569,20 +569,21 @@ static inline int gpu_temporal_mesh_pairs(const GpuTemporalTriangle *prev, int p
                 gpu_temporal_twin_find(faces, mask,
                     gpu_temporal_twin_key(&prev[twins[triangle]], zero))->spent = 1;
             }
-            /* A group of faces that kept its shape but gained a few units on
-             * the camera is an object in motion. A tile's width is not a few. */
-            for (int index = 0; index < candidate_count; ++index) {
-                const int *proposed = candidates[index].shift;
+            /* A group of faces that kept its shape but gained a few units on the camera is an object in
+             * motion (a tile's width is not a few), and one that kept its place before it rides with it. */
+            for (int index = 0; index <= candidate_count; ++index) {
+                const int *proposed = index < candidate_count ? candidates[index].shift : zero;
+                const int rides = !proposed[0] && !proposed[1] && !proposed[2];
                 int near_camera = 1;
                 for (int axis = 0; axis < 3; ++axis)
-                    near_camera &= abs(proposed[axis] - best_shift[axis]) <= GPU_TEMPORAL_TWIN_OBJECT_REACH;
+                    near_camera &= rides || abs(proposed[axis] - best_shift[axis]) <= GPU_TEMPORAL_TWIN_OBJECT_REACH;
                 if (!near_camera || !memcmp(proposed, best_shift, sizeof(best_shift)) ||
                     gpu_temporal_twin_count(faces, mask, prev, curr, curr_n, proposed, pairs, object) <
                         GPU_TEMPORAL_TWIN_OBJECT_MINIMUM) continue;
                 for (int triangle = 0; triangle < curr_n; ++triangle) {
                     if (object[triangle] < 0) continue;
                     pairs[triangle] = object[triangle];
-                    trusted[triangle] = 2;
+                    trusted[triangle] = rides ? 3 : 2;
                     gpu_temporal_twin_find(faces, mask,
                         gpu_temporal_twin_key(&prev[object[triangle]], zero))->spent = 1;
                 }
@@ -1036,10 +1037,16 @@ static inline int gpu_temporal_mesh_prepare_scene(
         }
     }
 
+    if (prior) memcpy(shift, prior->shift, sizeof(shift));
+    twins = gpu_temporal_mesh_pairs(prev, prev_n, curr, curr_n, matches, pairs, trusted, shift);
     qsort(points, (size_t)point_count, sizeof(*points), gpu_temporal_mesh_compare_point);
-    for (int point = 1; point < point_count; ++point)
-        if (!gpu_temporal_mesh_compare_point(&points[point - 1], &points[point]))
-            gpu_temporal_mesh_union(nodes, points[point - 1].corner, points[point].corner);
+    /* The world goes by a rider: a corner of one that meets a corner of the other is not welded to it. */
+    for (int point = 0, last[2] = {-1, -1}; point < point_count; ++point) {
+        const int rides = trusted[points[point].corner / 3] == 3;
+        if (point && gpu_temporal_mesh_compare_point(&points[point - 1], &points[point])) last[0] = last[1] = -1;
+        if (last[rides] >= 0) gpu_temporal_mesh_union(nodes, last[rides], points[point].corner);
+        last[rides] = points[point].corner;
+    }
     qsort(edges, (size_t)edge_count, sizeof(*edges), gpu_temporal_mesh_compare_edge);
     for (int first = 0; first < edge_count;) {
         int end = first + 1;
@@ -1048,6 +1055,7 @@ static inline int gpu_temporal_mesh_prepare_scene(
         if (end - first == 2) {
             const GpuTemporalMeshEdge *a = &edges[first], *b = &edges[first + 1];
             if (a->triangle != b->triangle && a->direction != b->direction &&
+                (trusted[a->triangle] == 3) == (trusted[b->triangle] == 3) &&
                 gpu_temporal_mesh_depth_compatible(curr, a->a, b->a) &&
                 gpu_temporal_mesh_depth_compatible(curr, a->b, b->b)) {
                 const int compatible_a = gpu_temporal_mesh_group_depth_compatible(nodes, a->a, b->a);
@@ -1084,8 +1092,6 @@ static inline int gpu_temporal_mesh_prepare_scene(
          * cannot detach from it. HUD faces never participate in this graph. */
         if (!faces[corner / 3].eligible) nodes[root].held = 1;
     }
-    if (prior) memcpy(shift, prior->shift, sizeof(shift));
-    twins = gpu_temporal_mesh_pairs(prev, prev_n, curr, curr_n, matches, pairs, trusted, shift);
     has_camera = gpu_temporal_camera_fit(prev, prev_n, curr, curr_n, pairs, trusted, prior, &camera);
     memcpy(camera.shift, shift, sizeof(shift));
     if (has_camera) {
@@ -1120,7 +1126,7 @@ static inline int gpu_temporal_mesh_prepare_scene(
             (has_camera ? !gpu_temporal_camera_pair_valid(&prev[previous], &curr[triangle])
                         : !gpu_temporal_mesh_valid(&prev[previous]) ||
                           !gpu_temporal_compatible(&prev[previous], &curr[triangle]))) continue;
-        if (has_camera && trusted[triangle] == 2) dynamic = 1;
+        if (has_camera && trusted[triangle] >= 2) dynamic = 1;
         for (int vertex = 0; vertex < 3 && !dynamic; ++vertex) {
             double px, py;
             if (!gpu_temporal_mesh_known_depth(curr[triangle].depth[vertex]) ||

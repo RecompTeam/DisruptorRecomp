@@ -15,6 +15,8 @@
 extern "C" int disruptor_name_entry_key(int scancode, uint32_t keycode, int down, int plain);
 extern "C" void disruptor_name_entry_keys_for_pad(const uint8_t *keys, uint8_t *kept, int count);
 extern "C" void disruptor_name_entry_state_loaded(void);
+extern "C" void disruptor_mover_motion_state_loaded(void);
+extern "C" void disruptor_mover_motion_state_saving(void);
 extern "C" int disruptor_grown_quad_sources(uint32_t command_address, const uint32_t *packet, uint32_t source_address[4],
                                             uint32_t source_word[4]);
 
@@ -42,8 +44,11 @@ void psx_game_states_configured(void) { disruptor_language_settle(); }
 void psx_game_state_loaded(void) {
     disruptor_capsule_state_loaded();
     disruptor_name_entry_state_loaded();
+    disruptor_mover_motion_state_loaded();
     disruptor_far_rendering_abandon_metrics();
 }
+
+void psx_game_state_saving(void) { disruptor_mover_motion_state_saving(); }
 
 int psx_game_key(int scancode, uint32_t keycode, int down, int plain) {
     return disruptor_name_entry_key(scancode, keycode, down, plain);

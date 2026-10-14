@@ -47,6 +47,7 @@ set(DISRUPTOR_EXTRA_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/render_arena.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/grown_quad.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/hud_widgets.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/mover_motion.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/sprite_depth.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/vertical_camera.cpp")
 
@@ -208,6 +209,7 @@ if(BUILD_TESTING)
     disruptor_contract(hud_widget)
     disruptor_contract(name_entry RETAIL)
     disruptor_contract(grown_quad RETAIL)
+    disruptor_contract(mover_steps RETAIL)
     disruptor_contract(sprite_range RETAIL)
     disruptor_contract(intro_skip RETAIL)
     disruptor_contract(language RETAIL)
@@ -326,6 +328,7 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
     disruptor_unit_test(disruptor_present_rate tests/unit/disruptor_present_rate_test.cpp
         INCLUDES "${CMAKE_CURRENT_SOURCE_DIR}/tests/support/present_rate_fakes")
     disruptor_unit_test(disruptor_grown_quad tests/unit/disruptor_grown_quad_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_mover_steps tests/unit/disruptor_mover_steps_test.cpp)
     disruptor_unit_test(disruptor_sprite_depth tests/unit/disruptor_sprite_depth_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_billboard_aspect tests/unit/disruptor_billboard_aspect_test.cpp RUNTIME_HEADERS)
 

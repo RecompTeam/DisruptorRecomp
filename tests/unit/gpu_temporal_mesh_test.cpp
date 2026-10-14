@@ -493,6 +493,61 @@ void look_alikes_and_moving_objects() {
     for (int match : around.matches) far.matches.push_back(match + tiles);
     far.prepare(from, stats);
     expect(stats.seeded_vertices == 0, "a tile's width away is another tile, not a moving object");
+
+    /* A door's leaf: its corner that meets the frame's goes where the camera sends the frame's. */
+    Scene door = room(kStep);
+    const int frame = door.faces();
+    door.add_quad({-300, -50, 800}, {-100, -50, 800}, {-100, 50, 800}, {-300, 50, 800}, 903);
+    const int leaf = door.faces();
+    door.add_quad({-100, -50, 800}, {0, -50, 800}, {0, 50, 800}, {-100, 50, 800}, 900, {5, 0, 0});
+    door.add_quad({0, -50, 800}, {100, -50, 800}, {100, 50, 800}, {0, 50, 800}, 901, {5, 0, 0});
+    door.prepare(from, stats);
+    expect(stats.seeded_vertices == 6 && from[leaf].x[0] == from[frame].x[1] && from[leaf].y[0] == from[frame].y[1] &&
+               std::abs(from[leaf].x[0] / (from[leaf].w[0] != 0.0f ? from[leaf].w[0] : 1.0f) -
+                        (160.0 + 256.0 * door.before[frame][1].x / door.before[frame][1].z)) < 0.02,
+           "a moving object's corner that meets the world's is not welded to it");
+
+    /* A lift's floor keeps its place while the world goes by, in and past an object's reach, with and without the matcher's pairs. */
+    for (const bool matched : {true, false})
+        for (const int rise : {8, 16, 24, 64, -8, -64}) {
+            Scene lift = room(View{0.0, {0, rise, 0}});
+            /* A wall of the shaft whose lower corners meet the floor's in this frame. */
+            lift.add_quad({-100, 100, 500}, {-100, -100, 500}, {-100, -100, 300}, {-100, 100, 300}, 902);
+            const int floor = lift.faces();
+            lift.add_quad({-100, 100, 300}, {0, 100, 300}, {0, 100, 500}, {-100, 100, 500}, 900, {0, -rise, 0});
+            lift.add_quad({0, 100, 300}, {100, 100, 300}, {100, 100, 500}, {0, 100, 500}, 901, {0, -rise, 0});
+            if (!matched) std::fill(lift.matches.begin() + floor, lift.matches.end(), -1);
+            lift.prepare(from, stats);
+            expect(lift.worst_error(floor, lift.faces(), from) < 0.02, "a floor that rides with the camera goes by with the world");
+            expect(stats.seeded_vertices == 6 && stats.twin_faces == floor && lift.worst_error(0, floor, from) < 0.02,
+                   "the floor is the only voted geometry and the world keeps the camera's step");
+        }
+
+    /* Tiles a tile away along the one axis the camera moves on are not riders. */
+    for (const int axis : {0, 1}) {
+        std::array<int, 3> along{0, 0, 0}, away{0, 0, 0};
+        along[axis] = 64;
+        away[axis] = 512;
+        Scene shaft = room(View{0.0, along});
+        shaft.add_quad({-100, -50, 800}, {0, -50, 800}, {0, 50, 800}, {-100, 50, 800}, 900, away);
+        shaft.add_quad({0, -50, 800}, {100, -50, 800}, {100, 50, 800}, {0, 50, 800}, 901, away);
+        shaft.prepare(from, stats);
+        expect(stats.seeded_vertices == 0, "a tile away along the camera's own axis is taken for a rider");
+    }
+
+    /* The world goes by a tile's height a frame, and the lowest tile's own past was out of view. */
+    const View climb{0.0, {0, 100, 0}};
+    Scene stack = room(climb);
+    const int first_tile = stack.faces();
+    for (int row = 0; row < 5; ++row) {
+        const double y = -300.0 + 100.0 * row;
+        stack.add_quad({-420, y, 400}, {-420, y + 100, 400}, {-420, y + 100, 700}, {-420, y, 700}, 900);
+    }
+    stack.previous.erase(stack.previous.begin() + first_tile, stack.previous.begin() + first_tile + 2);
+    std::fill(stack.matches.begin(), stack.matches.end(), -1);
+    stack.prepare(from, stats);
+    expect(stats.seeded_vertices == 0 && stats.twin_faces == stack.faces() - 2,
+           "a tile that came into view where its neighbour stood is taken for a rider");
 }
 
 void fast_turn_keeps_lines_straight() {

@@ -29,6 +29,11 @@ validation is incomplete.
   frames per second. Experimental 60 FPS gameplay removes that floor, and
   in-between frames add presentation frames. Higher render resolution alone
   does not increase the game cadence.
+- The game steps doors and lifts on every second tick. Under 60 FPS gameplay a
+  door is drawn half a step ahead on the frames in between and a lift half a
+  step behind on the frames it steps, with the view of a player it carries, so
+  both move on every frame. Enemies and items on a moving lift, and the other
+  things the game updates at that rate, still step at 30.
 - The widescreen sky and skyline backdrop draws extra tile columns to keep its
   proportions. Checked at 16:9, 21:9, and 32:9 in the first mission only.
 - Vertical aim needs broader actor, room-edge, and level-transition testing.
