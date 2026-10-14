@@ -43,14 +43,20 @@ void set_aspect(Settings& settings, int index) {
 
 int scale(const Settings& settings) { return settings.supersampling - 1; }
 void set_scale(Settings& settings, int index) { settings.has_supersampling = true; settings.supersampling = index + 1; }
-int multisampling(const Settings& settings) {
+// One list over two saved keys: the samples a pixel, then the same counts with every sample shaded.
+constexpr int sample_levels = 4;
+bool antialiasing_saved(const Settings& settings) { return settings.has_multisampling || settings.has_sample_shading; }
+int antialiasing(const Settings& settings) {
     const auto found = std::ranges::find(PSXRecompV4::kDisruptorSampleCounts, settings.multisampling);
-    return found == std::end(PSXRecompV4::kDisruptorSampleCounts) ? 0
+    const int samples = found == std::end(PSXRecompV4::kDisruptorSampleCounts) ? 0
         : static_cast<int>(found - std::begin(PSXRecompV4::kDisruptorSampleCounts));
+    return samples > 0 && settings.sample_shading ? samples + sample_levels : samples;
 }
-void set_multisampling(Settings& settings, int index) {
-    settings.has_multisampling = true;
-    settings.multisampling = PSXRecompV4::kDisruptorSampleCounts[std::clamp(index, 0, 4)];
+void set_antialiasing(Settings& settings, int index) {
+    index = std::clamp(index, 0, 2 * sample_levels);
+    settings.has_multisampling = settings.has_sample_shading = true;
+    settings.sample_shading = index > sample_levels;
+    settings.multisampling = PSXRecompV4::kDisruptorSampleCounts[settings.sample_shading ? index - sample_levels : index];
 }
 int vsync(const Settings& settings) { return std::clamp(settings.vsync + 1, 0, 2); }
 void set_vsync(Settings& settings, int index) { settings.has_vsync = true; settings.vsync = index - 1; }
@@ -67,7 +73,8 @@ constexpr const char* display_modes[] = {"Windowed", "Borderless fullscreen", "E
 constexpr const char* aspects[] = {"4:3", "16:9", "21:9", "32:9", "Match window (up to 32:9)"};
 constexpr const char* scales[] = {"1x (native)", "2x", "3x", "4x", "5x", "6x", "7x", "8x"};
 constexpr const char* vsyncs[] = {"Adaptive", "Immediate", "Synchronised"};
-constexpr const char* sample_counts[] = {"Off", "2x", "4x", "8x", "16x"};
+constexpr const char* antialiasing_levels[] = {"Off",     "2x MSAA", "4x MSAA", "8x MSAA", "16x MSAA",
+                                               "2x SSAA", "4x SSAA", "8x SSAA", "16x SSAA"};
 
 constexpr const char* geometry_key = "disruptor.geometry_correction";
 constexpr const char* frames_key = "video.frame_interpolation";
@@ -211,16 +218,12 @@ constexpr Option option_list[] = {
         "Writes more into the game's log for a bug report: how the frames ran, settings changed in the menu, "
         "controllers coming and going, the graphics driver's complaints. The driver's part starts with the next launch."),
 
-    choice("disruptor.multisampling", "Multisampling", 0,
-           "Draws the world with this many samples a pixel, which smooths the edges of polygons and of the "
-           "HUD's rectangles. Video memory and the graphics card's work grow with the value, and a card that "
-           "has fewer samples uses its most. Unfinished.", sample_counts,
-           saved<&Settings::has_multisampling>, multisampling, set_multisampling, needs_geometry),
-    toggle<&Settings::has_sample_shading, &Settings::sample_shading>(
-        "disruptor.sample_shading", "Supersampling", 0,
-        "Shades every sample of Multisampling, which smooths textures and cut-out outlines too, the HUD's among "
-        "them. The graphics card shades that many times as much. Does nothing while Multisampling is off. Unfinished.",
-        needs_geometry),
+    choice("disruptor.multisampling", "Anti-aliasing (MSAA / SSAA)", 0,
+           "MSAA smooths the edges of polygons and of the HUD's rectangles. SSAA also smooths textures and cut-out "
+           "outlines, at that many times the card's shading, and needs OpenGL 4.0. Video memory grows with the number. "
+           "Unfinished.",
+           antialiasing_levels,
+           antialiasing_saved, antialiasing, set_antialiasing, needs_geometry),
     toggle<&Settings::has_downscale_averaging, &Settings::downscale_averaging>(
         "disruptor.downscale_averaging", "Downscale averaging", 0,
         "Averages an internal resolution above the screen's down to it, where one sample a screen pixel is taken "

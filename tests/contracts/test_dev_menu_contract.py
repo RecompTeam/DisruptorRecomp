@@ -765,7 +765,7 @@ shared_keys = set(re.findall(r'\b(?:toggle|choice|slider)(?:<[^>]*>)?\(\s*"([\w.
 staged_keys = set(re.findall(r'\bmark\("([\w.]+)"', menu)) | set(
     re.findall(r'g_preferences\.changed\.insert\(\s*find_option\("([\w.]+)"\)\)', menu))
 applied_keys = set(re.findall(r'\bchanged\("([\w.]+)"\)', function_body(menu, "apply_pending_preferences")))
-require(len(shared_keys) == 32 and staged_keys == shared_keys and applied_keys == shared_keys and
+require(len(shared_keys) == 31 and staged_keys == shared_keys and applied_keys == shared_keys and
         set(re.findall(r'\bfind_option\("([\w.]+)"', menu)) <= shared_keys,
         "the menu must stage every shared option, apply every one it staged and name no key the table lacks")
 require('void mark_vsync(int value) { mark("video.vsync", value + 1); }\n' in menu and
@@ -839,7 +839,7 @@ drawn_keys = set(re.findall(r'\boption_(?:toggle|slider|list)\("([\w.]+)"', menu
     re.findall(r'find_option\("([\w.]+)"\)->label', menu))
 present = read("src/game/frame/present_rate.cpp")
 require(HELPERS in menu and "bool option_list(const char *key, int *index, size_t skipped = 0);\n" in menu and
-        len(shared_labels) == 32 and drawn_keys == shared_keys and
+        len(shared_labels) == 31 and drawn_keys == shared_keys and
         not [text for text in [*shared_labels, *shared_choices] if f'"{text}"' in menu + present] and
         "    static constexpr int kScaleCount = 8;\n" in menu and
         '"1x (native)", "2x", "3x", "4x", "5x", "6x", "7x", "8x"' in options and
@@ -889,7 +889,7 @@ for row in table_rows:
         needing[re.search(r'"([\w.]+)"', row)[1]] = needs_lists[ending[1]]
 asked = set(re.findall(r'\bapplies\("([\w.]+)"\)', menu))
 told = set(re.findall(r'key == "([\w.]+)"', function_body(menu, "prerequisite_on")))
-require(RULE in options and LIVE in menu and len(needing) == 12 and
+require(RULE in options and LIVE in menu and len(needing) == 11 and
         needing["disruptor.high_precision_camera"] == ["disruptor.mouse_aim", "disruptor.geometry_correction"] and
         asked == set(needing) - {"video.frame_interpolation_fps"} and
         told == {key for keys in needing.values() for key in keys} - {"video.frame_interpolation"} and
@@ -914,7 +914,7 @@ def greyed_by_own_rule(source: str, key: str) -> bool:
 
 
 greyed = asked - {"video.frame_interpolation"}
-require(len(greyed) == 10 and all(greyed_by_own_rule(menu, key) for key in greyed) and
+require(len(greyed) == 9 and all(greyed_by_own_rule(menu, key) for key in greyed) and
         not greyed_by_own_rule(menu.replace("    if (!textures_apply) ImGui::BeginDisabled();\n",
                                             "    if (false) ImGui::BeginDisabled();\n"), "disruptor.perspective_textures") and
         not greyed_by_own_rule(menu.replace('applies("disruptor.gap_filling")', 'applies("disruptor.vsync")'),
@@ -937,7 +937,7 @@ shared_hints = [
         r'\b(?:toggle<[^>]*>|choice|slider)\(\s*"[\w.]+",\s*"[^"]+",\s*-?\d+,\s*((?:"(?:[^"\\]|\\.)*"\s*)+)', options)
 ]
 written = "".join(re.findall(LITERAL, menu + present))
-require(HINT in read("src/game/ui/hint.h") and len(shared_hints) == 32 and
+require(HINT in read("src/game/ui/hint.h") and len(shared_hints) == 31 and
         all(20 <= len(text) <= 240 for text in shared_hints) and
         not [text for text in shared_hints if text[:32] in written] and
         "Needs mouse aim and exact geometry." in shared_hints[

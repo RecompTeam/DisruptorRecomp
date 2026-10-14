@@ -19,9 +19,8 @@ disc revision; the redistributable OpenBIOS backend is used for booting.
 - Optional geometry and perspective-texture correction.
 - Optional gap filling, a depth-sorted world, a smooth distance fade and
   ambient occlusion on top of geometry correction.
-- Experimental anti-aliasing: 2x–16x multisampling of the world, with
-  supersampling of every sample as an option, downscale averaging and edge
-  smoothing that leaves the HUD's pictures alone.
+- Experimental anti-aliasing: 2x–16x MSAA or SSAA of the world, downscale
+  averaging and edge smoothing that leaves the HUD's pictures alone.
 - Optional 60 FPS gameplay and in-between frames.
 - Keyboard/controller input and optional modern WASD/mouse controls.
 - Optional smooth mouse turning between the game's 256 turn steps.

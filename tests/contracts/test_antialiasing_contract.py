@@ -234,10 +234,16 @@ require(
 )
 require(
     "inline constexpr int kDisruptorSampleCounts[] = {0, 2, 4, 8, 16};\n" in fields
-    and 'constexpr const char* sample_counts[] = {"Off", "2x", "4x", "8x", "16x"};\n' in options
-    and '    choice("disruptor.multisampling", "Multisampling", 0,\n' in options
-    and "           saved<&Settings::has_multisampling>, multisampling, set_multisampling, needs_geometry),\n" in options
-    and "    settings.multisampling = PSXRecompV4::kDisruptorSampleCounts[std::clamp(index, 0, 4)];\n" in options
+    and 'constexpr const char* antialiasing_levels[] = {"Off",     "2x MSAA", "4x MSAA", "8x MSAA", "16x MSAA",\n'
+    '                                               "2x SSAA", "4x SSAA", "8x SSAA", "16x SSAA"};\n' in options
+    and '    choice("disruptor.multisampling", "Anti-aliasing (MSAA / SSAA)", 0,\n' in options
+    and "           antialiasing_saved, antialiasing, set_antialiasing, needs_geometry),\n" in options
+    and "    return samples > 0 && settings.sample_shading ? samples + sample_levels : samples;\n" in options
+    and "    settings.has_multisampling = settings.has_sample_shading = true;\n"
+    "    settings.sample_shading = index > sample_levels;\n"
+    "    settings.multisampling = PSXRecompV4::kDisruptorSampleCounts[settings.sample_shading ? index - sample_levels : index];\n"
+    in options
+    and '"disruptor.sample_shading"' not in options
     and "    toggle<&Settings::has_downscale_averaging, &Settings::downscale_averaging>(\n"
     '        "disruptor.downscale_averaging", "Downscale averaging", 0,\n' in options
     and "    toggle<&Settings::has_edge_smoothing, &Settings::edge_smoothing>(\n"
@@ -246,8 +252,8 @@ require(
     and "                        std::span<const char* const> needs = {}) {\n"
     "    return {key, Kind::choice, label, saved, get, set, initial, 0, static_cast<int>(choices.size()) - 1,\n"
     "            choices, needs, Unit::none, hint};\n" in options,
-    "the three are saved settings that start off: the samples a list that needs geometry correction, the two filters switches "
-    "that need nothing",
+    "the three are saved settings that start off: anti-aliasing one list over the samples and their shading that needs "
+    "geometry correction, the two filters switches that need nothing",
 )
 require(
     '            const int samples = toml::find<int>(d, "multisampling");\n'
@@ -264,37 +270,32 @@ require(
     in saved
     and '        if (s.has_sample_shading)\n            f << "sample_shading = " << (s.sample_shading ? "true" : "false") << "\\n";\n' in saved
     and "        s.has_multisampling || s.has_sample_shading || s.has_downscale_averaging || s.has_edge_smoothing ||\n" in saved
-    and '    {"disruptor.multisampling", Page::experimental},\n    {"disruptor.sample_shading", Page::experimental},\n'
-    '    {"disruptor.downscale_averaging", Page::experimental},\n    {"disruptor.edge_smoothing", Page::experimental},\n' in launcher,
-    "each of the four is read from the file, the samples only as a count the list has, written back, counted as a setting "
-    "of its own and shown on the launcher's Experimental page",
+    and '    {"disruptor.multisampling", Page::experimental},\n'
+    '    {"disruptor.downscale_averaging", Page::experimental},\n    {"disruptor.edge_smoothing", Page::experimental},\n' in launcher
+    and '"disruptor.sample_shading"' not in launcher,
+    "each of the four keys is read from the file, the samples only as a count the list has, written back and counted as a "
+    "setting of its own, and the launcher's Experimental page shows the anti-aliasing list over the first two",
 )
 require(
-    "    toggle<&Settings::has_sample_shading, &Settings::sample_shading>(\n"
-    '        "disruptor.sample_shading", "Supersampling", 0,\n' in options
-    and 'Does nothing while Multisampling is off. Unfinished.",\n        needs_geometry),\n' in options
-    and "    bool sample_shading = gl_renderer_sample_shading() != 0;\n"
-    '    const bool shading_applies = applies("disruptor.sample_shading");\n'
-    "    if (!shading_applies) ImGui::BeginDisabled();\n"
-    '    if (option_toggle("disruptor.sample_shading", &sample_shading)) {\n'
-    "        gl_renderer_set_sample_shading(sample_shading ? 1 : 0);\n"
-    "        mark_sample_shading(sample_shading);\n"
-    "    }\n"
-    "    if (!shading_applies) ImGui::EndDisabled();\n" in experimental
-    and "    if (settings.has_sample_shading) gl_renderer_set_sample_shading(settings.sample_shading ? 1 : 0);\n" in menu
-    and '    if (changed("disruptor.sample_shading"))\n        gl_renderer_set_sample_shading(pending.sample_shading ? 1 : 0);\n' in menu
-    and 'void mark_sample_shading(bool value) { mark("disruptor.sample_shading", value); }\n' in menu,
-    "supersampling is a saved switch that starts off and needs geometry correction, as the samples it shades do: the "
-    "Experimental tab switches it at once and stages it for saving, and a start with it saved applies it",
+    "    if (settings.has_sample_shading) gl_renderer_set_sample_shading(settings.sample_shading ? 1 : 0);\n" in menu
+    and '"disruptor.sample_shading"' not in menu + experimental
+    and "mark_sample_shading" not in menu + experimental,
+    "supersampling is the anti-aliasing list's shading: no row of its own, and a start with it saved applies it",
 )
 require(
-    "        if (PSXRecompV4::kDisruptorSampleCounts[level] == gl_renderer_multisampling()) samples = level;\n"
+    '    const Option& antialiasing = *find_option("disruptor.multisampling");\n'
+    "    settings::Settings running;\n"
+    "    running.multisampling = gl_renderer_multisampling();\n"
+    "    running.sample_shading = gl_renderer_sample_shading() != 0;\n"
+    "    int level = antialiasing.get(running);\n"
     '    const bool sampling_applies = applies("disruptor.multisampling");\n'
     "    if (!sampling_applies) ImGui::BeginDisabled();\n"
     "    ImGui::SetNextItemWidth(260.0f);\n"
-    '    if (option_list("disruptor.multisampling", &samples)) {\n'
-    "        gl_renderer_set_multisampling(PSXRecompV4::kDisruptorSampleCounts[samples]);\n"
-    "        mark_multisampling(samples);\n"
+    '    if (option_list("disruptor.multisampling", &level)) {\n'
+    "        antialiasing.set(running, level);\n"
+    "        gl_renderer_set_multisampling(running.multisampling);\n"
+    "        gl_renderer_set_sample_shading(running.sample_shading ? 1 : 0);\n"
+    "        mark_antialiasing(level);\n"
     "    }\n"
     "    if (!sampling_applies) ImGui::EndDisabled();\n" in experimental
     and "    bool averaging = gl_renderer_downscale_averaging() != 0;\n"
@@ -310,13 +311,15 @@ require(
     and "    if (settings.has_multisampling) gl_renderer_set_multisampling(settings.multisampling);\n" in menu
     and "    if (settings.has_downscale_averaging) gl_renderer_set_downscale_averaging(settings.downscale_averaging ? 1 : 0);\n"
     "    if (settings.has_edge_smoothing) gl_renderer_set_edge_smoothing(settings.edge_smoothing ? 1 : 0);\n" in menu
-    and '    if (changed("disruptor.multisampling"))\n        gl_renderer_set_multisampling(pending.multisampling);\n' in menu
+    and '    if (changed("disruptor.multisampling")) {\n        gl_renderer_set_multisampling(pending.multisampling);\n'
+    "        gl_renderer_set_sample_shading(pending.sample_shading ? 1 : 0);\n    }\n" in menu
     and '    if (changed("disruptor.downscale_averaging"))\n        gl_renderer_set_downscale_averaging(pending.downscale_averaging ? 1 : 0);\n'
     '    if (changed("disruptor.edge_smoothing"))\n        gl_renderer_set_edge_smoothing(pending.edge_smoothing ? 1 : 0);\n' in menu
-    and 'void mark_multisampling(int level) { mark("disruptor.multisampling", level); }\n' in menu
+    and 'void mark_antialiasing(int level) { mark("disruptor.multisampling", level); }\n' in menu
     and "void gl_renderer_set_downscale_averaging(int enabled) { s_aa_average = enabled != 0; }\n" in renderer
     and "void gl_renderer_set_edge_smoothing(int enabled) { s_aa_edges = enabled != 0; }\n" in renderer,
-    "the Experimental tab switches each of the three at once and stages it for saving, the samples by their place in the list, "
+    "the Experimental tab switches each of the three at once and stages it for saving, anti-aliasing through the shared table's "
+    "own reading of the samples and their shading, "
     "and a start with a setting saved applies it",
 )
 

@@ -97,12 +97,15 @@ starts off.
 adjustable reach and strength. It requires exact geometry and starts off.
 **Settings → Experimental** holds three anti-aliasing settings that start
 off and can be combined.
-**Multisampling** draws the world with 2, 4, 8 or 16 samples a pixel, which
-smooths the edges of polygons and of the HUD's rectangles. It requires exact
-geometry, and video memory grows with the value and the internal resolution.
-**Supersampling** shades every one of those samples, which smooths textures
-and cut-out outlines too, the HUD's among them. The graphics card shades
-that many times as much. It does nothing while Multisampling is off.
+**Anti-aliasing (MSAA / SSAA)** is one list. 2x, 4x, 8x or 16x MSAA draws
+the world with that many samples a pixel, which smooths the edges of
+polygons and of the HUD's rectangles. The same counts of SSAA also shade
+every sample, which smooths textures and cut-out outlines too, the HUD's
+among them. The graphics card then shades that many times as much. SSAA
+needs OpenGL 4.0 or its sample shading extension, without it the card draws
+MSAA of that count. The list requires exact geometry, and video memory grows
+with the number and the internal resolution. A card that has fewer samples
+uses its most.
 **Downscale averaging** averages an internal resolution above the screen's
 down to it. **Edge smoothing** smooths the edges left in the world's picture,
 sprite outlines among them. With exact geometry the textured pictures of the

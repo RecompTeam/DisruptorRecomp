@@ -172,9 +172,7 @@ void mark_occlusion_shape(int reach, int strength) {
 
 void mark_smooth_fade(bool value) { mark("disruptor.smooth_fade", value); }
 
-void mark_multisampling(int level) { mark("disruptor.multisampling", level); }
-
-void mark_sample_shading(bool value) { mark("disruptor.sample_shading", value); }
+void mark_antialiasing(int level) { mark("disruptor.multisampling", level); }
 
 void mark_downscale_averaging(bool value) { mark("disruptor.downscale_averaging", value); }
 
@@ -421,10 +419,10 @@ void apply_pending_preferences() {
         gl_renderer_set_ssao_shape(static_cast<float>(pending.occlusion_reach), pending.occlusion_strength / 100.0f);
     if (changed("disruptor.smooth_fade"))
         gl_renderer_set_smooth_fade(pending.smooth_fade ? 1 : 0);
-    if (changed("disruptor.multisampling"))
+    if (changed("disruptor.multisampling")) {
         gl_renderer_set_multisampling(pending.multisampling);
-    if (changed("disruptor.sample_shading"))
         gl_renderer_set_sample_shading(pending.sample_shading ? 1 : 0);
+    }
     if (changed("disruptor.downscale_averaging"))
         gl_renderer_set_downscale_averaging(pending.downscale_averaging ? 1 : 0);
     if (changed("disruptor.edge_smoothing"))

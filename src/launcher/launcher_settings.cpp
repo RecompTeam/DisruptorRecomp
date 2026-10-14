@@ -44,7 +44,6 @@ constexpr Placement placed[] = {
     {"audio.master_volume", Page::audio},
     {"audio.muted", Page::audio},
     {"disruptor.multisampling", Page::experimental},
-    {"disruptor.sample_shading", Page::experimental},
     {"disruptor.downscale_averaging", Page::experimental},
     {"disruptor.edge_smoothing", Page::experimental},
     {"disruptor.detailed_logging", Page::troubleshooting},

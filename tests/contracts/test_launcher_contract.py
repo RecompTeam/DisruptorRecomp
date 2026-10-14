@@ -15,7 +15,7 @@ NOT_OFFERED = {
     "video.frame_interpolation_blend", "audio.spu_hq", "disruptor.diagnostic_view",
 }
 # Keys written together with a launcher row, or by the language row.
-COVERED = {"video.adaptive_view", "disruptor.language_disc", "disruptor.language_discs"}
+COVERED = {"video.adaptive_view", "disruptor.language_disc", "disruptor.language_discs", "disruptor.sample_shading"}
 SHOWN_SECTIONS = ("video", "audio", "disruptor")
 UTF8_PAGE = '<activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>'
 
@@ -53,7 +53,7 @@ ROW = r'\b(toggle|choice|slider)(?:<[^>]*>)?\(\s*"([\w.]+)", "([^"]+)", (-?\d+)'
 rows = re.findall(ROW, options)
 keys = [key for _, key, _, _ in rows]
 initial = {key: int(value) for _, key, _, value in rows}
-require(len(rows) == 32 and len(set(keys)) == 32, "the shared table must hold its 32 options, each key once")
+require(len(rows) == 31 and len(set(keys)) == 31, "the shared table must hold its 31 options, each key once")
 placed = re.findall(r'^    \{"([\w.]+)", Page::\w+\},$', table, re.MULTILINE)
 require(
     sorted(placed) == sorted(keys)

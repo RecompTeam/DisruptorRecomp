@@ -124,6 +124,67 @@ void needed() {
             "and only when what it needs applies itself");
 }
 
+// A settings.toml written before the list, as replay capsules carry it too, read by the game's own reader.
+void antialiasing_from_file(const fs::path& folder) {
+    const Option& list = option("disruptor.multisampling");
+    const std::pair<const char*, int> files[] = {
+        {"[disruptor]\nmultisampling = 8\nsample_shading = true\n", 7},
+        {"[disruptor]\nmultisampling = 16\n", 4},
+        {"[disruptor]\nsample_shading = true\n", 0},
+        {"[disruptor]\nmultisampling = 5\nsample_shading = true\n", 0},
+    };
+    for (const auto& [contents, level] : files) {
+        const fs::path file = folder / "antialiasing.toml";
+        write(file, contents);
+        const Settings loaded = PSXRecompV4::load_user_settings(file);
+        require(!loaded.parse_error && list.saved(loaded) && list.get(loaded) == level,
+                "a file of the two keys from before the list reads as the level they make");
+        SettingsFile settings(file);
+        require(settings.load() && settings.shown(list) == level, "and the launcher shows that level");
+    }
+}
+
+void antialiasing_list() {
+    const Option& list = option("disruptor.multisampling");
+    require(list.kind == Kind::choice && list.initial == 0 && list.choices.size() == 9 &&
+                std::string_view(list.choices[0]) == "Off" && std::string_view(list.choices[1]) == "2x MSAA" &&
+                std::string_view(list.choices[4]) == "16x MSAA" && std::string_view(list.choices[5]) == "2x SSAA" &&
+                std::string_view(list.choices[8]) == "16x SSAA",
+            "anti-aliasing is one list: off, four counts of MSAA, the same four of SSAA");
+    Settings fresh;
+    require(!list.saved(fresh) && list.get(fresh) == 0, "a file that names neither key is off");
+    const int samples[] = {0, 2, 4, 8, 16};
+    for (int level = 0; level <= 8; ++level) {
+        Settings chosen;
+        list.set(chosen, level);
+        require(chosen.has_multisampling && chosen.has_sample_shading && list.saved(chosen) &&
+                    chosen.multisampling == samples[level > 4 ? level - 4 : level] && chosen.sample_shading == (level > 4) &&
+                    list.get(chosen) == level,
+                "each level is written as the two saved keys and read back as itself");
+    }
+    Settings old;
+    old.has_multisampling = old.has_sample_shading = true;
+    old.multisampling = 8;
+    old.sample_shading = true;
+    require(list.get(old) == 7, "a file of the two settings before the list reads as the level they make");
+    old.sample_shading = false;
+    require(list.get(old) == 3, "and without shading as that count of MSAA");
+    old.multisampling = 0;
+    old.sample_shading = true;
+    require(list.get(old) == 0, "shading without samples is off, as the renderer has it");
+    Settings shading_only;
+    shading_only.has_sample_shading = true;
+    require(list.saved(shading_only), "either key saved counts as the list saved");
+    Settings odd;
+    odd.has_multisampling = true;
+    odd.multisampling = 3;
+    require(list.get(odd) == 0, "a count the list does not have reads as off");
+    list.set(odd, 42);
+    require(odd.multisampling == 16 && odd.sample_shading, "a level past the list is its last");
+    list.set(odd, -3);
+    require(odd.multisampling == 0 && !odd.sample_shading, "and one before it is off");
+}
+
 void described() {
     Settings settings;
     const Option& logging = *find_option("disruptor.detailed_logging");
@@ -538,8 +599,10 @@ int main() {
         carried();
         needed();
         placements();
+        antialiasing_list();
         described();
         absent(folder);
+        antialiasing_from_file(folder);
         one_change(folder);
         round_trip(folder);
         whole_range(folder);

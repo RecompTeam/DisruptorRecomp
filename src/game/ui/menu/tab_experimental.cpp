@@ -8,26 +8,21 @@ void draw_experimental_tab() {
         "correction on.");
     ImGui::Spacing();
 
-    int samples = 0;
-    for (int level = 0; level < 5; ++level)
-        if (PSXRecompV4::kDisruptorSampleCounts[level] == gl_renderer_multisampling()) samples = level;
+    const Option& antialiasing = *find_option("disruptor.multisampling");
+    settings::Settings running;
+    running.multisampling = gl_renderer_multisampling();
+    running.sample_shading = gl_renderer_sample_shading() != 0;
+    int level = antialiasing.get(running);
     const bool sampling_applies = applies("disruptor.multisampling");
     if (!sampling_applies) ImGui::BeginDisabled();
     ImGui::SetNextItemWidth(260.0f);
-    if (option_list("disruptor.multisampling", &samples)) {
-        gl_renderer_set_multisampling(PSXRecompV4::kDisruptorSampleCounts[samples]);
-        mark_multisampling(samples);
+    if (option_list("disruptor.multisampling", &level)) {
+        antialiasing.set(running, level);
+        gl_renderer_set_multisampling(running.multisampling);
+        gl_renderer_set_sample_shading(running.sample_shading ? 1 : 0);
+        mark_antialiasing(level);
     }
     if (!sampling_applies) ImGui::EndDisabled();
-    draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
-    bool sample_shading = gl_renderer_sample_shading() != 0;
-    const bool shading_applies = applies("disruptor.sample_shading");
-    if (!shading_applies) ImGui::BeginDisabled();
-    if (option_toggle("disruptor.sample_shading", &sample_shading)) {
-        gl_renderer_set_sample_shading(sample_shading ? 1 : 0);
-        mark_sample_shading(sample_shading);
-    }
-    if (!shading_applies) ImGui::EndDisabled();
     draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
     bool averaging = gl_renderer_downscale_averaging() != 0;
     if (option_toggle("disruptor.downscale_averaging", &averaging)) {
