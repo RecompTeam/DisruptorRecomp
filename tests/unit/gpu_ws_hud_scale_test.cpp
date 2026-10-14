@@ -1,6 +1,8 @@
 #include "gpu_ws_hud_scale.h"
+#include "gpu_ws_screen_tile.h"
 
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <iostream>
 
@@ -211,6 +213,47 @@ void test_a_line_of_text_is_placed_by_where_its_words_can_be() {
 /* The baton of Disruptor: at rest against the right edge, then the four pictures of its swing. */
 constexpr std::array<Rect, 5> kBaton{{{216, 79, 104, 161}, {119, 206, 52, 34}, {119, 145, 64, 95}, {143, 92, 94, 148}, {176, 49, 128, 191}}};
 
+void test_a_held_sprite_is_placed_between_pixels() {
+    PsxWsHeldPlace place{};
+    expect(psx_ws_hud_held_place(83, 122, 160, 4, 4, &place) == 1 && place.left == 83 && place.width == 122 &&
+               place.sides[0] == 0.0f && place.sides[1] == 0.0f,
+           "a sprite that is not squashed moves");
+    /* The user's gun at 16:9: the body, and the barrels' front laid over its window from texel 60. */
+    expect(psx_ws_hud_held_place(83, 122, 160, 3, 4, &place) == 1 && place.left == 102 && place.width == 92 &&
+               place.sides[0] == 0.25f && place.sides[1] == -0.25f,
+           "the gun's body is not drawn at 102.25 to 193.75");
+    const double window = place.left + place.sides[0] + 60 * 0.75;
+    expect(psx_ws_hud_held_place(143, 36, 160, 3, 4, &place) == 1 && place.left == 147 && place.width == 27 &&
+               place.sides[0] == 0.25f && place.sides[1] == 0.25f && place.left + place.sides[0] == window,
+           "the barrels' front does not stand where the body's window is");
+    for (const std::int32_t pivot : {0, 160, 213, 320})
+        for (std::int32_t x = -40; x <= 360; ++x)
+            for (std::int32_t w = 1; w <= 130; ++w) {
+                const bool placed = psx_ws_hud_held_place(x, w, pivot, 3, 4, &place) == 1;
+                const std::int32_t left = psx_ws_squash_about(x, pivot, 3, 4), right = psx_ws_squash_about(x + w, pivot, 3, 4);
+                expect(placed == (right > left), "a sprite with width left is not placed, or one without is");
+                if (!placed) {
+                    expect(place.width == 1 && place.sides[0] == 0.0f && place.sides[1] == 0.0f, "a sprite squashed to nothing keeps a fraction");
+                    continue;
+                }
+                expect(place.left == left && place.left + place.width == right, "an edge is not the squashed end, rounded");
+                for (int end = 0; end < 2; ++end) {
+                    const double exact = pivot + (static_cast<double>(end ? x + w : x) - pivot) * 3.0 / 4.0;
+                    const double drawn = (end ? place.left + place.width : place.left) + place.sides[end];
+                    expect(place.sides[end] >= -0.5f && place.sides[end] <= 0.5f && std::abs(drawn - exact) < 1e-4,
+                           "an end is not drawn at its unrounded place, or by more than half a pixel off its edge");
+                }
+                PsxWsHeldPlace next{};
+                if (psx_ws_hud_held_place(x + w, 17, pivot, 3, 4, &next) == 1)
+                    expect(next.left == place.left + place.width && next.sides[0] == place.sides[1],
+                           "two sprites side by side part or overlap");
+            }
+    expect(psx_ws_hud_held_place(83, 0, 160, 3, 4, &place) == 0 && place.left == 83 && place.width == 0,
+           "a sprite without width is placed");
+    expect(psx_ws_hud_held_place(83, 122, 160, 3, 0, &place) == 0 && place.left == 83 && place.width == 122 && place.sides[0] == 0.0f,
+           "a squash without a denominator is used");
+}
+
 void test_a_held_weapon_slides_to_the_edge_it_touches() {
     for (const Rect &gun : {Rect{83, 183, 122, 57}, Rect{103, 179, 106, 61}, Rect{109, 173, 82, 67}, kWeapon})
         expect(psx_ws_hud_held_pivot(gun.x, gun.w, kWidth) == kWidth / 2, "a gun in the middle of the screen is squashed about the centre");
@@ -259,6 +302,7 @@ int main() {
     test_neighbours_keep_touching();
     test_exact_values();
     test_a_held_weapon_slides_to_the_edge_it_touches();
+    test_a_held_sprite_is_placed_between_pixels();
     if (g_failures) return 1;
     std::cout << "GPU widescreen HUD scale tests passed\n";
     return 0;

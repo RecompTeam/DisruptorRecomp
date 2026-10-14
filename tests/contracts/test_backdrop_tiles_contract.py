@@ -191,11 +191,11 @@ require(
     "                placed.period = (float)((double)ws_backdrop_period * scale);\n"
     "                placed.pins = tile_pins;\n"
     "                tile_placed = 1;\n" in gpu
-    and "    setup_textured_draw(color24, semi_trans, raw_texture);\n    if (tile_placed) gr_set_screen_tile(&placed);\n    if (dw != w || dh != h)\n" in gpu
+    and "    setup_textured_draw(color24, semi_trans, raw_texture);\n    if (tile_placed) gr_set_screen_tile(&placed);\n    ws_hud_held_sides_send();\n    if (dw != w || dh != h)\n" in gpu
     and gpu.index("    if (draw_area_out_rect(x0, y0, dw, dh)) return;\n    setup_textured_draw(color24, semi_trans, raw_texture);\n    if (tile_placed)")
     > gpu.index("                tile_placed = 1;\n")
     and "void gr_set_screen_tile(const struct PsxWsPlacedTile *tile) {\n    if (g_b->set_screen_tile) g_b->set_screen_tile(tile);\n}\n" in dispatch
-    and "    .set_screen_tile = glb_set_screen_tile,\n#ifndef PSX_DISABLE_FRAME_INTERPOLATION\n" in renderer,
+    and "    .set_screen_tile = glb_set_screen_tile,\n    .set_flat_sides = glb_set_flat_sides,\n#ifndef PSX_DISABLE_FRAME_INTERPOLATION\n" in renderer,
     "a marked tile is handed to the renderer with the remainder of the turn as a move of the panorama, each edge's rounding, "
     "the panorama's origin and period, only for a rectangle that is drawn, and in a build without in-between frames too",
 )
@@ -205,7 +205,7 @@ require(
     "    s_next_tile = *tile;\n    s_next_tile_set = 1;\n" in renderer
     and "    s_tile_set = s_next_tile_set && w > 0 && h > 0;  /* as a sprite's depth: for this rectangle alone */\n"
     "    s_next_tile_set = 0;\n    s_tile = s_next_tile;\n" in renderer
-    and "    gpu_textured_triangle(xs2,ys2,us2,vs2,col,tp,clut_x,clut_y,s_mod_raw,semi,lim);\n    s_tile_set = 0;\n    s_sprite_depth = 0.0f;\n}\n"
+    and "    gpu_textured_triangle(xs2,ys2,us2,vs2,col,tp,clut_x,clut_y,s_mod_raw,semi,lim);\n    s_tile_set = 0;\n    s_sprite_depth = 0.0f;\n    memset(s_flat_sides, 0, sizeof(s_flat_sides));\n}\n"
     in renderer
     and "static int tile_placed(void) { return s_geometry_correction && s_tile_set; }\n" in renderer
     and "    if (s_tile.pins & (end ? 2u : 1u)) {\n        *place = (float)x;\n        *mark = end ? -4.0f : -3.0f;\n"
@@ -222,6 +222,7 @@ require(
 require(
     '    "  bool placed = u_visual > 0.5 && a_visual_flags < -1.5;\\n"\n' in renderer
     and '    "  vec2 p = corrected ? a_visual_pos : a_pos;\\n"\n'
+    '    "  if (u_visual > 0.5 && a_visual_flags < -0.5 && a_visual_flags > -1.5) p.x = a_visual_pos.x;\\n"\n'
     '    "  if (placed) { p = vec2(a_visual_pos.x, a_pos.y); v_uv.x += a_q; v_limits.x -= 64; v_limits.z += 64; }\\n"\n' in renderer
     and renderer.count("a_visual_flags < -1.5") == 1
     and '"  v_bill = u_visual > 0.5 ? (a_visual_flags < -0.5 && a_visual_flags > -1.5 ? 0.75 : ' in renderer
@@ -231,7 +232,8 @@ require(
 )
 require(
     "    int placed = !direct && s_geometry_correction && textured && v[flags_at] < -1.5f;  /* a backdrop tile, see tile_corner */\n"
-    "    float x = corrected || placed ? v[pos_at] : v[0], y = corrected ? v[pos_at+1] : v[1];\n"
+    "    int flat = s_geometry_correction && textured && v[flags_at] < -0.5f && v[flags_at] > -1.5f;\n"
+    "    float x = corrected || placed || flat ? v[pos_at] : v[0], y = corrected ? v[pos_at+1] : v[1];\n"
     "    const float want = placed ? v[pos_at+1] : 0.0f;  /* a tile's y slot: the slide its end wants, see tile_corner */\n" in presenter
     and "    if (textured && (!corrected || v[flags_at] <= 1.5f))\n        v[22] = 0;\n    if (placed) v[22] = want;\n" in presenter
     and presenter.index("    const float want = placed ? v[pos_at+1] : 0.0f;") < presenter.index("    v[0] = v[pos_at] = x; v[1] = v[pos_at+1] = y;\n")

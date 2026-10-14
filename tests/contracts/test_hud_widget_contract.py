@@ -106,7 +106,8 @@ require(
     "        texpage_y != (uint32_t)ws_hud_held_page_y)\n        return 0;\n" in held
     and "    if (!ws_hud_held_seen) {\n        ws_hud_held_pivot = psx_ws_hud_held_pivot(*x, w, ws_disp_w());\n"
     "        ws_hud_held_seen = 1;\n    }\n" in held
-    and "    *x = ws_scale_about(*x, ws_hud_held_pivot);\n    w = (int)ws_scale_len(w);\n    return w > 0 ? w : 1;" in held
+    and "    PsxWsHeldPlace place;\n    ws_hud_held_sided = psx_ws_hud_held_place(*x, w, ws_hud_held_pivot, ws_xnum, ws_xden, &place);\n"
+    "    ws_hud_held_sides[0] = place.sides[0];\n    ws_hud_held_sides[1] = place.sides[1];\n    *x = place.left;\n    return place.width;" in held
     and "ws_hud_user_scale" not in held and "ws_hud_scale_percent" not in held
     and "    gp0_ot_rank = 0xFFFFu;\n    ws_hud_held_seen = 0;\n" in body(gpu, "void gpu_ws_begin_linked_list(void) {")
     and gpu.count("ws_hud_held_seen = 0;") == 1
@@ -114,6 +115,37 @@ require(
     and "void gpu_ws_set_hud_held_page(int page_x, int page_y);" in header,
     "a sprite of the held weapon's texture page in a HUD layer keeps its size whatever the HUD size, and all of the "
     "weapon in one list is squashed about the column its first sprite gives",
+)
+renderer = read("psxrecomp/runtime/src/gpu_gl_renderer.c")
+temporal = read("psxrecomp/runtime/src/gpu_gl_temporal.c.inc")
+rect = body(renderer, "static void gpu_textured_rect(int x,int y,int w,int h,")
+textured = gpu[gpu.index("static void gp0_exec_textured_rect(void) {") :]
+require(
+    "static void ws_hud_held_sides_send(void) {\n    if (ws_hud_held_sided) gr_set_flat_sides(ws_hud_held_sides[0], ws_hud_held_sides[1]);\n"
+    "    ws_hud_held_sided = 0;\n}\n" in gpu
+    and gpu.count("    ws_hud_held_sides_send();\n") == 3
+    and gpu.count("gr_set_flat_sides(") == 1
+    and "    PsxWsPlacedTile placed = {0};\n    ws_hud_held_sided = 0;\n" in textured
+    and "    *out_h = 0;\n    ws_hud_held_sided = 0;\n" in body(gpu, "static int ws_sprt_fixed_transform(int32_t *x0, int32_t *y0, int w, int *out_h) {")
+    and textured.index("    if (draw_area_out_rect(x0, y0, dw, dh)) return;\n") < textured.index("    ws_hud_held_sides_send();\n")
+    < textured.index("        gr_draw_textured_rect_scaled(x0, y0, dw, dh, u0, v0, u0 + w, v0 + h,")
+    and "    if (whole[1] > whole[0]) return 1;\n    place->sides[0] = place->sides[1] = 0.0f;\n    return 0;\n" in scale_header
+    and "static void glb_set_flat_sides(float left, float right) {\n"
+    "    const int placed = s_raster_ok && isfinite(left + right) && fabsf(left) <= 1.0f && fabsf(right) <= 1.0f;\n"
+    "    s_next_flat_sides[0] = placed ? left : 0.0f;\n    s_next_flat_sides[1] = placed ? right : 0.0f;\n}\n" in renderer
+    and "    memcpy(s_flat_sides, s_next_flat_sides, sizeof(s_flat_sides));\n    memset(s_next_flat_sides, 0, sizeof(s_next_flat_sides));\n" in rect
+    and "    if (w <= 0 || h <= 0) { s_sprite_depth = 0.0f; memset(s_flat_sides, 0, sizeof(s_flat_sides)); return; }\n" in rect
+    and rect.rstrip().endswith("    memset(s_flat_sides, 0, sizeof(s_flat_sides));")
+    and ": s_flat_sides[xs[i] == s_sprite_x ? 0 : 1]);" in renderer
+    and "vp[20] = visual_flags || s_flat_sides[0] != 0.0f || s_flat_sides[1] != 0.0f ? px[cut_corners >= 0 ? 0 : i] : (float)xs[i];" in renderer
+    and '    "  if (u_visual > 0.5 && a_visual_flags < -0.5 && a_visual_flags > -1.5) p.x = a_visual_pos.x;\\n"\n' in renderer
+    and "    int flat = s_geometry_correction && textured && v[flags_at] < -0.5f && v[flags_at] > -1.5f;\n"
+    "    float x = corrected || placed || flat ? v[pos_at] : v[0], y = corrected ? v[pos_at+1] : v[1];\n" in temporal
+    and "void gr_set_flat_sides(float left, float right) {\n    if (g_b->set_flat_sides) g_b->set_flat_sides(left, right);\n}\n"
+    in read("psxrecomp/runtime/src/gpu_render.c")
+    and "    void (*set_flat_sides)(float left, float right);\n" in read("psxrecomp/runtime/include/gpu_render.h"),
+    "a held weapon sprite's fractions reach the renderer right before its own draw and never another rectangle, and the "
+    "mirror and the in-between frames, never the canonical picture, put its corners at their unrounded places",
 )
 require(
     "    if (w <= 0 || screen_w <= 0 || w >= screen_w) return screen_w / 2;\n" in scale_header

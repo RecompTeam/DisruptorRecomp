@@ -24,6 +24,14 @@ def between(source: str, opening: str, closing: str) -> str:
 
 cmake = read("CMakeLists.txt")
 renderer = read("psxrecomp/runtime/src/gpu_gl_renderer.c")
+temporal = read("psxrecomp/runtime/src/gpu_gl_temporal.c.inc")
+
+
+def body(source: str, signature: str) -> str:
+    start = source.index(signature)
+    return source[start : source.index("\n}\n", start) + 3]
+
+
 menu = menu_text(ROOT)
 loader = read("src/game/settings/saved.cpp")
 settings = read("src/game/settings/game_user_settings.h")
@@ -121,6 +129,7 @@ require(
     "captured, and the files are a list with a header and pictures written top row first",
 )
 
+flush = body(renderer, "static void flush_tex_batch(void) {")
 require(
     "static int s_uv_view = 0;\n" in renderer
     and "void gl_renderer_set_uv_view(int enabled) {\n    s_uv_view = enabled != 0;\n    ssao_mode();\n}\nint gl_renderer_uv_view(void) { return s_uv_view; }\n"
@@ -129,15 +138,28 @@ require(
     and "s_yaw_center_x > 0.0f ? s_yaw_center_x : 160.0f, nearer, s_uv_view ? 1.0f : 0.0f);\n" in renderer
     and "    const int on = !s_uv_view && (grown > 1 || (s_aa_edges && edges)) && s_aa_prog && lw > 0 && lh > 0;\n" in renderer
     and '        "  if (v_bill > 0.5 && u_fade_at.w > 0.5) {\\n"\n'
-    '        "    if (blended) discard;\\n"\n'
+    '        "    if (blended && v_bill > 0.9) discard;\\n"\n'
+    '        "    blend_factor = vec4(0.0);\\n"\n'
     '        "    vec2 cell = floor(mod(sample_uv, 256.0) / 16.0);\\n"\n'
     '        "    frag.rgb = vec3(abs(fract(sample_uv / 32.0) * 2.0 - 1.0), (cell.x + 16.0 * cell.y) / 255.0);\\n"\n'
     '        "  }\\n"\n'
     '        "}\\n";\n' in renderer
-    and "inline constexpr int kDisruptorDiagnosticViewCount = 7;\n" in settings,
+    and "inline constexpr int kDisruptorDiagnosticViewCount = 7;\n" in settings
+    and "static void apply_texel_blend(int mode, int mirror) {\n    if (s_uv_view && mirror) glDisable(GL_BLEND);\n    else apply_psx_blend(mode);\n}\n" in renderer
+    and "        apply_texel_blend(semi, s_visual_on);          /* Pass 2: STP=1 texels (blended) */\n" in renderer
+    and "    s_visual_on = on > 0.0f;\n" in body(renderer, "static void geometry_visual_uniforms(GLint visual, GLint camera, GLint options,")
+    and flush.index("    hr_begin(1);\n") < flush.index("geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 0);")
+    < flush.index("    tex_batch_draw_passes(nverts, semi);\n") < flush.index("        wide_target_begin(dx, s_tex_uXoff, s_tex_uXhalf);\n"
+        "        geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 1);\n")
+    < flush.index("        geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 0);\n        wide_target_end(")
+    and flush.count("geometry_visual_uniforms(") == 3
+    and "apply_psx_blend" not in body(renderer, "static void tex_batch_draw_passes(int nverts, int semi) {")
+    and temporal.count("apply_texel_blend(c->semi, 1); temporal_mask(c->check,1);") == 2
+    and "apply_texel_blend" not in temporal.replace("apply_texel_blend(c->semi, 1); temporal_mask(c->check,1);", ""),
     "the UV view starts off and shows, on the mirror alone, where a textured pixel lies in its texture: u and v as waves of 16 "
-    "texels down and 16 up with no step, and the 16-texel cell, with blended fragments left out, and with the shading and the picture's filters off so "
-    "that a recording keeps the values",
+    "texels down and 16 up with no step, and the 16-texel cell, with the world's blended fragments left out and a flat "
+    "picture's (the HUD, the held weapon) drawn opaque in real and in-between frames while the canonical picture blends as "
+    "ever, and with the shading and the picture's filters off so that a recording keeps the values",
 )
 
 print("Disruptor debug tab source contract: PASS")

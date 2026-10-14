@@ -220,7 +220,7 @@ require(
 rect = function_body(renderer, "static void gpu_textured_rect(int x,int y,int w,int h,")
 require(
     "    s_sprite_depth = s_next_sprite_depth;\n    s_next_sprite_depth = 0.0f;\n" in rect
-    and rect.rstrip().endswith("    s_sprite_depth = 0.0f;\n}"),
+    and rect.rstrip().endswith("    s_sprite_depth = 0.0f;\n    memset(s_flat_sides, 0, sizeof(s_flat_sides));\n}"),
     "a sprite depth is for one rectangle and must not leak into the next primitive",
 )
 quad = function_body(gpu, "static void gp0_exec_textured_quad(void)")
@@ -308,10 +308,10 @@ require(
     and "    for (int side = 0; placed && side < 4; ++side) placed = isfinite(sides[side]) && fabsf(sides[side]) < 64.0f;\n#ifndef PSX_NO_DEBUG_TOOLS\n" in sprite_setter
     and "    if (whole) placed = 0;\n#endif\n    for (int side = 0; side < 4; ++side) s_next_sprite_sides[side] = placed ? sides[side] : 0.0f;" in sprite_setter
     and "const int sprite = !world && s_geometry_correction && s_sprite_depth > 0.0f;" in take
-    and "px[i] = (float)xs[i] + (sprite ? s_sprite_sides[xs[i] == s_sprite_x ? 0 : 2] : 0.0f);" in take
+    and "px[i] = (float)xs[i] + (sprite ? s_sprite_sides[xs[i] == s_sprite_x ? 0 : 2] : s_flat_sides[xs[i] == s_sprite_x ? 0 : 1]);" in take
     and "py[i] = (float)ys[i] + (sprite ? s_sprite_sides[ys[i] == s_sprite_y ? 1 : 3] : 0.0f);" in take
     and "return (world || sprite || unpinned ? 1 : 0) | (exact ? 2 : 0) | (filler ? 4 : 0);" in take
-    and "    memcpy(s_sprite_sides, s_next_sprite_sides, sizeof(s_sprite_sides));\n    memset(s_next_sprite_sides, 0, sizeof(s_next_sprite_sides));\n    s_sprite_x = x; s_sprite_y = y;\n" in rect,
+    and "    memcpy(s_sprite_sides, s_next_sprite_sides, sizeof(s_sprite_sides));\n    memset(s_next_sprite_sides, 0, sizeof(s_next_sprite_sides));\n    memcpy(s_flat_sides, s_next_flat_sides, sizeof(s_flat_sides));\n    memset(s_next_flat_sides, 0, sizeof(s_next_flat_sides));\n    s_sprite_x = x; s_sprite_y = y;\n" in rect,
     "a sprite's unrounded place must reach the presentation of its own rectangle only, and only with geometry correction",
 )
 require(

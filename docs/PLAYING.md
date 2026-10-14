@@ -191,7 +191,9 @@ rendering bug reports. Close the settings menu to begin the short recording;
 its pictures and timing data are written under `shown/` beside the executable.
 Diagnostic views reset to Off at the next start. The **Texture coordinates**
 view paints each textured pixel with its place in its texture, so a recording
-shows how a texture sits and moves on its polygons. It needs exact geometry
+shows how a texture sits and moves on its polygons. The world's
+semi-transparent pixels are left out and show what is behind them, while
+those of the HUD and the weapon in hand are painted. It needs exact geometry
 and switches ambient occlusion and the anti-aliasing filters off while on.
 
 Press **Ctrl+F12** to start a replay capsule and press it again to finish.

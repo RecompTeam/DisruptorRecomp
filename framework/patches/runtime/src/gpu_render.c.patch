@@ -1,5 +1,5 @@
 diff --git a/runtime/src/gpu_render.c b/runtime/src/gpu_render.c
-index cae379538501938c7236686556174d7d34a4fbe8..1080ec278564f0ccda954a97993e1b5692e6f3c6 100644
+index cae379538501938c7236686556174d7d34a4fbe8..68e225e6b632665e88b312592c23f350117eac7a 100644
 --- a/runtime/src/gpu_render.c
 +++ b/runtime/src/gpu_render.c
 @@ -25,6 +25,13 @@
@@ -16,7 +16,7 @@ index cae379538501938c7236686556174d7d34a4fbe8..1080ec278564f0ccda954a97993e1b56
      .fill_rect                     = sw_fill_rect,
      .copy_rect                     = sw_copy_rect,
      .draw_flat_triangle            = sw_draw_flat_triangle,
-@@ -101,6 +108,55 @@
+@@ -101,6 +108,58 @@
  void gr_set_mask_bits(int s, int c)                  { g_b->set_mask_bits(s, c); }
  void gr_set_texture_window(uint32_t raw)             { g_b->set_texture_window(raw); }
  void gr_set_color_modulation(int r, int g, int b, int raw) { g_b->set_color_modulation(r, g, b, raw); }
@@ -58,6 +58,9 @@ index cae379538501938c7236686556174d7d34a4fbe8..1080ec278564f0ccda954a97993e1b56
 +}
 +void gr_set_screen_tile(const struct PsxWsPlacedTile *tile) {
 +    if (g_b->set_screen_tile) g_b->set_screen_tile(tile);
++}
++void gr_set_flat_sides(float left, float right) {
++    if (g_b->set_flat_sides) g_b->set_flat_sides(left, right);
 +}
 +void gr_set_near_triangle(const float a[3], const float b[3], const float c[3]) {
 +    if (g_b->set_near_triangle) g_b->set_near_triangle(a, b, c);

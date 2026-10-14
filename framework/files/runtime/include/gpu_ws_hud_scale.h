@@ -35,6 +35,32 @@ static inline int32_t psx_ws_hud_thirds_centre(int32_t x, int32_t w, int32_t str
  * screen's centre, as for any sprite there. In an outer third it slides toward that edge and is on it when the sprite
  * touches it: a picture the screen crops stays cropped by the screen, and nothing jumps as the sprite crosses a third.
  * A sprite too wide to slide inside an outer third, one over five twelfths of the screen, slides from the centre on. */
+/* Where a held weapon's sprite at x, w wide, squashed about pivot by numerator/denominator, is drawn: whole edges from
+ * both squashed ends, and how far each unrounded end stands off its whole edge. 0 when no width or no squash is left. */
+typedef struct {
+    int32_t left, width;
+    float sides[2];
+} PsxWsHeldPlace;
+static inline int psx_ws_hud_held_place(int32_t x, int32_t w, int32_t pivot, int32_t numerator, int32_t denominator,
+                                        PsxWsHeldPlace *place) {
+    const int64_t ends[2] = {x, (int64_t)x + w};
+    int64_t whole[2];
+    place->left = x;
+    place->width = w;
+    place->sides[0] = place->sides[1] = 0.0f;
+    if (w <= 0 || numerator <= 0 || denominator <= 0) return 0;
+    for (int end = 0; end < 2; ++end) {
+        const int64_t offset = ends[end] - pivot;
+        whole[end] = pivot + (offset * numerator + (offset >= 0 ? denominator / 2 : -(denominator / 2))) / denominator;
+        place->sides[end] = (float)((double)pivot + (double)offset * numerator / denominator - (double)whole[end]);
+    }
+    place->left = (int32_t)whole[0];
+    place->width = whole[1] > whole[0] ? (int32_t)(whole[1] - whole[0]) : 1;
+    if (whole[1] > whole[0]) return 1;
+    place->sides[0] = place->sides[1] = 0.0f;
+    return 0;
+}
+
 static inline int32_t psx_ws_hud_held_pivot(int32_t x, int32_t w, int32_t screen_w) {
     int64_t centre, start, reach, gone;
     int mirrored;

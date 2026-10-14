@@ -144,7 +144,7 @@ require(
     and "    } else if (w > 0 && (ws_active() || ws_backdrop_placed())) {\n" in rect
     and "        } else if (!ws_active()) {\n" in rect
     and rect.index("    if (ws_menu_frame()) {") < rect.index("ws_hud_widget_rect(") < rect.index("ws_hud_user_scale(")
-    and "    *out_h = 0;\n    if (ws_menu_frame()) return ws_menu_rect(x0, w);\n    if (!ws_active()) return 0;\n"
+    and "    *out_h = 0;\n    ws_hud_held_sided = 0;\n    if (ws_menu_frame()) return ws_menu_rect(x0, w);\n    if (!ws_active()) return 0;\n"
     in gpu
     and "    ws_expand_fullscreen_rect(&x0, y0, &w, h);\n    w = ws_menu_rect(&x0, w);\n" in gpu
     and "    parse_vertex(gp0_cmd_buf[1], &x, &y);\n    (void)ws_menu_rect(&x, 1);\n" in gpu

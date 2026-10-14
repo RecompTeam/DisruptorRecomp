@@ -1,8 +1,8 @@
 diff --git a/runtime/src/gpu_gl_renderer.c b/runtime/src/gpu_gl_renderer.c
-index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..45e6db4fcff4e94e3cd17c6db91969a46c9aa384 100644
+index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c1c2078a60e810bf1dc6386cd85924d7922898a4 100644
 --- a/runtime/src/gpu_gl_renderer.c
 +++ b/runtime/src/gpu_gl_renderer.c
-@@ -1,747 +1,1127 @@
+@@ -1,747 +1,1130 @@
 -/* gpu_gl_renderer.c — hardware OpenGL renderer backend.
 - *
 - * ARCHITECTURE (v2 — GPU-authoritative VRAM)
@@ -1161,6 +1161,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..45e6db4fcff4e94e3cd17c6db91969a4
 +#define TEMPORAL_CUT_IDENTITY UINT64_C(0x1000000000000000) /* a triangle the turn clip cut: its pieces follow, itself it shows nothing */
 +static float         s_next_sprite_depth = 0.0f, s_sprite_depth = 0.0f;
 +static float         s_next_sprite_sides[4], s_sprite_sides[4]; /* left, top, right, bottom */
++static float         s_next_flat_sides[2], s_flat_sides[2];     /* left, right of a flat picture's rectangle */
 +static int           s_sprite_x, s_sprite_y;
 +static PsxWsPlacedTile s_next_tile, s_tile;  /* the backdrop tile the next rectangle is, and the one being drawn */
 +static int           s_next_tile_set = 0, s_tile_set = 0;
@@ -1364,9 +1365,11 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..45e6db4fcff4e94e3cd17c6db91969a4
 +
 +static int mirror_depth(void) { return s_geometry_correction && (s_ssao || s_grown_under || s_crack_fill > 0.0f || s_world_depth); }
 +
++static int s_visual_on;
 +static void geometry_visual_uniforms(GLint visual, GLint camera, GLint options,
 +                                     int enabled) {
 +    const float on = enabled && s_geometry_correction ? 1.0f : 0.0f;
++    s_visual_on = on > 0.0f;
 +    p_glUniform1f(visual, on);
 +    p_glUniform4f(camera, s_yaw_sin, s_yaw_cos,
 +                  (float)g_wide_cur_base + s_yaw_center_x,
@@ -1428,7 +1431,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..45e6db4fcff4e94e3cd17c6db91969a4
 +            px[i] = (float)((double)s_next_unpinned_x16[i] / 65536.0);
 +            py[i] = (float)((double)s_next_unpinned_y16[i] / 65536.0);
 +        } else {
-+            px[i] = (float)xs[i] + (sprite ? s_sprite_sides[xs[i] == s_sprite_x ? 0 : 2] : 0.0f);
++            px[i] = (float)xs[i] + (sprite ? s_sprite_sides[xs[i] == s_sprite_x ? 0 : 2] : s_flat_sides[xs[i] == s_sprite_x ? 0 : 1]);
 +            py[i] = (float)ys[i] + (sprite ? s_sprite_sides[ys[i] == s_sprite_y ? 1 : 3] : 0.0f);
 +        }
 +        if (pq) pq[i] = perspective ? s_next_q[i] : 0.0f;
@@ -1862,7 +1865,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..45e6db4fcff4e94e3cd17c6db91969a4
  static const char *INTERP_FS =
      "#version 330\n"
      "in vec2 v_uv; uniform sampler2D u_prev; uniform sampler2D u_curr;\n"
-@@ -757,2715 +1137,4411 @@
+@@ -757,2715 +1140,4429 @@
      "  }\n"
      "  frag=mix(prev,curr,alpha);\n"
      "}\n";
@@ -3692,6 +3695,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..45e6db4fcff4e94e3cd17c6db91969a4
 +    "  bool close = corrected && a_visual_flags > 3.5 && a_visual_flags < 4.5;\n"
 +    "  float hw = close ? a_q : 1.0;\n"
 +    "  vec2 p = corrected ? a_visual_pos : a_pos;\n"
++    "  if (u_visual > 0.5 && a_visual_flags < -0.5 && a_visual_flags > -1.5) p.x = a_visual_pos.x;\n"
 +    "  if (placed) { p = vec2(a_visual_pos.x, a_pos.y); v_uv.x += a_q; v_limits.x -= 64; v_limits.z += 64; }\n"
 +    "  /* The whole-pixel rule for mirrored pictures flips a moving world face by a texel: the mirror takes back what is marked. */\n"
 +    "  vec4 took = corrected ? step(0.125, a_limits - floor(a_limits + 0.5)) : vec4(0.0);\n"
@@ -3975,7 +3979,8 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..45e6db4fcff4e94e3cd17c6db91969a4
 +        "  else if (v_bill > 0.5 && blended) frag.a = 0.25; else if (v_bill > 1.5) frag.a = 0.5;\n"
 +        "  if (v_bill > 0.5 && v_deep > -999.5 && v_deep < 0.999) frag.a = 0.25;  /* some corner has no depth (it weighs -1000): its depth is no surface */\n"
 +        "  if (v_bill > 0.5 && u_fade_at.w > 0.5) {\n"
-+        "    if (blended) discard;\n"
++        "    if (blended && v_bill > 0.9) discard;\n"
++        "    blend_factor = vec4(0.0);\n"
 +        "    vec2 cell = floor(mod(sample_uv, 256.0) / 16.0);\n"
 +        "    frag.rgb = vec3(abs(fract(sample_uv / 32.0) * 2.0 - 1.0), (cell.x + 16.0 * cell.y) / 255.0);\n"
 +        "  }\n"
@@ -4038,6 +4043,8 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..45e6db4fcff4e94e3cd17c6db91969a4
 +    glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
 +}
 +
++static int s_uv_view;
++
 +/* PS1 semi-transparency as fixed-function blending, RGB only — the alpha
 + * channel (mask bit) is always replaced by the source fragment's alpha.
 + *   0: B/2 + F/2   1: B + F   2: B - F   3: B + F/4 */
@@ -4060,6 +4067,12 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..45e6db4fcff4e94e3cd17c6db91969a4
 +        p_glBlendFuncSeparate(PSXGL_CONSTANT_ALPHA, GL_ONE, GL_ONE, GL_ZERO);
 +        break;
 +    }
++}
++
++/* The coordinates view draws the blended texels it keeps (a flat picture's) opaque, on the mirror alone. */
++static void apply_texel_blend(int mode, int mirror) {
++    if (s_uv_view && mirror) glDisable(GL_BLEND);
++    else apply_psx_blend(mode);
 +}
 +
 +/* ---- hr FBO render-state bracket ---------------------------------------- */
@@ -4658,7 +4671,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..45e6db4fcff4e94e3cd17c6db91969a4
 +        mask_stencil(s_tb_mask);
 +        p_glUniform1i(s_uSemipass, 1);
 +        glDrawArrays(GL_TRIANGLES, 0, nverts);
-+        apply_psx_blend(semi);                         /* Pass 2: STP=1 texels (blended) */
++        apply_texel_blend(semi, s_visual_on);          /* Pass 2: STP=1 texels (blended) */
 +        mask_stencil(1);
 +        p_glUniform1i(s_uSemipass, 2);
 +        glDrawArrays(GL_TRIANGLES, 0, nverts);
@@ -5149,7 +5162,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..45e6db4fcff4e94e3cd17c6db91969a4
 +            if (marked_lim) psx_world_texel_mark(lim, plain_lim, &vp[14]);
 +            vp[18] = semi >= 0 ? (float)(semi + 1) : 0.0f;          /* a_semi code */
 +            vp[19] = flat_picture_flags(visual_flags);               /* a_visual_flags */
-+            vp[20] = visual_flags ? px[cut_corners >= 0 ? 0 : i] : (float)xs[i];  /* a_visual_pos: a cut triangle is one point, nothing in the mirror */
++            vp[20] = visual_flags || s_flat_sides[0] != 0.0f || s_flat_sides[1] != 0.0f ? px[cut_corners >= 0 ? 0 : i] : (float)xs[i];  /* a_visual_pos: a cut triangle is one point, nothing in the mirror */
 +            vp[21] = visual_flags ? py[cut_corners >= 0 ? 0 : i] : (float)ys[i];
 +            vp[22] = pq[i];                                          /* a_q (0 = affine) */
 +            if (!visual_flags && tile_placed()) {
@@ -5300,8 +5313,10 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..45e6db4fcff4e94e3cd17c6db91969a4
 +    s_next_sprite_depth = 0.0f;
 +    memcpy(s_sprite_sides, s_next_sprite_sides, sizeof(s_sprite_sides));
 +    memset(s_next_sprite_sides, 0, sizeof(s_next_sprite_sides));
++    memcpy(s_flat_sides, s_next_flat_sides, sizeof(s_flat_sides));
++    memset(s_next_flat_sides, 0, sizeof(s_next_flat_sides));
 +    s_sprite_x = x; s_sprite_y = y;
-+    if (w <= 0 || h <= 0) { s_sprite_depth = 0.0f; return; }
++    if (w <= 0 || h <= 0) { s_sprite_depth = 0.0f; memset(s_flat_sides, 0, sizeof(s_flat_sides)); return; }
 +    float mr=s_mod_r/255.0f, mg=s_mod_g/255.0f, mb=s_mod_b/255.0f;
 +    float col[9]={mr,mg,mb, mr,mg,mb, mr,mg,mb};
 +    /* gpu.c routes axis-aligned MIRRORED quads (X/Y-flipped 2D sprites,
@@ -5319,6 +5334,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..45e6db4fcff4e94e3cd17c6db91969a4
 +    gpu_textured_triangle(xs2,ys2,us2,vs2,col,tp,clut_x,clut_y,s_mod_raw,semi,lim);
 +    s_tile_set = 0;
 +    s_sprite_depth = 0.0f;
++    memset(s_flat_sides, 0, sizeof(s_flat_sides));
 +}
 +
 +/* GP0(02h) fill: writes color with bit15=0, ignoring draw area, mask and
@@ -5527,6 +5543,11 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..45e6db4fcff4e94e3cd17c6db91969a4
 +        fabsf(tile->left) > 1.0f || fabsf(tile->right) > 1.0f || fabsf(tile->moved) > 64.0f) return;
 +    s_next_tile = *tile;
 +    s_next_tile_set = 1;
++}
++static void glb_set_flat_sides(float left, float right) {
++    const int placed = s_raster_ok && isfinite(left + right) && fabsf(left) <= 1.0f && fabsf(right) <= 1.0f;
++    s_next_flat_sides[0] = placed ? left : 0.0f;
++    s_next_flat_sides[1] = placed ? right : 0.0f;
 +}
 +static void glb_set_near_triangle(const float a[3], const float b[3], const float c[3]) {
 +    const float *corner[3] = {a, b, c};
@@ -8955,7 +8976,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..45e6db4fcff4e94e3cd17c6db91969a4
      uint64_t freq = SDL_GetPerformanceFrequency();
      uint64_t deadline = SDL_GetPerformanceCounter();
      uint64_t diag_start = deadline, diag_swaps = 0, diag_captures = 0;
-@@ -3477,7 +5553,7 @@
+@@ -3477,7 +5574,7 @@
          int uncapped = hz < 0.0;
          uint64_t now = SDL_GetPerformanceCounter();
          if (!uncapped) {
@@ -8964,7 +8985,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..45e6db4fcff4e94e3cd17c6db91969a4
              uint64_t period = (uint64_t)((double)freq / hz);
              if (!period) period = 1;
              deadline += period;
-@@ -3492,235 +5568,420 @@
+@@ -3492,235 +5589,421 @@
              }
              while (SDL_GetPerformanceCounter() < deadline) {}
              now = SDL_GetPerformanceCounter();
@@ -9572,6 +9593,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..45e6db4fcff4e94e3cd17c6db91969a4
 +    .set_perspective_triangle = glb_set_perspective_triangle,
 +    .set_near_triangle = glb_set_near_triangle,
 +    .set_screen_tile = glb_set_screen_tile,
++    .set_flat_sides = glb_set_flat_sides,
 +#ifndef PSX_DISABLE_FRAME_INTERPOLATION
 +    .set_temporal_depth_triangle = glb_set_temporal_depth_triangle,
 +    .set_surface_depth_triangle = glb_set_surface_depth_triangle,

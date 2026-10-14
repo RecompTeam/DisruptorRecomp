@@ -271,7 +271,8 @@ static void temporal_position(float *v, int textured, int gate, int direct) {
     int flags_at = textured ? 19 : 6, pos_at = textured ? 20 : 7;
     int corrected = !direct && s_geometry_correction && v[flags_at] > 0.5f;
     int placed = !direct && s_geometry_correction && textured && v[flags_at] < -1.5f;  /* a backdrop tile, see tile_corner */
-    float x = corrected || placed ? v[pos_at] : v[0], y = corrected ? v[pos_at+1] : v[1];
+    int flat = s_geometry_correction && textured && v[flags_at] < -0.5f && v[flags_at] > -1.5f;
+    float x = corrected || placed || flat ? v[pos_at] : v[0], y = corrected ? v[pos_at+1] : v[1];
     const float want = placed ? v[pos_at+1] : 0.0f;  /* a tile's y slot: the slide its end wants, see tile_corner */
     if (textured) psx_world_texel_settle(corrected, &v[2], &v[14]);
     if (corrected && fabsf(s_yaw_sin) > 0.0000001f && s_yaw_focal_x > 0) {
@@ -804,7 +805,7 @@ static void temporal_submit_faces(const TemporalScene *s,const TemporalCommand *
         } else {
             temporal_mask(c->check,c->mask);
             p_glUniform1i(u->pass,1); glDrawArrays(GL_TRIANGLES,0,count);
-            apply_psx_blend(c->semi); temporal_mask(c->check,1);
+            apply_texel_blend(c->semi, 1); temporal_mask(c->check,1);
             p_glUniform1i(u->pass,2); glDrawArrays(GL_TRIANGLES,0,count);
         }
         p_glUniform1f(s_temp_uPull,0.0f); glDepthFunc(GL_ALWAYS); glDepthMask(GL_TRUE);
@@ -828,7 +829,7 @@ static void temporal_submit_faces(const TemporalScene *s,const TemporalCommand *
     } else {
         glDisable(GL_BLEND); temporal_mask(c->check,c->mask);
         p_glUniform1i(u->pass,1); glDrawArrays(GL_TRIANGLES,0,count);
-        apply_psx_blend(c->semi); temporal_mask(c->check,1);
+        apply_texel_blend(c->semi, 1); temporal_mask(c->check,1);
         if (shaded) glDepthMask(GL_FALSE);
         p_glUniform1i(u->pass,2); glDrawArrays(GL_TRIANGLES,0,count);
         if (shaded) glDepthMask(GL_TRUE);

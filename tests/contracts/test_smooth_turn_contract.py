@@ -87,7 +87,7 @@ require(
 require(
     "        if (s_tb_n + 3 + (cut_corners > 2 ? 3 * (cut_corners - 2) : 0) > TEXBATCH_MAXV) { s_batch_reason[6]++; flush_tex_batch(); }\n"
     in renderer
-    and "            vp[20] = visual_flags ? px[cut_corners >= 0 ? 0 : i] : (float)xs[i];" in renderer
+    and "            vp[20] = visual_flags || s_flat_sides[0] != 0.0f || s_flat_sides[1] != 0.0f ? px[cut_corners >= 0 ? 0 : i] : (float)xs[i];" in renderer
     and "            vp[21] = visual_flags ? py[cut_corners >= 0 ? 0 : i] : (float)ys[i];\n" in renderer
     and "        for (int piece = 0; piece + 2 < cut_corners; ++piece) {" in renderer
     and "            const int corner_of[3] = {0, piece + 1, piece + 2};\n"
