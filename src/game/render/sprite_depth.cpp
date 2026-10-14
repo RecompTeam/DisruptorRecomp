@@ -14,17 +14,27 @@
  * funnel sizes an effect after its projection: the size is worked out
  * ahead and holds only if the game's registers agree at the packet.
  * Guest state is only read, but for the range a funnel sorts and fades by:
- * under the widescreen squash it is made the squashed world's.
+ * under the widescreen squash it is made the squashed world's. And a body
+ * sorts kBodyReach nearer than the game sorts it, its shadow with it, so the
+ * floor polygon it lies on is not drawn over it, yet not past an upright
+ * world face that stands in front of it. A world sprite already linked over
+ * it on screen moves along to stay over it, and its fade is the game's own.
  */
 
 #include "cpu_state.h"
 #include "gpu.h"
+#include "gte_precision.h"
+#include "lockstep.h"
+#include "mod_memory.h"
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <utility>
+#include <vector>
 
 extern "C" void gte_ws_x_squash(int32_t *num, int32_t *den);
 
@@ -51,6 +61,28 @@ constexpr int32_t kLargest = 0x1FF;  /* the game caps a side here and rescales t
 constexpr int64_t kTaken = 3 * kOne / 2;  /* the renderer takes a size this far over its packet's, an effect's two cuts can leave more */
 constexpr int64_t kBodyLead = 0x18;  /* 0x8003CEC8..0x8003CEEC: the fourth funnel sorts this much nearer, down to kNearest */
 constexpr int64_t kNearest = 8;
+constexpr int64_t kBodyReach = 64;
+constexpr int64_t kHalvedBelow = kNearest + 2 * kBodyReach;
+constexpr int64_t kSlotShift = 3;
+constexpr uint32_t kSlotBytes = 4u;
+constexpr uint32_t kOrderingTable = 836u;  /* gp + 836: the ordering table's first slot */
+constexpr uint32_t kFadeStart = 1172u;  /* gp + 1172: the range the deferred pass fades from (0x80043184) */
+constexpr int32_t kFadeLast = 767;
+constexpr int32_t kFadeStep = 6;
+constexpr int32_t kClutRow = 6;  /* a CLUT id's y starts at bit 6 */
+constexpr uint32_t kClutStore = 8u;  /* the deferred pass stores the CLUT at 8($s1), 0x8004331C */
+constexpr uint8_t kRecordKey = 20u;  /* $s4 holds the record's key through the deferred pass */
+constexpr uint8_t kRecordClut = 17u;
+constexpr uint8_t kGlobals = 28u;
+constexpr uint32_t kTagNext = 0x00FFFFFFu;
+constexpr uint32_t kKseg0 = 0x80000000u;
+constexpr uint32_t kSpriteWords = 9u;  /* a funnel's POLY_FT4: its tag counts nine words, its code is 0x2C..0x2F */
+constexpr uint32_t kSpriteCode = 0x2Cu;
+constexpr uint32_t kSpriteCodeMask = 0xFCu;
+constexpr int kLinksWalked = 8192;
+constexpr double kUpright = 0.6;  /* a face whose normal rises less than this share of its length is a wall */
+constexpr std::size_t kMovedMost = 64;
+constexpr uint32_t kTagWords = 0xFF000000u;
 
 /* Where a funnel keeps the size it scales by 160 / Z. */
 enum class Size : uint8_t { Words, Bytes, Effect, Body };
@@ -105,6 +137,17 @@ struct Sprite {
     std::optional<Shape> shape;
     /* What an effect's first packet has to show in $s6 and $s2 for the shape to be the game's. */
     std::optional<Extent> cut;
+    /* A body's record key as the game stored it, as its walk led it (its shadow follows), and as it is now. */
+    int32_t key = 0;
+    int32_t walked = 0;
+    int32_t led = 0;
+};
+
+struct Box {
+    int32_t left;
+    int32_t top;
+    int32_t right;
+    int32_t bottom;
 };
 
 uint32_t g_pending_projection = 0;
@@ -274,6 +317,331 @@ void squash_range(CPUState& cpu, const Funnel& funnel) {
     cpu.gpr[funnel.range_gpr] = static_cast<uint32_t>(range_of(funnel, depth, aside * num / den));
 }
 
+[[nodiscard]] bool comparator_active() { return g_ls_mode != 0 || g_ls_replay_active != 0; }
+
+/* kBodyReach nearer; under kHalvedBelow halfway to the game's floor of kNearest, so that near bodies keep their order. */
+[[nodiscard]] constexpr int64_t led(int64_t range) {
+    if (range <= kNearest) return range;
+    return range >= kHalvedBelow ? range - kBodyReach : kNearest + (range - kNearest) / 2;
+}
+
+[[nodiscard]] constexpr bool overlap(const Box& a, const Box& b) {
+    return a.left <= b.right && b.left <= a.right && a.top <= b.bottom && b.top <= a.bottom;
+}
+
+/* A body's box from the place and size its funnel worked out, in the packet's own coordinates. */
+[[nodiscard]] std::optional<Box> box_of(const Sprite& sprite) {
+    if (!sprite.place || !sprite.shape) return std::nullopt;
+    const int64_t x = sprite.place->x, row = sprite.shape->row;
+    const int64_t half_width = sprite.shape->width / 2, half_height = sprite.shape->height / 2;
+    return Box{.left = static_cast<int32_t>((x - half_width) >> 16), .top = static_cast<int32_t>((row - half_height) >> 16),
+               .right = static_cast<int32_t>((x + half_width) >> 16), .bottom = static_cast<int32_t>((row + half_height) >> 16)};
+}
+
+[[nodiscard]] Box packet_box(const CPUState& cpu, uint32_t packet) {
+    Box box{.left = INT32_MAX, .top = INT32_MAX, .right = INT32_MIN, .bottom = INT32_MIN};
+    for (uint32_t corner = 8u; corner <= 32u; corner += 8u) {
+        const uint32_t xy = cpu.read_word(packet + corner);
+        const int32_t x = static_cast<int16_t>(xy), y = static_cast<int16_t>(xy >> 16);
+        box = Box{.left = std::min(box.left, x), .top = std::min(box.top, y), .right = std::max(box.right, x), .bottom = std::max(box.bottom, y)};
+    }
+    return box;
+}
+
+/* A world sprite a body passes: the node that stays before it, its address as tags name it, where it is, and its slot. */
+struct Passed {
+    uint32_t before;
+    uint32_t node;
+    uint32_t at;
+    int64_t slot;
+};
+
+/* How far a walk got: the sprites it takes along, and the slot it reached. */
+struct Walk {
+    std::vector<Passed> sprites;
+    int64_t reached;
+};
+
+/* A body's camera depth and its reach towards the eye, half its width in the world, both in GTE units. */
+struct Front {
+    double depth;
+    double reach;
+};
+
+[[nodiscard]] std::optional<Front> front_of(const Sprite& sprite) {
+    if (sprite.depth <= 0 || !sprite.shape) return std::nullopt;
+    const double depth = static_cast<double>(sprite.depth) * kGteDepthPerSpriteDepth;
+    const double width = static_cast<double>(sprite.shape->width) / kOne * sprite.depth / kFocal * kGteDepthPerSpriteDepth;
+    return Front{.depth = depth, .reach = width / 2.0};
+}
+
+/* The nearest depth of a triangle (screen place and 1 / z at each corner) over the box, 0 when it is not over it: on a plane
+ * 1 / z is linear on the screen, so the nearest point is a corner of the triangle clipped to the box. */
+[[nodiscard]] double nearest_over(const std::array<std::array<double, 3>, 3>& triangle, const Box& box) {
+    struct Edge {
+        std::size_t axis;
+        double bound;
+        bool least;
+    };
+    std::vector<std::array<double, 3>> shape(triangle.begin(), triangle.end());
+    const std::array<Edge, 4> edges{{{0, static_cast<double>(box.left), true},
+                                     {0, box.right + 1.0, false},
+                                     {1, static_cast<double>(box.top), true},
+                                     {1, box.bottom + 1.0, false}}};
+    for (const auto& [axis, bound, least] : edges) {
+        const auto inside = [axis, bound, least](const std::array<double, 3>& point) {
+            return least ? point[axis] >= bound : point[axis] <= bound;
+        };
+        std::vector<std::array<double, 3>> kept;
+        for (std::size_t index = 0; index < shape.size(); ++index) {
+            const std::array<double, 3>& from = shape[index];
+            const std::array<double, 3>& to = shape[(index + 1) % shape.size()];
+            if (inside(from)) kept.push_back(from);
+            if (inside(from) != inside(to)) {
+                const double share = (bound - from[axis]) / (to[axis] - from[axis]);
+                kept.push_back({from[0] + share * (to[0] - from[0]), from[1] + share * (to[1] - from[1]), from[2] + share * (to[2] - from[2])});
+            }
+        }
+        shape = std::move(kept);
+        if (shape.empty()) return 0.0;
+    }
+    double nearest = 0.0;
+    for (const auto& point : shape) nearest = std::max(nearest, point[2]);
+    return nearest > 0.0 ? 1.0 / nearest : 0.0;
+}
+
+/* Whether the world polygon at `at` is an upright face in front of the body over its box: somewhere in the box its depth,
+ * from the corners the GTE projected into the words the game stored, is nearer than the body's by more than its reach. */
+[[nodiscard]] bool occludes(const CPUState& cpu, uint32_t at, uint32_t tag, const Box& box, const Front& front) {
+    const uint32_t code = cpu.read_byte(at + 7u);
+    if ((code & 0xE0u) != 0x20u) return false;
+    const bool quad = (code & 0x08u) != 0u, textured = (code & 0x04u) != 0u, gouraud = (code & 0x10u) != 0u;
+    const uint32_t corners = quad ? 4u : 3u;
+    if (tag >> 24 != 1u + corners * (textured ? 2u : 1u) + (gouraud ? corners - 1u : 0u)) return false;
+    const uint32_t stride = 4u + (textured ? 4u : 0u) + (gouraud ? 4u : 0u);
+    int32_t num = 1, den = 1;
+    gte_ws_x_squash(&num, &den);
+    const double unsquash = num > 0 && den > 0 ? static_cast<double>(den) / num : 1.0;
+    std::array<std::array<double, 3>, 4> place{}, camera{};
+    for (uint32_t corner = 0; corner < corners; ++corner) {
+        const uint32_t word = at + 8u + corner * stride;
+        int32_t x16 = 0, y16 = 0;
+        uint16_t z = 0;
+        if (gte_precision_load_word_ex(word - kKseg0, cpu.read_word(word), &x16, &y16, &z) != GTE_PRECISION_LOOKUP_ACCEPTED || z == 0u) {
+            return false;
+        }
+        const double x = static_cast<double>(x16) / kOne, y = static_cast<double>(y16) / kOne;
+        place[corner] = {x, y, static_cast<double>(z)};
+        camera[corner] = {(x - kFocal) * unsquash * z / kFocal, (y - kHorizon) * z / kFocal, static_cast<double>(z)};
+    }
+    constexpr std::array<std::array<uint32_t, 3>, 2> kTriangles{{{0u, 1u, 2u}, {1u, 3u, 2u}}};
+    for (uint32_t triangle = 0; triangle < (quad ? 2u : 1u); ++triangle) {
+        const auto& [a, b, c] = kTriangles[triangle];
+        std::array<double, 3> u{}, v{};
+        for (int axis = 0; axis < 3; ++axis) {
+            u[axis] = camera[b][axis] - camera[a][axis];
+            v[axis] = camera[c][axis] - camera[a][axis];
+        }
+        const std::array<double, 3> normal{u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]};
+        const double length = std::sqrt(normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]);
+        if (length == 0.0 || std::fabs(normal[1]) >= kUpright * length) continue;
+        const double nearest = nearest_over({{{place[a][0], place[a][1], 1.0 / place[a][2]},
+                                              {place[b][0], place[b][1], 1.0 / place[b][2]},
+                                              {place[c][0], place[c][1], 1.0 / place[c][2]}}},
+                                            box);
+        if (nearest > 0.0 && nearest < front.depth - front.reach) return true;
+    }
+    return false;
+}
+
+/* A funnel's POLY_FT4: the CPU placed its corners, so the GTE kept no projection for them, as it does for the world's. */
+[[nodiscard]] bool world_sprite(const CPUState& cpu, uint32_t at, uint32_t tag) {
+    if (tag >> 24 != kSpriteWords || (cpu.read_byte(at + 7u) & kSpriteCodeMask) != kSpriteCode) return false;
+    int32_t x16 = 0, y16 = 0;
+    uint16_t z = 0;
+    return gte_precision_load_word_ex(at + 8u - kKseg0, cpu.read_word(at + 8u), &x16, &y16, &z) != GTE_PRECISION_LOOKUP_ACCEPTED;
+}
+
+/* The world sprites over `box` along the table's chain from slot `from` down to slot `to`, in the order they are drawn,
+ * and with `chain` every node on the way. An upright face in front of the body ends the walk in its slot when `may_stop`,
+ * the sprites of that slot staying where they are; otherwise, or when the chain does not reach `to`, nothing. */
+[[nodiscard]] std::optional<Walk> passed_sprites(const CPUState& cpu, uint32_t table, int64_t from, int64_t to, const Box& box,
+                                                 const Front& front, bool may_stop, std::vector<uint32_t>* chain = nullptr) {
+    const uint32_t first = table + static_cast<uint32_t>(from) * kSlotBytes;
+    const uint32_t last = table + static_cast<uint32_t>(to) * kSlotBytes;
+    std::vector<Passed> passed;
+    uint32_t before = first;
+    uint32_t at = first;
+    int64_t slot = from;
+    if (chain) chain->assign(1, first);
+    for (int link = 0; link < kLinksWalked; ++link) {
+        const uint32_t node = cpu.read_word(at) & kTagNext;
+        if (node == kTagNext) return std::nullopt;
+        /* The DMA's own reading of a node address: folded into RAM, or in the render arena past it. */
+        at = kKseg0 | psx_mod_gpu_dma_resolve_address(node);
+        if (at == last) return Walk{.sprites = passed, .reached = to};
+        if (chain) chain->push_back(at);
+        if (at >= table && at < first) {
+            before = at;
+            slot = (at - table) / kSlotBytes;
+            continue;
+        }
+        const uint32_t tag = cpu.read_word(at);
+        if (world_sprite(cpu, at, tag)) {
+            if (overlap(packet_box(cpu, at), box)) {
+                if (passed.size() == kMovedMost) return std::nullopt;
+                passed.push_back(Passed{.before = before, .node = node, .at = at, .slot = slot});
+                continue;
+            }
+        } else if (occludes(cpu, at, tag, box, front)) {
+            if (!may_stop) return std::nullopt;
+            std::erase_if(passed, [slot](const Passed& sprite) { return sprite.slot == slot; });
+            return Walk{.sprites = passed, .reached = slot};
+        }
+        before = at;
+    }
+    return std::nullopt;
+}
+
+[[nodiscard]] bool writable(const CPUState& cpu) { return readable(cpu) && cpu.write_half && cpu.write_word; }
+
+void unlink(CPUState& cpu, const std::vector<Passed>& passed) {
+    for (const Passed& sprite : passed) {
+        const uint32_t before = cpu.read_word(sprite.before);
+        cpu.write_word(sprite.before, (before & kTagWords) | (cpu.read_word(sprite.at) & kTagNext));
+    }
+}
+
+/* Links `sprites` at the head of `entry`, the first of them drawn first. */
+void head_of(CPUState& cpu, uint32_t entry, const std::vector<Passed>& sprites) {
+    for (auto sprite = sprites.rbegin(); sprite != sprites.rend(); ++sprite) {
+        const uint32_t head = cpu.read_word(entry);
+        cpu.write_word(sprite->at, (cpu.read_word(sprite->at) & kTagWords) | (head & kTagNext));
+        cpu.write_word(entry, (head & kTagWords) | sprite->node);
+    }
+}
+
+/* The world sprites the last record took along, at the head of its new slot until its shadow comes. */
+std::vector<Passed> g_moved;
+
+/* Moves the world sprites over `box` that a range going from `key` to `nearer` passes to the head of the slot of `nearer`,
+ * in the order they are drawn, so they stay over it. False, and nothing moves, when the chain cannot be walked there. */
+[[nodiscard]] std::optional<int64_t> move_over(CPUState& cpu, int64_t key, int64_t nearer, const Box& box, const Front& front) {
+    const uint32_t table = cpu.read_word(cpu.gpr[kGlobals] + kOrderingTable);
+    const std::optional<Walk> walk = passed_sprites(cpu, table, key >> kSlotShift, nearer >> kSlotShift, box, front, true);
+    if (!walk) return std::nullopt;
+    unlink(cpu, walk->sprites);
+    head_of(cpu, table + static_cast<uint32_t>(walk->reached) * kSlotBytes, walk->sprites);
+    g_moved = walk->sprites;
+    return walk->reached;
+}
+
+/* The shadow's own world sprites join the body's at the head of the new slot, all in the order the game drew them:
+ * a body's sprite went right after the node it followed, which is still on the chain. */
+[[nodiscard]] bool join_over(CPUState& cpu, int64_t key, int64_t nearer, const Box& box, const Front& front) {
+    const uint32_t table = cpu.read_word(cpu.gpr[kGlobals] + kOrderingTable);
+    const uint32_t entry = table + static_cast<uint32_t>(nearer >> kSlotShift) * kSlotBytes;
+    std::vector<uint32_t> chain;
+    const std::optional<Walk> walk = passed_sprites(cpu, table, key >> kSlotShift, nearer >> kSlotShift, box, front, false, &chain);
+    if (!walk) return false;
+    const std::vector<Passed>* const passed = &walk->sprites;
+    if (passed->empty()) return true;
+    uint32_t rest = cpu.read_word(entry) & kTagNext;
+    for (const Passed& sprite : g_moved) {
+        if (rest != sprite.node) return false;
+        rest = cpu.read_word(sprite.at) & kTagNext;
+    }
+    const auto place = [&chain](uint32_t at) { return std::find(chain.begin(), chain.end(), at) - chain.begin(); };
+    std::vector<std::pair<std::array<int64_t, 3>, Passed>> order;
+    for (std::size_t index = 0; index < g_moved.size(); ++index) {
+        const int64_t after = place(g_moved[index].before);
+        if (after == static_cast<int64_t>(chain.size())) return false;
+        order.push_back({{after, 1, static_cast<int64_t>(index)}, g_moved[index]});
+    }
+    for (const Passed& sprite : *passed) order.push_back({{place(sprite.at), 0, 0}, sprite});
+    std::stable_sort(order.begin(), order.end(), [](const auto& a, const auto& b) { return a.first < b.first; });
+    unlink(cpu, *passed);
+    cpu.write_word(entry, (cpu.read_word(entry) & kTagWords) | rest);
+    std::vector<Passed> sprites;
+    for (const auto& [_, sprite] : order) sprites.push_back(sprite);
+    head_of(cpu, entry, sprites);
+    return true;
+}
+
+/* The frame's records are 0 to `last` (the game counts them from 0 each frame, 0x80040EC8): a led key is never nearer than
+ * one the game put nearer, and only ever goes farther to stay so, which no wall forbids. */
+void keep_order(CPUState& cpu, std::size_t last, uint32_t first_key) {
+    std::vector<std::size_t> order(last + 1);
+    for (std::size_t index = 0; index <= last; ++index) order[index] = index;
+    std::stable_sort(order.begin(), order.end(), [](std::size_t a, std::size_t b) { return g_record[a].key < g_record[b].key; });
+    int32_t floor = INT32_MIN, behind = INT32_MIN;
+    for (const std::size_t index : order) {
+        Sprite& record = g_record[index];
+        const int32_t least = record.key > behind && floor != INT32_MIN ? floor + 1 : floor;
+        if (record.led < least) {
+            record.led = least;
+            cpu.write_half(first_key + kRecordBytes * static_cast<uint32_t>(index), static_cast<uint16_t>(least));
+        }
+        floor = record.led;
+        behind = record.key;
+    }
+}
+
+/* Where a body's walk takes its key from `key`: nearer by led(), the world sprites over it moved along, held by a wall in
+ * front of it. The game's key when the walk cannot be made or does not get there. */
+[[nodiscard]] int32_t walk_body(CPUState& cpu, int32_t key, const Sprite& record) {
+    const auto nearer = static_cast<int32_t>(led(key));
+    if (nearer >> kSlotShift == key >> kSlotShift) return nearer;
+    const std::optional<Box> box = box_of(record);
+    const std::optional<Front> front = front_of(record);
+    if (!box || !front) return key;
+    const std::optional<int64_t> reached = move_over(cpu, key, nearer, *box, *front);
+    if (!reached) return key;
+    return *reached == nearer >> kSlotShift ? nearer : static_cast<int32_t>(*reached << kSlotShift | (key & ((1 << kSlotShift) - 1)));
+}
+
+/* After `sh $s7, record.key`: the deferred pass cuts its list and links by the key, so both move with it. */
+void lead_record(CPUState& cpu, std::size_t index, Sprite& record) {
+    if (!writable(cpu)) return;
+    const uint32_t at = cpu.gpr[1] + static_cast<uint32_t>(static_cast<int16_t>(kRecordWord & 0xFFFFu));
+    const auto key = static_cast<int16_t>(cpu.read_half(at));
+    g_moved.clear();
+    record.key = key;
+    record.walked = record.led = walk_body(cpu, key, record);
+    if (record.led != key) cpu.write_half(at, static_cast<uint16_t>(record.led));
+    keep_order(cpu, index, at - kRecordBytes * static_cast<uint32_t>(index));
+}
+
+/* The shadow, sorted by the same range before the lead, goes where its body's walk went, with the world sprites over it;
+ * a body kept in order farther than that is then drawn under its shadow, as the game draws them in one slot. */
+void lead_shadow(CPUState& cpu, const Sprite& body, uint32_t packet) {
+    uint32_t& range = cpu.gpr[kFunnels.back().range_gpr];
+    const std::optional<Front> front = front_of(body);
+    if (body.walked == body.key || static_cast<int32_t>(range) != body.key || !front || !writable(cpu)) return;
+    if (body.walked >> kSlotShift != body.key >> kSlotShift &&
+        !join_over(cpu, body.key, body.walked, packet_box(cpu, packet), *front)) {
+        return;
+    }
+    range = static_cast<uint32_t>(body.walked);
+}
+
+[[nodiscard]] constexpr int32_t fade_row(int32_t key, int32_t start) {
+    return std::clamp(key - start, 0, kFadeLast) >> kFadeStep;
+}
+
+/* The pass faded the body by its led key (0x80043190..0x8004331C): its CLUT goes back to the row of the game's key. */
+void restore_fade(CPUState& cpu, const Sprite& record) {
+    if (record.led == record.key || static_cast<int32_t>(cpu.gpr[kRecordKey]) != record.led || !cpu.read_word || !cpu.read_half ||
+        !cpu.write_half) {
+        return;
+    }
+    const auto start = static_cast<int32_t>(cpu.read_word(cpu.gpr[kGlobals] + kFadeStart));
+    const int32_t rows = fade_row(record.key, start) - fade_row(record.led, start);
+    if (rows == 0) return;
+    const uint32_t at = cpu.gpr[kRecordClut] + kClutStore;
+    cpu.write_half(at, static_cast<uint16_t>(cpu.read_half(at) + (rows << kClutRow)));
+}
+
 [[nodiscard]] Sprite take_pending(uint32_t projection) {
     const Sprite sprite = g_pending_projection == projection ? g_pending : Sprite{};
     g_pending_projection = 0;
@@ -295,6 +663,9 @@ extern "C" void disruptor_sprite_depth_instruction_hook(
         }
         g_record[index] =
             g_pending_projection == kDeferredProjection ? g_pending : Sprite{};
+        if (!comparator_active()) lead_record(*cpu, index, g_record[index]);
+        g_pending.key = g_record[index].key;
+        g_pending.walked = g_record[index].walked;
         return;
     }
     if (instruction != kProjectWord) return;
@@ -317,6 +688,7 @@ extern "C" void disruptor_sprite_depth_packet(
             sprite = g_record[index];
             g_record[index] = Sprite{};
         }
+        if (!comparator_active()) restore_fade(*cpu, sprite);
     } else {
         for (const Funnel& funnel : kFunnels) {
             if (funnel.packets[0] == packet_site || funnel.packets[1] == packet_site) {
@@ -329,6 +701,7 @@ extern "C" void disruptor_sprite_depth_packet(
                        static_cast<int32_t>(cpu->gpr[18]) != sprite.cut->tall)) {
         sprite.shape.reset();
     }
+    if (packet_site == kShadowPacketSite && !comparator_active()) lead_shadow(*cpu, sprite, packet);
     if (packet_site == kShadowPacketSite && sprite.place) {
         /* The row and the size so far are the caster's. */
         sprite.place->dy = 0;

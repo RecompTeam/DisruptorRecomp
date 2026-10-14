@@ -17,7 +17,7 @@ validation is incomplete.
 | Player package | Windows x64 alpha includes the launcher, OpenBIOS, setup guide, and dependency licenses; players supply their supported BIN/CUE. |
 | Launcher and languages | Disc import and verification, saved settings, presets, and optional French/German/Japanese content from a second owned disc. USA remains the required game disc. |
 | Intro and widescreen fixes | Optional intro skipping, complete widescreen map and selection lists, reduced movie-edge noise, and near-wall hole fixes. |
-| Recent fixes and options | Widescreen front-end menus, loading-screen and pause-text fixes, borderless fullscreen and mouse-focus fixes, improved state resumption, gap filling, optional depth sorting, and experimental ambient occlusion. |
+| Recent fixes and options | Widescreen front-end menus, loading-screen and pause-text fixes, borderless fullscreen and mouse-focus fixes, improved state resumption, bodies no longer cut by the floor they lie on, gap filling, optional depth sorting, and experimental ambient occlusion. |
 
 ## Remaining limits
 
@@ -34,6 +34,9 @@ validation is incomplete.
   step behind on the frames it steps, with the view of a player it carries, so
   both move on every frame. Enemies and items on a moving lift, and the other
   things the game updates at that rate, still step at 30.
+- Enemies and bodies sort a little nearer than the game sorts them, together
+  with the items lying over them, so the floor under them does not cut them.
+  A wall standing in front of one keeps it behind, as the game does.
 - The widescreen sky and skyline backdrop draws extra tile columns to keep its
   proportions. Checked at 16:9, 21:9, and 32:9 in the first mission only.
 - Vertical aim needs broader actor, room-edge, and level-transition testing.

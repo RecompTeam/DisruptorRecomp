@@ -1,4 +1,5 @@
 #include "cpu_state.h"
+#include "gte_precision.h"
 #include "gpu_temporal_sprite.h"
 
 #include <algorithm>
@@ -122,6 +123,37 @@ std::int32_t g_range_num = 1, g_range_den = 1;
 extern "C" void gte_ws_x_squash(std::int32_t *num, std::int32_t *den) {
     *num = g_range_num;
     *den = g_range_den;
+}
+
+extern "C" {
+int g_ls_mode = 0;
+int g_ls_replay_active = 0;
+
+struct Projected {
+    std::uint32_t word;
+    std::int32_t x16;
+    std::int32_t y16;
+    std::uint16_t z;
+};
+std::map<std::uint32_t, Projected> g_projected;
+
+/* The corners the GTE projected into words the game stored, by the word's physical address. */
+GtePrecisionLookupResult gte_precision_load_word_ex(std::uint32_t addr, std::uint32_t packed, std::int32_t *x16, std::int32_t *y16,
+                                                    std::uint16_t *z) {
+    const auto found = g_projected.find(addr);
+    if (found == g_projected.end()) return GTE_PRECISION_LOOKUP_STORE_MISS;
+    if (found->second.word != packed) return GTE_PRECISION_LOOKUP_PACKED_MISMATCH;
+    *x16 = found->second.x16;
+    *y16 = found->second.y16;
+    *z = found->second.z;
+    return GTE_PRECISION_LOOKUP_ACCEPTED;
+}
+
+/* The retail DMAC folds a node address into 2 MiB of RAM; the render arena sits past it from 0xF00000. */
+std::uint32_t psx_mod_gpu_dma_resolve_address(std::uint32_t address) {
+    const std::uint32_t canonical = address & 0x00FFFFFCu;
+    return canonical >= 0x00F00000u ? canonical : canonical & 0x001FFFFCu;
+}
 }
 
 #include "../../src/game/render/sprite_depth.cpp"
@@ -678,6 +710,574 @@ void test_a_range_comes_under_the_squash() {
     g_range_num = g_range_den = 1;
 }
 
+
+constexpr std::uint32_t kGp = 0x80010000u;
+constexpr std::uint32_t kOrder = 0x80100000u;
+constexpr std::uint32_t kRecords = 0x80080000u;
+constexpr std::uint32_t kClutHolder = 0x800C5006u;
+constexpr std::uint32_t kPackets = 0x80110000u;
+constexpr std::uint32_t kArena = 0x80F00000u;
+constexpr std::uint32_t kShadowPacket = 0x80118000u;
+constexpr std::uint32_t kTableSlots = 256u;
+constexpr std::uint32_t kSprite = 0x2Cu;
+constexpr std::uint32_t kWorldQuad = 0x3Cu;
+constexpr std::uint32_t kWorldTriangle = 0x34u;
+/* The fourth funnel's actor at x 100, y 37, depth 640 covers 122..234 by 82..138 of the packet's coordinates. */
+constexpr Box kOverBody{.left = 150, .top = 120, .right = 160, .bottom = 140};
+constexpr Box kAside{.left = 300, .top = 10, .right = 310, .bottom = 20};
+constexpr Box kAbove{.left = 150, .top = 70, .right = 160, .bottom = 80};
+constexpr Box kBeside{.left = 240, .top = 120, .right = 250, .bottom = 130};
+
+void write_half(std::uint32_t address, std::uint16_t value) { put(address, value, 2); }
+void write_word(std::uint32_t address, std::uint32_t value) { put(address, value, 4); }
+
+std::uint32_t word_at(std::uint32_t address) {
+    return read_half(address) | static_cast<std::uint32_t>(read_half(address + 2u)) << 16;
+}
+
+std::uint32_t entry_of(std::uint32_t slot) { return kOrder + 4u * slot; }
+
+std::uint32_t xy(std::int32_t x, std::int32_t y) {
+    return static_cast<std::uint16_t>(x) | static_cast<std::uint32_t>(static_cast<std::uint16_t>(y)) << 16;
+}
+
+/* The table as the hardware clears it: each slot names the one before it, slot 0 ends the chain. */
+void lay_table() {
+    for (std::uint32_t slot = 0; slot < kTableSlots; ++slot)
+        put(entry_of(slot), slot == 0u ? 0x00FFFFFFu : entry_of(slot - 1u) & 0x00FFFFFFu, 4);
+}
+
+/* A packet of `words` words and `code` over `box`, linked at the head of `slot` as the game's 0x8004C600 does. */
+void add(std::uint32_t slot, std::uint32_t packet, std::uint32_t words, std::uint32_t code, const Box &box) {
+    put(packet, words << 24 | (word_at(entry_of(slot)) & 0x00FFFFFFu), 4);
+    put(packet + 7u, code, 1);
+    put(packet + 8u, xy(box.left, box.top), 4);
+    put(packet + 16u, xy(box.right, box.top), 4);
+    put(packet + 24u, xy(box.left, box.bottom), 4);
+    put(packet + 32u, xy(box.right, box.bottom), 4);
+    put(entry_of(slot), packet & 0x00FFFFFFu, 4);
+}
+
+/* The packets of `slot` in the order they are drawn. */
+std::vector<std::uint32_t> drawn(std::uint32_t slot) {
+    std::vector<std::uint32_t> packets;
+    std::uint32_t next = word_at(entry_of(slot)) & 0x00FFFFFFu;
+    for (int link = 0; link < 100 && next != 0x00FFFFFFu; ++link) {
+        const std::uint32_t at = 0x80000000u | psx_mod_gpu_dma_resolve_address(next);
+        if (at >= kOrder && at < entry_of(slot)) break;
+        packets.push_back(at);
+        next = word_at(at) & 0x00FFFFFFu;
+    }
+    return packets;
+}
+
+std::uint32_t key_at(std::uint32_t index) { return kRecords + 20u * index - 0x6160u; }
+
+void forget() {
+    g_notes.clear();
+    g_places.clear();
+    g_sizes.clear();
+}
+
+/* The fourth funnel has projected its actor, the game has its table, and is about to store `key` under record `index`. */
+CPUState body_before_its_record(std::uint32_t index, std::uint32_t key) {
+    const TestFunnel &fourth = kTestFunnels[3];
+    g_record.fill(Sprite{});
+    CPUState cpu = ready(fourth);
+    fourth_actor(cpu, 0u, 5u, 3u);
+    disruptor_sprite_depth_instruction_hook(&cpu, fourth.projection, kStoreWord, 1);
+    cpu.gpr[28] = kGp;
+    cpu.write_half = write_half;
+    cpu.write_word = write_word;
+    put(kGp + 836u, kOrder, 4);
+    lay_table();
+    cpu.gpr[1] = kRecords + 20u * index;
+    cpu.gpr[3] = 20u * index;
+    cpu.gpr[23] = key;
+    put(key_at(index), key, 2);
+    return cpu;
+}
+
+void record(CPUState &cpu) { disruptor_sprite_depth_instruction_hook(&cpu, kTestRecordSite, kTestRecordWord, 1); }
+
+void test_a_body_sorts_in_front_of_its_floor() {
+    CPUState cpu = body_before_its_record(5u, 600u);
+    add(75u, kPackets + 256u, 9u, kSprite | 2u, kOverBody);
+    add(70u, kPackets, 9u, kSprite, kOverBody);
+    add(70u, kPackets + 64u, 9u, kSprite, kAside);
+    add(69u, kPackets + 448u, 9u, kSprite, kAbove);
+    add(69u, kPackets + 512u, 9u, kSprite, kBeside);
+    add(68u, kPackets + 576u, 12u, kSprite, kOverBody);
+    add(71u, kPackets + 128u, 9u, kWorldTriangle, kOverBody);
+    add(72u, kPackets + 192u, 12u, kWorldQuad, kOverBody);
+    add(73u, kArena + 0x100u, 9u, kSprite, kOverBody);
+    add(74u, kPackets + 640u, 9u, kSprite, kOverBody);
+    add(74u, kPackets + 704u, 9u, kSprite, kOverBody);
+    add(67u, kPackets + 320u, 9u, kSprite, kOverBody);
+    add(66u, kPackets + 384u, 9u, kSprite, kOverBody);
+    record(cpu);
+    forget();
+    expect(read_half(key_at(5u)) == 536u, "the record's key, which the deferred pass cuts its list and links by, goes 64 nearer");
+    expect(drawn(67u) == std::vector<std::uint32_t>{kPackets + 256u, kPackets + 704u, kPackets + 640u, kArena + 0x100u, kPackets,
+                                                    kPackets + 320u},
+           "the world sprites over the body that it passes go to its new slot in the order they were drawn, still drawn after it");
+    bool whole = true;
+    for (const std::uint32_t packet : drawn(67u)) whole = whole && word_at(packet) >> 24 == 9u;
+    expect(whole, "and each keeps its length");
+    expect(drawn(75u).empty() && drawn(74u).empty() && drawn(73u).empty() && drawn(70u) == std::vector<std::uint32_t>{kPackets + 64u},
+           "a world sprite elsewhere on the screen stays where the game put it");
+    expect(drawn(71u) == std::vector<std::uint32_t>{kPackets + 128u} && drawn(72u) == std::vector<std::uint32_t>{kPackets + 192u},
+           "a world polygon, a triangle of nine words too, stays: the body passes it");
+    expect(drawn(66u) == std::vector<std::uint32_t>{kPackets + 384u}, "and nothing nearer than the body's new slot moves");
+    expect(drawn(69u) == std::vector<std::uint32_t>{kPackets + 512u, kPackets + 448u},
+           "a sprite only above the body or only beside it is not over it");
+    expect(drawn(68u) == std::vector<std::uint32_t>{kPackets + 576u}, "a packet of another length is no funnel's sprite");
+
+    cpu = body_before_its_record(5u, 600u);
+    put(kPackets, 9u << 24 | (word_at(entry_of(70u)) & 0x00FFFFFFu), 4);
+    put(kPackets + 7u, kSprite, 1);
+    put(kPackets + 8u, xy(kOverBody.left, kOverBody.top), 4);
+    put(kPackets + 16u, xy(kOverBody.right, kOverBody.top), 4);
+    put(kPackets + 24u, xy(kOverBody.left, kOverBody.bottom), 4);
+    put(kPackets + 32u, xy(kOverBody.right, kOverBody.bottom), 4);
+    put(entry_of(70u), (kPackets & 0x001FFFFFu) | 0x00600000u, 4);
+    record(cpu);
+    forget();
+    expect(drawn(67u) == std::vector<std::uint32_t>{kPackets} && drawn(70u).empty(),
+           "a node named in a mirror of RAM is read where the DMA reads it");
+
+    cpu = body_before_its_record(5u, 5u);
+    record(cpu);
+    expect(read_half(key_at(5u)) == 5u, "a key under the game's floor is never put farther");
+}
+
+void test_a_body_that_cannot_move_stays() {
+    {
+        CPUState cpu = body_before_its_record(5u, 600u);
+        add(70u, kPackets, 9u, kSprite, kOverBody);
+        put(entry_of(69u), 0x00FFFFFFu, 4);
+        record(cpu);
+        expect(read_half(key_at(5u)) == 600u && drawn(70u) == std::vector<std::uint32_t>{kPackets} && drawn(67u).empty(),
+               "a chain that ends before the new slot moves nothing and keeps the game's key: no wall was looked for past its end");
+    }
+    {
+        CPUState cpu = body_before_its_record(5u, 600u);
+        for (std::uint32_t sprite = 0; sprite < 65u; ++sprite) add(70u, kPackets + 64u * sprite, 9u, kSprite, kOverBody);
+        record(cpu);
+        expect(read_half(key_at(5u)) == 600u && drawn(70u).size() == 65u, "nor do more world sprites than it takes along");
+    }
+    {
+        CPUState cpu = body_before_its_record(5u, 600u);
+        put(entry_of(70u), entry_of(70u) & 0x00FFFFFFu, 4);
+        record(cpu);
+        expect(read_half(key_at(5u)) == 600u && drawn(67u).empty(), "nor a chain that turns in a circle");
+    }
+    {
+        CPUState cpu = body_before_its_record(5u, 12u);
+        add(1u, kPackets, 9u, kSprite, kOverBody);
+        record(cpu);
+        expect(read_half(key_at(5u)) == 10u && drawn(1u) == std::vector<std::uint32_t>{kPackets},
+               "a key that stays in its slot still goes nearer, to keep its order among bodies, and moves no sprite");
+    }
+    for (int *flag : {&g_ls_mode, &g_ls_replay_active}) {
+        CPUState cpu = body_before_its_record(5u, 600u);
+        add(70u, kPackets, 9u, kSprite, kOverBody);
+        *flag = 1;
+        record(cpu);
+        *flag = 0;
+        expect(read_half(key_at(5u)) == 600u && drawn(70u) == std::vector<std::uint32_t>{kPackets},
+               "the comparator's halves keep the game's own order");
+    }
+    {
+        CPUState cpu = body_before_its_record(5u, 600u);
+        cpu.write_word = nullptr;
+        record(cpu);
+        expect(read_half(key_at(5u)) == 600u, "without a way to write the table nothing moves");
+    }
+    {
+        const TestFunnel &fourth = kTestFunnels[3];
+        CPUState cpu = body_before_its_record(5u, 600u);
+        cpu.gpr[4] = 1u;
+        disruptor_sprite_depth_instruction_hook(&cpu, fourth.projection, kStoreWord, 1);
+        cpu.gpr[3] = 100u;
+        add(70u, kPackets, 9u, kSprite, kOverBody);
+        record(cpu);
+        expect(read_half(key_at(5u)) == 600u && drawn(70u) == std::vector<std::uint32_t>{kPackets},
+               "a body without a place on the screen keeps the game's key: its walls cannot be looked for");
+    }
+    forget();
+}
+
+void shadow(CPUState &cpu, const Box &box) {
+    add(0u, kShadowPacket, 9u, kSprite | 2u, box);
+    put(entry_of(0u), 0x00FFFFFFu, 4);
+    disruptor_sprite_depth_packet(&cpu, 0x8003D488u, kShadowPacket);
+    forget();
+}
+
+void test_the_shadow_goes_with_its_body() {
+    constexpr Box kFeet{.left = 140, .top = 136, .right = 240, .bottom = 146};
+    constexpr Box kOverFeet{.left = 236, .top = 141, .right = 239, .bottom = 144};
+    {
+        CPUState cpu = body_before_its_record(5u, 600u);
+        record(cpu);
+        add(72u, kPackets, 9u, kSprite, kOverFeet);
+        shadow(cpu, kFeet);
+        expect(cpu.gpr[23] == 536u, "the shadow sorts where its body does now");
+        expect(drawn(67u) == std::vector<std::uint32_t>{kPackets} && drawn(72u).empty(), "and a world sprite over the shadow alone goes along");
+    }
+    {
+        CPUState cpu = body_before_its_record(5u, 600u);
+        record(cpu);
+        cpu.gpr[23] = 601u;
+        shadow(cpu, kFeet);
+        expect(cpu.gpr[23] == 601u, "a range that is not the body's record key is not its shadow's");
+    }
+    {
+        CPUState cpu = body_before_its_record(5u, 600u);
+        put(entry_of(69u), 0x00FFFFFFu, 4);
+        record(cpu);
+        shadow(cpu, kFeet);
+        expect(read_half(key_at(5u)) == 600u && cpu.gpr[23] == 600u, "a body whose walk fails keeps the game's key, and so does its shadow");
+    }
+    {
+        CPUState cpu = body_before_its_record(5u, 600u);
+        record(cpu);
+        add(72u, kPackets, 9u, kSprite, kOverFeet);
+        g_ls_mode = 1;
+        shadow(cpu, kFeet);
+        g_ls_mode = 0;
+        expect(cpu.gpr[23] == 600u && drawn(72u) == std::vector<std::uint32_t>{kPackets}, "the comparator's halves keep the shadow's slot");
+    }
+    {
+        CPUState cpu = body_before_its_record(5u, 600u);
+        record(cpu);
+        put(entry_of(69u), 0x00FFFFFFu, 4);
+        shadow(cpu, kFeet);
+        expect(cpu.gpr[23] == 600u, "a shadow whose chain cannot be walked stays");
+    }
+}
+
+/* The deferred pass reads record `index` back into $s4 as `pass_key`, fades it from `start` and stores the CLUT. */
+std::uint32_t clut_after(CPUState &cpu, std::uint32_t index, std::uint32_t start, std::uint32_t pass_key) {
+    put(kGp + 1172u, start, 4);
+    const auto used = static_cast<std::uint32_t>(std::clamp<std::int32_t>(static_cast<std::int32_t>(pass_key - start), 0, 767)) >> 6;
+    put(kClutHolder + 8u, 0x7C20u + (used << 6), 2);
+    cpu.gpr[17] = kClutHolder;
+    cpu.gpr[20] = pass_key;
+    const std::uint32_t body = cpu.gpr[22];
+    cpu.gpr[22] = index;
+    disruptor_sprite_depth_packet(&cpu, kTestDeferredSite, kPacket);
+    cpu.gpr[22] = body;
+    forget();
+    return (read_half(kClutHolder + 8u) - 0x7C20u) >> 6;
+}
+
+void test_the_body_keeps_its_fade() {
+    CPUState cpu = body_before_its_record(5u, 600u);
+    record(cpu);
+    expect(clut_after(cpu, 5u, 200u, 536u) == 6u, "its palette row is the game's key's: (600 - 200) >> 6, not the led key's 5");
+    for (const auto &[key, nearer] : {std::pair{1100u, 1036u}, std::pair{230u, 166u}, std::pair{700u, 636u}}) {
+        cpu = body_before_its_record(6u, key);
+        record(cpu);
+        expect(read_half(key_at(6u)) == nearer, "each body below is led, so its fade is the one put back");
+    }
+    expect(clut_after(cpu, 5u, 200u, 536u) == 5u, "a record is put back once");
+
+    cpu = body_before_its_record(6u, 1100u);
+    record(cpu);
+    expect(clut_after(cpu, 6u, 200u, 1036u) == 11u, "past the last row both keys fade alike");
+    cpu = body_before_its_record(6u, 230u);
+    record(cpu);
+    expect(clut_after(cpu, 6u, 300u, 166u) == 0u, "and before the first");
+    cpu = body_before_its_record(7u, 700u);
+    record(cpu);
+    expect(clut_after(cpu, 7u, 0u, 637u) == 9u, "a pass that does not hold the led key is left alone");
+    cpu = body_before_its_record(7u, 700u);
+    record(cpu);
+    expect(clut_after(cpu, 8u, 0u, 636u) == 9u, "another record's packet is left alone");
+    cpu = body_before_its_record(5u, 600u);
+    record(cpu);
+    g_ls_replay_active = 1;
+    expect(clut_after(cpu, 5u, 200u, 536u) == 5u, "the comparator's halves keep the pass's palette");
+    g_ls_replay_active = 0;
+}
+
+
+std::uint32_t led_key(std::uint32_t key) {
+    CPUState cpu = body_before_its_record(5u, key);
+    record(cpu);
+    forget();
+    return read_half(key_at(5u));
+}
+
+void test_near_bodies_keep_their_order() {
+    expect(led_key(600u) == 536u && led_key(136u) == 72u, "from 136 on a key goes the whole 64 nearer");
+    expect(led_key(135u) == 71u && led_key(40u) == 24u && led_key(20u) == 14u, "under it halfway to the floor of 8");
+    std::uint32_t previous = 0u;
+    bool kept = true;
+    for (std::uint32_t key = 9u; key < 400u; key += 3u) {
+        const std::uint32_t now = led_key(key);
+        kept = kept && now >= previous && now >= 8u && now <= key;
+        previous = now;
+    }
+    expect(kept, "so a body never sorts past one the game put nearer, never under the floor, never farther");
+}
+
+void test_the_shadow_keeps_the_order_of_what_it_takes_along() {
+    constexpr Box kFeet{.left = 140, .top = 136, .right = 240, .bottom = 146};
+    constexpr Box kBoth{.left = 150, .top = 134, .right = 160, .bottom = 144};
+    constexpr Box kFeetOnly{.left = 236, .top = 141, .right = 239, .bottom = 144};
+    {
+        CPUState cpu = body_before_its_record(5u, 600u);
+        add(75u, kPackets, 9u, kSprite, kBoth);
+        add(72u, kPackets + 64u, 9u, kSprite, kFeetOnly);
+        add(70u, kPackets + 128u, 9u, kSprite, kBoth);
+        add(67u, kPackets + 192u, 9u, kSprite, kBoth);
+        record(cpu);
+        shadow(cpu, kFeet);
+        expect(cpu.gpr[23] == 536u, "the shadow sorts where its body does");
+        expect(drawn(67u) == std::vector<std::uint32_t>{kPackets, kPackets + 64u, kPackets + 128u, kPackets + 192u},
+               "the sprites over the body and those over the shadow alone are drawn in the game's order");
+    }
+    {
+        CPUState cpu = body_before_its_record(5u, 600u);
+        add(75u, kPackets + 64u, 9u, kSprite, kFeetOnly);
+        add(75u, kPackets, 9u, kSprite, kBoth);
+        record(cpu);
+        shadow(cpu, kFeet);
+        expect(drawn(67u) == std::vector<std::uint32_t>{kPackets, kPackets + 64u}, "also within one slot: the body's first");
+    }
+    {
+        CPUState cpu = body_before_its_record(5u, 600u);
+        add(75u, kPackets, 9u, kSprite, kBoth);
+        add(75u, kPackets + 64u, 9u, kSprite, kFeetOnly);
+        record(cpu);
+        shadow(cpu, kFeet);
+        expect(drawn(67u) == std::vector<std::uint32_t>{kPackets + 64u, kPackets}, "and the shadow's first");
+    }
+    {
+        CPUState cpu = body_before_its_record(5u, 12u);
+        record(cpu);
+        cpu.gpr[23] = 12u;
+        shadow(cpu, kFeet);
+        expect(read_half(key_at(5u)) == 10u && cpu.gpr[23] == 10u, "a shadow whose body stays in its slot goes along without a walk");
+    }
+    {
+        CPUState cpu = body_before_its_record(5u, 600u);
+        add(75u, kPackets, 9u, kSprite, kBoth);
+        add(72u, kPackets + 64u, 9u, kSprite, kFeetOnly);
+        record(cpu);
+        add(67u, kPackets + 128u, 9u, kSprite, kAside);
+        shadow(cpu, kFeet);
+        expect(cpu.gpr[23] == 600u && drawn(72u) == std::vector<std::uint32_t>{kPackets + 64u},
+               "a slot whose head is no longer the body's sprites moves nothing for the shadow");
+    }
+}
+
+
+struct Corner {
+    double x;
+    double y;
+    std::uint16_t z;
+};
+
+/* A world polygon (POLY_GT4 of twelve words by default) with the GTE's corners at `stride` bytes apart, linked at the head
+ * of `slot`; `tracked` false leaves its corners without a projection the runtime kept. */
+void add_face(std::uint32_t slot, std::uint32_t packet, const std::array<Corner, 4> &corners, bool tracked = true,
+              std::uint32_t code = 0x3Cu, std::uint32_t words = 12u, std::uint32_t count = 4u, std::uint32_t stride = 12u) {
+    put(packet, words << 24 | (word_at(entry_of(slot)) & 0x00FFFFFFu), 4);
+    put(packet + 7u, code, 1);
+    for (std::uint32_t corner = 0; corner < count; ++corner) {
+        const std::uint32_t at = packet + 8u + stride * corner;
+        const std::uint32_t word = xy(static_cast<std::int32_t>(corners[corner].x), static_cast<std::int32_t>(corners[corner].y));
+        put(at, word, 4);
+        if (tracked) {
+            g_projected[at - 0x80000000u] = {word, static_cast<std::int32_t>(corners[corner].x * 65536.0),
+                                             static_cast<std::int32_t>(corners[corner].y * 65536.0), corners[corner].z};
+        }
+    }
+    put(entry_of(slot), packet & 0x00FFFFFFu, 4);
+}
+
+/* A wall facing the eye at camera depth `z` over the screen columns `left`..`right`, rows 60..160. */
+std::array<Corner, 4> wall(std::uint16_t z, double left = 100.0, double right = 260.0) {
+    return {{{left, 60.0, z}, {right, 60.0, z}, {left, 160.0, z}, {right, 160.0, z}}};
+}
+
+/* Floor 100 under the eye, from depth 2000 to 6000, 1000 wide: it passes under the body's box. */
+constexpr std::array<Corner, 4> kFloor{{{120.0, 128.0, 2000u}, {200.0, 128.0, 2000u}, {146.67, 122.67, 6000u}, {173.33, 122.67, 6000u}}};
+
+void test_a_wall_in_front_stops_a_body() {
+    /* The body at depth 640 is 5120 GTE units deep and reaches 1792 towards the eye: a face nearer than 3328 hides it. */
+    {
+        CPUState cpu = body_before_its_record(5u, 600u);
+        g_projected.clear();
+        add(75u, kPackets, 9u, kSprite, kOverBody);
+        add(72u, kPackets + 64u, 9u, kSprite, kOverBody);
+        add(70u, kPackets + 128u, 9u, kSprite, kOverBody);
+        add_face(70u, kPackets + 192u, wall(2000u));
+        add(70u, kPackets + 256u, 9u, kSprite, kOverBody);
+        add_face(70u, kPackets + 320u, kFloor);
+        record(cpu);
+        forget();
+        expect(read_half(key_at(5u)) == 560u, "a wall in front of the body over its box holds it in the wall's slot");
+        expect(drawn(70u) == std::vector<std::uint32_t>{kPackets, kPackets + 64u, kPackets + 320u, kPackets + 256u, kPackets + 192u,
+                                                        kPackets + 128u},
+               "the sprites it passed go to that slot ahead of everything there, those already there stay");
+    }
+    {
+        CPUState cpu = body_before_its_record(5u, 600u);
+        g_projected.clear();
+        add_face(70u, kPackets + 192u, wall(4000u));
+        record(cpu);
+        expect(read_half(key_at(5u)) == 536u, "a wall within the body's reach does not hold it");
+        cpu = body_before_its_record(5u, 600u);
+        g_projected.clear();
+        add_face(70u, kPackets + 192u, kFloor);
+        record(cpu);
+        expect(read_half(key_at(5u)) == 536u, "nor the floor in front of it");
+        cpu = body_before_its_record(5u, 600u);
+        g_projected.clear();
+        add_face(70u, kPackets + 192u, wall(2000u, 280.0, 320.0));
+        record(cpu);
+        expect(read_half(key_at(5u)) == 536u, "nor a wall in front that is not over the body");
+        cpu = body_before_its_record(5u, 600u);
+        g_projected.clear();
+        add_face(70u, kPackets + 192u, wall(2000u), false);
+        record(cpu);
+        expect(read_half(key_at(5u)) == 536u, "nor a face whose corners the runtime did not keep");
+        cpu = body_before_its_record(5u, 600u);
+        g_projected.clear();
+        add_face(75u, kPackets + 192u, wall(2000u));
+        record(cpu);
+        expect(read_half(key_at(5u)) == 600u, "a wall in the body's own slot keeps it there");
+        cpu = body_before_its_record(5u, 600u);
+        g_projected.clear();
+        add_face(70u, kPackets + 192u, wall(2000u, 20.0, 110.0));
+        record(cpu);
+        expect(read_half(key_at(5u)) == 536u, "nor a wall in front beside the body");
+        cpu = body_before_its_record(5u, 600u);
+        g_projected.clear();
+        add_face(70u, kPackets + 192u, {{{100.0, 60.0, 2000u}, {130.0, 60.0, 2000u}, {100.0, 90.0, 2000u}, {0.0, 0.0, 0u}}}, true, 0x34u, 9u, 3u);
+        record(cpu);
+        expect(read_half(key_at(5u)) == 536u, "nor a wall triangle whose corner only comes near the body");
+        cpu = body_before_its_record(5u, 600u);
+        g_projected.clear();
+        add_face(70u, kPackets + 192u, wall(2000u), true, 0x3Cu, 9u);
+        record(cpu);
+        expect(read_half(key_at(5u)) == 536u, "nor a packet whose length is not its kind's");
+        cpu = body_before_its_record(5u, 600u);
+        g_projected.clear();
+        add_face(70u, kPackets + 192u, wall(2000u), true, 0x7Cu);
+        record(cpu);
+        expect(read_half(key_at(5u)) == 536u, "nor a packet that is no polygon");
+        cpu = body_before_its_record(5u, 600u);
+        g_projected.clear();
+        add_face(70u, kPackets + 192u, {{{100.0, 60.0, 2000u}, {100.0, 60.0, 2000u}, {180.0, 200.0, 2000u}, {260.0, 60.0, 2000u}}});
+        record(cpu);
+        expect(read_half(key_at(5u)) == 560u, "a quad's second triangle holds the body too");
+    }
+    {
+        constexpr Box kFeet{.left = 140, .top = 136, .right = 250, .bottom = 146};
+        CPUState cpu = body_before_its_record(5u, 600u);
+        g_projected.clear();
+        record(cpu);
+        add_face(72u, kPackets + 192u, wall(2000u, 240.0, 250.0));
+        shadow(cpu, kFeet);
+        expect(read_half(key_at(5u)) == 536u && cpu.gpr[23] == 600u, "a wall in front of the shadow alone keeps the shadow where it was");
+    }
+    g_projected.clear();
+    forget();
+}
+
+
+/* Another body of the same frame, projected where the first was, stores `key` under record `index`. */
+void another_record(CPUState &cpu, std::uint32_t index, std::uint32_t key) {
+    cpu.gpr[1] = kRecords + 20u * index;
+    cpu.gpr[3] = 20u * index;
+    cpu.gpr[23] = key;
+    put(key_at(index), key, 2);
+    record(cpu);
+}
+
+void test_walls_hold_bodies_in_order() {
+    {
+        CPUState cpu = body_before_its_record(0u, 580u);
+        g_projected.clear();
+        add_face(70u, kPackets + 192u, wall(2000u));
+        record(cpu);
+        another_record(cpu, 1u, 600u);
+        expect(read_half(key_at(0u)) == 564u && read_half(key_at(1u)) == 565u,
+               "two bodies held by one wall keep the game's order: the farther one goes no nearer than the nearer one");
+        cpu = body_before_its_record(0u, 600u);
+        g_projected.clear();
+        add_face(70u, kPackets + 192u, wall(2000u));
+        record(cpu);
+        another_record(cpu, 1u, 580u);
+        expect(read_half(key_at(0u)) == 565u && read_half(key_at(1u)) == 564u, "also when the farther one was recorded first");
+        cpu = body_before_its_record(0u, 580u);
+        g_projected.clear();
+        add_face(70u, kPackets + 192u, wall(2000u));
+        record(cpu);
+        another_record(cpu, 1u, 600u);
+        shadow(cpu, Box{.left = 140, .top = 136, .right = 240, .bottom = 146});
+        expect(read_half(key_at(1u)) == 565u && cpu.gpr[23] == 560u, "a body kept in order behind its walk leaves its shadow where the walk went");
+        cpu = body_before_its_record(0u, 600u);
+        g_projected.clear();
+        record(cpu);
+        another_record(cpu, 1u, 580u);
+        another_record(cpu, 2u, 600u);
+        expect(read_half(key_at(0u)) == 536u && read_half(key_at(1u)) == 516u && read_half(key_at(2u)) == 536u,
+               "bodies no wall holds keep their leads, equal keys stay equal");
+        cpu = body_before_its_record(0u, 9u);
+        g_projected.clear();
+        record(cpu);
+        another_record(cpu, 1u, 8u);
+        expect(read_half(key_at(0u)) == 9u && read_half(key_at(1u)) == 8u,
+               "a body on the floor that keeps its key still puts a farther one recorded before it behind it");
+    }
+    {
+        CPUState cpu = body_before_its_record(5u, 600u);
+        g_projected.clear();
+        add_face(70u, kPackets + 192u, wall(2000u, 150.2, 150.8));
+        record(cpu);
+        expect(read_half(key_at(5u)) == 560u, "a wall thinner than a pixel holds the body");
+        cpu = body_before_its_record(5u, 600u);
+        g_projected.clear();
+        add_face(70u, kPackets + 192u, wall(2000u), true, kSprite, 9u, 4u, 8u);
+        record(cpu);
+        expect(read_half(key_at(5u)) == 560u && drawn(70u) == std::vector<std::uint32_t>{kPackets + 192u},
+               "a flat textured quad of the world is a wall, not a sprite to take along");
+    }
+    g_projected.clear();
+    forget();
+}
+
+
+void test_the_nearest_depth_over_a_box() {
+    const auto near = [](const Box &box, std::array<std::array<double, 3>, 3> corners) {
+        for (auto &corner : corners) corner[2] = 1.0 / corner[2];
+        return nearest_over(corners, box);
+    };
+    const Box middle{.left = 10, .top = 10, .right = 19, .bottom = 19};
+    expect(std::fabs(near(middle, {{{0.0, 0.0, 1000.0}, {40.0, 0.0, 1000.0}, {0.0, 40.0, 1000.0}}}) - 1000.0) < 1e-6,
+           "a face of one depth over the box is that deep");
+    expect(std::fabs(near(middle, {{{0.0, 0.0, 1000.0}, {30.0, 0.0, 2000.0}, {0.0, 30.0, 2000.0}}}) -
+                     1.0 / (1.0 / 1000.0 + (1.0 / 2000.0 - 1.0 / 1000.0) * 20.0 / 30.0)) < 1e-6,
+           "a sloped face is as near as its nearest point over the box: the box's corner nearest the face's near corner");
+    expect(near(middle, {{{30.0, 0.0, 1000.0}, {40.0, 0.0, 1000.0}, {30.0, 10.0, 1000.0}}}) == 0.0, "a face beside the box is not over it");
+    expect(near(middle, {{{0.0, 0.0, 1000.0}, {12.0, 0.0, 1000.0}, {0.0, 12.0, 1000.0}}}) == 0.0,
+           "nor one whose bounds cross the box but not the face itself");
+    expect(near(middle, {{{19.2, 0.0, 1000.0}, {19.8, 0.0, 1000.0}, {19.2, 40.0, 1000.0}}}) > 0.0,
+           "the box's last column counts: its right edge is the far side of that pixel");
+    const Box left_edge{.left = -27, .top = 10, .right = 5, .bottom = 30};
+    expect(std::fabs(near(left_edge, {{{-40.0, 0.0, 1000.0}, {-20.0, 0.0, 1000.0}, {-40.0, 40.0, 1000.0}}}) - 1000.0) < 1e-6,
+           "a box partly left of the screen keeps its left edge as a left edge");
+    expect(near(left_edge, {{{-60.0, 0.0, 1000.0}, {-30.0, 0.0, 1000.0}, {-60.0, 40.0, 1000.0}}}) == 0.0,
+           "and a face left of it is not over it");
+}
+
 }  // namespace
 
 int main() {
@@ -687,6 +1287,15 @@ int main() {
     test_only_the_reviewed_instructions_count();
     test_deferred_actor_waits_under_its_record();
     test_sizes_run_after_places();
+    test_a_body_sorts_in_front_of_its_floor();
+    test_a_body_that_cannot_move_stays();
+    test_the_shadow_goes_with_its_body();
+    test_the_body_keeps_its_fade();
+    test_near_bodies_keep_their_order();
+    test_the_shadow_keeps_the_order_of_what_it_takes_along();
+    test_a_wall_in_front_stops_a_body();
+    test_walls_hold_bodies_in_order();
+    test_the_nearest_depth_over_a_box();
     expect(g_places.empty() && g_sizes.empty(), "no test leaves a place or a size behind");
     if (g_failures) return 1;
     std::cout << "Disruptor sprite depth tests passed\n";

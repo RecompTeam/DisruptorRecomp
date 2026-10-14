@@ -53,6 +53,46 @@ RETAIL_INSTRUCTIONS = {
     0x80046360: 0x216FFF60,
     0x8004637C: 0x95EF0000,
     0x800463CC: 0x01AF6820,
+    # The lead: the shadow's seam and its link; the link routine; each sector's funnels in order, the deferred pass later.
+    0x8003D488: 0xA2060025,
+    0x8003D4BC: 0x0C013180,
+    0x8004C600: 0x3C0600FF,
+    0x8004C604: 0x34C6FFFF,
+    0x8004C608: 0x3C07FF00,
+    0x8004C60C: 0x8CA30000,
+    0x8004C610: 0x8C820000,
+    0x8004C614: 0x00671824,
+    0x8004C618: 0x00461024,
+    0x8004C61C: 0x00621825,
+    0x8004C620: 0xACA30000,
+    0x8004C624: 0x8C820000,
+    0x8004C628: 0x00A62824,
+    0x8004C62C: 0x00471024,
+    0x8004C630: 0x00451025,
+    0x8004C634: 0x03E00008,
+    0x8004C638: 0xAC820000,
+    0x800411A4: 0x0C00EDE3,
+    0x800411AC: 0x0C00EEF8,
+    0x800411B4: 0x0C00F000,
+    0x800411BC: 0x0C00F2CE,
+    0x80043FD8: 0x0C010C02,
+    # The deferred pass: the least key into $s4, the cut and the fade by it, the CLUT at 8($s1), the seam, the link.
+    0x80043090: 0x84239EA0,
+    0x800430A4: 0x0060A021,
+    0x80043144: 0x001420C3,
+    0x80043184: 0x8F820494,
+    0x80043190: 0x02829023,
+    0x80043194: 0x2A420300,
+    0x800431A0: 0x341202FF,
+    0x800431A4: 0x06410002,
+    0x800431AC: 0x00009021,
+    0x800431C4: 0x00129183,
+    0x80043314: 0x00121980,
+    0x80043318: 0x00431021,
+    0x8004331C: 0xA6220008,
+    0x800433A0: 0x02A02821,
+    0x800433A4: 0x001420C3,
+    0x800433AC: 0x0C013180,
 }
 # Per funnel: its first instruction, where the step aside is taken from X, where the range is made, the projection
 # seam, where a culled sprite leaves to, the register of X (None: the word at 0x18 of the stack), of the depth and
@@ -173,6 +213,84 @@ def faults(words: list[int]) -> list[str]:
     return found
 
 
+LINK = 0x0C013180
+RANGE, KEY, CLUT_HOLDER, FADE_ROW = 23, 20, 17, 18
+# The shadow's seam, its `sra a0,s7,3`, the end of the fourth funnel's loop, the loop's head, the range's next write.
+SHADOW_SITE = (0x8003D488, 0x8003D4B4, 0x8003D4D4, 0x8003CB8C, 0x8003CD3C)
+RECORD_KEY_OFFSET = 0x9EA0
+SELECT, CUT, FADE, FADE_END, CLUT_ADD, CLUT_STORE, SEAM, PASS_LINK = (
+    0x800430A4,
+    0x80043144,
+    0x80043190,
+    0x800431C4,
+    0x80043314,
+    0x8004331C,
+    0x800433A0,
+    0x800433A4,
+)
+
+
+def reads(word: int) -> set[int]:
+    """The general registers an instruction reads, from the R3000's opcode table."""
+    operation, rs, rt = word >> 26, word >> 21 & 31, word >> 16 & 31
+    if operation == 0x00:
+        function = word & 0x3F
+        if function in (0x00, 0x02, 0x03):
+            return {rt}
+        if function in (0x08, 0x09, 0x11, 0x13):
+            return {rs}
+        if function in (0x0C, 0x0D, 0x10, 0x12):
+            return set()
+        return {rs, rt}
+    if operation in (0x01, 0x06, 0x07) or 0x08 <= operation <= 0x0E or operation in LOADS or operation in (0x32, 0x3A):
+        return {rs}
+    if operation in (0x04, 0x05) or operation in STORES:
+        return {rs, rt}
+    if operation == 0x12 and rs in (0x04, 0x06):
+        return {rt}
+    return set()
+
+
+def stores_clut(word: int) -> bool:
+    """A store through $s1 that reaches the CLUT halfword at 8($s1)."""
+    size = STORES.get(word >> 26)
+    first = signed(word & 0xFFFF)
+    return size is not None and word >> 21 & 31 == CLUT_HOLDER and first < 10 and first + size > 8
+
+
+def lead_faults(words: list[int]) -> list[str]:
+    """What in the retail code would let a lead at a seam reach more than the slot it was meant for."""
+
+    def at(address: int) -> int:
+        return words[(address - LOAD_ADDRESS) // 4]
+
+    found = []
+    site, slot, end, head, rewritten = SHADOW_SITE
+    if any(written(at(address)) == RANGE for address in range(site, slot, 4)):
+        found.append("the shadow's range is written between its seam and its slot")
+    if at(slot + 8) != LINK:
+        found.append("the link does not follow the shadow's slot")
+    if any(RANGE in reads(at(address)) for address in [*range(slot + 4, end + 4, 4), *range(head, rewritten, 4)]):
+        found.append("the shadow's range is read again after its slot")
+    keyed = sorted(
+        LOAD_ADDRESS + 4 * index
+        for index, word in enumerate(words)
+        if (word >> 26 in LOADS or word >> 26 in STORES) and word & 0xFFFF == RECORD_KEY_OFFSET
+    )
+    if keyed != [0x8003D1B4, 0x80043090]:
+        found.append(f"the record key is accessed at {list(map(hex, keyed))}")
+    if any(written(at(address)) == KEY for address in range(SELECT + 4, PASS_LINK, 4)):
+        found.append("the deferred pass's key register is written between its choice and its link")
+    if any(written(at(address)) == FADE_ROW for address in range(FADE_END + 4, CLUT_ADD, 4)):
+        found.append("the fade row is rewritten before it goes into the CLUT")
+    between = [at(address) for address in range(CLUT_STORE + 4, SEAM + 4, 4)]
+    if any(written(word) == CLUT_HOLDER for word in between):
+        found.append("the CLUT's holder moves between its store and the seam")
+    if any(stores_clut(word) for word in between):
+        found.append("the CLUT is stored again before the seam")
+    return found
+
+
 def read(path: str) -> str:
     return (ROOT / path).read_text(encoding="utf-8")
 
@@ -217,10 +335,112 @@ require(
     "    cpu.gpr[funnel.range_gpr] = static_cast<uint32_t>(range_of(funnel, depth, aside * num / den));\n"
     in source
     and GUEST_WRITE.findall(source) == ["cpu.gpr[funnel.range_gpr] ="]
-    and all(
-        name not in source for name in ("psx_mod_write", "write_word", "write_half", "write_byte", "cpu.pc", "cpu->pc")
-    ),
-    "only while the GTE squashes, only a register that holds the game's own range, and nothing else of the guest is written",
+    and all(name not in source for name in ("psx_mod_write", "write_byte", "cpu.pc", "cpu->pc")),
+    "only while the GTE squashes, only a register that holds the game's own range",
+)
+require(
+    source.count("uint32_t& ") == 1
+    and "    uint32_t& range = cpu.gpr[kFunnels.back().range_gpr];\n" in source
+    and source.count("    range = ") == 1
+    and "    range = static_cast<uint32_t>(body.walked);\n" in source
+    and source.count("cpu.write_half(") == 3
+    and "            cpu.write_half(first_key + kRecordBytes * static_cast<uint32_t>(index), static_cast<uint16_t>(least));\n"
+    in source
+    and "    if (record.led != key) cpu.write_half(at, static_cast<uint16_t>(record.led));\n" in source
+    and "    cpu.write_half(at, static_cast<uint16_t>(cpu.read_half(at) + (rows << kClutRow)));\n" in source
+    and source.count("cpu.write_word(") == 4
+    and "    cpu.write_word(entry, (cpu.read_word(entry) & kTagWords) | rest);\n" in source
+    and "        cpu.write_word(sprite.before, (before & kTagWords) | (cpu.read_word(sprite.at) & kTagNext));\n"
+    in source
+    and "        cpu.write_word(sprite->at, (cpu.read_word(sprite->at) & kTagWords) | (head & kTagNext));\n" in source
+    and "        cpu.write_word(entry, (head & kTagWords) | sprite->node);\n" in source,
+    "besides the range the guest gets only the lead: the record key, the shadow's range, the sprites moved along and the CLUT",
+)
+require(
+    "constexpr int64_t kBodyReach = 64;\nconstexpr int64_t kHalvedBelow = kNearest + 2 * kBodyReach;\n" in source
+    and "    if (range <= kNearest) return range;\n"
+    "    return range >= kHalvedBelow ? range - kBodyReach : kNearest + (range - kNearest) / 2;\n"
+    in source
+    and "constexpr uint32_t kOrderingTable = 836u;" in source
+    and "constexpr uint32_t kFadeStart = 1172u;" in source
+    and "constexpr int32_t kFadeLast = 767;\nconstexpr int32_t kFadeStep = 6;\nconstexpr int32_t kClutRow = 6;"
+    in source
+    and "constexpr uint32_t kClutStore = 8u;" in source
+    and f"constexpr uint8_t kRecordKey = {KEY}u;" in source
+    and f"constexpr uint8_t kRecordClut = {CLUT_HOLDER}u;" in source
+    and f"constexpr uint8_t kGlobals = {GLOBALS}u;" in source,
+    "a lead that keeps the order of keys, never past the game's floor, and the deferred pass's own fade arithmetic",
+)
+require(
+    "constexpr uint32_t kTagNext = 0x00FFFFFFu;" in source
+    and "constexpr uint32_t kTagWords = 0xFF000000u;" in source
+    and "constexpr int kLinksWalked = 8192;\n" in source
+    and "constexpr std::size_t kMovedMost = 64;\n" in source
+    and "    for (int link = 0; link < kLinksWalked; ++link) {\n" in source
+    and "constexpr uint32_t kSpriteWords = 9u;" in source
+    and "constexpr uint32_t kSpriteCode = 0x2Cu;\nconstexpr uint32_t kSpriteCodeMask = 0xFCu;" in source
+    and "    if (tag >> 24 != kSpriteWords || (cpu.read_byte(at + 7u) & kSpriteCodeMask) != kSpriteCode) return false;\n"
+    in source
+    and "    return gte_precision_load_word_ex(at + 8u - kKseg0, cpu.read_word(at + 8u), &x16, &y16, &z) != GTE_PRECISION_LOOKUP_ACCEPTED;\n"
+    in source
+    and "        at = kKseg0 | psx_mod_gpu_dma_resolve_address(node);\n" in source
+    and "        if (node == kTagNext) return std::nullopt;\n" in source
+    and "        if (at == last) return Walk{.sprites = passed, .reached = to};\n" in source
+    and "            if (passed.size() == kMovedMost) return std::nullopt;\n" in source
+    and "    keep_order(cpu, index, at - kRecordBytes * static_cast<uint32_t>(index));\n}\n" in source
+    and source.count("keep_order(") == 2
+    and "    if (!box || !front) return key;\n" in source
+    and "    if (!reached) return key;\n" in source
+    and "        const int32_t least = record.key > behind && floor != INT32_MIN ? floor + 1 : floor;\n" in source
+    and "        if (record.led < least) {\n" in source
+    and "    if (nearer >> kSlotShift == key >> kSlotShift) return nearer;\n" in source
+    and source.count("    g_moved.clear();\n") == 1
+    and "        if (rest != sprite.node) return false;\n" in source
+    and "        if (after == static_cast<int64_t>(chain.size())) return false;\n" in source,
+    "the walk reads the chain as the GPU's DMA does, takes only a funnel's POLY_FT4, and moves nothing unless it reaches the new slot",
+)
+require(
+    '#include "gte_precision.h"\n' in source
+    and "constexpr double kUpright = 0.6;" in source
+    and "        if (gte_precision_load_word_ex(word - kKseg0, cpu.read_word(word), &x16, &y16, &z) != GTE_PRECISION_LOOKUP_ACCEPTED"
+    in source
+    and "        if (length == 0.0 || std::fabs(normal[1]) >= kUpright * length) continue;\n" in source
+    and "        if (nearest > 0.0 && nearest < front.depth - front.reach) return true;\n" in source
+    and "    for (const auto& point : shape) nearest = std::max(nearest, point[2]);\n" in source
+    and "        } else if (occludes(cpu, at, tag, box, front)) {\n            if (!may_stop) return std::nullopt;\n"
+    in source
+    and "            std::erase_if(passed, [slot](const Passed& sprite) { return sprite.slot == slot; });\n" in source
+    and source.count("occludes(") == 2
+    and "    const std::optional<Walk> walk = passed_sprites(cpu, table, key >> kSlotShift, nearer >> kSlotShift, box, front, true);\n"
+    in source
+    and "passed_sprites(cpu, table, key >> kSlotShift, nearer >> kSlotShift, box, front, false, &chain);" in source,
+    "an upright face that the GTE put in front of the body over its box holds the body in its slot, and fails the shadow's walk",
+)
+require(
+    "[[nodiscard]] bool comparator_active() { return g_ls_mode != 0 || g_ls_replay_active != 0; }" in source
+    and "        if (!comparator_active()) lead_record(*cpu, index, g_record[index]);\n" in source
+    and "        if (!comparator_active()) restore_fade(*cpu, sprite);\n" in source
+    and "    if (packet_site == kShadowPacketSite && !comparator_active()) lead_shadow(*cpu, sprite, packet);\n"
+    in source
+    and source.count("lead_record(") == 2
+    and source.count("restore_fade(") == 2
+    and source.count("lead_shadow(") == 2
+    and source.count("move_over(") == 2
+    and source.count("join_over(") == 2,
+    "the comparator's halves run the game's own order, and each part of the lead runs at its one seam",
+)
+require(
+    "    const uint32_t at = cpu.gpr[1] + static_cast<uint32_t>(static_cast<int16_t>(kRecordWord & 0xFFFFu));\n"
+    in source
+    and "    if (record.led == record.key || static_cast<int32_t>(cpu.gpr[kRecordKey]) != record.led" in source
+    and "    return std::clamp(key - start, 0, kFadeLast) >> kFadeStep;\n" in source
+    and "    if (body.walked == body.key || static_cast<int32_t>(range) != body.key || !front || !writable(cpu)) return;\n"
+    in source
+    and "    if (body.walked >> kSlotShift != body.key >> kSlotShift &&\n"
+    "        !join_over(cpu, body.key, body.walked, packet_box(cpu, packet), *front)) {\n"
+    in source,
+    "the record key is the one the game just stored, the shadow's range is its body's, and a CLUT is put back only for "
+    "the record the pass holds",
 )
 require(
     "        g_pending = projected(*cpu, funnel);\n        squash_range(*cpu, funnel);\n        return;\n" in source
@@ -304,6 +524,31 @@ if image_path.exists():
     for name, (address, word, complaint) in seeded.items():
         said = faults(changed(address, word))
         require(any(complaint in fault for fault in said), f"the scan must refuse {name}, it said {said}")
+
+    require(not lead_faults(retail), f"the retail seams do not hold a lead to its slot: {lead_faults(retail)}")
+    seeded_leads = {
+        "the shadow's range changed after its seam": (0x8003D4B0, 0x26F70008, "between its seam and its slot"),
+        "the shadow's link gone": (0x8003D4BC, 0x00000000, "the link does not follow the shadow's slot"),
+        "the shadow's range read after its link": (0x8003D4C4, 0x02E01821, "read again after its slot"),
+        "the body funnel's range read before it is made": (
+            spare(0x8003CB8C, 0x8003CD3C),
+            0x02E01821,
+            "read again after its slot",
+        ),
+        "the record key read elsewhere": (spare(0x80043000, 0x80043400), 0x84239EA0, "the record key is accessed at"),
+        "the pass's key changed before its link": (spare(SELECT + 4, PASS_LINK), 0x26940008, "key register is written"),
+        "the fade row changed before the CLUT": (
+            spare(FADE_END + 4, CLUT_ADD),
+            0x26520001,
+            "the fade row is rewritten",
+        ),
+        "the CLUT's holder moved": (spare(CLUT_STORE + 4, SEAM), 0x26310004, "the CLUT's holder moves"),
+        "the CLUT stored again": (spare(CLUT_STORE + 4, SEAM), 0xA6220008, "the CLUT is stored again"),
+        "a word over the CLUT stored": (spare(CLUT_STORE + 4, SEAM), 0xAE200006, "the CLUT is stored again"),
+    }
+    for name, (address, word, complaint) in seeded_leads.items():
+        said = lead_faults(changed(address, word))
+        require(any(complaint in fault for fault in said), f"the lead scan must refuse {name}, it said {said}")
 
 checked = f"retail image {'checked' if image_path.exists() else 'absent'}"
 require(
