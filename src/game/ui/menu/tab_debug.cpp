@@ -164,14 +164,6 @@ void draw_debug_tab() {
         "next start.");
 
     ImGui::Separator();
-    bool one_layer = gl_renderer_one_layer() != 0;
-    if (ImGui::Checkbox("One texture layer per wall", &one_layer)) gl_renderer_set_one_layer(one_layer ? 1 : 0);
-    draw_status_badge("SESSION", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
-    ImGui::TextDisabled(
-        "Near a wall the game draws finer pieces over the wall, half a texel "
-        "off it. This leaves them out. Not saved.");
-
-    ImGui::Separator();
     draw_capsules();
 }
 

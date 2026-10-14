@@ -1,5 +1,5 @@
 diff --git a/runtime/src/gpu_gl_renderer.c b/runtime/src/gpu_gl_renderer.c
-index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0041d88a44749f13eeeed71264919b63b57eacca 100644
+index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..45e6db4fcff4e94e3cd17c6db91969a46c9aa384 100644
 --- a/runtime/src/gpu_gl_renderer.c
 +++ b/runtime/src/gpu_gl_renderer.c
 @@ -1,747 +1,1127 @@
@@ -1862,7 +1862,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0041d88a44749f13eeeed71264919b63
  static const char *INTERP_FS =
      "#version 330\n"
      "in vec2 v_uv; uniform sampler2D u_prev; uniform sampler2D u_curr;\n"
-@@ -757,2715 +1137,4464 @@
+@@ -757,2715 +1137,4411 @@
      "  }\n"
      "  frag=mix(prev,curr,alpha);\n"
      "}\n";
@@ -4751,63 +4751,12 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0041d88a44749f13eeeed71264919b63
 +    glDepthFunc(GL_ALWAYS);
 +}
 +
-+/* Near the viewer the game draws a wall as a whole polygon and then finer pieces of it over the near part. The pieces'
-+ * texture coordinates are whole texels, so a piece shows its texture up to half a texel off the whole polygon's, and where
-+ * the pieces end the texture jumps as the player moves. With perspective weights the whole polygon needs no pieces: a
-+ * smaller triangle that redraws one of the last 160 kept in its batch (inside it, within 2 percent of its depth, the same
-+ * texels within two: a piece of a piece is off by up to 1.6) is left out. */
-+#define REDRAW_LOOK_BACK 160
-+static int s_one_layer = 0;
 +static int s_smooth_fade = 0, s_fade_rows = 0;
 +/* The UV view (diagnostic): the mirror's textured pixels show where they lie in their texture in place of the texel: red and green
 + * are u and v as waves that fall and rise 16 texels each with no step, blue the 16-texel cell of the 256 by 256 page. A recording's
 + * downscale keeps such a wave, so a picture gives the texel under a pixel to a sixteenth. Shading and filters would spoil the values. */
 +static int s_uv_view = 0;
 +static float s_fade_start = 0.0f, s_fade_step = 1.0f, s_fade_side = 0.0f;
-+static int tex_batch_redraws(const float *whole, const float *piece) {
-+    const float ax = whole[20], ay = whole[21], bx = whole[TEXV + 20], by = whole[TEXV + 21];
-+    const float cx = whole[2 * TEXV + 20], cy = whole[2 * TEXV + 21];
-+    const float det = (by - cy) * (ax - cx) + (cx - bx) * (ay - cy);
-+    const float px0 = piece[20], py0 = piece[21], px1 = piece[TEXV + 20], py1 = piece[TEXV + 21];
-+    const float px2 = piece[2 * TEXV + 20], py2 = piece[2 * TEXV + 21];
-+    const float piece_det = (py1 - py2) * (px0 - px2) + (px2 - px1) * (py0 - py2);
-+    if (whole[19] < 2.5f || whole[19] > 3.5f || fabsf(det) < 1.0f || fabsf(piece_det) > 0.9f * fabsf(det)) return 0;
-+    for (int k = 0; k < 3; k++) {
-+        const float *corner = piece + k * TEXV;
-+        float weight[3], sum = 0.0f, u = 0.0f, v = 0.0f, inverse = 0.0f;
-+        weight[0] = ((by - cy) * (corner[20] - cx) + (cx - bx) * (corner[21] - cy)) / det;
-+        weight[1] = ((cy - ay) * (corner[20] - cx) + (ax - cx) * (corner[21] - cy)) / det;
-+        weight[2] = 1.0f - weight[0] - weight[1];
-+        for (int i = 0; i < 3; i++) {
-+            const float *of = whole + i * TEXV;
-+            const float depth = fabsf(of[23]);
-+            if (weight[i] < -0.004f || !(of[22] > 0.0f) || !(depth > 16.0f)) return 0;
-+            sum += weight[i] * of[22];
-+            u += weight[i] * of[22] * of[2];
-+            v += weight[i] * of[22] * of[3];
-+            inverse += weight[i] / depth;
-+        }
-+        if (!(sum > 0.0f) || !(inverse > 0.0f) || !(fabsf(corner[23]) > 16.0f)) return 0;
-+        if (fabsf(u / sum - corner[2]) > 2.0f || fabsf(v / sum - corner[3]) > 2.0f) return 0;
-+        if (fabsf(1.0f / inverse - fabsf(corner[23])) > 0.02f * fabsf(corner[23]) + 2.0f) return 0;
-+    }
-+    return 1;
-+}
-+static int tex_batch_drop_redrawn(int nverts) {
-+    int kept = 0;
-+    for (int i = 0; i + 2 < nverts; i += 3) {
-+        const float *piece = &s_tb[i * TEXV];
-+        int redrawn = 0;
-+        if (piece[19] > 2.5f && piece[19] < 3.5f && piece[22] > 0.0f && piece[TEXV + 22] > 0.0f && piece[2 * TEXV + 22] > 0.0f)
-+            for (int j = kept - 3; j >= 0 && j >= kept - 3 * REDRAW_LOOK_BACK && !redrawn; j -= 3)
-+                redrawn = tex_batch_redraws(&s_tb[j * TEXV], piece);
-+        if (redrawn) continue;
-+        if (kept != i) memmove(&s_tb[kept * TEXV], piece, 3 * TEXV * sizeof(float));
-+        kept += 3;
-+    }
-+    return kept;
-+}
-+void gl_renderer_set_one_layer(int enabled) { s_one_layer = enabled != 0; }
 +void gl_renderer_set_smooth_fade(int enabled) { s_smooth_fade = enabled != 0; }
 +int gl_renderer_smooth_fade(void) { return s_smooth_fade; }
 +void gl_renderer_set_palette_fade(int rows, float start, float step, float side) {
@@ -4817,11 +4766,10 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0041d88a44749f13eeeed71264919b63
 +    p_glUniform4f(fade, s_fade_start, s_fade_step, s_smooth_fade ? (float)s_fade_rows : 0.0f, s_fade_side);
 +    p_glUniform4f(at, (float)g_wide_cur_base + s_yaw_center_x, s_yaw_center_x > 0.0f ? s_yaw_center_x : 160.0f, nearer, s_uv_view ? 1.0f : 0.0f);
 +}
-+int gl_renderer_one_layer(void) { return s_one_layer; }
 +
 +static void flush_tex_batch(void) {
 +    if (s_tb_n == 0) return;
-+    int nverts = s_one_layer ? tex_batch_drop_redrawn(s_tb_n) : s_tb_n, semi = s_tb_semi;
++    int nverts = s_tb_n, semi = s_tb_semi;
 +    glEnable(PSXGL_DEPTH_CLAMP);  /* a near face is clipped by its w alone, its depth stops at the nearest */
 +    const int fillers = s_tb_fillers;
 +    const int world = s_tb_world;
@@ -6336,7 +6284,6 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0041d88a44749f13eeeed71264919b63
 +            if (fill) s_crack_fill = s_crack_width = (float)atof(fill);
 +            if (under) s_grown_under = atoi(under) != 0;
 +            if (getenv("PSX_GL_WORLD_DEPTH")) s_world_depth = atoi(getenv("PSX_GL_WORLD_DEPTH")) != 0;
-+            if (getenv("PSX_GL_ONE_LAYER")) s_one_layer = atoi(getenv("PSX_GL_ONE_LAYER")) != 0;
 +            if (getenv("PSX_GL_SHOWN_DUMP"))
 +                gl_renderer_record_shown(getenv("PSX_GL_SHOWN_DUMP"),
 +                                         getenv("PSX_GL_SHOWN_DUMP_SKIP") ? atoi(getenv("PSX_GL_SHOWN_DUMP_SKIP")) : 0,
@@ -9008,7 +8955,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0041d88a44749f13eeeed71264919b63
      uint64_t freq = SDL_GetPerformanceFrequency();
      uint64_t deadline = SDL_GetPerformanceCounter();
      uint64_t diag_start = deadline, diag_swaps = 0, diag_captures = 0;
-@@ -3477,7 +5606,7 @@
+@@ -3477,7 +5553,7 @@
          int uncapped = hz < 0.0;
          uint64_t now = SDL_GetPerformanceCounter();
          if (!uncapped) {
@@ -9017,7 +8964,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..0041d88a44749f13eeeed71264919b63
              uint64_t period = (uint64_t)((double)freq / hz);
              if (!period) period = 1;
              deadline += period;
-@@ -3492,235 +5621,420 @@
+@@ -3492,235 +5568,420 @@
              }
              while (SDL_GetPerformanceCounter() < deadline) {}
              now = SDL_GetPerformanceCounter();
