@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Source contract for the experimental ambient occlusion: its marks in the mirror, its switches and the setting."""
+"""Source contract for the ambient occlusion: its marks in the mirror, its switches and the setting."""
 
 from pathlib import Path
 
@@ -81,6 +81,7 @@ void gl_renderer_set_ssao_shape(float radius, float strength) {
     "or a strength that is not one changes nothing",
 )
 
+enhancements = between(menu, "void draw_enhancements_tab() {", "\n}\n") + "\n"
 experimental = between(menu, "void draw_experimental_tab() {", "\n}\n") + "\n"
 require(
     """    bool occlusion = gl_renderer_ssao() != 0;
@@ -91,26 +92,28 @@ require(
         mark_occlusion(occlusion);
     }
     if (!occlusion_applies) ImGui::EndDisabled();
-""" in experimental
+""" in enhancements
     and """    const bool shape_applies = applies("disruptor.occlusion_reach") &&
                                applies("disruptor.occlusion_strength");
     if (!shape_applies) ImGui::BeginDisabled();
     ImGui::SetNextItemWidth(260.0f);
     const bool reach_moved = option_slider("disruptor.occlusion_reach", &reach);
-""" in experimental
+""" in enhancements
     and """        option_slider("disruptor.occlusion_strength", &strength);
     if (!shape_applies) ImGui::EndDisabled();
     if (reach_moved || strength_moved) {
         gl_renderer_set_ssao_shape(static_cast<float>(reach), strength / 100.0f);
         mark_occlusion_shape(reach, strength);
     }
-""" in experimental
+""" in enhancements
     and menu.count('option_toggle("disruptor.ambient_occlusion"') == 1
-    and experimental.count("ImGui::BeginDisabled()") == experimental.count("ImGui::EndDisabled()") == 5
-    and experimental.count("option_toggle(") == 5
+    and "occlusion" not in experimental
+    and experimental.count("ImGui::BeginDisabled()") == experimental.count("ImGui::EndDisabled()") == 2
+    and experimental.count("option_toggle(") == 3
     and "ImGui::Checkbox(" not in experimental
-    and '            if (ImGui::BeginTabItem("Experimental")) {\n                draw_experimental_tab();\n' in menu,
-    "the Experimental tab holds the occlusion, four more switches and a list: a switch greyed without geometry correction and two bounded sliders greyed without the switch",
+    and '            if (ImGui::BeginTabItem("Enhancements")) {\n                draw_enhancements_tab();\n' in menu,
+    "the Enhancements tab holds the occlusion: a switch greyed without geometry correction and two bounded sliders greyed without the switch, "
+    "and the Experimental tab keeps three switches and a list",
 )
 
 require(
@@ -175,11 +178,11 @@ require(
     and strength.endswith("needs_occlusion")
     and "constexpr const char* needs_occlusion[] = {occlusion_key};\n" in options
     and 'constexpr const char* occlusion_key = "disruptor.ambient_occlusion";\n' in options
-    and '    {"disruptor.ambient_occlusion", Page::experimental},\n'
-    '    {"disruptor.occlusion_reach", Page::experimental},\n'
-    '    {"disruptor.occlusion_strength", Page::experimental},\n' in launcher
-    and launcher.count("Page::experimental") == 8,
-    "the launcher's Experimental page holds these three rows and the smooth fade's: the switch needs geometry correction, the sliders the switch, "
+    and '    {"disruptor.ambient_occlusion", Page::enhancements},\n'
+    '    {"disruptor.occlusion_reach", Page::enhancements},\n'
+    '    {"disruptor.occlusion_strength", Page::enhancements},\n' in launcher
+    and launcher.count("Page::experimental") == 4,
+    "the launcher's Enhancements page holds these three rows and its Experimental page the anti-aliasing's four: the switch needs geometry correction, the sliders the switch, "
     "with the menu's own bounds",
 )
 

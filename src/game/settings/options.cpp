@@ -67,7 +67,6 @@ constexpr const char* display_modes[] = {"Windowed", "Borderless fullscreen", "E
 constexpr const char* aspects[] = {"4:3", "16:9", "21:9", "32:9", "Match window (up to 32:9)"};
 constexpr const char* scales[] = {"1x (native)", "2x", "3x", "4x", "5x", "6x", "7x", "8x"};
 constexpr const char* vsyncs[] = {"Adaptive", "Immediate", "Synchronised"};
-constexpr const char* shadows[] = {"Vanilla", "Improved"};
 constexpr const char* sample_counts[] = {"Off", "2x", "4x", "8x", "16x"};
 
 constexpr const char* geometry_key = "disruptor.geometry_correction";
@@ -139,12 +138,20 @@ constexpr Option option_list[] = {
         "disruptor.depth_sorted_world", "Depth-sorted world", 0,
         "Draws world polygons by their depth where the game's own order puts a far one over a near "
         "one.", needs_geometry),
-    choice("disruptor.improved_shadows", "Shadows", 0,
-           "Vanilla is the game's own shape. Improved lays a shadow flat on the floor: as wide as the "
-           "game makes it and as tall as the floor's perspective gives. Improved needs exact "
-           "geometry.", shadows,
-           saved<&Settings::has_improved_shadows>, read<&Settings::improved_shadows>,
-           write<&Settings::has_improved_shadows, &Settings::improved_shadows>),
+    toggle<&Settings::has_smooth_fade, &Settings::smooth_fade>(
+        "disruptor.smooth_fade", "Smooth distance fade", 0,
+        "Fades walls and floors into the distance evenly, where the game steps through twelve shades.", needs_geometry),
+    toggle<&Settings::has_ambient_occlusion, &Settings::ambient_occlusion>(
+        "disruptor.ambient_occlusion", "Ambient occlusion", 0,
+        "Shades corners and the floor under things.", needs_geometry),
+    slider("disruptor.occlusion_reach", "Occlusion reach", 160,
+           "How far from a corner or an object the shade spreads.", 50, 800, Unit::none,
+           saved<&Settings::has_occlusion_reach>, read<&Settings::occlusion_reach>,
+           write<&Settings::has_occlusion_reach, &Settings::occlusion_reach>, needs_occlusion),
+    slider("disruptor.occlusion_strength", "Occlusion strength", 80,
+           "How dark the shade is.", 0, 300, Unit::percent,
+           saved<&Settings::has_occlusion_strength>, read<&Settings::occlusion_strength>,
+           write<&Settings::has_occlusion_strength, &Settings::occlusion_strength>, needs_occlusion),
     toggle<&Settings::has_frame_unlock, &Settings::frame_unlock>(
         "disruptor.frame_unlock", "60 FPS gameplay", 0,
         "Lets the game run at up to 60 frames a second in place of its original rate."),
@@ -204,20 +211,6 @@ constexpr Option option_list[] = {
         "Writes more into the game's log for a bug report: how the frames ran, settings changed in the menu, "
         "controllers coming and going, the graphics driver's complaints. The driver's part starts with the next launch."),
 
-    toggle<&Settings::has_ambient_occlusion, &Settings::ambient_occlusion>(
-        "disruptor.ambient_occlusion", "Ambient occlusion", 0,
-        "Shades corners and the floor under things. Unfinished.", needs_geometry),
-    slider("disruptor.occlusion_reach", "Occlusion reach", 160,
-           "How far from a corner or an object the shade spreads.", 50, 800, Unit::none,
-           saved<&Settings::has_occlusion_reach>, read<&Settings::occlusion_reach>,
-           write<&Settings::has_occlusion_reach, &Settings::occlusion_reach>, needs_occlusion),
-    slider("disruptor.occlusion_strength", "Occlusion strength", 80,
-           "How dark the shade is.", 0, 300, Unit::percent,
-           saved<&Settings::has_occlusion_strength>, read<&Settings::occlusion_strength>,
-           write<&Settings::has_occlusion_strength, &Settings::occlusion_strength>, needs_occlusion),
-    toggle<&Settings::has_smooth_fade, &Settings::smooth_fade>(
-        "disruptor.smooth_fade", "Smooth distance fade", 0,
-        "Fades walls and floors into the distance evenly, where the game steps through twelve shades. Unfinished.", needs_geometry),
     choice("disruptor.multisampling", "Multisampling", 0,
            "Draws the world with this many samples a pixel, which smooths the edges of polygons and of the "
            "HUD's rectangles. Video memory and the graphics card's work grow with the value, and a card that "

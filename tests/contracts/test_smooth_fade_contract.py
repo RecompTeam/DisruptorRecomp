@@ -22,7 +22,7 @@ renderer = read("psxrecomp/runtime/src/gpu_gl_renderer.c")
 presenter = read("psxrecomp/runtime/src/gpu_gl_temporal.c.inc")
 arena = read("src/game/render/render_arena.cpp")
 menu = menu_text(ROOT)
-experimental = read("src/game/ui/menu/tab_experimental.cpp")
+enhancements = read("src/game/ui/menu/tab_enhancements.cpp")
 options = read("src/game/settings/options.cpp")
 saved = read("src/game/settings/saved.cpp")
 launcher = read("src/launcher/launcher_settings.cpp")
@@ -85,13 +85,13 @@ require(
 require(
     "    toggle<&Settings::has_smooth_fade, &Settings::smooth_fade>(\n"
     '        "disruptor.smooth_fade", "Smooth distance fade", 0,\n' in options
-    and "where the game steps through twelve shades. Unfinished.\", needs_geometry),\n" in options
+    and "where the game steps through twelve shades.\", needs_geometry),\n" in options
     and '        if (d.contains("smooth_fade")) try_get([&]{\n            s.smooth_fade = toml::find<bool>(d, "smooth_fade");\n            s.has_smooth_fade = true;\n'
     in saved
     and '        if (s.has_smooth_fade)\n            f << "smooth_fade = " << (s.smooth_fade ? "true" : "false") << "\\n";\n' in saved
     and "s.has_occlusion_strength || s.has_smooth_fade ||" in saved
-    and '    {"disruptor.smooth_fade", Page::experimental},\n' in launcher,
-    "the fade is a saved setting that starts off, needs geometry correction and stands on the launcher's Experimental page",
+    and '    {"disruptor.smooth_fade", Page::enhancements},\n' in launcher,
+    "the fade is a saved setting that starts off, needs geometry correction and stands on the launcher's Enhancements page",
 )
 require(
     '    const bool fade_applies = applies("disruptor.smooth_fade");\n'
@@ -100,7 +100,8 @@ require(
     "        gl_renderer_set_smooth_fade(smooth_fade ? 1 : 0);\n"
     "        mark_smooth_fade(smooth_fade);\n"
     "    }\n"
-    "    if (!fade_applies) ImGui::EndDisabled();\n" in experimental
+    "    if (!fade_applies) ImGui::EndDisabled();\n" in enhancements
+    and "smooth_fade" not in read("src/game/ui/menu/tab_experimental.cpp")
     and "    if (settings.has_smooth_fade) gl_renderer_set_smooth_fade(settings.smooth_fade ? 1 : 0);\n" in menu
     and '    if (changed("disruptor.smooth_fade"))\n        gl_renderer_set_smooth_fade(pending.smooth_fade ? 1 : 0);\n' in menu
     and menu.count('option_toggle("disruptor.smooth_fade"') == 1,

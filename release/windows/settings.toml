@@ -7,7 +7,6 @@ geometry_correction = true
 perspective_textures = true
 # Experimental options stay off until enabled in Settings.
 frame_unlock = false
-improved_shadows = false
 
 [video]
 frame_interpolation = false

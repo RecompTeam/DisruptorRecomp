@@ -159,7 +159,8 @@ void draw_menu() {
     char picked[4096];
     if (psx_host_pick_disc_image_poll(picked, static_cast<int>(sizeof picked)) == 1) mark_language_disc(picked);
     bool keep_open = g_menu.open;
-    ImGui::SetNextWindowSize(ImVec2(760.0f, 560.0f),
+    const ImVec2 room = ImGui::GetIO().DisplaySize;
+    ImGui::SetNextWindowSize(ImVec2(std::min(880.0f, room.x - 32.0f), std::min(640.0f, room.y - 32.0f)),
                              ImGuiCond_FirstUseEver);
     if (ImGui::Begin("Disruptor Settings", &keep_open,
                      ImGuiWindowFlags_NoCollapse)) {

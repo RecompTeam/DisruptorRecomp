@@ -97,16 +97,6 @@ void draw_aspect_controls() {
         "live window matching (capped at 32:9) apply after the current "
         "frame and are saved.");
 
-    if (gpu_sprite_placement_available()) {
-        int shadow_shape = gpu_shadow_shape();
-        ImGui::SetNextItemWidth(260.0f);
-        if (option_list("disruptor.improved_shadows", &shadow_shape)) {
-            gpu_set_shadow_shape(shadow_shape);
-            mark_shadow_shape(shadow_shape != 0);
-        }
-        draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
-    }
-
     int hud_scale = gpu_ws_hud_scale();
     ImGui::SetNextItemWidth(260.0f);
     if (option_slider("disruptor.hud_scale", &hud_scale)) {
@@ -183,6 +173,41 @@ void draw_enhancements_tab() {
     }
     if (!depth_applies) ImGui::EndDisabled();
     draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
+
+    bool smooth_fade = gl_renderer_smooth_fade() != 0;
+    const bool fade_applies = applies("disruptor.smooth_fade");
+    if (!fade_applies) ImGui::BeginDisabled();
+    if (option_toggle("disruptor.smooth_fade", &smooth_fade)) {
+        gl_renderer_set_smooth_fade(smooth_fade ? 1 : 0);
+        mark_smooth_fade(smooth_fade);
+    }
+    if (!fade_applies) ImGui::EndDisabled();
+    draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
+
+    bool occlusion = gl_renderer_ssao() != 0;
+    const bool occlusion_applies = applies("disruptor.ambient_occlusion");
+    if (!occlusion_applies) ImGui::BeginDisabled();
+    if (option_toggle("disruptor.ambient_occlusion", &occlusion)) {
+        gl_renderer_set_ssao(occlusion ? 1 : 0);
+        mark_occlusion(occlusion);
+    }
+    if (!occlusion_applies) ImGui::EndDisabled();
+    draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
+    int reach = static_cast<int>(std::lround(gl_renderer_ssao_radius()));
+    int strength = static_cast<int>(std::lround(gl_renderer_ssao_strength() * 100.0f));
+    const bool shape_applies = applies("disruptor.occlusion_reach") &&
+                               applies("disruptor.occlusion_strength");
+    if (!shape_applies) ImGui::BeginDisabled();
+    ImGui::SetNextItemWidth(260.0f);
+    const bool reach_moved = option_slider("disruptor.occlusion_reach", &reach);
+    ImGui::SetNextItemWidth(260.0f);
+    const bool strength_moved =
+        option_slider("disruptor.occlusion_strength", &strength);
+    if (!shape_applies) ImGui::EndDisabled();
+    if (reach_moved || strength_moved) {
+        gl_renderer_set_ssao_shape(static_cast<float>(reach), strength / 100.0f);
+        mark_occlusion_shape(reach, strength);
+    }
 
     ImGui::SeparatorText("Synchronisation");
     int vsync = psx_host_video_get_vsync();

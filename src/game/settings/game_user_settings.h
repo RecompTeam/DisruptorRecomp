@@ -21,7 +21,6 @@ struct GameUserSettings {
     bool has_language_disc = false; std::string language_disc;  // image of another region's disc, "" for none
     bool has_language_discs = false; std::vector<std::string> language_discs;  // the ones named before, for a launcher to offer again
     bool has_hud_scale = false; int hud_scale = 100;
-    bool has_improved_shadows = false; bool improved_shadows = false;
     bool has_ambient_occlusion = false; bool ambient_occlusion = false;
     bool has_occlusion_reach = false; int occlusion_reach = 160;       // camera depth units, 50..800
     bool has_occlusion_strength = false; int occlusion_strength = 80;  // percent, 0..300

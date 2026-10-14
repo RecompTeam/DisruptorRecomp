@@ -184,8 +184,8 @@ host = read("psxrecomp/runtime/src/main.cpp")
 require(
     "    disruptor_unit_test(disruptor_present_rate " in cmake
     and "constexpr int kDisruptorPresentRateLowest = 30;" in present_rate
-    and "constexpr int kDisruptorPresentRateLeastTop = 120;" in present_rate,
-    "the in-between frame rate control must run from 30 FPS to at least 120 and keep its unit test",
+    and "constexpr int kDisruptorPresentRateLeastTop = 320;" in present_rate,
+    "the in-between frame rate control must run from 30 FPS to at least 320 and keep its unit test",
 )
 require(
     "    if(DISRUPTOR_FRAME_INTERPOLATION)\n"

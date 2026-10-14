@@ -171,7 +171,6 @@ void mark_skip_intro(bool value);
 void mark_language_disc(const std::string &path);
 void mark_hud_scale(int value);
 void mark_frame_unlock(bool value);
-void mark_shadow_shape(bool improved);
 void mark_occlusion(bool value);
 void mark_smooth_fade(bool value);
 void mark_multisampling(int level);

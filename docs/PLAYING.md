@@ -85,17 +85,18 @@ In-between frames that are on can still be switched off.
 **Settings → Enhancements** offers 1x–8x resolution, widescreen options,
 HUD size for widescreen, and 60 FPS gameplay and in-between frames. Both
 frame options start off; in-between frames need exact geometry.
-The **Shadows** setting offers Vanilla and Improved shapes when geometry
-correction is enabled. HUD size ranges from 50% to 100% in widescreen and
-leaves the weapon size unchanged.
+Shadows keep the game's own shape at 4:3 and lie flat on the floor in
+widescreen. HUD size ranges from 50% to 100% in widescreen and leaves the
+weapon size unchanged.
 **Gap filling** closes small polygon gaps; **Depth-sorted world** offers an
 alternative to the game's polygon order. Both require exact geometry.
-**Settings → Experimental** adds optional ambient occlusion with adjustable
-reach and strength; it also requires exact geometry and starts off.
-**Smooth distance fade** on the same tab fades walls and floors into the
-distance evenly, where the game steps through twelve shades. It requires
-exact geometry and starts off.
-Three anti-aliasing settings on the same tab start off and can be combined.
+**Smooth distance fade** fades walls and floors into the distance evenly,
+where the game steps through twelve shades. It requires exact geometry and
+starts off.
+**Ambient occlusion** shades corners and the floor under things, with
+adjustable reach and strength. It requires exact geometry and starts off.
+**Settings → Experimental** holds three anti-aliasing settings that start
+off and can be combined.
 **Multisampling** draws the world with 2, 4, 8 or 16 samples a pixel, which
 smooths the edges of polygons and of the HUD's rectangles. It requires exact
 geometry, and video memory grows with the value and the internal resolution.

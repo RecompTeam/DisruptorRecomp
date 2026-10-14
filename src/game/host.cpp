@@ -30,7 +30,6 @@ bool psx_game_settings_loaded(const PSXRecompV4::UserSettings &settings) {
 extern "C" {
 
 int psx_game_configure(const char *game_id, size_t length) {
-    if (const char *asked = std::getenv("PSX_DISRUPTOR_IMPROVED_SHADOWS")) gpu_set_shadow_shape(asked[0] == '1');
     return disruptor_precision_routes_configure(game_id, length);
 }
 

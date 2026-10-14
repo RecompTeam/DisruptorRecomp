@@ -134,10 +134,10 @@ void test_the_control_hands_over_what_the_user_chose() {
     expect(disruptor_present_rate_control("Rate", "Rate hint", &accepted) == 0 && accepted == -7 && g_host.sets == 0,
            "a control nobody touched changes nothing");
     expect(g_slider.label == "Rate" && g_hint == "Rate hint", "the control is drawn under the label and with the hint it was given");
-    expect(g_slider.shown == 60 && g_slider.lowest == 30 && g_slider.highest == 144 && g_slider.disabled == 0 &&
+    expect(g_slider.shown == 60 && g_slider.lowest == 30 && g_slider.highest == 320 && g_slider.disabled == 0 &&
                g_slider.disabled_when_drawn == 0,
-           "it shows the host's target between 30 and the display's rounded rate");
-    expect(g_slider.text.find("or 120 when that rate is lower, not known or outside the host's range") != std::string::npos &&
+           "it shows the host's target between 30 and 320 on a display slower than that");
+    expect(g_slider.text.find("or 320 when that rate is lower, not known or outside the host's range") != std::string::npos &&
                g_slider.text.find("launcher") == std::string::npos,
            "and says where its top comes from");
     launcher_override("90");
@@ -154,8 +154,11 @@ void test_the_control_hands_over_what_the_user_chose() {
     launcher_override("");
     g_host.display_hz = 1000.6;
     (void)disruptor_present_rate_control("Rate", "Rate hint", &accepted);
-    expect(g_slider.highest == 120 && g_slider.text.find("outside the host's range") != std::string::npos,
-           "a refresh rate past the host's range gives 120, as the sentence says");
+    expect(g_slider.highest == 320 && g_slider.text.find("outside the host's range") != std::string::npos,
+           "a refresh rate past the host's range gives 320, as the sentence says");
+    g_host.display_hz = 359.6;
+    (void)disruptor_present_rate_control("Rate", "Rate hint", &accepted);
+    expect(g_slider.highest == 360, "a display faster than 320 gives its own rounded rate");
     g_host.display_hz = 143.86;
 
     g_slider = Slider{};
@@ -176,7 +179,7 @@ void test_the_control_hands_over_what_the_user_chose() {
     g_host.target = 0;
     g_slider = Slider{};
     (void)disruptor_present_rate_control("Rate", "Rate hint", &accepted);
-    expect(g_slider.highest == 120 && g_slider.shown == 120, "on a 60 Hz display the top is 120 and a target of 0 is shown as the top");
+    expect(g_slider.highest == 320 && g_slider.shown == 320, "on a 60 Hz display the top is 320 and a target of 0 is shown as the top");
 
     g_host = Host{};
     g_host.enabled = 0;
@@ -254,14 +257,14 @@ int main() {
     test_the_rate_reaches_the_host();
     test_the_control_hands_over_what_the_user_chose();
     test_the_switch_turns_the_frames_on_and_off();
-    expect(disruptor_present_rate_top(270.0) == 270 && disruptor_present_rate_top(143.86) == 144 &&
-               disruptor_present_rate_top(120.4) == 120,
+    expect(disruptor_present_rate_top(360.0) == 360 && disruptor_present_rate_top(479.86) == 480 &&
+               disruptor_present_rate_top(320.6) == 321,
            "the control reaches the display's refresh rate, rounded");
-    expect(disruptor_present_rate_top(59.94) == 120 && disruptor_present_rate_top(100.0) == 120 &&
-               disruptor_present_rate_top(120.0) == 120,
-           "and at least 120 on a slower display");
-    expect(disruptor_present_rate_top(0.0) == 120 && disruptor_present_rate_top(-1.0) == 120 &&
-               disruptor_present_rate_top(29.9) == 120 && disruptor_present_rate_top(1000.6) == 120 &&
+    expect(disruptor_present_rate_top(59.94) == 320 && disruptor_present_rate_top(270.0) == 320 &&
+               disruptor_present_rate_top(320.0) == 320 && disruptor_present_rate_top(320.4) == 320,
+           "and at least 320 on a slower display");
+    expect(disruptor_present_rate_top(0.0) == 320 && disruptor_present_rate_top(-1.0) == 320 &&
+               disruptor_present_rate_top(29.9) == 320 && disruptor_present_rate_top(1000.6) == 320 &&
                disruptor_present_rate_top(1000.0) == 1000,
            "a refresh rate that is unknown or out of the host's range gives the least top");
 
@@ -278,8 +281,8 @@ int main() {
                disruptor_present_rate_accepted(1000) && !disruptor_present_rate_accepted(-1) &&
                !disruptor_present_rate_accepted(29) && !disruptor_present_rate_accepted(1001),
            "the start takes 0 or a rate from 30 to 1000");
-    expect(kDisruptorPresentRateLowest == 30 && kDisruptorPresentRateLeastTop == 120,
-           "the range starts at the retail 30 and reaches at least 120");
+    expect(kDisruptorPresentRateLowest == 30 && kDisruptorPresentRateLeastTop == 320,
+           "the range starts at the retail 30 and reaches at least 320");
 
     if (g_failures) return 1;
     std::cout << "Disruptor present rate tests passed\n";

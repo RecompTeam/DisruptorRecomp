@@ -72,7 +72,7 @@ int disruptor_present_rate_control(const char *label, const char *hint, int *acc
             "PSX_FRAME_INTERPOLATION_FPS of the launcher replaces it at the next start.");
     else
         ImGui::TextDisabled(
-            "Pictures shown per second. The top is the display's refresh rate, rounded, or 120 when "
+            "Pictures shown per second. The top is the display's refresh rate, rounded, or 320 when "
             "that rate is lower, not known or outside the host's range. Applied now and saved.");
     return changed;
 }

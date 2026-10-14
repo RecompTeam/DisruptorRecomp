@@ -163,8 +163,6 @@ void mark_hud_scale(int value) { mark("disruptor.hud_scale", value); }
 
 void mark_frame_unlock(bool value) { mark("disruptor.frame_unlock", value); }
 
-void mark_shadow_shape(bool improved) { mark("disruptor.improved_shadows", improved); }
-
 void mark_occlusion(bool value) { mark("disruptor.ambient_occlusion", value); }
 
 void mark_occlusion_shape(int reach, int strength) {
@@ -337,8 +335,6 @@ void apply_saved_preferences(const PSXRecompV4::UserSettings &settings) {
         !env_override_present("PSX_DISRUPTOR_SKIP_INTRO"))
         disruptor_intro_skip_set_enabled(settings.skip_intro ? 1 : 0);
     if (settings.has_language_disc) g_language_disc = settings.language_disc;
-    if (settings.has_improved_shadows && !env_override_present("PSX_DISRUPTOR_IMPROVED_SHADOWS"))
-        gpu_set_shadow_shape(settings.improved_shadows ? 1 : 0);
     if (!env_override_present("PSX_GL_SSAO")) {
         if (settings.has_ambient_occlusion) gl_renderer_set_ssao(settings.ambient_occlusion ? 1 : 0);
         /* A layer is a session's own. Only a capsule's replay starts in the one its recording was made in. */
@@ -418,8 +414,6 @@ void apply_pending_preferences() {
         disruptor_frame_rate_set_unlocked(pending.frame_unlock ? 1 : 0);
     if (changed("disruptor.skip_intro"))
         disruptor_intro_skip_set_enabled(pending.skip_intro ? 1 : 0);
-    if (changed("disruptor.improved_shadows"))
-        gpu_set_shadow_shape(pending.improved_shadows ? 1 : 0);
     if (changed("disruptor.ambient_occlusion"))
         gl_renderer_set_ssao(pending.ambient_occlusion ? 1 : 0);
     if (changed("disruptor.occlusion_reach") ||

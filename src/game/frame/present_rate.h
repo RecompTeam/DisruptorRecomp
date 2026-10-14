@@ -2,9 +2,9 @@
 #define DISRUPTOR_PRESENT_RATE_H
 
 /* The range of the in-between frame rate control: from the retail 30 pictures a second up to the
- * display's refresh rate. The top is 120 when that rate is lower, unknown or past the host's 1000. */
+ * display's refresh rate. The top is 320 when that rate is lower, unknown or past the host's 1000. */
 constexpr int kDisruptorPresentRateLowest = 30;
-constexpr int kDisruptorPresentRateLeastTop = 120;
+constexpr int kDisruptorPresentRateLeastTop = 320;
 constexpr int kDisruptorPresentRateHighest = 1000;
 
 constexpr int disruptor_present_rate_top(double display_hz) {

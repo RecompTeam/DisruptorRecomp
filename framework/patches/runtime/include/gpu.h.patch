@@ -1,5 +1,5 @@
 diff --git a/runtime/include/gpu.h b/runtime/include/gpu.h
-index 11b29fe121b12ffe7b453fde551c274d99425a1e..2fe27188d80a831ce24498b7ca562267287c7746 100644
+index 11b29fe121b12ffe7b453fde551c274d99425a1e..820a0e53f3e0c43d99588b585ba70edf567794a7 100644
 --- a/runtime/include/gpu.h
 +++ b/runtime/include/gpu.h
 @@ -1,4 +1,4 @@
@@ -144,7 +144,7 @@ index 11b29fe121b12ffe7b453fde551c274d99425a1e..2fe27188d80a831ce24498b7ca562267
  /* Widescreen proportion correction (active only when aspect != 4:3 and the
   * game's [widescreen] block opts in — see config_loader.h). Tagged
   * character/billboard prims are re-squashed around their projected anchor;
-@@ -126,6 +255,48 @@
+@@ -126,6 +255,47 @@
   * (render the wider FOV into a wider frame, present 1:1; GTE not squashed). */
  void gpu_ws_configure(int aspect_num, int aspect_den,
                        uint32_t sprite_anchor_addr, int hud_sprt_squash, int mode);
@@ -160,8 +160,7 @@ index 11b29fe121b12ffe7b453fde551c274d99425a1e..2fe27188d80a831ce24498b7ca562267
 + * whole: the packet spans the size cut to whole pixels, not one less. */
 +void gpu_temporal_size_sprite(uint32_t primitive_addr, int32_t row16, int32_t width16, int32_t height16,
 +                              int shadow, int whole);
-+/* Shadows as the game shapes them (0) or flattened the way the floor recedes (1). */
-+void gpu_set_shadow_shape(int improved);
++/* Shadows as the game shapes them (0), which is the 4:3 picture's, or flattened the way the floor recedes (1), a wider picture's. */
 +int gpu_shadow_shape(void);
 +int gpu_sprite_placement_available(void);
 +void gpu_ws_tag_primitive(CPUState *cpu, uint32_t primitive_addr,
@@ -193,7 +192,7 @@ index 11b29fe121b12ffe7b453fde551c274d99425a1e..2fe27188d80a831ce24498b7ca562267
  /* [widescreen] full_2d: opt a pure-2D sprite game into the widescreen present
   * path (treat every in-game frame as gameplay, since it never tags 3D prims). */
  void gpu_ws_set_full_2d(int on);
-@@ -186,6 +357,13 @@
+@@ -186,6 +356,13 @@
   * full-2D menu/title screen), so the squash is suppressed and content drawn
   * pixel-native. The present path uses the same predicate to pillarbox. */
  int  gpu_ws_present_native_43(void);
@@ -207,7 +206,7 @@ index 11b29fe121b12ffe7b453fde551c274d99425a1e..2fe27188d80a831ce24498b7ca562267
  /* Per-side X cull-margin (screen/world units) emitted into the game's draw-
   * cull immediates by the recompiler ([widescreen.cull]); 0 unless stretching. */
  int  psx_ws_x_margin(void);
-@@ -240,6 +418,8 @@
+@@ -240,6 +417,8 @@
  int psx_ws_cull_keep_site(uint32_t pc, uint32_t instr, uint32_t vanilla,
                            uint32_t *out);
  uint32_t psx_ws_angle_widen(uint32_t vanilla);
@@ -216,7 +215,7 @@ index 11b29fe121b12ffe7b453fde551c274d99425a1e..2fe27188d80a831ce24498b7ca562267
  int psx_ws_angle_site(uint32_t pc, uint32_t instr, uint32_t *out);
  uint32_t psx_ws_aspect_cone_result(uint32_t site, uint32_t vanilla,
                                     uint32_t object, int32_t x, int32_t z,
-@@ -263,6 +443,9 @@
+@@ -263,6 +442,9 @@
   * widen for the paired `bltz maxSX` reject. Identity at 4:3. */
  int  psx_ws_cull_slti(uint32_t sx, uint32_t imm);
  int  psx_ws_cull_slti_lower(uint32_t sx, uint32_t imm);
@@ -226,7 +225,7 @@ index 11b29fe121b12ffe7b453fde551c274d99425a1e..2fe27188d80a831ce24498b7ca562267
  int  psx_ws_cull_bltz(uint32_t v);
  int  psx_ws_cull_vxrange(uint32_t x, uint32_t imm);
  /* True if a run of instruction words carries the screen-extent reject signature
-@@ -318,6 +501,10 @@
+@@ -318,6 +500,10 @@
   * final screenX store to squash it around the screen centre (identity at 4:3).
   * Pulls far backdrop pieces in from past the 320px edge to cover the 16:9 FOV. */
  int  psx_ws_backdrop_x(int x);

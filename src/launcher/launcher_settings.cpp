@@ -25,7 +25,10 @@ constexpr Placement placed[] = {
     {"disruptor.perspective_textures", Page::enhancements},
     {"disruptor.gap_filling", Page::enhancements},
     {"disruptor.depth_sorted_world", Page::enhancements},
-    {"disruptor.improved_shadows", Page::enhancements},
+    {"disruptor.smooth_fade", Page::enhancements},
+    {"disruptor.ambient_occlusion", Page::enhancements},
+    {"disruptor.occlusion_reach", Page::enhancements},
+    {"disruptor.occlusion_strength", Page::enhancements},
     {"disruptor.frame_unlock", Page::enhancements},
     {"video.frame_interpolation", Page::enhancements},
     {"video.frame_interpolation_fps", Page::enhancements},
@@ -40,10 +43,6 @@ constexpr Placement placed[] = {
     {"disruptor.invert_vertical", Page::controls},
     {"audio.master_volume", Page::audio},
     {"audio.muted", Page::audio},
-    {"disruptor.ambient_occlusion", Page::experimental},
-    {"disruptor.occlusion_reach", Page::experimental},
-    {"disruptor.occlusion_strength", Page::experimental},
-    {"disruptor.smooth_fade", Page::experimental},
     {"disruptor.multisampling", Page::experimental},
     {"disruptor.sample_shading", Page::experimental},
     {"disruptor.downscale_averaging", Page::experimental},
@@ -53,16 +52,16 @@ constexpr Placement placed[] = {
 
 constexpr PresetValue original_values[] = {
     {"video.aspect_ratio", 0}, {"disruptor.hud_scale", 100}, {"disruptor.geometry_correction", 0},
-    {"disruptor.perspective_textures", 0}, {"disruptor.improved_shadows", 0}, {"disruptor.frame_unlock", 0},
+    {"disruptor.perspective_textures", 0}, {"disruptor.frame_unlock", 0},
     {"video.frame_interpolation", 0}};
 constexpr PresetValue enhanced_values[] = {
     {"video.aspect_ratio", 1}, {"disruptor.geometry_correction", 1}, {"disruptor.perspective_textures", 1},
-    {"disruptor.improved_shadows", 1}, {"disruptor.frame_unlock", 1}, {"video.frame_interpolation", 1}};
+    {"disruptor.frame_unlock", 1}, {"video.frame_interpolation", 1}};
 constexpr Preset preset_list[] = {{L"Original", original_values}, {L"Enhanced", enhanced_values}};
 
 constexpr const char* shipped_keys[] = {
     "disruptor.mouse_aim", "disruptor.modern_controls", "disruptor.vertical_look", "disruptor.geometry_correction",
-    "disruptor.perspective_textures", "disruptor.frame_unlock", "disruptor.improved_shadows", "video.frame_interpolation"};
+    "disruptor.perspective_textures", "disruptor.frame_unlock", "video.frame_interpolation"};
 
 bool listed(const std::vector<std::string>& discs, const std::string& path) {
     return std::find(discs.begin(), discs.end(), path) != discs.end();

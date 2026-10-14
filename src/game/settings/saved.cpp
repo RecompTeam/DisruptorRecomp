@@ -102,10 +102,6 @@ void read_game_user_settings(const toml::value& doc, UserSettings& s) {
                 s.has_hud_scale = true;
             }
         });
-        if (d.contains("improved_shadows")) try_get([&]{
-            s.improved_shadows = toml::find<bool>(d, "improved_shadows");
-            s.has_improved_shadows = true;
-        });
         if (d.contains("ambient_occlusion")) try_get([&]{
             s.ambient_occlusion = toml::find<bool>(d, "ambient_occlusion");
             s.has_ambient_occlusion = true;
@@ -191,7 +187,7 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
         s.has_vertical_look || s.has_vertical_sensitivity ||
         s.has_invert_vertical ||
         s.has_high_precision_camera || s.has_geometry_correction ||
-        s.has_perspective_textures || s.has_frame_unlock || s.has_improved_shadows ||
+        s.has_perspective_textures || s.has_frame_unlock ||
         s.has_ambient_occlusion || s.has_occlusion_reach || s.has_occlusion_strength || s.has_smooth_fade ||
         s.has_multisampling || s.has_sample_shading || s.has_downscale_averaging || s.has_edge_smoothing ||
         s.has_gap_filling || s.has_depth_sorted_world || s.has_diagnostic_view || s.has_detailed_logging ||
@@ -245,8 +241,6 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
         }
         if (s.has_hud_scale && s.hud_scale >= 50 && s.hud_scale <= 100)
             f << "hud_scale = " << s.hud_scale << "\n";
-        if (s.has_improved_shadows)
-            f << "improved_shadows = " << (s.improved_shadows ? "true" : "false") << "\n";
         if (s.has_ambient_occlusion)
             f << "ambient_occlusion = " << (s.ambient_occlusion ? "true" : "false") << "\n";
         if (s.has_occlusion_reach && s.occlusion_reach >= 50 && s.occlusion_reach <= 800)

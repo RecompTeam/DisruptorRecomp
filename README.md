@@ -17,8 +17,8 @@ disc revision; the redistributable OpenBIOS backend is used for booting.
   the screen too, movies stay at 4:3, and the HUD retains its proportions. A
   HUD size setting shrinks it toward the screen edges.
 - Optional geometry and perspective-texture correction.
-- Optional gap filling, a depth-sorted world, and experimental ambient
-  occlusion and smooth distance fade on top of geometry correction.
+- Optional gap filling, a depth-sorted world, a smooth distance fade and
+  ambient occlusion on top of geometry correction.
 - Experimental anti-aliasing: 2x–16x multisampling of the world, with
   supersampling of every sample as an option, downscale averaging and edge
   smoothing that leaves the HUD's pictures alone.

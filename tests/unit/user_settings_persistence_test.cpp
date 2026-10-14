@@ -100,8 +100,6 @@ int main() {
                                   "a line\nbreak, a tab\t and \x7F from a hand edit"};
         written.has_hud_scale = true;
         written.hud_scale = 70;
-        written.has_improved_shadows = true;
-        written.improved_shadows = true;
         written.has_ambient_occlusion = true;
         written.ambient_occlusion = true;
         written.has_occlusion_reach = true;
@@ -174,7 +172,6 @@ int main() {
                     loaded.has_language_disc && loaded.language_disc == "C:\\Games \"old\"\\Disruptor (France).cue" &&
                     loaded.has_language_discs && loaded.language_discs == written.language_discs &&
                     loaded.has_hud_scale && loaded.hud_scale == 70 &&
-                    loaded.has_improved_shadows && loaded.improved_shadows &&
                     loaded.has_ambient_occlusion && loaded.ambient_occlusion &&
                     loaded.has_occlusion_reach && loaded.occlusion_reach == 240 &&
                     loaded.has_occlusion_strength && loaded.occlusion_strength == 130 &&

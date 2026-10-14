@@ -168,9 +168,11 @@ void absent(const fs::path& folder) {
         require(settings.shown(one) == one.initial, "a missing key must show what a new installation has");
     }
     const Option& rate = option("video.frame_interpolation_fps");
-    require(settings.highest(rate) == 120 && settings.shown(rate) == 120, "an unknown display must cap the rate at 120");
+    require(settings.highest(rate) == 320 && settings.shown(rate) == 320, "an unknown display must cap the rate at 320");
     settings.set_display_rate(143.9);
-    require(settings.highest(rate) == 144 && settings.shown(rate) == 144, "the rate must reach the display's own");
+    require(settings.highest(rate) == 320 && settings.shown(rate) == 320, "a slower display must leave the rate its 320");
+    settings.set_display_rate(359.9);
+    require(settings.highest(rate) == 360 && settings.shown(rate) == 360, "the rate must reach a faster display's own");
     require(!fs::exists(folder / "none"), "reading must write nothing");
     require(settings.saves_folder() == folder / "none", "saves are beside the settings by default");
 }
@@ -296,14 +298,14 @@ void presets_and_reset(const fs::path& folder) {
     const fs::path file = folder / "settings.toml";
     SettingsFile settings(file);
     require(settings.apply(presets()[1]), "the enhanced preset must be saved");
-    for (const char* key : {"disruptor.geometry_correction", "disruptor.perspective_textures", "disruptor.improved_shadows",
+    for (const char* key : {"disruptor.geometry_correction", "disruptor.perspective_textures",
                             "disruptor.frame_unlock", "video.frame_interpolation", "video.aspect_ratio"})
         require(settings.shown(option(key)) == 1, "the enhanced preset must switch its rows on");
     require(has(file, "aspect_ratio      = \"16:9\"") && has(file, "adaptive_view     = false"), "enhanced is 16:9");
     require(settings.set(option("disruptor.hud_scale"), 60) && settings.set(option("audio.master_volume"), 30),
             "changes must be saved");
     require(settings.apply(presets()[0]), "the original preset must be saved");
-    for (const char* key : {"disruptor.geometry_correction", "disruptor.perspective_textures", "disruptor.improved_shadows",
+    for (const char* key : {"disruptor.geometry_correction", "disruptor.perspective_textures",
                             "disruptor.frame_unlock", "video.frame_interpolation", "video.aspect_ratio"})
         require(settings.shown(option(key)) == 0, "the original preset must switch its rows off");
     require(settings.shown(option("disruptor.hud_scale")) == 100 && settings.shown(option("audio.master_volume")) == 30 &&
@@ -364,15 +366,18 @@ void aspects(const fs::path& folder) {
 void rates(const fs::path& folder) {
     const fs::path file = folder / "settings.toml";
     const Option& rate = option("video.frame_interpolation_fps");
-    write(file, "[video]\nframe_interpolation_fps = 300\n");
+    write(file, "[video]\nframe_interpolation_fps = 400\n");
     SettingsFile settings(file);
     settings.set_display_rate(144.0);
-    require(settings.load() && settings.shown(rate) == 144, "a rate over the display's is shown as the display's");
-    settings.set_display_rate(360.0);
-    require(settings.shown(rate) == 300 && settings.highest(rate) == 360, "a rate the display reaches is shown as it is");
+    require(settings.load() && settings.shown(rate) == 320, "a rate over the control's top is shown as the top");
+    settings.set_display_rate(480.0);
+    require(settings.shown(rate) == 400 && settings.highest(rate) == 480, "a rate the display reaches is shown as it is");
+    write(file, "[video]\nframe_interpolation_fps = 300\n");
+    settings.set_display_rate(144.0);
+    require(settings.load() && settings.shown(rate) == 300, "a rate over the display's and under 320 is shown as it is");
     write(file, "[video]\nframe_interpolation_fps = 0\n");
     settings.set_display_rate(60.0);
-    require(settings.load() && settings.shown(rate) == 120, "the display's own rate is shown as the top of the control");
+    require(settings.load() && settings.shown(rate) == 320, "the display's own rate is shown as the top of the control");
     fs::remove(file);
 }
 
@@ -487,7 +492,7 @@ void completed(const fs::path& folder) {
             "the window shows the completed file");
 
     write(file, "[disruptor]\nmouse_aim = true\nmodern_controls = true\nvertical_look = false\ngeometry_correction = false\n"
-                "perspective_textures = true\nframe_unlock = false\nimproved_shadows = false\n\n[video]\nframe_interpolation = false\n");
+                "perspective_textures = true\nframe_unlock = false\n\n[video]\nframe_interpolation = false\n");
     const std::string chosen = read(file);
     SettingsFile theirs(file);
     require(theirs.complete() && read(file) == chosen && theirs.shown(option("disruptor.geometry_correction")) == 0,
@@ -511,7 +516,7 @@ void shipped_values() {
         ++named;
         require(one.get(file) == one.initial, "a row starts from another value than the shipped settings.toml gives it");
     }
-    require(named == 8, "the shipped settings.toml names eight rows");
+    require(named == 7, "the shipped settings.toml names seven rows");
     const auto game = PSXRecompV4::load_game_config(source / "game.toml");
     Settings as_game;
     as_game.has_supersampling = as_game.has_aspect_ratio = true;

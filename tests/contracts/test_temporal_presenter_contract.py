@@ -232,16 +232,16 @@ require(
     "the depth and the sides must be announced right before the rectangle they belong to, from the packet's size before the squash",
 )
 require(
-    "static int s_shadow_shape;\n"
-    "void gpu_set_shadow_shape(int improved) { s_shadow_shape = improved != 0; }\n"
-    "int gpu_shadow_shape(void) { return s_shadow_shape; }\n" in gpu
-    and "int psx_game_configure(const char *game_id, size_t length) {\n"
-    '    if (const char *asked = std::getenv("PSX_DISRUPTOR_IMPROVED_SHADOWS")) gpu_set_shadow_shape(asked[0] == \'1\');\n'
-    in read("src/game/host.cpp")
-    and '    if (settings.has_improved_shadows && !env_override_present("PSX_DISRUPTOR_IMPROVED_SHADOWS"))\n'
-    "        gpu_set_shadow_shape(settings.improved_shadows ? 1 : 0);\n" in menu_text(ROOT),
-    "the renderer holds the shadow switch and reads no environment: the game sets it at the start, "
-    "and a saved setting gives way to the environment",
+    "int gpu_shadow_shape(void) { return psx_ws_x_margin() > 0; }\n" in gpu
+    and "gpu_set_shadow_shape" not in gpu
+    and "gpu_set_shadow_shape" not in read("psxrecomp/runtime/include/gpu.h")
+    and "IMPROVED_SHADOWS" not in read("src/game/host.cpp")
+    and "improved_shadows" not in menu_text(ROOT)
+    and "improved_shadows" not in read("src/game/settings/options.cpp")
+    and "improved_shadows" not in read("src/game/settings/saved.cpp")
+    and "improved_shadows" not in read("src/launcher/launcher_settings.cpp"),
+    "a shadow keeps the game's shape at 4:3 and lies flat on the floor in a wider picture: no setting, no switch "
+    "and no environment variable chooses",
 )
 host_loop = read("psxrecomp/runtime/src/main.cpp")
 require(
