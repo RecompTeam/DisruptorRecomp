@@ -95,7 +95,7 @@ Hit hit_at(float x, float y, float width, float height, const TitleBar& bar, boo
 // Windows command-line quoting, including trailing backslashes and quotes.
 std::wstring quote(const std::wstring& argument);
 // Whole paths: the disc lives with the player's files, which need not be beside the program.
-std::wstring game_command(const std::filesystem::path& program, const VerifiedDisc& disc);
+std::vector<std::string> game_arguments(const std::filesystem::path& program, const VerifiedDisc& disc);
 
 constexpr int slider_steps = 200;
 std::wstring value_text(const Option& option, int value);

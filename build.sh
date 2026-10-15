@@ -11,8 +11,8 @@ for command in git cmake ctest python3; do
         exit 1
     }
 done
-python3 -c 'import sys; sys.exit(sys.version_info < (3, 10))' || {
-    echo "Python 3.10 or newer is required." >&2
+python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))' || {
+    echo "Python 3.11 or newer is required." >&2
     exit 1
 }
 # DISRUPTOR_WITHOUT_GAME=1 is for a machine without the game: every source is

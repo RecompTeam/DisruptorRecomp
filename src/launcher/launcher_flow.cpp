@@ -180,9 +180,8 @@ std::wstring quote(const std::wstring& argument) {
     return result + L'\"';
 }
 
-std::wstring game_command(const std::filesystem::path& program, const VerifiedDisc& disc) {
-    return quote((program / "DisruptorRecompiled.exe").wstring()) + L" --no-launcher --game " +
-        quote((program / disc.profile->game_config).wstring()) + L" --disc " + quote(disc.cue.wstring());
+std::vector<std::string> game_arguments(const std::filesystem::path& program, const VerifiedDisc& disc) {
+    return {"--no-launcher", "--game", utf8(program / disc.profile->game_config), "--disc", utf8(disc.cue)};
 }
 
 std::wstring value_text(const Option& option, int value) {

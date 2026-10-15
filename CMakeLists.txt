@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.24)
 project(DisruptorRecomp C CXX)
 
 if(WIN32)
@@ -7,6 +7,13 @@ endif()
 
 set(CMAKE_C_STANDARD 99)
 set(CMAKE_CXX_STANDARD 20)
+
+# A Linux release runs on systems whose C++ library is older than the compiler's: glibc is all it asks of them.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    add_link_options(-static-libstdc++ -static-libgcc)
+endif()
+# libGL.so.1 is on every Linux system that has OpenGL, GLVND's libOpenGL.so.0 only where its own package is installed.
+set(OpenGL_GL_PREFERENCE LEGACY)
 
 if(WIN32 AND NOT CMAKE_SIZEOF_VOID_P EQUAL 8)
     message(FATAL_ERROR
@@ -187,11 +194,11 @@ if(WIN32)
 endif()
 
 include(CTest)
-if(WIN32)
+if(WIN32 OR CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_subdirectory(src/launcher)
 endif()
 if(BUILD_TESTING)
-    find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)
+    find_package(Python3 3.11 REQUIRED COMPONENTS Interpreter)
     include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/DisruptorTests.cmake")
 
     disruptor_contract(backdrop_tiles RETAIL)

@@ -101,9 +101,9 @@ foreach ($Command in @('git', 'cmake', 'ctest', 'python')) {
         throw "Missing prerequisite: $Command"
     }
 }
-python -c "import sys; sys.exit(sys.version_info < (3, 10))"
+python -c "import sys; sys.exit(sys.version_info < (3, 11))"
 if ($LASTEXITCODE -ne 0) {
-    throw 'Python 3.10 or newer is required.'
+    throw 'Python 3.11 or newer is required.'
 }
 if (!(Test-Path $Exe)) {
     throw "Copy the verified SLUS_002.24 into input/ before building."

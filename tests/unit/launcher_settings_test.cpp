@@ -1,9 +1,16 @@
 #include "launcher_settings.h"
 #include "startup_log.h"
 
+#ifdef _WIN32
 #include <windows.h>
+#else
+#include <unistd.h>
+#endif
 
 #include <algorithm>
+#include <cerrno>
+#include <chrono>
+#include <cstdlib>
 #include <cstring>
 #include <cwchar>
 
@@ -21,7 +28,11 @@ namespace fs = std::filesystem;
 using namespace disruptor::launcher;
 namespace {
 const std::string french = "C:\\Games \"old\"\\Disruptor (France).cue";
+#ifdef _WIN32
 const std::string german = "D:\\\xD0\x94\xD0\xB8\xD1\x81\xD0\xBA\xD0\xB8\\Disruptor (Germany).cue";
+#else
+const std::string german = "/media/\xD0\x94\xD0\xB8\xD1\x81\xD0\xBA\xD0\xB8/Disruptor (Germany).cue";
+#endif
 
 void require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
@@ -246,6 +257,11 @@ void placements() {
         require((std::string_view(row.key) == "disruptor.detailed_logging") == (row.page == Page::troubleshooting),
                 "the Troubleshooting page holds the detailed log's switch and nothing else");
     require(wide("caf\xC3\xA9") == L"café" && wide("").empty(), "an option's text is read as UTF-8");
+    require(wide("a\xFF" "b\xC3") == L"a\uFFFDb\uFFFD" && wide("\xE0\x80\x80") == L"\uFFFD\uFFFD\uFFFD" &&
+                wide("\xED\xA0\x80") == L"\uFFFD\uFFFD\uFFFD",
+            "bytes that are not UTF-8, overlong forms and surrogates come out as U+FFFD, one a byte");
+    for (const char* text : {"caf\xC3\xA9", "\xF0\x9F\x8E\xAE game", "\xE6\x97\xA5\xE6\x9C\xAC", "plain"})
+        require(narrow(wide(text)) == text, "UTF-8 goes to wide and back unchanged, beyond the basic plane too");
     const auto rows = layout();
     for (std::size_t index = 0; index < rows.size(); ++index) {
         if (!rows[index].child) continue;
@@ -289,8 +305,13 @@ void one_change(const fs::path& folder) {
     SettingsFile settings(file);
     require(settings.load(), "the fixture must load");
     require(settings.saves_folder() == folder / "cards", "a relative saves folder is beside the settings");
-    write(file, "[memcard]\ndir = \"D:/Saves\"\n");
-    require(settings.load() && settings.saves_folder() == fs::path("D:/Saves"), "an absolute saves folder is itself");
+#ifdef _WIN32
+    constexpr const char* absolute_saves = "D:/Saves";
+#else
+    constexpr const char* absolute_saves = "/srv/Saves";
+#endif
+    write(file, std::string("[memcard]\ndir = \"") + absolute_saves + "\"\n");
+    require(settings.load() && settings.saves_folder() == fs::path(absolute_saves), "an absolute saves folder is itself");
     write(file, "[video]\nrenderer = \"opengl\"\n\n[controller]\np1_device = \"keyboard\"\n\n"
                 "[memcard]\ndir = \"cards\"\n\n[disruptor]\nhigh_precision_camera = true\n");
     require(settings.load(), "the fixture must load again");
@@ -335,13 +356,13 @@ void whole_range(const fs::path& folder) {
             SettingsFile again(file);
             again.set_display_rate(1000.0);
             const bool saved = settings.set(one, value);
-            const DWORD save_error = GetLastError();
+            const int save_error = errno;
             const bool loaded = again.load();
             if (!saved || !loaded || again.shown(one) != value)
                 throw std::runtime_error(std::string("settings round-trip failed for ") + one.key +
                     "=" + std::to_string(value) + ": saved=" + std::to_string(saved) +
                     ", loaded=" + std::to_string(loaded) + ", actual=" + std::to_string(again.shown(one)) +
-                    ", Windows error=" + std::to_string(save_error));
+                    ", error=" + std::to_string(save_error));
         }
     }
     fs::remove(file);
@@ -391,10 +412,20 @@ void dependants(const fs::path& folder) {
     require(settings.load() && settings.shown(frames) == 1 && !settings.applies(frames) && !settings.applies(rate),
             "a row whose need does not apply itself does not apply either");
     const std::string before = read(file);
-    fs::permissions(file, fs::perms::owner_write | fs::perms::group_write | fs::perms::others_write, fs::perm_options::remove);
+#ifdef _WIN32
+    const fs::path locked = file;
+#else
+    const fs::path locked = file.parent_path();  // a rename replaces a read-only file here: the folder refuses it
+#endif
+    fs::permissions(locked, fs::perms::owner_write | fs::perms::group_write | fs::perms::others_write, fs::perm_options::remove);
     const bool written = settings.set(geometry, 1);
-    fs::permissions(file, fs::perms::owner_write, fs::perm_options::add);
-    require(!written && settings.readable() && settings.shown(geometry) == 0 && read(file) == before,
+    fs::permissions(locked, fs::perms::owner_write, fs::perm_options::add);
+#ifdef _WIN32
+    const bool refusable = true;
+#else
+    const bool refusable = geteuid() != 0;  // root writes into any folder, so there this save cannot be made to fail
+#endif
+    require(!refusable || (!written && settings.readable() && settings.shown(geometry) == 0 && read(file) == before),
             "a save that fails must be reported and must not be shown as done");
     fs::remove(file);
 }
@@ -482,18 +513,27 @@ void rates(const fs::path& folder) {
     fs::remove(file);
 }
 
+void set_variable(const char* name, const char* value) {
+#ifdef _WIN32
+    SetEnvironmentVariableA(name, value);
+#else
+    if (value) setenv(name, value, 1);
+    else unsetenv(name);
+#endif
+}
+
 void overrides() {
-    SetEnvironmentVariableW(L"PSX_LAUNCHER_TEST_ONE", nullptr);
-    SetEnvironmentVariableW(L"psx_launcher_test_two", nullptr);
+    set_variable("PSX_LAUNCHER_TEST_ONE", nullptr);
+    set_variable("psx_launcher_test_two", nullptr);
     const std::wstring before = environment_overrides();
     require(before.find(L"LAUNCHER_TEST") == std::wstring::npos, "a variable that is not set is not named");
-    SetEnvironmentVariableW(L"PSX_LAUNCHER_TEST_ONE", L"1");
-    SetEnvironmentVariableW(L"psx_launcher_test_two", L"a=b");
-    SetEnvironmentVariableW(L"NOT_PSX_LAUNCHER_TEST", L"1");
+    set_variable("PSX_LAUNCHER_TEST_ONE", "1");
+    set_variable("psx_launcher_test_two", "a=b");
+    set_variable("NOT_PSX_LAUNCHER_TEST", "1");
     const std::wstring named = environment_overrides();
-    SetEnvironmentVariableW(L"PSX_LAUNCHER_TEST_ONE", nullptr);
-    SetEnvironmentVariableW(L"psx_launcher_test_two", nullptr);
-    SetEnvironmentVariableW(L"NOT_PSX_LAUNCHER_TEST", nullptr);
+    set_variable("PSX_LAUNCHER_TEST_ONE", nullptr);
+    set_variable("psx_launcher_test_two", nullptr);
+    set_variable("NOT_PSX_LAUNCHER_TEST", nullptr);
     require(named.find(L"PSX_LAUNCHER_TEST_ONE") != std::wstring::npos &&
             named.find(L"psx_launcher_test_two") != std::wstring::npos && named.find(L"NOT_PSX") == std::wstring::npos &&
             named.find(L'=') == std::wstring::npos && named.find(L", ") != std::wstring::npos,
@@ -645,7 +685,8 @@ void shipped_values() {
 } // namespace
 
 int main() {
-    const fs::path folder = fs::temp_directory_path() / ("disruptor-launcher-settings-" + std::to_string(GetCurrentProcessId()));
+    const fs::path folder = fs::temp_directory_path() /
+                            ("disruptor-launcher-settings-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     int result = 0;
     try {
         fs::remove_all(folder);

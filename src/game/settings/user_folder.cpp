@@ -84,7 +84,10 @@ fs::path local_application_data() {
     CoTaskMemFree(found);
     return folder;
 #else
-    return {};
+    const char* data = std::getenv("XDG_DATA_HOME");
+    if (data && *data == '/') return data;
+    const char* home = std::getenv("HOME");
+    return home && *home == '/' ? fs::path(home) / ".local" / "share" : fs::path();
 #endif
 }
 
@@ -93,6 +96,9 @@ fs::path local_application_data() {
 Copy copy_of(const fs::path& program) {
     const fs::path named = folder_of(program);
     const fs::path root = named.parent_path();
+    if (text(named.filename()) == "bin" && text(root.filename()) == "usr" && regular(named / "sq.version") &&
+        regular(named / "UpdateNix"))
+        return Copy::installed;
     if (!named_current(named) || !regular(named / "sq.version") || !regular(root / "Update.exe")) return Copy::plain;
     return kind(root / ".portable") == fs::file_type::not_found ? Copy::installed : Copy::portable;
 }
@@ -105,7 +111,7 @@ fs::path folder_for(const fs::path& program, const fs::path& chosen, const fs::p
     }
     switch (copy_of(program)) {
     case Copy::installed:
-        if (local.empty()) throw std::runtime_error("Windows did not say where this user's application data is.");
+        if (local.empty()) throw std::runtime_error("The system did not say where this user's application data is.");
         return (local / kInstalledName).lexically_normal();
     case Copy::portable: return (folder_of(program).parent_path() / "data").lexically_normal();
     case Copy::plain: break;

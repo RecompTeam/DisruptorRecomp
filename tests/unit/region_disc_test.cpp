@@ -2,8 +2,7 @@
 
 #include "region_disc.h"
 
-#include <windows.h>
-
+#include <chrono>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -79,7 +78,8 @@ void refused(const fs::path& folder) {
 } // namespace
 
 int main() {
-    const fs::path folder = fs::temp_directory_path() / ("disruptor-region-disc-" + std::to_string(GetCurrentProcessId()));
+    const fs::path folder = fs::temp_directory_path() /
+                            ("disruptor-region-disc-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
     int result = 0;
     try {
         fs::remove_all(folder);

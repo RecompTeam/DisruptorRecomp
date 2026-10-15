@@ -1,5 +1,5 @@
 diff --git a/runtime/src/gpu.c b/runtime/src/gpu.c
-index 6d81477285f786cdd3658d14c424d4bfbab5d809..4e51c582bbadcc2f28fa7afeb92f0b2a84fb7c24 100644
+index 6d81477285f786cdd3658d14c424d4bfbab5d809..bb08cdd96bde9bcfd228007a3c4364e60bd3fe1d 100644
 --- a/runtime/src/gpu.c
 +++ b/runtime/src/gpu.c
 @@ -11,6 +11,7 @@
@@ -277,7 +277,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..4e51c582bbadcc2f28fa7afeb92f0b2a
      uint32_t now = (uint32_t)s_frame_count;
      uint32_t idx = (key >> 2) & (WS_TAG_BUCKETS - 1);
      uint32_t victim = idx;
-@@ -1638,8 +1777,190 @@
+@@ -1638,8 +1777,191 @@
      }
      ws_tags[victim].key      = key;
      ws_tags[victim].stamp    = now;
@@ -410,6 +410,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..4e51c582bbadcc2f28fa7afeb92f0b2a
 +}
 +
 +/* The tiles are placed whenever the display has its own picture, wide or not. */
++extern int gte_geometry_correction_enabled(void);
 +static int ws_backdrop_placed(void) { return ws_backdrop_period > 0 && gte_geometry_correction_enabled(); }
 +
 +void gpu_ws_tag_screen_tile(CPUState *cpu, uint32_t primitive_addr) {
@@ -469,7 +470,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..4e51c582bbadcc2f28fa7afeb92f0b2a
  }
  
  /* Look up the executing GP0 command's prim in the tag table. The command's
-@@ -1649,11 +1970,12 @@
+@@ -1649,11 +1971,12 @@
      if (!ws_active() || gp0_cmd_source_addr == 0xFFFFFFFFu) return 0;
      uint32_t now = (uint32_t)s_frame_count;
      for (int variant = 0; variant < 2; variant++) {
@@ -484,7 +485,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..4e51c582bbadcc2f28fa7afeb92f0b2a
                  *out_ax = t->anchor_x;
                  return 1;
              }
-@@ -1786,11 +2108,12 @@
+@@ -1786,11 +2109,12 @@
      if (!ws_engaged() || gp0_cmd_source_addr == 0xFFFFFFFFu) return 0;
      uint32_t now = (uint32_t)s_frame_count;
      for (int variant = 0; variant < 2; variant++) {
@@ -499,7 +500,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..4e51c582bbadcc2f28fa7afeb92f0b2a
          }
      }
      return 0;
-@@ -1820,6 +2143,12 @@
+@@ -1820,6 +2144,12 @@
      GpuDisplayInfo di;
      gpu_get_display_info(&di);
      return di.height ? (int32_t)di.height : 240;
@@ -512,7 +513,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..4e51c582bbadcc2f28fa7afeb92f0b2a
  }
  
  /* Full-screen fades and environmental filters are authored as 320x240 TILEs.
-@@ -1842,9 +2171,10 @@
+@@ -1842,9 +2172,10 @@
   * the middle third to centre. A composite (counter box + digits) sits inside
   * one zone, so its pieces share a pivot and stay aligned. (Full-2D menu
   * screens never reach here — they get zero squash + 4:3 pillarbox instead.) */
@@ -524,7 +525,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..4e51c582bbadcc2f28fa7afeb92f0b2a
      if (3 * cx < 2 * W) return 0;
      if (3 * cx > 4 * W) return W;
      return W / 2;
-@@ -1861,7 +2191,7 @@
+@@ -1861,7 +2192,7 @@
      if (!ws_auto_ui_squash || !ws_active() ||
          gp0_cmd_source_addr == 0xFFFFFFFFu)
          return 0;
@@ -533,7 +534,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..4e51c582bbadcc2f28fa7afeb92f0b2a
      for (uint32_t i = 0; i < ws_ui_prepass_count; i++) {
          if (ws_ui_prepass[i].src_addr != src) continue;
          if (out_anchor) *out_anchor = ws_ui_prepass[i].group.anchor;
-@@ -1946,20 +2276,105 @@
+@@ -1946,20 +2277,105 @@
      return 1;
  }
  
@@ -642,7 +643,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..4e51c582bbadcc2f28fa7afeb92f0b2a
          *x0 = ws_scale_about(*x0, ws_hud_pivot(*x0, w));
          return (int)ws_scale_len(w);
      }
-@@ -2024,6 +2439,10 @@
+@@ -2024,6 +2440,10 @@
   * the game's dedicated HUD packet arena reaches here, never world polygons. */
  static void ws_nw_hud_shift_vertices(int32_t *vx, int count) {
      if (count <= 0) return;
@@ -653,7 +654,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..4e51c582bbadcc2f28fa7afeb92f0b2a
      /* Sprite-tag titles: polygon/line prims are the GTE world and the tagged
       * character billboards, never HUD — only the rect-family sites (which
       * call ws_nw_hud_shift directly, with the untagged filter) re-anchor. */
-@@ -2103,6 +2522,7 @@
+@@ -2103,6 +2523,7 @@
   * CPU-visible transfer remains ordered because GP0 accepts no next command
   * until this payload is complete. Maximum PS1 transfer = full VRAM (1 MiB). */
  static uint16_t vram_write_pixels[1024 * 512];
@@ -661,7 +662,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..4e51c582bbadcc2f28fa7afeb92f0b2a
  
  /* Depth24 CPU→VRAM upload span (halfwords, exclusive end). See
   * gpu_depth24_rgb_limit — declared early so gpu_reset_state can clear it. */
-@@ -2110,6 +2530,58 @@
+@@ -2110,6 +2531,58 @@
  static int      s_d24_present_hold = 0; /* vblanks to skip Swap after GP1(07h) */
  static uint32_t s_d24_prev_disp_h = 0;  /* last GP1(07h) band height */
  static void depth24_note_upload(uint32_t x, uint32_t w);
@@ -720,7 +721,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..4e51c582bbadcc2f28fa7afeb92f0b2a
  
  static void gp0_commit_cpu_to_vram(void) {
      for (uint32_t row = 0; row < vram_write_h; row++)
-@@ -2120,6 +2592,11 @@
+@@ -2120,6 +2593,11 @@
      gr_vram_transfer_in(vram_write_x, vram_write_y,
                          vram_write_w, vram_write_h, vram_write_pixels);
      depth24_note_upload(vram_write_x, vram_write_w);
@@ -732,7 +733,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..4e51c582bbadcc2f28fa7afeb92f0b2a
      gp0_state = GP0_IDLE;
      vram_write_remaining = 0;
      text_xlate_vram_upload(vram_write_x, vram_write_y,
-@@ -2137,6 +2614,35 @@
+@@ -2137,6 +2615,35 @@
  /* Texture page / draw mode (set by GP0(E1h), reflected in GPUSTAT bits 0-10) */
  static uint32_t texpage_x;         /* bits 0-3: texture page X base (N*64) */
  static uint32_t texpage_y;         /* bit 4: texture page Y base (0 or 256) */
@@ -768,7 +769,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..4e51c582bbadcc2f28fa7afeb92f0b2a
  static uint32_t semi_transparency; /* bits 5-6 */
  static uint32_t texpage_colors;    /* bits 7-8: 4bit/8bit/15bit */
  static uint32_t dither_enabled;    /* bit 9 */
-@@ -2221,11 +2727,186 @@
+@@ -2221,11 +2728,186 @@
   * when native-wide is active and that buffer is a known display buffer; else
   * disable mirroring for this draw. Called when the draw env changes. */
  static void ws_nw_sync_target(void) {
@@ -957,7 +958,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..4e51c582bbadcc2f28fa7afeb92f0b2a
  }
  
  static void ws_clear_all_reveal_margins(void) {
-@@ -2239,18 +2920,24 @@
+@@ -2239,18 +2921,24 @@
   * stage art. A stale reveal tile is safer than deleting submitted content. */
  void gpu_ws_begin_linked_list(void) {
      gp0_ot_rank = 0xFFFFu;
@@ -982,7 +983,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..4e51c582bbadcc2f28fa7afeb92f0b2a
  }
  
  
-@@ -2362,6 +3049,16 @@
+@@ -2362,6 +3050,16 @@
      s_d24_upload_x1 = 0;
      s_d24_present_hold = 0;
      s_d24_prev_disp_h = 0;
@@ -999,7 +1000,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..4e51c582bbadcc2f28fa7afeb92f0b2a
  }
  
  void gpu_init(void) {
-@@ -2538,6 +3235,9 @@
+@@ -2538,6 +3236,9 @@
      }
      g_doff_min_this = 0x7fffffff; g_doff_max_this = -0x7fffffff; g_doff_cnt_this = 0;
      gpustat_poll_count = 0;
@@ -1009,13 +1010,13 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..4e51c582bbadcc2f28fa7afeb92f0b2a
      /* Trusted package-selected plugins run on guest VBlank, independent of
       * host presentation, pacing, turbo, or skipped frames. */
      mod_runtime_on_vblank();
-@@ -2757,73 +3457,551 @@
+@@ -2757,73 +3458,550 @@
      *y = sign_extend((word >> 16) & 0x7FFu, 11);
  }
  
 -extern int gte_geometry_correction_lookup(uint32_t packed,
 -                                          int32_t *x16, int32_t *y16);
- extern int gte_geometry_correction_enabled(void);
+-extern int gte_geometry_correction_enabled(void);
 -static int s_texture_correction_enabled = 0;
  extern void gte_precision_tracking_set(int enabled);
 -extern int gte_precision_load_word(uint32_t addr, uint32_t packed,

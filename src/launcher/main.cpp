@@ -3,6 +3,7 @@
 #include "game/settings/user_folder.h"
 #include "game_process.h"
 #include "launcher_settings.h"
+#include "platform.h"
 #include "session.h"
 #include "update_flow.h"
 #include "updater.h"
@@ -19,13 +20,13 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
+#ifdef _WIN32
 #include <windows.h>
 #include <dwmapi.h>
-#include <shellapi.h>
+#endif
 
 #include <algorithm>
 #include <atomic>
-#include <cwctype>
 #include <charconv>
 #include <chrono>
 #include <exception>
@@ -61,30 +62,28 @@ void velopack_log(void* user, const char* level, const char* message) noexcept {
 // These diagnostic modes use the same production checks as the window. They work
 // with redirected stdout/stderr without opening a console window.
 // --root names one folder for the program and the player's files alike.
-int diagnostic(int count, wchar_t** arguments, const fs::path& data) {
+int diagnostic(int count, char** arguments, const fs::path& data) {
     if (count < 2) return -1;
-    const std::wstring mode = arguments[1];
-    if (mode != L"--verify" && mode != L"--import" && mode != L"--check") return -1;
-    const bool needs_image = mode != L"--check";
+    const std::string_view mode = arguments[1];
+    if (mode != "--verify" && mode != "--import" && mode != "--check") return -1;
+    const bool needs_image = mode != "--check";
     if (needs_image && count < 3) throw std::runtime_error("A disc image path is required.");
     fs::path program = executable_directory();
     fs::path files = data;
     const int option = needs_image ? 3 : 2;
-    if (count == option + 2 && std::wstring(arguments[option]) == L"--root") program = files = fs::absolute(arguments[option + 1]);
+    if (count == option + 2 && std::string_view(arguments[option]) == "--root") program = files = fs::absolute(from_utf8(arguments[option + 1]));
     else if (count != option) throw std::runtime_error("Unexpected launcher arguments.");
     std::atomic_bool cancelled{false};
     VerifiedDisc verified;
-    if (mode == L"--verify") verified = verify_disc(arguments[2], cancelled);
-    else if (mode == L"--import") verified = import_disc(arguments[2], files, cancelled);
+    if (mode == "--verify") verified = verify_disc(from_utf8(arguments[2]), cancelled);
+    else if (mode == "--import") verified = import_disc(from_utf8(arguments[2]), files, cancelled);
     else {
         const auto installed = find_installed_disc(files);
         if (installed.empty()) throw std::runtime_error("No supported disc image is installed.");
         verified = verify_disc(installed, cancelled);
         check_package(program, *verified.profile);
     }
-    const std::string message = std::string("Verified ") + verified.profile->id + "\n";
-    DWORD written = 0;
-    WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), message.data(), static_cast<DWORD>(message.size()), &written, nullptr);
+    platform::write_standard(std::string("Verified ") + verified.profile->id + "\n", false);
     return 0;
 }
 
@@ -179,12 +178,7 @@ int write_status(const Updater& updater, const fs::path& path) {
     return closed(status, 0);
 }
 
-// A GUI program's C streams reach no redirected handle, so a message for a script is written to the handle itself.
-void write_error(const std::string& what) {
-    const std::string text = what + "\n";
-    DWORD written = 0;
-    WriteFile(GetStdHandle(STD_ERROR_HANDLE), text.data(), static_cast<DWORD>(text.size()), &written, nullptr);
-}
+void write_error(const std::string& what) { platform::write_standard(what + "\n", true); }
 
 bool g_unattended = false; // a picture or a test: no dialog may wait for a person
 
@@ -194,7 +188,8 @@ void fail_window(const char* what) {
 }
 
 // The window draws its own title bar. Windows 11 still rounds its corners and draws its edge in the launcher's colour.
-void shape_frame(SDL_Window* window) {
+void shape_frame([[maybe_unused]] SDL_Window* window) {
+#ifdef _WIN32
     constexpr DWORD use_dark_mode = 20, corner_preference = 33, border_colour = 34, round_corners = 2;
     const auto handle = static_cast<HWND>(
         SDL_GetPointerProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr));
@@ -204,6 +199,7 @@ void shape_frame(SDL_Window* window) {
     DwmSetWindowAttribute(handle, corner_preference, &round_corners, sizeof(round_corners));
     const COLORREF edge = RGB(38, 50, 40);
     DwmSetWindowAttribute(handle, border_colour, &edge, sizeof(edge));
+#endif
 }
 
 SDL_HitTestResult SDLCALL hit_test(SDL_Window* window, const SDL_Point* point, void* data) {
@@ -445,30 +441,23 @@ int main(int count, char** values) {
     Velopack::VelopackApp::Build().SetAutoApplyOnStartup(false).Run();
 #endif
     static Activity activity;
-    int wide_count = 0;
-    wchar_t** wide_arguments = CommandLineToArgvW(GetCommandLineW(), &wide_count);
     try {
-        if (!wide_arguments) throw std::runtime_error("Cannot read launcher arguments.");
         const fs::path program = executable_directory();
         const fs::path data = disruptor::user_folder::prepare(program);
         // One launcher for a folder of the player's files: two would write them at once.
-        std::wstring key = fs::weakly_canonical(data).wstring();
-        for (wchar_t& letter : key) letter = static_cast<wchar_t>(std::towlower(letter));
-        const std::wstring one = L"Local\\DisruptorLauncher-" + std::to_wstring(std::hash<std::wstring>{}(key));
-        HANDLE single = CreateMutexW(nullptr, TRUE, one.c_str());
-        if (single && GetLastError() == ERROR_ALREADY_EXISTS) {
+        const platform::Instance single(data);
+        if (!single.first()) {
             if (count > 1) write_error("The launcher of this copy is already open.");
             else fail_window("The launcher is already open.");
-            LocalFree(wide_arguments);
             return 1;
         }
-        const int result = diagnostic(wide_count, wide_arguments, data);
-        LocalFree(wide_arguments);
-        wide_arguments = nullptr;
+        const int result = diagnostic(count, values, data);
         if (result >= 0) return result;
+#ifdef _WIN32
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+#endif
         // The Language row names the disc and checks it: the game would let this variable replace it unchecked.
-        SetEnvironmentVariableW(L"PSX_DISRUPTOR_LANGUAGE_DISC", nullptr);
+        platform::unset("PSX_DISRUPTOR_LANGUAGE_DISC");
         const Arguments arguments = parse(count, values);
         Updater updater(arguments.source, activity);
 #if DISRUPTOR_UPDATER
@@ -483,7 +472,6 @@ int main(int count, char** values) {
         } else {
             fail_window(utf8(fs::path(error_text(error))).c_str());
         }
-        if (wide_arguments) LocalFree(wide_arguments);
         return 1;
     }
 }

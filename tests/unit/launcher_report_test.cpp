@@ -2,12 +2,15 @@
 
 #include <array>
 #include <chrono>
+#include <cstdint>
 #include <ctime>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <map>
 #include <sstream>
 #include <string>
+#include <string_view>
 
 namespace fs = std::filesystem;
 using namespace disruptor::launcher;
@@ -25,6 +28,46 @@ void expect(bool condition, const char* message) {
 void put(const fs::path& file, const std::string& text) {
     fs::create_directories(file.parent_path());
     std::ofstream(file, std::ios::binary) << text;
+}
+
+// A ZIP of stored entries read back through its central directory, each entry checked against its local header and
+// its CRC-32 by a table of this test's own. Empty when anything does not hold.
+std::map<std::string, std::string> unzipped(const std::string& zip) {
+    std::array<std::uint32_t, 256> table{};
+    for (std::uint32_t at = 0; at < table.size(); ++at) {
+        std::uint32_t value = at;
+        for (int bit = 0; bit < 8; ++bit) value = value & 1 ? 0xEDB88320u ^ (value >> 1) : value >> 1;
+        table[at] = value;
+    }
+    const auto crc = [&](std::string_view bytes) {
+        std::uint32_t value = 0xFFFFFFFFu;
+        for (const char byte : bytes) value = table[(value ^ static_cast<unsigned char>(byte)) & 0xFF] ^ (value >> 8);
+        return ~value;
+    };
+    const auto number = [&](std::size_t at, int bytes) {
+        std::uint32_t value = 0;
+        for (int part = bytes - 1; part >= 0; --part) value = value << 8 | static_cast<unsigned char>(zip.at(at + static_cast<std::size_t>(part)));
+        return value;
+    };
+    std::map<std::string, std::string> entries;
+    if (zip.size() < 22 || number(zip.size() - 22, 4) != 0x06054B50u) return {};
+    const std::uint32_t count = number(zip.size() - 12, 2), size = number(zip.size() - 10, 4), start = number(zip.size() - 6, 4);
+    if (start + size != zip.size() - 22) return {};
+    std::size_t at = start;
+    for (std::uint32_t entry = 0; entry < count; ++entry) {
+        if (number(at, 4) != 0x02014B50u || number(at + 10, 2) != 0) return {};
+        const std::uint32_t sum = number(at + 16, 4), stored = number(at + 20, 4), length = number(at + 28, 2);
+        const std::uint32_t extra = number(at + 30, 2), comment = number(at + 32, 2), local = number(at + 42, 4);
+        const std::string name = zip.substr(at + 46, length);
+        if (stored != number(at + 24, 4) || number(local, 4) != 0x04034B50u || number(local + 14, 4) != sum ||
+            number(local + 18, 4) != stored || zip.compare(local + 30, number(local + 26, 2), name) != 0)
+            return {};
+        const std::string data = zip.substr(local + 30 + number(local + 26, 2) + number(local + 28, 2), stored);
+        if (data.size() != stored || crc(data) != sum) return {};
+        entries[name] = data;
+        at += 46 + length + extra + comment;
+    }
+    return at == start + size ? entries : std::map<std::string, std::string>{};
 }
 
 std::string read(const fs::path& file) {
@@ -143,14 +186,22 @@ void test_a_report_takes_logs_and_settings_only() {
     }
     put(root / "startup.log", heading + "the last run\n");
 
+    expect(without_user_names("/home/alice/.local/share/x and /HOME/bob/y") == "/home/<user>/.local/share/x and /HOME/<user>/y",
+           "a Linux home folder's name is cut out as well");
+    const Report same = make_report(root, "system", "same", false);
     const Report packed = make_report(root, "system", "packed");
     const fs::path folder = root / "reports" / "disruptor-report-packed";
-    if (packed.archived)
-        expect(packed.path == fs::path(folder).concat(".zip") && fs::file_size(packed.path) > 0 && !fs::exists(folder),
-               "with Windows' tar the report is one ZIP and its folder is gone");
-    else
-        expect(packed.path == folder && fs::exists(folder / "startup.log") && !fs::exists(fs::path(folder).concat(".zip")),
-               "without it the folder stays and no half-made ZIP is left");
+    expect(packed.archived && packed.path == fs::path(folder).concat(".zip") && !fs::exists(folder),
+           "the report is one ZIP and its folder is gone");
+    const std::map<std::string, std::string> entries = unzipped(read(packed.path));
+    std::map<std::string, std::string> expected;
+    for (const auto& entry : fs::directory_iterator(same.path))
+        if (entry.path().filename() != "system.txt")
+            expected["disruptor-report-packed/" + entry.path().filename().string()] = read(entry.path());
+    std::map<std::string, std::string> taken = entries;
+    const bool noted = taken.erase("disruptor-report-packed/system.txt") == 1;
+    expect(noted && expected.size() > 3 && taken == expected,
+           "the ZIP holds every file of the same report under the folder's name, each whole");
 
     std::string long_log = std::string(50, 'x') + R"( C:\Users\Alice\secret)" "\n";
     while (long_log.size() < 4 * 1024 * 1024 + 62) long_log += "filler\n";
@@ -184,7 +235,11 @@ void test_the_notes_have_their_shape() {
     const auto universal = [] {
         const std::time_t now = std::time(nullptr);
         std::tm parts{};
+#ifdef _WIN32
         gmtime_s(&parts, &now);
+#else
+        gmtime_r(&now, &parts);
+#endif
         std::array<char, 32> text{};
         std::strftime(text.data(), text.size(), "%Y-%m-%d %H:%M:%S UTC", &parts);
         return std::string(text.data());
@@ -208,8 +263,13 @@ void test_the_notes_have_their_shape() {
                windows_name("", "26200").empty(),
            "another name and a build that is no number are left as they are");
     const std::string note = system_note();
-    expect(note.rfind("Disruptor Recompiled ", 0) == 0 && note.find("Windows: ") != std::string::npos,
-           "the system note begins with the build's version and names the Windows version");
+#ifdef _WIN32
+    constexpr const char* system_line = "\r\nWindows: ";
+#else
+    constexpr const char* system_line = "\r\nSystem: ";
+#endif
+    expect(note.rfind("Disruptor Recompiled ", 0) == 0 && note.find(system_line) != std::string::npos,
+           "the system note begins with the build's version and names the system's version");
 }
 
 } // namespace

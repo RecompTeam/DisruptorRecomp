@@ -19,6 +19,15 @@
 
 #ifdef _WIN32
 #include <windows.h>
+#else
+#include <cerrno>
+#include <chrono>
+#include <fstream>
+#include <iterator>
+#include <thread>
+#include <vector>
+#include <signal.h>
+#include <unistd.h>
 #endif
 
 namespace {
@@ -54,6 +63,45 @@ void start_again() {
     CloseHandle(started.hThread);
     CloseHandle(started.hProcess);
 }
+#else
+constexpr char kEarlier[] = "DISRUPTOR_RESTART_AFTER_PID";
+constexpr unsigned long kLongestWait = 15000;  /* milliseconds */
+
+/* Whether a game is gone: no process has its number, or it has ended and waits for its parent to be told. */
+bool earlier_game_ended(unsigned long process, unsigned long longest_wait) {
+    const auto until = std::chrono::steady_clock::now() + std::chrono::milliseconds(longest_wait);
+    while (true) {
+        if (process == 0 || (kill(static_cast<pid_t>(process), 0) != 0 && errno == ESRCH)) return true;
+        std::ifstream status("/proc/" + std::to_string(process) + "/stat");
+        const std::string line((std::istreambuf_iterator<char>(status)), std::istreambuf_iterator<char>());
+        const std::size_t name_end = line.rfind(')');
+        if (name_end != std::string::npos && name_end + 2 < line.size() && line[name_end + 2] == 'Z') return true;
+        if (std::chrono::steady_clock::now() >= until) return false;
+        std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    }
+}
+
+void start_again() {
+    setenv(kEarlier, std::to_string(getpid()).c_str(), 1);
+    std::ifstream cmdline("/proc/self/cmdline", std::ios::binary);
+    const std::string words((std::istreambuf_iterator<char>(cmdline)), std::istreambuf_iterator<char>());
+    std::vector<std::string> arguments;
+    for (std::size_t at = 0; at < words.size();) {
+        const std::size_t end = words.find('\0', at);
+        arguments.push_back(words.substr(at, end == std::string::npos ? std::string::npos : end - at));
+        at = end == std::string::npos ? words.size() : end + 1;
+    }
+    std::vector<char *> argv;
+    for (std::string &argument : arguments) argv.push_back(argument.data());
+    argv.push_back(nullptr);
+    std::fflush(nullptr);
+    const pid_t started = arguments.empty() ? -1 : fork();
+    if (started == 0) {
+        execv("/proc/self/exe", argv.data());
+        _exit(127);
+    }
+    if (started < 0) std::fprintf(stderr, "disruptor: the game could not be started again (error %d)\n", errno);
+}
 #endif
 
 PSX_MOD_CONSTRUCTOR(wait_for_the_game_before) {
@@ -67,19 +115,25 @@ PSX_MOD_CONSTRUCTOR(wait_for_the_game_before) {
         std::fprintf(stderr, "disruptor: the game before this one has not closed, so this one does not start beside it\n");
         std::exit(1);
     }
+#else
+    const char *earlier = std::getenv(kEarlier);
+    if (!earlier || !*earlier) return;
+    g_started_by_restart = true;
+    const unsigned long before = std::strtoul(earlier, nullptr, 10);
+    unsetenv(kEarlier);
+    if (!earlier_game_ended(before, kLongestWait)) {
+        std::fprintf(stderr, "disruptor: the game before this one has not closed, so this one does not start beside it\n");
+        std::exit(1);
+    }
 #endif
 }
 
 }  // namespace
 
 extern "C" int disruptor_restart_arm(void) {
-#ifdef _WIN32
     if (!g_armed && std::atexit(start_again) != 0) return 0;
     g_armed = true;
     return 1;
-#else
-    return 0;
-#endif
 }
 
 extern "C" int disruptor_restart_started_this(void) { return g_started_by_restart ? 1 : 0; }

@@ -2,6 +2,7 @@
 
 #include "art.h"
 #include "game_process.h"
+#include "platform.h"
 #include "icons.h"
 #include "update_flow.h"
 
@@ -2125,7 +2126,7 @@ void View::about() {
         ImGui::SameLine();
         ImGui::TextDisabled("|");
         ImGui::SameLine();
-        if (ImGui::TextLink("Licences")) open_folder(licences);
+        if (ImGui::TextLink("Licences")) platform::open_folder(licences);
     }
     ImGui::Spacing();
     ImGui::Separator();
@@ -2140,7 +2141,7 @@ void View::about() {
         ImGui::TextUnformatted(utf8(path).c_str());
         ImGui::TableNextColumn();
         ImGui::PushID(id);
-        if (ImGui::Button("Open")) open_folder(path);
+        if (ImGui::Button("Open")) platform::open_folder(path);
         ImGui::PopID();
     };
     if (ImGui::BeginTable("folders", 3, ImGuiTableFlags_SizingFixedFit)) {

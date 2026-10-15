@@ -4,20 +4,23 @@
 
 // Where a copy of the program keeps the player's files, said once for the launcher and for the game. Velopack replaces
 // its program folder on every update and deletes the whole install folder on uninstall, so an installed copy keeps them
-// in the user's own application data and a portable copy beside its program folder. Any other copy keeps them with the
+// in the user's own application data and a portable copy beside its program folder. Its AppImage runs from a folder
+// that cannot be written, so that one keeps them in the user's data folder too. Any other copy keeps them with the
 // program, as a build folder or an unzipped release always has.
 namespace disruptor::user_folder {
 
 enum class Copy { plain, installed, portable };
 
 constexpr const char* kChosen = "PSX_USER_DIR";             // a whole path that wins over the rule
-constexpr const char* kInstalledName = "DisruptorRecompData"; // under the user's local application data
+constexpr const char* kInstalledName = "DisruptorRecompData"; // under the user's local application or XDG data
 
-// Velopack's `current` beside Update.exe is an installed copy, or a portable one with `.portable` in its root.
+// Velopack's `current` beside Update.exe is an installed copy, or a portable one with `.portable` in its root. Its
+// AppImage's usr/bin with UpdateNix and sq.version is an installed one too.
 Copy copy_of(const std::filesystem::path& program);
 
 // The folder for the player's files of the copy in `program`. `chosen` is what PSX_USER_DIR says, `local` the user's
-// local application data. Throws when `chosen` is not a whole path or an installed copy has no `local`.
+// local application data, or on Linux $XDG_DATA_HOME or ~/.local/share. Throws when `chosen` is not a whole path or an
+// installed copy has no `local`.
 std::filesystem::path folder_for(const std::filesystem::path& program, const std::filesystem::path& chosen,
                                  const std::filesystem::path& local);
 

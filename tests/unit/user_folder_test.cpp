@@ -89,6 +89,15 @@ void test_kinds_of_copy() {
     const fs::path other = named.parent_path() / "unpacked";
     put(other / "sq.version", "");
     expect(copy_of(other) == Copy::plain, "a folder of another name beside Update.exe is a plain copy");
+    const fs::path image = fresh("disruptor-user-folder-test-image") / "usr" / "bin";
+    put(image / "sq.version", "");
+    expect(copy_of(image) == Copy::plain, "an AppImage's usr/bin without UpdateNix is no Velopack copy");
+    put(image / "UpdateNix", "");
+    expect(copy_of(image) == Copy::installed && copy_of(image / "") == Copy::installed,
+           "with UpdateNix and sq.version it is an installed copy, its files in the user's data folder");
+    fs::remove(image / "sq.version");
+    expect(copy_of(image) == Copy::plain, "and without sq.version it is not");
+    fs::remove_all(image.parent_path().parent_path());
     fs::remove_all(root);
     fs::remove_all(named.parent_path());
 }

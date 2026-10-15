@@ -3,10 +3,10 @@
 #include "disc_import.h"
 #include "game/frame/present_rate.h"
 #include "game/settings/user_folder.h"
-
-#include <windows.h>
+#include "platform.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cwchar>
 #include <string_view>
 #include <utility>
@@ -66,11 +66,65 @@ std::span<const Placement> layout() { return placed; }
 std::span<const wchar_t* const> page_labels() { return pages; }
 
 std::wstring wide(std::string_view utf8_text) {
-    const int bytes = static_cast<int>(utf8_text.size());
-    const int size = MultiByteToWideChar(CP_UTF8, 0, utf8_text.data(), bytes, nullptr, 0);
-    std::wstring text(static_cast<size_t>(std::max(size, 0)), L'\0');
-    if (size > 0) MultiByteToWideChar(CP_UTF8, 0, utf8_text.data(), bytes, text.data(), size);
+    std::wstring text;
+    const auto byte = [&](std::size_t at) { return static_cast<unsigned char>(utf8_text[at]); };
+    for (std::size_t at = 0; at < utf8_text.size();) {
+        const unsigned char lead = byte(at);
+        const std::size_t length = lead < 0x80 ? 1 : (lead & 0xE0) == 0xC0 ? 2 : (lead & 0xF0) == 0xE0 ? 3 : (lead & 0xF8) == 0xF0 ? 4 : 0;
+        char32_t code = length == 1 ? lead : length == 2 ? lead & 0x1Fu : length == 3 ? lead & 0x0Fu : lead & 0x07u;
+        bool whole = length > 0 && at + length <= utf8_text.size();
+        for (std::size_t next = 1; whole && next < length; ++next) {
+            whole = (byte(at + next) & 0xC0) == 0x80;
+            code = (code << 6) | (byte(at + next) & 0x3Fu);
+        }
+        constexpr char32_t least[] = {0, 0, 0x80, 0x800, 0x10000};
+        if (!whole || code < least[length] || code > 0x10FFFF || (code >= 0xD800 && code <= 0xDFFF)) {
+            text.push_back(static_cast<wchar_t>(0xFFFD));
+            ++at;
+            continue;
+        }
+        if constexpr (sizeof(wchar_t) == 2) {
+            if (code >= 0x10000) {
+                text.push_back(static_cast<wchar_t>(0xD800 + ((code - 0x10000) >> 10)));
+                text.push_back(static_cast<wchar_t>(0xDC00 + ((code - 0x10000) & 0x3FF)));
+                at += length;
+                continue;
+            }
+        }
+        text.push_back(static_cast<wchar_t>(code));
+        at += length;
+    }
     return text;
+}
+
+std::string narrow(std::wstring_view text) {
+    std::string out;
+    for (std::size_t at = 0; at < text.size(); ++at) {
+        char32_t code = static_cast<char32_t>(text[at]);
+        if constexpr (sizeof(wchar_t) == 2) {
+            if (code >= 0xD800 && code <= 0xDBFF && at + 1 < text.size() && text[at + 1] >= 0xDC00 && text[at + 1] <= 0xDFFF) {
+                code = 0x10000 + ((code - 0xD800) << 10) + (static_cast<char32_t>(text[at + 1]) - 0xDC00);
+                ++at;
+            }
+        }
+        if (code > 0x10FFFF || (code >= 0xD800 && code <= 0xDFFF)) code = 0xFFFD;
+        if (code < 0x80) {
+            out.push_back(static_cast<char>(code));
+        } else if (code < 0x800) {
+            out.push_back(static_cast<char>(0xC0 | (code >> 6)));
+            out.push_back(static_cast<char>(0x80 | (code & 0x3F)));
+        } else if (code < 0x10000) {
+            out.push_back(static_cast<char>(0xE0 | (code >> 12)));
+            out.push_back(static_cast<char>(0x80 | ((code >> 6) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | (code & 0x3F)));
+        } else {
+            out.push_back(static_cast<char>(0xF0 | (code >> 18)));
+            out.push_back(static_cast<char>(0x80 | ((code >> 12) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | ((code >> 6) & 0x3F)));
+            out.push_back(static_cast<char>(0x80 | (code & 0x3F)));
+        }
+    }
+    return out;
 }
 
 std::string utf8(const fs::path& path) {
@@ -82,14 +136,13 @@ fs::path from_utf8(const std::string& text) { return fs::path(std::u8string(text
 
 std::wstring environment_overrides() {
     std::wstring names;
-    wchar_t* const block = GetEnvironmentStringsW();
-    for (const wchar_t* entry = block; entry && *entry; entry += wcslen(entry) + 1) {
-        const std::wstring_view variable(entry);
-        if (_wcsnicmp(entry, L"PSX_", 4) != 0) continue;
+    for (const auto& [name, value] : platform::environment()) {
+        std::string upper = name.substr(0, 4);
+        for (char& letter : upper) letter = static_cast<char>(std::toupper(static_cast<unsigned char>(letter)));
+        if (upper != "PSX_") continue;
         if (!names.empty()) names += L", ";
-        names += variable.substr(0, variable.find(L'='));
+        names += wide(name);
     }
-    if (block) FreeEnvironmentStringsW(block);
     return names;
 }
 

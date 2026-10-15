@@ -6,7 +6,8 @@
 
 namespace disruptor::launcher {
 
-/// `text` with the name of every Windows user folder cut out of its paths: `C:\Users\Name\x` becomes `C:\Users\<user>\x`.
+/// `text` with the name of every user folder cut out of its paths: `C:\Users\Name\x` becomes `C:\Users\<user>\x`,
+/// `/home/name/x` becomes `/home/<user>/x`.
 std::string without_user_names(std::string_view text);
 
 struct Report {
@@ -21,7 +22,7 @@ struct Report {
 /// file: its size and when it was written, or that there is none. A freeze dump is taken when its name says it was
 /// made since the last run began, as the log's first line tells, and the newest two of those. A link is never
 /// followed. The disc image, the BIOS and saves are never taken. With `archive` the folder becomes a ZIP of the
-/// same name when Windows' own tar can make one.
+/// same name, its files stored under the folder's name.
 ///
 /// Throws std::runtime_error when the folder cannot be written.
 Report make_report(const std::filesystem::path& root, std::string_view system, std::string_view stamp, bool archive = true);
@@ -30,7 +31,7 @@ Report make_report(const std::filesystem::path& root, std::string_view system, s
 /// begin at 22000.
 std::string windows_name(std::string_view product, std::string_view build);
 
-/// The build's version, the Windows version, the display and the graphics adapters, a line each.
+/// The build's version, then the system's own lines: its name and version, displays and graphics adapters.
 std::string system_note();
 
 /// Now as `YYYY-MM-DD HH:MM:SS UTC`.

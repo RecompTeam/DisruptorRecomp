@@ -2,6 +2,7 @@
 
 #include "disc_import.h"
 #include "game_process.h"
+#include "platform.h"
 #include "region_disc.h"
 #include "report.h"
 #include "startup_log.h"
@@ -334,7 +335,7 @@ void Session::cancel() {
 void Session::make_problem_report() {
     try {
         const Report report = make_report(data_, system_note(), report_stamp());
-        show_in_explorer(report.path);
+        platform::show_file(report.path);
         say((report.archived ? L"Report saved as " : L"Report saved in the folder ") + report.path.wstring() +
             L".\nAttach it to a bug report at github.com/RecompTeam/DisruptorRecomp/issues with the level and the steps.\n"
             L"It holds the game's logs, your settings and a note of the system, with user names cut out of paths.\n"
@@ -344,7 +345,7 @@ void Session::make_problem_report() {
     }
 }
 
-void Session::open_saves() const { open_folder(settings_.saves_folder()); }
+void Session::open_saves() const { platform::open_folder(settings_.saves_folder()); }
 
 void Session::reset_page(Page page) {
     if (editable()) saved(settings_.reset(page), L"The settings on this page are those of a new installation again.");

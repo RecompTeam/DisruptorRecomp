@@ -4,11 +4,12 @@
 
 - The verified Disruptor USA executable and BIN/CUE files in `input/`; see
   [DISC.md](DISC.md).
-- Git, Python 3.10+, CMake 3.20+, and a C++20 toolchain.
+- Git, Python 3.11+, CMake 3.24+, and a C++20 toolchain.
 - Windows x64: Visual Studio with **Desktop development with C++**, or
   MSYS2 MinGW-w64. Ninja is recommended.
-- Linux: GCC and the platform development libraries needed to build SDL.
-  Linux is a development target; Windows is the primary tested platform.
+- Linux x64: GCC 13 or newer and the development libraries SDL builds
+  against (the `build` workflow's list). The launcher builds there too.
+  Windows is the platform play is tested on.
 
 The first build needs network access to fetch the pinned PSXRecomp revision and
 dependencies. OpenBIOS is built locally; no proprietary PlayStation BIOS is
@@ -43,11 +44,61 @@ updater. It imports existing disc dumps; physical drive reading is outside the
 current scope. Release packaging includes it automatically through
 `tools/package_release.py` and still excludes game data.
 
+## Releases
+
+A release is a Velopack `Setup.exe` and a portable ZIP, packed from a Release
+configuration whose `PSX_GAME_VERSION` is the release's version:
+
+```powershell
+python tools/package_release.py --version v0.1.0-alpha.6 --build build --zstd-license <zstd LICENSE>
+```
+
+- `CHANGELOG.md` needs the release's `## v0.1.0-alpha.6` section first. It
+  becomes the package's notes, which the launcher shows, and the GitHub
+  release's text.
+- The .NET SDK runs the pinned Velopack packer, the version of the C library
+  the launcher links.
+- The previous release's package is fetched from GitHub when there is one,
+  and the update then also gets a delta package. Without it, or with
+  `--no-delta`, an update downloads the full package.
+- `build/releases/<version>/windows/packages` holds
+  `DisruptorRecomp-win-Setup.exe` and `DisruptorRecomp-win-Portable.zip` for
+  players, each with its SHA-256, and the packages the launcher updates from.
+  Setup installs the Visual C++ x64 Redistributable when it is missing, the ZIP
+  does not. `--publish` creates the
+  GitHub pre-release with them.
+- `--publish`, or `--sign` alone, signs those files with Sigstore first. A
+  browser opens: sign in with the organisation's Google account,
+  `recomp.team@gmail.com`. Each file gets a `.sigstore.json` bundle and a line
+  of SLSA provenance in `DisruptorRecomp-<channel>.intoto.jsonl`, and the
+  script stops when a bundle names another account. It signs only a checkout
+  without uncommitted changes.
+
+A Linux release is an AppImage packed from a Linux Release build of the same
+commit. It is built on Ubuntu 22.04, so that it runs on glibc 2.35 and newer:
+GCC 13 from the `ubuntu-toolchain-r/test` PPA, Kitware's CMake and Python 3.11,
+newer than the ones 22.04 ships. The C++ runtime is linked statically and OpenGL through
+`libGL.so.1`, so glibc and a GL driver are all it asks of a player's system.
+From Windows, with that build reachable through WSL:
+
+```powershell
+python tools/package_release.py --platform linux --version v0.1.0-alpha.6 `
+    --build \\wsl.localhost\<distro>\<checkout>\build --zstd-license <zstd LICENSE>
+```
+
+The Linux build folder must hold a `SOURCE_COMMIT` file with the commit it was
+built from, and the script stops unless that is the checkout's. It makes
+`DisruptorRecomp.AppImage` and the packages the launcher updates from in
+`build/releases/<version>/linux/packages`. With `--publish` they go to the release the Windows run made, which must
+come first and from the same commit, and the release text gets the Linux
+install lines.
+
 The launcher and the game find the player's files by one rule,
 `src/game/settings/user_folder.cpp`. A copy the updater installed keeps them in
 `%LOCALAPPDATA%\DisruptorRecompData`, a portable copy of the updater in `data`
-beside its `current` folder, and any other copy, a build folder included,
-beside the executable. A whole path in `PSX_USER_DIR` names another folder.
+beside its `current` folder, the AppImage in `$XDG_DATA_HOME` or
+`~/.local/share` under `DisruptorRecompData`, and any other copy, a build
+folder included, beside the executable. A whole path in `PSX_USER_DIR` names another folder.
 The framework's `main.cpp` asks `psx_game_user_folder` for it before anything
 else and writes settings, bindings, memory cards, caches, mods and the notes of
 a run there. Program files are still found beside the executable. The shipped

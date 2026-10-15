@@ -14,10 +14,16 @@
 namespace fs = std::filesystem;
 using namespace disruptor::launcher;
 namespace {
+#ifdef _WIN32
 const fs::path kRoot = L"C:\\Games\\Disruptor";
-const fs::path kHome = kRoot / "disc";
 const fs::path kImage = L"D:\\\u0414\u0438\u0441\u043A\u0438\\Disruptor (France).cue";
-const std::string kGerman = "E:\\Disruptor (Germany).cue";
+const std::string kGerman = "E:\\Disruptor (Germany).cue", kGone = "F:\\gone.cue", kUnlisted = "G:\\unlisted.cue";
+#else
+const fs::path kRoot = "/games/Disruptor";
+const fs::path kImage = u8"/media/\u0414\u0438\u0441\u043A\u0438/Disruptor (France).cue";
+const std::string kGerman = "/media/e/Disruptor (Germany).cue", kGone = "/media/f/gone.cue", kUnlisted = "/media/g/unlisted.cue";
+#endif
+const fs::path kHome = kRoot / "disc";
 
 void require(bool condition, const char* message) {
     if (!condition) throw std::runtime_error(message);
@@ -234,7 +240,7 @@ void test_the_running_status() {
 }
 
 void test_the_language_box() {
-    const std::string french = utf8(kImage), missing = "F:\\gone.cue";
+    const std::string french = utf8(kImage), missing = kGone;
     LanguageList list = language_list({}, {}, "");
     require(list.labels == std::vector<std::wstring>{L"English (the US disc alone)"} && list.selected == 0 && starts(list.note, L"Add a French"),
             "without discs the box offers English and says how to add one");
@@ -250,7 +256,7 @@ void test_the_language_box() {
     require(list.selected == 3 && starts(list.note, L"This image is missing"), "a missing disc in use is called missing");
     list = language_list({kGerman, french, missing}, regions, kGerman);
     require(list.selected == 1 && list.note.empty(), "a disc not looked at yet has no note");
-    list = language_list({kGerman}, regions, "G:\\unlisted.cue");
+    list = language_list({kGerman}, regions, kUnlisted);
     require(list.selected == 0 && starts(list.note, L"Add a French"), "a disc in use that is not listed leaves English selected");
 }
 
@@ -349,10 +355,9 @@ void test_the_command_line() {
     const fs::path program = L"C:\\Games folder\\Disruptor";
     const fs::path data = L"C:\\Users\\Player\\AppData\\Local\\DisruptorRecompData";
     const VerifiedDisc disc{&profile, data / "disc", data / "disc" / "Disruptor (USA).cue", nullptr};
-    require(game_command(program, disc) ==
-                L"\"C:\\Games folder\\Disruptor\\DisruptorRecompiled.exe\" --no-launcher --game "
-                L"\"C:\\Games folder\\Disruptor\\game.toml\" --disc "
-                L"\"C:\\Users\\Player\\AppData\\Local\\DisruptorRecompData\\disc\\Disruptor (USA).cue\"",
+    require(game_arguments(program, disc) ==
+                std::vector<std::string>{"--no-launcher", "--game", utf8(program / "game.toml"), "--disc",
+                                         utf8(data / "disc" / "Disruptor (USA).cue")},
             "the game is started without its own launcher, its config named in the program folder and the disc "
             "wherever the player's files are");
 }

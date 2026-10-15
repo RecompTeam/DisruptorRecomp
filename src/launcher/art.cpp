@@ -2,7 +2,9 @@
 
 #include <SDL3/SDL.h>
 
+#ifdef _WIN32
 #include <windows.h>
+#endif
 
 namespace disruptor::launcher {
 
@@ -42,6 +44,7 @@ SDL_Texture* app_icon_texture(SDL_Renderer* renderer) {
     return pixel_texture(renderer, bitmap(app_icon_resource), SDL_SCALEMODE_LINEAR);
 }
 
+#ifdef _WIN32
 std::span<const std::byte> resource_bytes(int id) {
     HRSRC found = FindResourceW(nullptr, MAKEINTRESOURCEW(id), RT_RCDATA);
     HGLOBAL loaded = found ? LoadResource(nullptr, found) : nullptr;
@@ -49,5 +52,6 @@ std::span<const std::byte> resource_bytes(int id) {
     if (!bytes) return {};
     return {static_cast<const std::byte*>(bytes), SizeofResource(nullptr, found)};
 }
+#endif
 
 } // namespace disruptor::launcher

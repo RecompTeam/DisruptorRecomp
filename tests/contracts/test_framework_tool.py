@@ -199,9 +199,9 @@ def main() -> int:
     for script, call in (
         ("build.ps1", "python (Join-Path $Root 'tools/framework.py') apply --framework $Framework"),
         ("build.sh", 'python3 "$ROOT/tools/framework.py" apply --framework "$FRAMEWORK"'),
-        ("build.ps1", 'python -c "import sys; sys.exit(sys.version_info < (3, 10))"'),
-        ("build.sh", "python3 -c 'import sys; sys.exit(sys.version_info < (3, 10))' || {"),
-        ("CMakeLists.txt", "    find_package(Python3 3.10 REQUIRED COMPONENTS Interpreter)\n"),
+        ("build.ps1", 'python -c "import sys; sys.exit(sys.version_info < (3, 11))"'),
+        ("build.sh", "python3 -c 'import sys; sys.exit(sys.version_info < (3, 11))' || {"),
+        ("CMakeLists.txt", "    find_package(Python3 3.11 REQUIRED COMPONENTS Interpreter)\n"),
     ):
         require(
             call in (ROOT / script).read_text(encoding="utf-8"),

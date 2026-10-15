@@ -5,7 +5,7 @@ validation is incomplete.
 
 | Area | Current state |
 | --- | --- |
-| Platform and disc | Windows x64; Disruptor USA, SLUS-00224 only. Linux is a development target. |
+| Platform and disc | Windows x64 and Linux x64 (an AppImage for glibc 2.35 and newer); Disruptor USA, SLUS-00224 only. On Linux the build and its tests pass and the AppImage's launcher starts. Play there is not tested yet. |
 | Gameplay | Boot, menus, FMVs, audio, and the first mission have been exercised on Windows. |
 | Rendering | OpenGL supports 1x–8x resolution, widescreen, geometry correction, and perspective textures. Minor edge gaps and localized texture wobble can remain. |
 | Controls | Modern keyboard/mouse controls, optional smooth mouse turning, and keyboard save naming are available. Vertical look and weapon aim remain experimental. |

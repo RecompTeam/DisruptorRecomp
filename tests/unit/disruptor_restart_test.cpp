@@ -1,5 +1,6 @@
 #include "../../src/game/session/restart.cpp"
 
+#include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <string>
@@ -114,10 +115,111 @@ int main(int argc, char **argv) {
 
 #else
 
-int main() {
-    if (disruptor_restart_arm() != 0 || disruptor_restart_started_this() != 0) return 1;
-    std::cout << "disruptor restart: PASS (a program cannot start itself again here)\n";
+#include <fcntl.h>
+#include <sys/wait.h>
+
+namespace {
+
+std::string lines_of(const std::string &file) {
+    std::ifstream in(file);
+    return std::string((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+}
+
+/* Two games may say their line at the same moment, and only an append the system makes whole keeps both. */
+void say(const std::string &file, const std::string &line) {
+    const int out = open(file.c_str(), O_WRONLY | O_APPEND | O_CREAT | O_CLOEXEC, 0644);
+    if (out < 0) return;
+    if (write(out, line.data(), line.size()) < 0) {}
+    close(out);
+}
+
+/* Running and not a process that has ended and waits to be reaped. */
+bool still_runs(unsigned long process) {
+    if (kill(static_cast<pid_t>(process), 0) != 0) return false;
+    const std::string stat = lines_of("/proc/" + std::to_string(process) + "/stat");
+    const std::size_t name_end = stat.rfind(')');
+    return name_end == std::string::npos || name_end + 2 >= stat.size() || stat[name_end + 2] != 'Z';
+}
+
+void linger(unsigned long milliseconds) { std::this_thread::sleep_for(std::chrono::milliseconds(milliseconds)); }
+
+pid_t start(const std::vector<std::string> &words) {
+    std::vector<std::string> copy = words;
+    std::vector<char *> argv;
+    for (std::string &word : copy) argv.push_back(word.data());
+    argv.push_back(nullptr);
+    const pid_t started = fork();
+    if (started == 0) {
+        execv(argv[0], argv.data());
+        _exit(127);
+    }
+    return started;
+}
+
+int game(const std::string &file) {
+    if (!disruptor_restart_started_this()) {
+        const bool chained = lines_of(file).find("first ") != std::string::npos;
+        say(file, "first " + std::to_string(getpid()) + "\n");
+        /* A game that does not know a restart started it must not start a third, or a defect here would never stop. */
+        if (chained) return 0;
+        /* Registered first, so it runs last: the first game lingers after it has started the second. */
+        std::atexit([] { linger(700); });
+        if (!disruptor_restart_arm() || !disruptor_restart_arm()) return 3;
+        return 0;
+    }
+    const std::string before = lines_of(file);
+    const unsigned long first = before.rfind("first ", 0) == 0 ? std::stoul(before.substr(6)) : 0;
+    const char *left = std::getenv(kEarlier);
+    say(file, std::string("second ") + (first != 0 && !still_runs(first) ? "after" : "beside") + " the first, name " +
+                  (left && *left ? "left" : "cleared") + "\n");
     return 0;
+}
+
+bool waits_only_for_a_game_that_ends(const std::string &program) {
+    const pid_t started = start({program, "linger", "700"});
+    if (started < 0) return false;
+    const bool early = earlier_game_ended(static_cast<unsigned long>(started), 50);
+    const bool late = earlier_game_ended(static_cast<unsigned long>(started), 10000);
+    waitpid(started, nullptr, 0);
+    if (early || !late) std::cerr << "FAIL: a game that still runs when the wait is over has not ended, one that ends within it has\n";
+    const bool none = earlier_game_ended(0, 0) && earlier_game_ended(0x3FFFFFFFul, 0);
+    if (!none) std::cerr << "FAIL: a number no process has is a game that is gone\n";
+    return !early && late && none;
+}
+
+int run(const std::string &program, const std::string &file) {
+    if (!waits_only_for_a_game_that_ends(program)) return 1;
+    std::remove(file.c_str());
+    const pid_t started = start({program, "game", file});
+    if (started < 0) return 2;
+    int status = 1;
+    waitpid(started, &status, 0);
+    std::string seen;
+    for (int tries = 0; tries < 100 && seen.find("second ") == std::string::npos; ++tries) {
+        linger(100);
+        seen = lines_of(file);
+    }
+    /* A second restart, if there is one, starts as late as the first: give it time to say so. */
+    linger(600);
+    seen = lines_of(file);
+    std::remove(file.c_str());
+    const bool once = seen.find("second ") != std::string::npos && seen.find("second ") == seen.rfind("second ") && seen.find("first ") == seen.rfind("first ");
+    if (!WIFEXITED(status) || WEXITSTATUS(status) != 0 || !once || seen.find("second after the first, name cleared") == std::string::npos) {
+        std::cerr << "FAIL: an armed game must start once more when it exits, after it has ended, and the new one must not start a third\n" << seen;
+        return 1;
+    }
+    std::cout << "disruptor restart: PASS\n";
+    return 0;
+}
+
+}  // namespace
+
+int main(int argc, char **argv) {
+    const std::string program = std::filesystem::canonical("/proc/self/exe").string();
+    if (argc == 3 && std::string(argv[1]) == "game") return game(argv[2]);
+    if (argc == 3 && std::string(argv[1]) == "run") return run(program, argv[2]);
+    if (argc == 3 && std::string(argv[1]) == "linger") return linger(std::stoul(argv[2])), 0;
+    return 2;
 }
 
 #endif

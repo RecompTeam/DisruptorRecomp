@@ -12,7 +12,7 @@
 
 <p align="center">
   <b>Disruptor</b> (PlayStation, 1996), recompiled into a native Windows program.<br>
-  Bring your own disc. <a href="https://github.com/RecompTeam/DisruptorRecomp/releases/latest"><b>Download</b></a>
+  Bring your own disc. <a href="https://github.com/RecompTeam/DisruptorRecomp/releases"><b>Download</b></a>
 </p>
 
 <table>
@@ -20,7 +20,7 @@
     <td width="50%" valign="top">
       <img src="docs/images/launcher.png" alt="The launcher's home page" width="100%"><br>
       <b>Launcher</b><br>
-      Drop the disc, press Play. The image is checked byte for byte.<br>An installed copy updates from here, an unzipped one by hand.
+      Drop the disc, press Play. The image is checked byte for byte.<br>New releases install from here.
     </td>
     <td width="50%" valign="top">
       <img src="docs/images/picture.jpg" alt="A room at 8x in 16:9" width="100%"><br>
@@ -58,8 +58,8 @@
 
 | | |
 | --- | --- |
-| **1** | Download the [Windows x64 ZIP](https://github.com/RecompTeam/DisruptorRecomp/releases/latest) and extract it. |
-| **2** | Open `DisruptorLauncher.exe` and drop your **Disruptor (USA, SLUS-00224)** disc image on it. |
+| **1** | Download **DisruptorRecomp-win-Setup.exe** from [Releases](https://github.com/RecompTeam/DisruptorRecomp/releases) and run it. Or unpack **DisruptorRecomp-win-Portable.zip** and run `Disruptor Recompiled.exe`, without installing. On Linux: **DisruptorRecomp.AppImage**, made executable. |
+| **2** | Drop your **Disruptor (USA, SLUS-00224)** disc image on the launcher it opens. |
 | **3** | Press **Play**. |
 
 No game data is included. A French, German or Japanese disc of yours can give the game its language.
@@ -93,7 +93,7 @@ No game data is included. A French, German or Japanese disc of yours can give th
 <details>
 <summary><b>Build from source</b></summary>
 
-Git, Python 3.10+, CMake 3.20+ and Visual Studio's **Desktop development with C++**, and your disc's files in `input/`
+Git, Python 3.11+, CMake 3.24+ and Visual Studio's **Desktop development with C++**, and your disc's files in `input/`
 ([DISC.md](docs/DISC.md)). From an x64 developer PowerShell:
 
 ```powershell

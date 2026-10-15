@@ -180,9 +180,12 @@ require(
     "a disc image is opened on the worker only: one on a share that is gone must not stall the window",
 )
 require(
-    '        SetEnvironmentVariableW(L"PSX_DISRUPTOR_LANGUAGE_DISC", nullptr);' in window
+    '        platform::unset("PSX_DISRUPTOR_LANGUAGE_DISC");' in window
     and window.count("PSX_DISRUPTOR_LANGUAGE_DISC") == 1
-    and "    if (WaitForSingleObject(process_, 0) != WAIT_OBJECT_0) return std::nullopt;" in window
+    and "    if (WaitForSingleObject(state_->process.get(), static_cast<DWORD>(most.count())) != WAIT_OBJECT_0) return std::nullopt;"
+    in read("src/launcher/platform_windows.cpp")
+    and "std::optional<int> Process::ended() { return wait(std::chrono::milliseconds(0)); }" in read("src/launcher/platform_windows.cpp")
+    and "    const std::optional<int> code = process_->ended();\n" in window
     and "code != STILL_ACTIVE" not in window,
     "Play must start from the file as it is, the language disc reaches the game through settings.toml alone, "
     "and the game's end is asked of its handle: 259 is an exit code too",
@@ -223,19 +226,23 @@ require(
     in report
     and '        if (present) write(folder / name, without_user_names(end_of(root / name)));\n' in report
     and '    write(folder / "system.txt", without_user_names(note));\n' in report
-    and "    if (!archive || !run_tar(folder, zip)) {\n        fs::remove(zip, failed);\n        return {folder, false};\n    }\n"
+    and "    if (!archive || !write_zip(folder, zip)) {\n        fs::remove(zip, failed);\n        return {folder, false};\n    }\n"
     "    fs::remove_all(folder, failed);\n    return {zip, true};\n" in report
     and '    std::string note = "Disruptor Recompiled " DISRUPTOR_BUILD_VERSION "\\r\\n";\n' in report
-    and '    note += "Windows: " + windows_name(windows_value(L"ProductName"), windows_value(L"CurrentBuildNumber")) + ", version " +\n' in report,
+    and "    for (const std::string& line : platform::system_lines()) note += line + \"\\r\\n\";\n" in report
+    and '    lines.push_back("Windows: " + windows_name(registry_text(L"ProductName"), registry_text(L"CurrentBuildNumber")) + ", version " +\n'
+    in read("src/launcher/platform_windows.cpp"),
     "a report takes the game's log of two runs, the mouse log and the settings, each with user names cut out, and a note "
-    "of the system: one ZIP where Windows' tar makes it, with no folder and no half-made ZIP left beside it",
+    "of the system: one ZIP the launcher writes itself, with no folder and no half-made ZIP left beside it",
 )
 require(
-    '    fs::rename(data / "startup.log", data / "startup.previous.log", kept);\n'
-    '    HANDLE log = CreateFileW((data / "startup.log").c_str(), GENERIC_WRITE, FILE_SHARE_READ,\n' in window
-    and '        if (!line.empty()) heading += "launcher: " + std::string(line.begin(), line.end()) + "\\r\\n";\n'
-    "    DWORD written = 0;\n"
-    "    WriteFile(log, heading.data(), static_cast<DWORD>(heading.size()), &written, nullptr);\n" in window
+    '    fs::rename(data / "startup.log", data / "startup.previous.log", kept);\n' in window
+    and '    launch.output = data / "startup.log";\n' in window
+    and '        if (!line.empty()) launch.heading += "launcher: " + std::string(line.begin(), line.end()) + "\\r\\n";\n'
+    in window
+    and "        WriteFile(output.get(), launch.heading.data(), static_cast<DWORD>(launch.heading.size()), &written, nullptr);\n"
+    in read("src/launcher/platform_windows.cpp")
+    and "write(output, launch.heading.data(), launch.heading.size())" in read("src/launcher/platform_posix.cpp")
     and '    if (small(icon::bug, "Report a problem", true, "Saves the game\'s logs, your settings and a note of the system for a bug report."))\n'
     '        session_.make_problem_report();\n' in window
     and "void Session::make_problem_report() {\n    try {\n"
@@ -287,7 +294,7 @@ require(
     and '"disruptor: capsule: %zu frames in %s (%s)\\n"' in read("src/game/session/capsule.cpp")
     and 'rest.starts_with(" frames in ") && rest.ends_with(" (the asked length)")' in upgrade
     and 'std::getenv("PSX_HIDDEN_WINDOW")' in read("psxrecomp/runtime/src/main.cpp")
-    and '{L"PSX_HIDDEN_WINDOW", L"1"}' in upgrade,
+    and '{"PSX_HIDDEN_WINDOW", "1"}' in upgrade,
     "the launcher reads and restamps a save state by the header boot_state.c writes, and judges a trial by the lines "
     "the game prints when it loads a slot and when a recording ends, with the game's window hidden",
 )
@@ -329,8 +336,8 @@ require(
     and 'case Copy::portable: return (folder_of(program).parent_path() / "data").lexically_normal();' in folder
     and 'kind(root / ".portable") == fs::file_type::not_found ? Copy::installed : Copy::portable' in folder
     and "const fs::path data = disruptor::user_folder::prepare(program);" in window
-    and 'const std::pair<std::wstring, std::wstring> folder{L"PSX_USER_DIR", data.wstring()};' in window
-    and '{L"PSX_USER_DIR", trial.wstring()},' in upgrade
+    and 'launch.environment = platform::with(platform::environment(), {{"PSX_USER_DIR", utf8(data)}});' in window
+    and '{{"PSX_USER_DIR", utf8(trial)},' in upgrade
     and 'const fs::path trial = data / "cache" / "state-trial";' in upgrade
     and "carry" not in launcher_cmake
     and not (ROOT / "src/launcher/carry.cpp").exists(),

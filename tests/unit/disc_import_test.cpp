@@ -1,13 +1,17 @@
 #include "disc_import.h"
+#ifdef _WIN32
 #include <windows.h>
+#endif
 
 #include <atomic>
 #include <chrono>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace fs = std::filesystem;
 using namespace disruptor::launcher;
@@ -59,6 +63,7 @@ int main() {
         {
             auto verified = verify_disc(cue, cancelled, {}, fixture);
             require(verified.profile == &fixture[0], "known SHA-256 was not recognized");
+#ifdef _WIN32
             HANDLE writer = CreateFileW(source.c_str(), GENERIC_WRITE, FILE_SHARE_READ,
                 nullptr, OPEN_EXISTING, 0, nullptr);
             if (writer != INVALID_HANDLE_VALUE) CloseHandle(writer);
@@ -67,6 +72,7 @@ int main() {
                 nullptr, OPEN_EXISTING, 0, nullptr);
             if (writer != INVALID_HANDLE_VALUE) CloseHandle(writer);
             require(writer == INVALID_HANDLE_VALUE, "verified CUE must remain locked against writes");
+#endif
         }
         const auto package = root / fs::path(u8"Build with spaces ü 日本");
         {
@@ -146,6 +152,28 @@ int main() {
         for (const auto& entry : fs::directory_iterator(destination.parent_path()))
             if (entry.path().filename().string().starts_with(".previous-")) ++backup_count;
         require(backup_count == 1, "reimporting verified data created an unnecessary backup");
+        // Python's hashlib gave these: lengths around the 64-byte block and its 56-byte padding limit, and past the
+        // 1 MiB a read takes.
+        constexpr std::pair<std::uint64_t, const char*> vectors[] = {
+            {0, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
+            {55, "8aa994584139d128848eeebc4e815639ba5ab6e6e39574195a63ac4f14f7c43b"},
+            {56, "ad574708f75c044c9b85de64cb568ee7711ff4f36448c6242f053ba8f6cc2b63"},
+            {63, "280ed3e8ff1df845b2e7dfe6ac6cee817bef20e783cc65abc41b818b4d2fe076"},
+            {64, "c6ab9724ade5b6a7a1edfffb12f3aa9181351355af8fd08c919952ad211339dd"},
+            {65, "788367c73c7ddf4c53f65e68cc0d943e6227ab55b0e78ba63ace822b1c6301c0"},
+            {119, "3d610547d68216dedf7435a4fb6260353911f6b3fd3f18805ddb8be285d726fe"},
+            {120, "1f80156a804cb7862ad113e8200e9d74499723e7c7854d5f48776d3148e09656"},
+            {1048577, "0d09f3eabb5c78e5d435c41e3b3755f1c4d038657f739d0be0083c24e71235df"},
+        };
+        for (const auto& [length, digest] : vectors) {
+            std::string bytes(static_cast<size_t>(length), '\0');
+            for (size_t at = 0; at < bytes.size(); ++at) bytes[at] = static_cast<char>((at * 31 + 7) % 256);
+            const auto image = root / ("vector-" + std::to_string(length) + ".bin");
+            write(image, bytes);
+            const DiscProfile profile[] = {{"TEST-VECTOR", L"Vector", length, digest, L"game.toml"}};
+            require(verify_disc(image, cancelled, {}, profile).profile == &profile[0],
+                    "SHA-256 must match hashlib at every block boundary");
+        }
         fs::remove_all(root);
         std::cout << "Disc verification, CUE parsing, import, cancellation, repair and Unicode tests passed\n";
         return 0;

@@ -35,8 +35,9 @@ bool shipped(const Option& option);
 bool experimental(const Option& option);
 std::span<const wchar_t* const> page_labels();
 
-// Bytes that are not UTF-8 come out as U+FFFD.
+// Bytes that are not UTF-8 come out as U+FFFD, a lone surrogate going back the same way.
 std::wstring wide(std::string_view utf8_text);
+std::string narrow(std::wstring_view text);
 std::string utf8(const std::filesystem::path& path);
 std::filesystem::path from_utf8(const std::string& text);
 // The PSX_ variables of this process, which the game it starts lets replace settings for that run.

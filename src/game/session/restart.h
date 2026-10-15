@@ -5,8 +5,8 @@
 extern "C" {
 #endif
 
-/* Makes this program start again, with the command line it was started with, when it exits. 1 when armed, 0 where
- * a program cannot start itself again. The caller then closes the game the way a window close does. */
+/* Makes this program start again, with the command line it was started with, when it exits. 1 when armed, 0 when
+ * it cannot be. The caller then closes the game the way a window close does. */
 int disruptor_restart_arm(void);
 
 /* 1 in a program that a restart started. It waited for the one before it to end before anything else ran. */

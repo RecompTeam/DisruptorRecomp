@@ -1,9 +1,10 @@
 #include "state_upgrade.h"
 
 #include "game_process.h"
+#include "launcher_flow.h"
+#include "launcher_settings.h"
+#include "platform.h"
 #include "state_stamp.h"
-
-#include <windows.h>
 
 #include <algorithm>
 #include <array>
@@ -22,22 +23,8 @@ namespace disruptor::launcher {
 
 namespace {
 
-constexpr DWORD trial_milliseconds = 90000;
+constexpr std::chrono::milliseconds trial_time{90000};
 constexpr std::size_t asked_frames = 60;
-
-class Handle {
-public:
-    explicit Handle(HANDLE value = nullptr) : value_(value == INVALID_HANDLE_VALUE ? nullptr : value) {}
-    ~Handle() {
-        if (value_) CloseHandle(value_);
-    }
-    Handle(const Handle&) = delete;
-    Handle& operator=(const Handle&) = delete;
-    HANDLE get() const { return value_; }
-
-private:
-    HANDLE value_;
-};
 
 // A line of tried.txt: the state's path and contents, and the build that refused it.
 std::string tried_line(const fs::path& saves, const SavedState& state, std::string_view bytes) {
@@ -100,18 +87,15 @@ bool keep_original(const fs::path& saves, const Waiting& waiting) {
 
 // This process's environment with the switches of an unattended run: the trial folder as the player's files, no
 // window, no sound, slot 0 loaded at once and a second of play recorded, after which the game ends by itself.
-std::wstring trial_environment(const fs::path& trial) {
-    const std::array<std::pair<std::wstring, std::wstring>, 6> given = {{
-        {L"PSX_USER_DIR", trial.wstring()},
-        {L"PSX_HIDDEN_WINDOW", L"1"},
-        {L"SDL_AUDIODRIVER", L"dummy"},
-        {L"PSX_HEADLESS", L"1"},
-        {L"PSX_LOAD_SLOT", L"0"},
-        {L"PSX_DISRUPTOR_CAPSULE_RECORD", std::to_wstring(asked_frames)},
-    }};
-    constexpr std::array<const wchar_t*, 3> dropped = {
-        L"PSX_DISRUPTOR_CAPSULE_REPLAY", L"PSX_DISRUPTOR_CAPSULE_FRAMES", L"PSX_DISRUPTOR_LANGUAGE_DISC"};
-    return environment_block(given, dropped);
+platform::Variables trial_environment(const fs::path& trial) {
+    return platform::with(platform::environment(),
+                          {{"PSX_USER_DIR", utf8(trial)},
+                           {"PSX_HIDDEN_WINDOW", "1"},
+                           {"SDL_AUDIODRIVER", "dummy"},
+                           {"PSX_HEADLESS", "1"},
+                           {"PSX_LOAD_SLOT", "0"},
+                           {"PSX_DISRUPTOR_CAPSULE_RECORD", std::to_string(asked_frames)}},
+                          {"PSX_DISRUPTOR_CAPSULE_REPLAY", "PSX_DISRUPTOR_CAPSULE_FRAMES", "PSX_DISRUPTOR_LANGUAGE_DISC"});
 }
 
 // The length of the recording the run ended with, from capsule.cpp's line `disruptor: capsule: <N> frames in <folder>
@@ -139,59 +123,37 @@ struct TrialRun {
 
 TrialRun run_trial(const fs::path& program, const fs::path& trial, const VerifiedDisc& disc,
                    const std::atomic_bool& cancelled) {
-    std::wstring command = game_command(program, disc) + L" --memcard-dir saves";
-    SECURITY_ATTRIBUTES security{sizeof(security), nullptr, TRUE};
-    const fs::path log_path = trial / "run.log";
-    std::wstring environment = trial_environment(trial);
-    PROCESS_INFORMATION process{};
-    {
-        const Handle log(CreateFileW(log_path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, &security, CREATE_ALWAYS,
-                                     FILE_ATTRIBUTE_NORMAL, nullptr));
-        const Handle input(CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &security, OPEN_EXISTING,
-                                       FILE_ATTRIBUTE_NORMAL, nullptr));
-        if (!log.get() || !input.get()) return {Verdict::unknown, "its log could not be written"};
-        STARTUPINFOW startup{};
-        startup.cb = sizeof(startup);
-        startup.dwFlags = STARTF_USESTDHANDLES;
-        startup.hStdInput = input.get();
-        startup.hStdOutput = startup.hStdError = log.get();
-        if (!CreateProcessW(nullptr, command.data(), nullptr, nullptr, TRUE,
-                            CREATE_NO_WINDOW | CREATE_UNICODE_ENVIRONMENT | CREATE_SUSPENDED, environment.data(),
-                            trial.c_str(), &startup, &process))
-            return {Verdict::unknown, "the game did not start"};
+    platform::Launch launch;
+    launch.executable = platform::game_executable(program);
+    launch.arguments = game_arguments(program, disc);
+    launch.arguments.insert(launch.arguments.end(), {"--memcard-dir", "saves"});
+    launch.folder = trial;
+    launch.environment = trial_environment(trial);
+    launch.output = trial / "run.log";
+    launch.ends_with_launcher = true;
+    std::unique_ptr<platform::Process> game;
+    try {
+        game = std::make_unique<platform::Process>(launch);
+    } catch (const std::system_error&) {
+        return {Verdict::unknown, "the game did not start"};
     }
-    const Handle game(process.hProcess);
-    const Handle thread(process.hThread);
-    // The job ends the trial's game with the launcher, should the launcher itself end first.
-    const Handle job(CreateJobObjectW(nullptr, nullptr));
-    JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
-    limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-    const bool held = job.get() &&
-                      SetInformationJobObject(job.get(), JobObjectExtendedLimitInformation, &limits, sizeof(limits)) &&
-                      AssignProcessToJobObject(job.get(), game.get());
-    if (!held) {
-        const bool ended = TerminateProcess(game.get(), 1) && WaitForSingleObject(game.get(), 10000) == WAIT_OBJECT_0;
-        return {ended ? Verdict::unknown : Verdict::stuck, "the game could not be held to the launcher's life"};
-    }
-    ResumeThread(thread.get());
-    DWORD waited = 0;
-    while (WaitForSingleObject(game.get(), 100) == WAIT_TIMEOUT) {
-        waited += 100;
-        if (!cancelled && waited < trial_milliseconds) continue;
-        const bool ended = TerminateJobObject(job.get(), 1) && WaitForSingleObject(game.get(), 10000) == WAIT_OBJECT_0;
-        if (!ended) return {Verdict::stuck, "the game could not be stopped"};
+    std::chrono::milliseconds waited{0};
+    std::optional<int> ended;
+    while (!(ended = game->wait(std::chrono::milliseconds(100)))) {
+        waited += std::chrono::milliseconds(100);
+        if (!cancelled && waited < trial_time) continue;
+        if (!game->stop()) return {Verdict::stuck, "the game could not be stopped"};
         return {Verdict::unknown, cancelled ? "cancelled" : "the game did not end within 90 seconds"};
     }
-    DWORD code = 1;
-    GetExitCodeProcess(game.get(), &code);
-    const auto log = read_whole(log_path);
+    const auto code = static_cast<unsigned>(*ended);
+    const auto log = read_whole(launch.output);
     if (!log) return {Verdict::unknown, "its log could not be read"};
     // Only the game's own word is a refusal: a run that ends before it says either is tried again.
     if (log->find("savestate: LOAD FAILED slot 0") != std::string::npos) return {Verdict::refused, "the game did not load it"};
     if (log->find("savestate: LOADED slot 0") == std::string::npos)
-        return {Verdict::unknown, std::format("the game ended before it loaded a state, code 0x{:08X}", static_cast<unsigned>(code))};
+        return {Verdict::unknown, std::format("the game ended before it loaded a state, code 0x{:08X}", code)};
     if (code != 0 || recorded_frames(*log) < asked_frames)
-        return {Verdict::refused, std::format("the game stopped after loading it, code 0x{:08X}", static_cast<unsigned>(code))};
+        return {Verdict::refused, std::format("the game stopped after loading it, code 0x{:08X}", code)};
     return {Verdict::ran, {}};
 }
 

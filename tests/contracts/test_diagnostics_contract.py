@@ -131,12 +131,12 @@ require(
     and "    return fs::is_regular_file(fs::symlink_status(file, missing));\n" in report
     and '    const std::optional<std::int64_t> began = run_began(root / "startup.log");\n    if (began)\n' in report
     and 'std::string started_line() { return std::string(started) + utc_now() + "\\r\\n"; }\n' in report
-    and "    std::string heading = started_line();\n" in window
+    and "    launch.heading = started_line();\n" in window
     and "    if (found.size() > most_freeze_dumps) found.resize(most_freeze_dumps);\n" in report
-    and '        note += narrow(name.native()) + ": " + (present ? listed(root / name) : "none") + "\\r\\n";\n' in report
+    and '        note += utf8(name) + ": " + (present ? listed(root / name) : "none") + "\\r\\n";\n' in report
     and '    write(folder / "system.txt", without_user_names(note));\n' in report
-    and "    : process_(start_game(program, data, disc)), started_(GetTickCount64()) {}\n" in window
-    and "unsigned long long GameProcess::seconds() const { return (GetTickCount64() - started_) / 1000; }\n" in window
+    and "    : process_(start_game(program, data, disc)), started_(std::chrono::steady_clock::now()) {}\n" in window
+    and "        std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - started_).count());\n" in window
     and "        game_ = std::make_unique<GameProcess>(program_, data_, verified_);\n" in window
     and '    note_exit(data_ / "startup.log", code, seconds);\n' in window
     and '"%slauncher: the game ended with code 0x%08lX after %llu s\\r\\n"' in log,

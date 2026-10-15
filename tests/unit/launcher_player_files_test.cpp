@@ -1,6 +1,8 @@
 #include "launcher/player_files.h"
 
+#ifdef _WIN32
 #include <windows.h>
+#endif
 
 #include <algorithm>
 #include <atomic>
@@ -178,6 +180,7 @@ void test_bringing_over() {
                read(data / "backups" / "replaced-20261015-090000" / "settings.toml") == "my settings",
            "every bringing keeps its own folder of what it replaced, the same stamp included, and none is pruned");
 
+#ifdef _WIN32
     HANDLE held = CreateFileW((data / "keybinds.ini").c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
     const std::string failed = thrown([&] { bring_over(copy, data, "20261015-110000", cancelled, {}); });
     if (held != INVALID_HANDLE_VALUE) CloseHandle(held);
@@ -187,6 +190,7 @@ void test_bringing_over() {
     bring_over(copy, data, "20261015-110000", cancelled, {});
     expect(fs::exists(data / ".bring-20261015-110000" / "keybinds.ini") && !fs::exists(data / ".bring-20261015-110000-2"),
            "a later bringing with the same stamp leaves that staging folder alone and cleans up its own");
+#endif
     fs::remove_all(root);
 }
 

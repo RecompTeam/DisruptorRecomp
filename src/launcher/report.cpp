@@ -1,18 +1,19 @@
 #include "report.h"
 
-#include <windows.h>
+#include "launcher_settings.h"
+#include "platform.h"
 
 #include <algorithm>
 #include <array>
 #include <cctype>
 #include <charconv>
+#include <chrono>
 #include <cstdint>
-#include <cstdio>
 #include <ctime>
+#include <format>
 #include <fstream>
 #include <functional>
 #include <optional>
-#include <set>
 #include <stdexcept>
 #include <system_error>
 #include <utility>
@@ -28,10 +29,12 @@ namespace {
 
 constexpr std::array<const char*, 6> gathered = {"startup.log", "startup.previous.log", "disruptor-mouse-aim.log", "settings.toml",
                                                  "psx_last_run_report.json", "psx_freeze_heartbeat.json"};
-constexpr std::wstring_view freeze_dump = L"psx_freeze_dump_";
+constexpr std::string_view freeze_dump = "psx_freeze_dump_";
 constexpr size_t most_freeze_dumps = 2;
 constexpr std::string_view started = "launcher: started ";
 constexpr std::streamoff most_bytes = 4 * 1024 * 1024;  // of a log's end: GitHub takes attachments of 25 MB
+// Folders whose next part is a user's name: Windows' C:\Users\<name>, Linux's /home/<name>, macOS's /Users/<name>.
+constexpr std::array<std::string_view, 2> user_parents = {"users", "home"};
 
 bool separates(char letter) { return letter == '\\' || letter == '/'; }
 
@@ -51,56 +54,100 @@ std::string end_of(const fs::path& file) {
 void write(const fs::path& file, std::string_view text) {
     std::ofstream output(file, std::ios::binary);
     output.write(text.data(), static_cast<std::streamsize>(text.size()));
-    if (!output) throw std::runtime_error("Cannot write the report. Put the extracted build in a writable Games folder.");
+    if (!output) throw std::runtime_error("Cannot write the report. Check that the folder of your files can be written.");
 }
 
-bool run_tar(const fs::path& folder, const fs::path& archive) {
-    std::wstring system(MAX_PATH, L'\0');
-    system.resize(GetSystemDirectoryW(system.data(), MAX_PATH));
-    const fs::path tar = fs::path(system) / "tar.exe";
-    std::error_code missing;
-    if (!fs::exists(tar, missing)) return false;
-    std::wstring command = L"\"" + tar.wstring() + L"\" -a -c -f \"" + archive.filename().wstring() + L"\" \"" +
-                           folder.filename().wstring() + L"\"";
-    STARTUPINFOW startup{};
-    startup.cb = sizeof(startup);
-    PROCESS_INFORMATION process{};
-    if (!CreateProcessW(tar.c_str(), command.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr,
-                        folder.parent_path().c_str(), &startup, &process))
-        return false;
-    DWORD code = 1;
-    const bool ended = WaitForSingleObject(process.hProcess, 60000) == WAIT_OBJECT_0;
-    if (ended) GetExitCodeProcess(process.hProcess, &code);
-    else if (TerminateProcess(process.hProcess, 1)) WaitForSingleObject(process.hProcess, 5000);  // its half-made ZIP is open until it is gone
-    CloseHandle(process.hThread);
-    CloseHandle(process.hProcess);
-    std::error_code unreadable;
-    return ended && code == 0 && fs::file_size(archive, unreadable) > 0 && !unreadable;
+std::uint32_t crc32(std::string_view bytes) {
+    std::uint32_t crc = 0xFFFFFFFFu;
+    for (const char byte : bytes) {
+        crc ^= static_cast<unsigned char>(byte);
+        for (int bit = 0; bit < 8; ++bit) crc = (crc >> 1) ^ (0xEDB88320u & (0u - (crc & 1u)));
+    }
+    return ~crc;
 }
 
-std::string narrow(std::wstring_view text) {
-    if (text.empty()) return {};
-    const int size = WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), nullptr, 0, nullptr, nullptr);
-    std::string out(static_cast<size_t>(std::max(size, 0)), '\0');
-    WideCharToMultiByte(CP_UTF8, 0, text.data(), static_cast<int>(text.size()), out.data(), size, nullptr, nullptr);
-    return out;
+void put16(std::string& out, std::uint32_t value) {
+    out.push_back(static_cast<char>(value & 0xFF));
+    out.push_back(static_cast<char>((value >> 8) & 0xFF));
 }
 
-std::string utc_text(const SYSTEMTIME& time) {
-    std::array<char, 40> text{};
-    std::snprintf(text.data(), text.size(), "%04u-%02u-%02u %02u:%02u:%02u UTC", time.wYear, time.wMonth, time.wDay,
-                  time.wHour, time.wMinute, time.wSecond);
-    return text.data();
+void put32(std::string& out, std::uint32_t value) {
+    put16(out, value & 0xFFFF);
+    put16(out, value >> 16);
+}
+
+// The report's folder as a ZIP of stored files under the folder's own name, as every system's file manager opens.
+bool write_zip(const fs::path& folder, const fs::path& archive) {
+    std::vector<fs::path> files;
+    std::error_code failed;
+    for (fs::directory_iterator entry(folder, failed), end; !failed && entry != end; entry.increment(failed))
+        if (entry->is_regular_file(failed)) files.push_back(entry->path());
+    if (failed) return false;
+    std::ranges::sort(files);
+    const std::time_t now = std::time(nullptr);
+    std::tm local{};
+#ifdef _WIN32
+    localtime_s(&local, &now);
+#else
+    localtime_r(&now, &local);
+#endif
+    const std::uint32_t dos_time = static_cast<std::uint32_t>((local.tm_hour << 11) | (local.tm_min << 5) | (local.tm_sec / 2));
+    const std::uint32_t dos_date = static_cast<std::uint32_t>(((std::max(local.tm_year, 80) - 80) << 9) | ((local.tm_mon + 1) << 5) | local.tm_mday);
+    std::string zip, directory;
+    for (const fs::path& file : files) {
+        std::ifstream input(file, std::ios::binary);
+        const std::string bytes{std::istreambuf_iterator<char>(input), std::istreambuf_iterator<char>()};
+        if (!input && !input.eof()) return false;
+        const std::string name = utf8(folder.filename()) + "/" + utf8(file.filename());
+        const std::uint32_t crc = crc32(bytes), size = static_cast<std::uint32_t>(bytes.size()), offset = static_cast<std::uint32_t>(zip.size());
+        std::string header;
+        put32(header, 0x04034B50);
+        put16(header, 20);
+        put16(header, 0x0800);  // the name is UTF-8
+        put16(header, 0);       // stored
+        put16(header, dos_time);
+        put16(header, dos_date);
+        put32(header, crc);
+        put32(header, size);
+        put32(header, size);
+        put16(header, static_cast<std::uint32_t>(name.size()));
+        put16(header, 0);
+        zip += header + name + bytes;
+        put32(directory, 0x02014B50);
+        put16(directory, 20);
+        directory.append(header, 4, 26);
+        put16(directory, 0);
+        put16(directory, 0);
+        put16(directory, 0);
+        put32(directory, 0);
+        put32(directory, offset);
+        directory += name;
+    }
+    std::string end;
+    put32(end, 0x06054B50);
+    put32(end, 0);
+    put16(end, static_cast<std::uint32_t>(files.size()));
+    put16(end, static_cast<std::uint32_t>(files.size()));
+    put32(end, static_cast<std::uint32_t>(directory.size()));
+    put32(end, static_cast<std::uint32_t>(zip.size()));
+    put16(end, 0);
+    std::ofstream output(archive, std::ios::binary);
+    output << zip << directory << end;
+    output.close();
+    return static_cast<bool>(output);
+}
+
+std::string utc_text(std::chrono::system_clock::time_point time) {
+    return std::format("{:%Y-%m-%d %H:%M:%S} UTC", std::chrono::floor<std::chrono::seconds>(time));
 }
 
 std::string listed(const fs::path& file) {
-    WIN32_FILE_ATTRIBUTE_DATA found{};
-    if (!GetFileAttributesExW(file.c_str(), GetFileExInfoStandard, &found)) return "none";
-    SYSTEMTIME written{};
-    FileTimeToSystemTime(&found.ftLastWriteTime, &written);
-    const std::uint64_t bytes = (std::uint64_t{found.nFileSizeHigh} << 32) | found.nFileSizeLow;
-    return std::to_string(bytes) + " bytes, written " + utc_text(written) +
-           (bytes > static_cast<std::uint64_t>(most_bytes) ? ", its end taken" : "");
+    std::error_code failed;
+    const std::uintmax_t bytes = fs::file_size(file, failed);
+    const fs::file_time_type written = fs::last_write_time(file, failed);
+    if (failed) return "none";
+    return std::to_string(bytes) + " bytes, written " + utc_text(std::chrono::clock_cast<std::chrono::system_clock>(written)) +
+           (bytes > static_cast<std::uintmax_t>(most_bytes) ? ", its end taken" : "");
 }
 
 bool plain_file(const fs::path& file) {
@@ -122,27 +169,25 @@ std::optional<std::int64_t> run_began(const fs::path& log) {
             if (digit < '0' || digit > '9') return std::nullopt;
             parts[part] = parts[part] * 10 + (digit - '0');
         }
-    std::tm time{};
-    time.tm_year = parts[0] - 1900;
-    time.tm_mon = parts[1] - 1;
-    time.tm_mday = parts[2];
-    time.tm_hour = parts[3];
-    time.tm_min = parts[4];
-    time.tm_sec = parts[5];
-    const std::int64_t began = _mkgmtime64(&time);
-    return began < 0 ? std::nullopt : std::optional(began);
+    const std::chrono::year_month_day day{std::chrono::year(parts[0]), std::chrono::month(static_cast<unsigned>(parts[1])),
+                                          std::chrono::day(static_cast<unsigned>(parts[2]))};
+    if (!day.ok() || parts[3] > 23 || parts[4] > 59 || parts[5] > 60) return std::nullopt;
+    const auto began = std::chrono::sys_days(day) + std::chrono::hours(parts[3]) + std::chrono::minutes(parts[4]) +
+                       std::chrono::seconds(parts[5]);
+    const std::int64_t seconds = began.time_since_epoch().count();
+    return seconds < 0 ? std::nullopt : std::optional(seconds);
 }
 
 // The unix time in a dump's name, which the framework writes as `psx_freeze_dump_<backend>_<seconds>.json`.
-std::optional<std::int64_t> dump_time(const std::wstring& name) {
-    constexpr std::wstring_view ending = L".json";
+std::optional<std::int64_t> dump_time(std::string_view name) {
+    constexpr std::string_view ending = ".json";
     if (!name.starts_with(freeze_dump) || !name.ends_with(ending)) return std::nullopt;
-    const size_t end = name.size() - ending.size(), under = name.rfind(L'_', end);
+    const size_t end = name.size() - ending.size(), under = name.rfind('_', end);
     if (under < freeze_dump.size() || end - under < 2 || end - under > 13) return std::nullopt;
     std::int64_t seconds = 0;
     for (size_t at = under + 1; at < end; ++at) {
-        if (name[at] < L'0' || name[at] > L'9') return std::nullopt;
-        seconds = seconds * 10 + (name[at] - L'0');
+        if (name[at] < '0' || name[at] > '9') return std::nullopt;
+        seconds = seconds * 10 + (name[at] - '0');
     }
     return seconds;
 }
@@ -153,7 +198,7 @@ std::vector<fs::path> freeze_dumps(const fs::path& root, std::int64_t began) {
     std::error_code failed;
     for (fs::directory_iterator entry(root, failed), end; !failed && entry != end; entry.increment(failed)) {
         const fs::path name = entry->path().filename();
-        const std::optional<std::int64_t> made = dump_time(name.native());
+        const std::optional<std::int64_t> made = dump_time(utf8(name));
         if (made && *made >= began && plain_file(entry->path())) found.emplace_back(*made, name);
     }
     std::ranges::sort(found, std::greater{});
@@ -163,32 +208,26 @@ std::vector<fs::path> freeze_dumps(const fs::path& root, std::int64_t began) {
     return names;
 }
 
-std::string windows_value(const wchar_t* name) {
-    std::array<wchar_t, 128> value{};
-    DWORD bytes = static_cast<DWORD>(sizeof(wchar_t) * (value.size() - 1));
-    if (RegGetValueW(HKEY_LOCAL_MACHINE, L"SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion", name, RRF_RT_REG_SZ, nullptr,
-                     value.data(), &bytes) != ERROR_SUCCESS)
-        return "?";
-    return narrow(value.data());
+bool user_parent_at(std::string_view text, size_t at, std::string_view folder) {
+    return at > 0 && separates(text[at - 1]) && text.size() - at > folder.size() &&
+           std::equal(folder.begin(), folder.end(), text.begin() + static_cast<std::ptrdiff_t>(at),
+                      [](char wanted, char found) { return std::tolower(static_cast<unsigned char>(found)) == wanted; }) &&
+           separates(text[at + folder.size()]);
 }
 
 } // namespace
 
 std::string without_user_names(std::string_view text) {
-    constexpr std::string_view folder = "users";
     std::string out;
     out.reserve(text.size());
     size_t at = 0;
     while (at < text.size()) {
-        const bool begins = at > 0 && separates(text[at - 1]) && text.size() - at > folder.size() &&
-                            std::equal(folder.begin(), folder.end(), text.begin() + static_cast<std::ptrdiff_t>(at),
-                                       [](char wanted, char found) { return std::tolower(static_cast<unsigned char>(found)) == wanted; }) &&
-                            separates(text[at + folder.size()]);
-        if (!begins) {
+        const auto parent = std::ranges::find_if(user_parents, [&](std::string_view folder) { return user_parent_at(text, at, folder); });
+        if (parent == user_parents.end()) {
             out += text[at++];
             continue;
         }
-        size_t name = at + folder.size();
+        size_t name = at + parent->size();
         while (name < text.size() && separates(text[name])) ++name;
         size_t end = name;
         while (end < text.size() && !separates(text[end]) && text[end] != '"' && text[end] != '\r' && text[end] != '\n') ++end;
@@ -202,7 +241,7 @@ std::string without_user_names(std::string_view text) {
 Report make_report(const fs::path& root, std::string_view system, std::string_view stamp, bool archive) {
     const fs::path folder = root / "reports" / ("disruptor-report-" + std::string(stamp));
     std::error_code failed;
-    fs::remove_all(folder, failed);  // one of the same second: what tar packs is what is written here and nothing older
+    fs::remove_all(folder, failed);  // one of the same second: what is packed is what is written here and nothing older
     fs::create_directories(folder, failed);
     std::vector<fs::path> names(gathered.begin(), gathered.end());
     const std::optional<std::int64_t> began = run_began(root / "startup.log");
@@ -214,12 +253,12 @@ Report make_report(const fs::path& root, std::string_view system, std::string_vi
     if (!began) note += "Freeze dumps: none taken, the log does not say when its run began\r\n";
     for (const fs::path& name : names) {
         const bool present = plain_file(root / name);
-        note += narrow(name.native()) + ": " + (present ? listed(root / name) : "none") + "\r\n";
+        note += utf8(name) + ": " + (present ? listed(root / name) : "none") + "\r\n";
         if (present) write(folder / name, without_user_names(end_of(root / name)));
     }
     write(folder / "system.txt", without_user_names(note));
     const fs::path zip = fs::path(folder).concat(".zip");
-    if (!archive || !run_tar(folder, zip)) {
+    if (!archive || !write_zip(folder, zip)) {
         fs::remove(zip, failed);
         return {folder, false};
     }
@@ -238,35 +277,22 @@ std::string windows_name(std::string_view product, std::string_view build) {
 
 std::string system_note() {
     std::string note = "Disruptor Recompiled " DISRUPTOR_BUILD_VERSION "\r\n";
-    note += "Windows: " + windows_name(windows_value(L"ProductName"), windows_value(L"CurrentBuildNumber")) + ", version " +
-            windows_value(L"DisplayVersion") + ", build " +
-            windows_value(L"CurrentBuildNumber") + "\r\n";
-    DEVMODEW mode{};
-    mode.dmSize = sizeof(mode);
-    if (EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &mode))
-        note += "Display: " + std::to_string(mode.dmPelsWidth) + " by " + std::to_string(mode.dmPelsHeight) + " at " +
-                std::to_string(mode.dmDisplayFrequency) + " Hz\r\n";
-    std::set<std::string> adapters;
-    DISPLAY_DEVICEW device{};
-    device.cb = sizeof(device);
-    for (DWORD index = 0; EnumDisplayDevicesW(nullptr, index, &device, 0); ++index)
-        if (device.StateFlags & DISPLAY_DEVICE_ATTACHED_TO_DESKTOP) adapters.insert(narrow(device.DeviceString));
-    for (const auto& adapter : adapters) note += "Graphics: " + adapter + "\r\n";
+    for (const std::string& line : platform::system_lines()) note += line + "\r\n";
     return note;
 }
 
-std::string utc_now() {
-    SYSTEMTIME now{};
-    GetSystemTime(&now);
-    return utc_text(now);
-}
+std::string utc_now() { return utc_text(std::chrono::system_clock::now()); }
 
 std::string started_line() { return std::string(started) + utc_now() + "\r\n"; }
 
 std::string report_stamp() {
     const std::time_t now = std::time(nullptr);
     std::tm local{};
+#ifdef _WIN32
     localtime_s(&local, &now);
+#else
+    localtime_r(&now, &local);
+#endif
     std::array<char, 32> text{};
     std::strftime(text.data(), text.size(), "%Y%m%d-%H%M%S", &local);
     return text.data();

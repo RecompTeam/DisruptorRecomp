@@ -11,19 +11,31 @@ project and share feedback.
 
 ### Install
 
-1. Download the Windows x64 ZIP from the
+1. Download **DisruptorRecomp-win-Setup.exe** from the
    [GitHub releases](https://github.com/RecompTeam/DisruptorRecomp/releases).
-   Take the Windows ZIP asset, not GitHub's source-code archives.
-2. Use **Extract All** and keep the extracted files together in a writable
-   folder, such as your Games folder.
-3. On Windows 10 or 11 x64, install the latest
-   [Microsoft Visual C++ x64 Redistributable](https://aka.ms/vc14/vc_redist.x64.exe)
-   if it is not installed yet. The graphics driver must support OpenGL 3.3.
+2. Run it. Windows may warn of an unknown publisher: press **More info**, then
+   **Run anyway**.
+3. Setup installs the game for your Windows user, puts shortcuts on the desktop
+   and in the Start menu, and opens the launcher. It installs the Microsoft
+   Visual C++ x64 Redistributable too when it is missing.
+
+To play without installing, download **DisruptorRecomp-win-Portable.zip**
+instead, unpack it into a folder of its own and run
+`Disruptor Recompiled.exe`. Your saves and settings stay in its `data` folder.
+It needs the
+[Microsoft Visual C++ x64 Redistributable](https://aka.ms/vc14/vc_redist.x64.exe).
+
+Windows 10 or 11 x64 and a graphics driver with OpenGL 3.3 are needed.
+
+On Linux x64, download **DisruptorRecomp.AppImage**, make it executable with
+`chmod +x DisruptorRecomp.AppImage` and run it. It needs glibc 2.35 or newer
+(Ubuntu 22.04, Debian 12, Fedora 36 and later) and OpenGL 3.3. Your saves and
+settings are kept in `~/.local/share/DisruptorRecompData`. The launcher updates
+the AppImage in place.
 
 ### Add your disc
 
-1. Double-click **DisruptorLauncher.exe**. **Play Disruptor.cmd** opens the
-   same launcher.
+1. Open **Disruptor Recompiled** from the desktop or the Start menu.
 2. Press **Choose file...** and pick your USA **MODE2/2352** CUE or BIN, or
    drop the image on the launcher's window.
 3. The launcher copies the image into `input/discs/SLUS-00224/` in the
@@ -53,6 +65,10 @@ If the game stops with an error, the launcher says so under its banner.
 **Help** in the side bar shows this guide, and F1 opens it.
 
 ### Older releases
+
+Releases up to alpha.5 came as a ZIP. Install the new release with its
+Setup.exe, then press **Bring saves...** in the side bar and choose the old
+folder: saves, settings, keys and the imported disc come over.
 
 Releases without `DisruptorLauncher.exe` are set up by hand: copy the BIN and
 CUE into `input/`, name the CUE `Disruptor (USA).cue` and run
@@ -260,9 +276,8 @@ replaces it:
 
 | Copy | Folder of your files |
 | --- | --- |
-| Installed by the updater | `%LOCALAPPDATA%\DisruptorRecompData` |
-| Portable copy of the updater | `data` beside its `current` folder |
-| Unzipped release or a build folder | the folder of the executable |
+| Installed by Setup | `%LOCALAPPDATA%\DisruptorRecompData` |
+| A ZIP of alpha.5 or earlier, or a build folder | the folder of the executable |
 
 - **Saves folder** in the launcher's side bar opens `saves/` there.
   **About** names the folder.
@@ -294,8 +309,10 @@ The launcher's home page says whether a newer release is out and offers to
 download and install it. **What's new** beside it, or **Update options**, and
 the version at the foot of the side bar open the **Updates** window: the
 release notes, this copy's version and **Check at start**, which looks for a
-newer release each time the launcher opens. A copy unzipped from a ZIP is
-updated by hand from the releases page.
+newer release each time the launcher opens. A portable copy is updated the same
+way, in its own folder, and only when you press the button. A copy unzipped
+from a ZIP of alpha.5 or older is updated by installing the new release with
+its Setup.exe.
 
 Below them the home page shows what is new: in this version, or in the next one
 once it is out. The notes come from [CHANGELOG.md](../CHANGELOG.md).
@@ -401,8 +418,9 @@ describe the replay tool and its limits.
 
 ## Troubleshooting
 
-- **Missing MSVCP140 or VCRUNTIME140 DLL:** install the latest x64 Visual C++
-  Redistributable linked in [Setup](#setup), then start again. See
+- **Missing MSVCP140 or VCRUNTIME140 DLL:** install the latest
+  [x64 Visual C++ Redistributable](https://aka.ms/vc14/vc_redist.x64.exe),
+  then start again. Setup installs it, a copy from an older ZIP does not. See
   Microsoft's
   [runtime download guidance](https://learn.microsoft.com/en-us/cpp/windows/latest-supported-vc-redist/).
 - **Disc not found:** open the launcher and choose your original image again.
