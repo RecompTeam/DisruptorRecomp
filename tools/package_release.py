@@ -195,6 +195,7 @@ def payload_of(build: Path, version: str, zstd_license: Path, platform: Platform
         "CHANGELOG.md": ROOT / "CHANGELOG.md",
         "bios/openbios.bin": build / "bios/openbios.bin",
         "bios/OpenBIOS.LICENSE": build / "bios/OpenBIOS.LICENSE",
+        "LICENSE.txt": ROOT / "LICENSE",
         "licenses/PSXRecomp-LICENSE.txt": ROOT / "licenses/PSXRecomp-LICENSE.txt",
         "licenses/Dear-ImGui-LICENSE.txt": ROOT / "licenses/Dear-ImGui-LICENSE.txt",
         "licenses/Velopack-LICENSE.txt": ROOT / "licenses/Velopack-LICENSE.txt",

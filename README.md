@@ -104,4 +104,4 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 [BUILD.md](docs/BUILD.md) has Linux, the generated code and the tests.
 </details>
 
-<sub>Built on <a href="https://github.com/mstan/psxrecomp">PSXRecomp</a>. Early alpha: the whole campaign is not tested yet. <a href="THIRD_PARTY_NOTICES.md">Third-party notices</a>.</sub>
+<sub>Built on <a href="https://github.com/mstan/psxrecomp">PSXRecomp</a>. Early alpha: the whole campaign is not tested yet. Our code is under the <a href="LICENSE">MIT License</a>. PSXRecomp is under <a href="licenses/PSXRecomp-LICENSE.txt">PolyForm Noncommercial 1.0.0</a>, so the built game is for noncommercial use. <a href="THIRD_PARTY_NOTICES.md">Third-party notices</a>.</sub>
