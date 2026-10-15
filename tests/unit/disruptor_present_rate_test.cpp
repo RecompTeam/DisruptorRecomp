@@ -1,7 +1,9 @@
 #include "../../src/game/frame/present_rate.h"
+#include "imgui.h"
 
 #include <cstdint>
 #include <cstdlib>
+#include <cstring>
 #include <iostream>
 #include <string>
 
@@ -106,7 +108,10 @@ bool SliderInt(const char *label, int *value, int lowest, int highest, const cha
     return g_slider.moved && g_slider.disabled == 0;
 }
 void TextDisabled(const char *text, ...) { g_slider.text = text; }
-void TextUnformatted(const char *text) { g_hint = text; }
+void TextUnformatted(const char *text, const char *end) { g_hint.assign(text, end ? end : text + std::strlen(text)); }
+void PopStyleColor(int) {}
+void PushStyleColor(int, const ImVec4 &) {}
+void SameLine(float, float) {}
 }  // namespace ImGui
 
 #include "../../src/game/frame/present_rate.cpp"

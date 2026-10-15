@@ -3,6 +3,7 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <cstring>
 #include <cwchar>
 
@@ -14,6 +15,7 @@
 #include <string>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace fs = std::filesystem;
 using namespace disruptor::launcher;
@@ -59,11 +61,6 @@ void table() {
             require(option(need).kind == Kind::toggle && &option(need) != &one, "a row needs no toggle");
         require(one.hint && std::strlen(one.hint) >= 20 && std::strlen(one.hint) <= 240, "a row has no hint to show");
     }
-    require(presets().size() == 2, "the two presets are expected");
-    for (const auto& preset : presets())
-        for (const auto& value : preset.values)
-            require(value.value >= option(value.key).lowest && value.value <= option(value.key).highest,
-                    "a preset sets a value outside its option");
 }
 
 // The in-game menu saves a staged value by get and set from one settings to another.
@@ -144,6 +141,36 @@ void antialiasing_from_file(const fs::path& folder) {
     }
 }
 
+void separate_vertical_from_file(const fs::path& folder) {
+    const Option& separate = option("disruptor.separate_vertical_speed");
+    const std::pair<const char*, int> files[] = {
+        {"[disruptor]\nvertical_sensitivity = 0.120\n", 1},
+        {"[disruptor]\nhorizontal_sensitivity = 0.200\nvertical_sensitivity = 0.200\n", 0},
+        {"[disruptor]\nhorizontal_sensitivity = 0.200\n", 0},
+        {"[disruptor]\nvertical_sensitivity = 0.080\n", 0},
+        {"[disruptor]\nvertical_sensitivity = 0.120\nseparate_vertical_speed = false\n", 0},
+        {"[disruptor]\nseparate_vertical_speed = true\n", 1},
+    };
+    for (const auto& [contents, shown] : files) {
+        const fs::path file = folder / "separate.toml";
+        write(file, contents);
+        SettingsFile settings(file);
+        require(settings.load() && settings.shown(separate) == shown,
+                "a file from before the switch keeps a vertical speed of its own where it set one unlike the "
+                "horizontal, and the switch once saved decides");
+    }
+    SettingsFile settings(folder / "separate.toml");
+    require(settings.load() && settings.set(separate, 1) && settings.shown(separate) == 1 &&
+                settings.set(separate, 0) && settings.shown(separate) == 0,
+            "the switch writes both ways");
+    const Option& horizontal = option("disruptor.horizontal_sensitivity");
+    write(folder / "separate.toml", "[disruptor]\nvertical_sensitivity = 0.120\n");
+    SettingsFile older(folder / "separate.toml");
+    require(older.load() && older.shown(separate) == 1 && older.set(horizontal, 120) && older.shown(separate) == 1 &&
+                older.set(horizontal, 150) && older.shown(separate) == 1 && has(folder / "separate.toml", "separate_vertical_speed = true"),
+            "a speed written once writes down the switch the older file implied, so the next speeds leave it");
+}
+
 void antialiasing_list() {
     const Option& list = option("disruptor.multisampling");
     require(list.kind == Kind::choice && list.initial == 0 && list.choices.size() == 9 &&
@@ -219,6 +246,23 @@ void placements() {
         require((std::string_view(row.key) == "disruptor.detailed_logging") == (row.page == Page::troubleshooting),
                 "the Troubleshooting page holds the detailed log's switch and nothing else");
     require(wide("caf\xC3\xA9") == L"café" && wide("").empty(), "an option's text is read as UTF-8");
+    const auto rows = layout();
+    for (std::size_t index = 0; index < rows.size(); ++index) {
+        if (!rows[index].child) continue;
+        const auto& needs = option(rows[index].key).needs;
+        bool found = false;
+        for (std::size_t above = index; above-- > 0 && rows[above].page == rows[index].page;) {
+            found = found || std::find(needs.begin(), needs.end(), std::string_view(rows[above].key)) != needs.end();
+            if (!rows[above].child) break;
+        }
+        require(!rows[index].group && found, "a child row stands under a row of its group that it needs");
+    }
+    std::vector<std::string> enhancements;
+    for (const auto& row : rows)
+        if (row.page == Page::enhancements) enhancements.emplace_back(row.key);
+    require(enhancements.size() == 12 && enhancements.front() == "disruptor.frame_unlock" && rows[5].group &&
+                std::string_view(rows[5].key) == "disruptor.frame_unlock",
+            "Enhancements opens with its frame rate group, 60 FPS gameplay first");
 }
 
 void absent(const fs::path& folder) {
@@ -355,29 +399,25 @@ void dependants(const fs::path& folder) {
     fs::remove(file);
 }
 
-void presets_and_reset(const fs::path& folder) {
+void reset_to_new(const fs::path& folder) {
     const fs::path file = folder / "settings.toml";
     SettingsFile settings(file);
-    require(settings.apply(presets()[1]), "the enhanced preset must be saved");
-    for (const char* key : {"disruptor.geometry_correction", "disruptor.perspective_textures",
-                            "disruptor.frame_unlock", "video.frame_interpolation", "video.aspect_ratio"})
-        require(settings.shown(option(key)) == 1, "the enhanced preset must switch its rows on");
-    require(has(file, "aspect_ratio      = \"16:9\"") && has(file, "adaptive_view     = false"), "enhanced is 16:9");
-    require(settings.set(option("disruptor.hud_scale"), 60) && settings.set(option("audio.master_volume"), 30),
+    require(settings.set(option("disruptor.hud_scale"), 60) && settings.set(option("audio.master_volume"), 30) &&
+                settings.set(option("disruptor.geometry_correction"), 0) && settings.set(option("video.aspect_ratio"), 1),
             "changes must be saved");
-    require(settings.apply(presets()[0]), "the original preset must be saved");
-    for (const char* key : {"disruptor.geometry_correction", "disruptor.perspective_textures",
-                            "disruptor.frame_unlock", "video.frame_interpolation", "video.aspect_ratio"})
-        require(settings.shown(option(key)) == 0, "the original preset must switch its rows off");
-    require(settings.shown(option("disruptor.hud_scale")) == 100 && settings.shown(option("audio.master_volume")) == 30 &&
-            has(file, "aspect_ratio      = \"4:3\""), "the original preset is 4:3 with a full HUD and leaves the volume");
 
-    require(settings.choose_language_disc(french) && settings.reset(), "a reset must be saved");
+    require(settings.choose_language_disc(french) && settings.reset(Page::display), "a reset must be saved");
+    require(settings.shown(option("disruptor.hud_scale")) == option("disruptor.hud_scale").initial &&
+                settings.shown(option("video.aspect_ratio")) == option("video.aspect_ratio").initial &&
+                settings.shown(option("audio.master_volume")) == 30 && settings.shown(option("disruptor.geometry_correction")) == 0,
+            "a reset of one page leaves the other pages as they were");
+    for (const auto& row : layout())
+        require(settings.reset(row.page), "every page can be reset");
     for (const auto& one : options())
         require(settings.shown(one) == (one.kind == Kind::slider && one.initial == 0 ? settings.highest(one) : one.initial),
-                "a reset must show what a new installation has");
+                "every page reset shows what a new installation has");
     require(has(file, "mouse_aim = true") && has(file, "master_volume = 100") && has(file, "frame_interpolation_fps = 0") &&
-            settings.language_disc() == french, "a reset writes every row and leaves the language");
+            settings.language_disc() == french, "a reset writes the page's rows and leaves the language");
     fs::remove(file);
 }
 
@@ -387,7 +427,7 @@ void unreadable(const fs::path& folder) {
     write(file, broken);
     SettingsFile settings(file);
     require(!settings.load() && !settings.readable(), "a file that is not TOML must be reported");
-    require(!settings.set(option("audio.muted"), 1) && !settings.reset() && !settings.apply(presets()[0]) &&
+    require(!settings.set(option("audio.muted"), 1) && !settings.reset(Page::audio) &&
             !settings.choose_language_disc(french) && !settings.forget_language_disc(french),
             "nothing may be saved over a file that could not be read");
     require(read(file) == broken, "the unreadable file must be left as it is");
@@ -553,7 +593,8 @@ void completed(const fs::path& folder) {
             "the window shows the completed file");
 
     write(file, "[disruptor]\nmouse_aim = true\nmodern_controls = true\nvertical_look = false\ngeometry_correction = false\n"
-                "perspective_textures = true\nframe_unlock = false\n\n[video]\nframe_interpolation = false\n");
+                "perspective_textures = true\nsmooth_fade = true\ndepth_sorted_world = true\nframe_unlock = false\n\n"
+                "[video]\nframe_interpolation = false\n");
     const std::string chosen = read(file);
     SettingsFile theirs(file);
     require(theirs.complete() && read(file) == chosen && theirs.shown(option("disruptor.geometry_correction")) == 0,
@@ -563,6 +604,20 @@ void completed(const fs::path& folder) {
     SettingsFile broken(file);
     require(!broken.complete() && read(file) == "[video\nbroken", "a file that is not TOML is left as it is");
     fs::remove(file);
+}
+
+// The game reads its saves folder from game.toml when settings.toml names none, as a release ships them.
+void saves_beside_game(const fs::path& folder) {
+    const fs::path source = DISRUPTOR_SOURCE_DIR;
+    const fs::path package = folder / "package";
+    fs::create_directories(package);
+    fs::copy_file(source / "game.toml", package / "game.toml", fs::copy_options::overwrite_existing);
+    fs::copy_file(source / "release/windows/settings.toml", package / "settings.toml", fs::copy_options::overwrite_existing);
+    SettingsFile settings(package / "settings.toml");
+    require(settings.load() && settings.saves_folder() == package / "saves", "the saves are where game.toml puts them");
+    write(package / "settings.toml", "[memcard]\ndir = \"cards\"\n");
+    require(settings.load() && settings.saves_folder() == package / "cards", "and settings.toml's own folder wins");
+    fs::remove_all(package);
 }
 
 // The game's own readers say what a new installation runs with: the table must start from the same values.
@@ -577,7 +632,7 @@ void shipped_values() {
         ++named;
         require(one.get(file) == one.initial, "a row starts from another value than the shipped settings.toml gives it");
     }
-    require(named == 7, "the shipped settings.toml names seven rows");
+    require(named == 9, "the shipped settings.toml names nine rows");
     const auto game = PSXRecompV4::load_game_config(source / "game.toml");
     Settings as_game;
     as_game.has_supersampling = as_game.has_aspect_ratio = true;
@@ -603,11 +658,13 @@ int main() {
         described();
         absent(folder);
         antialiasing_from_file(folder);
+        separate_vertical_from_file(folder);
         one_change(folder);
+        saves_beside_game(folder);
         round_trip(folder);
         whole_range(folder);
         dependants(folder);
-        presets_and_reset(folder);
+        reset_to_new(folder);
         unreadable(folder);
         aspects(folder);
         rates(folder);
@@ -616,7 +673,7 @@ int main() {
         log(folder);
         completed(folder);
         shipped_values();
-        std::cout << "Launcher settings, presets, language discs and log tail tests passed\n";
+        std::cout << "Launcher settings, reset, language discs and log tail tests passed\n";
     } catch (const std::exception& error) {
         std::cerr << "FAILED: " << error.what() << "\n";
         result = 1;

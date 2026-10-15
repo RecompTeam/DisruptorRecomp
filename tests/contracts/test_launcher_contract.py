@@ -13,10 +13,14 @@ NOT_OFFERED = {
     "video.renderer", "video.window_width", "video.antialiasing", "video.texture_filtering", "video.crt_filter",
     "video.auto_skip_fmv", "video.turbo_loads", "video.fast_boot", "video.bios_hle", "video.low_latency_input",
     "video.frame_interpolation_blend", "audio.spu_hq", "disruptor.diagnostic_view",
+    # Withdrawn for now on the user's word: the game keeps both off whatever the file says.
+    "disruptor.downscale_averaging", "disruptor.edge_smoothing",
+    # game.toml routes Player 1 to the keyboard and the first gamepad together, and locks the pad mode.
+    "controller.p1_device", "controller.p2_device", "controller.p1_mode", "controller.p2_mode",
 }
 # Keys written together with a launcher row, or by the language row.
 COVERED = {"video.adaptive_view", "disruptor.language_disc", "disruptor.language_discs", "disruptor.sample_shading"}
-SHOWN_SECTIONS = ("video", "audio", "disruptor")
+SHOWN_SECTIONS = ("video", "audio", "disruptor", "controller")
 UTF8_PAGE = '<activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>'
 
 
@@ -41,7 +45,8 @@ def plain_values(text: str) -> dict[str, str]:
 
 table = read("src/launcher/launcher_settings.cpp")
 options = read("src/game/settings/options.cpp")
-window = read("src/launcher/main.cpp")
+window = "".join(read(f"src/launcher/{name}") for name in ("main.cpp", "session.h", "session.cpp", "view.cpp", "game_process.cpp"))
+session = read("src/launcher/session.cpp")
 region = read("src/launcher/region_disc.cpp")
 launcher_cmake = read("src/launcher/CMakeLists.txt")
 cmake = read("CMakeLists.txt")
@@ -54,11 +59,11 @@ rows = re.findall(ROW, options)
 keys = [key for _, key, _, _ in rows]
 initial = {key: int(value) for _, key, _, value in rows}
 require(len(rows) == 31 and len(set(keys)) == 31, "the shared table must hold its 31 options, each key once")
-placed = re.findall(r'^    \{"([\w.]+)", Page::\w+\},$', table, re.MULTILINE)
+placed = re.findall(r'^    \{"([\w.]+)", Page::\w+(?:, (?:"[\w ]+"|nullptr)(?:, true)?)?\},$', table, re.MULTILINE)
 require(
     sorted(placed) == sorted(keys)
     and not re.findall(ROW, table)
-    and '    "${PROJECT_SOURCE_DIR}/src/game/settings/options.cpp")\n' in launcher_cmake
+    and '    "${PROJECT_SOURCE_DIR}/src/game/settings/options.cpp"\n' in launcher_cmake
     and "std::span<const Placement> layout() { return placed; }\n" in table
     and "    for (const auto& placement : layout()) {\n        const Option& option = *find_option(placement.key);\n" in window,
     "the launcher puts each shared option on one page and describes none itself",
@@ -150,22 +155,22 @@ require(
     "    if (!known_disc(other, known))" in region and "    if (!laid_out.build(home, other, why))" in region,
     "a language disc must be checked with the game's own layout code",
 )
-worker = window[window.index("        worker = std::thread(") : window.index("    void take_image(")]
+worker = session[session.index("    worker_ = std::thread(") : session.index("void Session::finish(")]
 require(
-    "auto outcome = std::make_unique<Outcome>(run(std::move(request), discs, cancelled));" in worker
-    and "        Step step = after(*outcome, app->cancelled);" in window
-    and "        app->regions = std::move(outcome->regions);" in window,
+    "auto outcome = std::make_unique<Outcome>(run(std::move(request), discs, cancelled_));" in worker
+    and "    Step step = after(outcome, cancelled_);" in window
+    and "    regions_ = std::move(outcome.regions);" in window,
     "what a task does and what the window does with its outcome are the flow module's, where they are tested",
 )
 require(
-    "            app->begin(Task::import, outcome->image, outcome->launch);\n            return 0;" in window
-    and "        if (step.disc == DiscAfter::cleared) app->verified = {};\n"
-    "        else if (step.disc == DiscAfter::taken) app->verified = std::move(outcome->disc);\n"
-    "        if (step.save_language && !app->settings.choose_language_disc(utf8(outcome->image))) step.status = app->settings_error();\n"
-    "        if (!step.status.empty()) app->say(step.status);\n"
-    "        if (step.launch) app->launch();\n" in window
-    and "        if (launch) unwritten = !settings.complete() && settings.readable();\n" in window
-    and "            say(running_text(environment_overrides(), unwritten));" in window,
+    "        begin(Task::import, outcome.image, outcome.launch);\n        return;" in window
+    and "    if (step.disc == DiscAfter::cleared) verified_ = {};\n"
+    "    else if (step.disc == DiscAfter::taken) verified_ = std::move(outcome.disc);\n"
+    "    if (step.save_language && !settings_.choose_language_disc(utf8(outcome.image))) step.status = settings_error();\n"
+    "    if (!step.status.empty()) say(step.status);\n"
+    "    if (step.launch) launch();\n" in window
+    and "    if (launch) unwritten_ = !settings_.complete() && settings_.readable();\n" in window
+    and "        say(running_text(environment_overrides(), unwritten_));" in window,
     "the window must do each thing a step names, and say when the settings file could not be completed",
 )
 require(
@@ -177,20 +182,23 @@ require(
 require(
     '        SetEnvironmentVariableW(L"PSX_DISRUPTOR_LANGUAGE_DISC", nullptr);' in window
     and window.count("PSX_DISRUPTOR_LANGUAGE_DISC") == 1
-    and "            if (WaitForSingleObject(app->game, 0) == WAIT_OBJECT_0) {" in window
+    and "    if (WaitForSingleObject(process_, 0) != WAIT_OBJECT_0) return std::nullopt;" in window
     and "code != STILL_ACTIVE" not in window,
     "Play must start from the file as it is, the language disc reaches the game through settings.toml alone, "
     "and the game's end is asked of its handle: 259 is an exit code too",
 )
 require(
-    "                app->settings.load(); // the in-game menu writes the same file" in window
-    and "    bool editable() const { return !busy && !game && settings.readable(); }" in window,
+    "    settings_.load(); // the in-game menu writes the same file" in window
+    and "    bool editable() const { return !busy_ && !game_ && settings_.readable(); }" in window
+    and "    if (!editable()) return;\n    saved(settings_.set(option, value));\n" in window,
     "the launcher must not write settings while the game runs and must read them again after it",
 )
 require(
-    "        DragAcceptFiles(window, TRUE);" in window and "    case WM_DROPFILES: {" in window
-    and "    case WM_DPICHANGED: {" in window and "DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2" in window
-    and 'log_tail(app->root / "startup.log", log_lines)' in window,
+    "                        view.dropped(from_utf8(event.drop.data));" in window
+    and "SDL_EVENT_DROP_FILE" in window
+    and "                        view.style(SDL_GetWindowDisplayScale(window));" in window
+    and "DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2" in window
+    and 'log_tail(data_ / "startup.log", log_lines)' in window,
     "drag and drop, the per-monitor layout and the log tail must stay",
 )
 require(
@@ -209,7 +217,7 @@ require(
 )
 
 report = read("src/launcher/report.cpp")
-playing = read("docs/PLAYING.md")
+playing = " ".join(read("docs/PLAYING.md").split())  # the guide is wrapped where it reads best
 require(
     'constexpr std::array<const char*, 6> gathered = {"startup.log", "startup.previous.log", "disruptor-mouse-aim.log", "settings.toml",\n'
     in report
@@ -223,16 +231,19 @@ require(
     "of the system: one ZIP where Windows' tar makes it, with no folder and no half-made ZIP left beside it",
 )
 require(
-    '    fs::rename(root / "startup.log", root / "startup.previous.log", kept);\n'
-    '    HANDLE log = CreateFileW((root / "startup.log").c_str(), GENERIC_WRITE, FILE_SHARE_READ,\n' in window
+    '    fs::rename(data / "startup.log", data / "startup.previous.log", kept);\n'
+    '    HANDLE log = CreateFileW((data / "startup.log").c_str(), GENERIC_WRITE, FILE_SHARE_READ,\n' in window
     and '        if (!line.empty()) heading += "launcher: " + std::string(line.begin(), line.end()) + "\\r\\n";\n'
     "    DWORD written = 0;\n"
     "    WriteFile(log, heading.data(), static_cast<DWORD>(heading.size()), &written, nullptr);\n" in window
-    and '    app.add(window, L"BUTTON", L"Report a problem", BS_PUSHBUTTON | WS_TABSTOP, 0, 260, 612, 134, 38, report_id);\n' in window
-    and "    } else if (id == report_id) {\n        try {\n"
-    "            const Report report = make_report(app.root, system_note(), report_stamp());\n" in window
-    and window.count("report_id") == 3
-    and window.index("} else if (id == report_id) {") < window.index("} else if (!app.editable()) {"),
+    and '    if (small(icon::bug, "Report a problem", true, "Saves the game\'s logs, your settings and a note of the system for a bug report."))\n'
+    '        session_.make_problem_report();\n' in window
+    and "void Session::make_problem_report() {\n    try {\n"
+    "        const Report report = make_report(data_, system_note(), report_stamp());\n" in window
+    and window.count("make_problem_report()") == 3
+    and "editable" not in window[window.index("void Session::make_problem_report() {") : window.index("void Session::open_saves(")]
+    and "BeginDisabled" not in window[window.index("    const auto small = [&]("):window.index("    if (small(icon::bug,")].replace("ImGui::BeginDisabled(!enabled);", "")
+    and "        return clicked && enabled;\n" in window[window.index("    const auto small = [&]("):window.index("    if (small(icon::bug,")],
     "the launcher keeps the log of the run before, heads a new log with the build and the system, and has a button that "
     "makes a report at any time, an import or a running game included",
 )
@@ -252,9 +263,79 @@ require(
     in launcher_cmake
     and "    add_test(NAME disruptor_launcher_report COMMAND disruptor-launcher-report-test)\n" in launcher_cmake
     and "Press **Report a problem** in the launcher." in playing
-    and "your disc image, BIOS and saves are never\nincluded" in playing,
+    and "your disc image, BIOS and saves are never included" in playing,
     "the report is built into the launcher with the build's version, its test is registered, and the guide tells a player "
     "of the button and of what it leaves out",
+)
+
+boot_state = read("psxrecomp/runtime/src/boot_state.c")
+header_writer = boot_state[boot_state.index("static int write_header_le(") : boot_state.index("static int read_header_le(")]
+fields = re.findall(r"pst_w_(?:u32|i32)\(&w, h->(\w+)\)", header_writer)
+stamp = read("src/launcher/state_stamp.cpp")
+upgrade = read("src/launcher/state_upgrade.cpp")
+require(
+    fields == ["magic", "version", "bios_checksum", "entry_pc", "codegen_hash", "abi_tag", "codegen_ver",
+               "section_count", "reserved"]
+    and "constexpr std::size_t hash_at = 16, abi_at = 20, version_at = 24;" in stamp
+    and "word(header, 0) != BOOT_STATE_MAGIC || word(header, 4) != BOOT_STATE_VERSION" in stamp
+    and "SavedState state{file, {}, *slot, word(header, 12)};" in stamp
+    and '"%s%sstate_%08X_slot%02d.pst"' in read("psxrecomp/runtime/src/savestate.c")
+    and 'fprintf(stderr, "savestate: LOADED slot %d -> resuming pc=0x%08X\\n",' in read("psxrecomp/runtime/src/savestate.c")
+    and 'fprintf(stderr, "savestate: LOAD FAILED slot %d (missing/mismatched) %s\\n",' in read("psxrecomp/runtime/src/savestate.c")
+    and 'log->find("savestate: LOADED slot 0")' in upgrade
+    and 'log->find("savestate: LOAD FAILED slot 0")' in upgrade
+    and '"disruptor: capsule: %zu frames in %s (%s)\\n"' in read("src/game/session/capsule.cpp")
+    and 'rest.starts_with(" frames in ") && rest.ends_with(" (the asked length)")' in upgrade
+    and 'std::getenv("PSX_HIDDEN_WINDOW")' in read("psxrecomp/runtime/src/main.cpp")
+    and '{L"PSX_HIDDEN_WINDOW", L"1"}' in upgrade,
+    "the launcher reads and restamps a save state by the header boot_state.c writes, and judges a trial by the lines "
+    "the game prints when it loads a slot and when a recording ends, with the game's window hidden",
+)
+
+runtime_main = read("psxrecomp/runtime/src/main.cpp")
+folder = read("src/game/settings/user_folder.cpp")
+program_sites = re.findall(r"exe_dir_from_argv\((?:argv0|argv\[0\])\)", runtime_main)
+require(
+    len(program_sites) == 10
+    and "        g_user_dir = psx_game_user_folder(exe_dir_from_argv(argv[0]), problem);\n" in runtime_main
+    and runtime_main.index("psx_game_user_folder(") < runtime_main.index("    psx_crash_trace_install_handlers();")
+    and "    if (!psx_set_note_folder(user_dir_from_argv(argv[0]).string().c_str())) {\n" in runtime_main
+    and "    return psx_moved_to_user_dir(path, exe_dir_from_argv(argv0), user_dir_from_argv(argv0));\n" in runtime_main
+    and "    return psx_moved_to_user_dir(path, program, user);\n" in folder
+    and "    return path.is_relative() ? user_dir_from_argv(argv0) / path : in_user_dir(path, argv0);\n" in runtime_main
+    and runtime_main.index("static std::filesystem::path in_user_dir(") < runtime_main.index("static std::filesystem::path under_user_dir(")
+    and runtime_main.count('user_dir_from_argv(argv[0]) / "settings.toml"') == 3
+    and "    fs::path config_path = user_dir_from_argv(argv0) / \"input.ini\";\n" in runtime_main
+    and "    return user_dir_from_argv(argv0) / filename;\n" in runtime_main
+    and 'user_dir_from_argv(argv[0]) / "mods", game_id,' in runtime_main
+    and 'std::string cache_dir = (user_dir / "cache").string();' in runtime_main
+    and "memcard_dir   = in_user_dir(gc.runtime.memcard_dir, argv[0]);" in runtime_main
+    and 'psx_note_path("psx_cps_exit_trace.json"' in runtime_main
+    and 'psx_note_path("psx_last_run_report.json", kReportPath, sizeof(kReportPath));' in read("psxrecomp/runtime/src/crash_trace.c")
+    and read("psxrecomp/runtime/src/freeze_heartbeat.c").count("psx_note_path(") == 3
+    and read("psxrecomp/runtime/src/memory.c").count('psx_note_path("psx_crash.txt"') == 2
+    and read("psxrecomp/runtime/src/traps.c").count('psx_note_path("psx_crash.txt"') == 1
+    and 'own_or_shipped("mouse-aim.ini")' in read("src/game/input/mouse_aim.cpp")
+    and 'in_user_folder("disruptor-mouse-aim.log")' in read("src/game/input/mouse_aim.cpp")
+    and 'in_user_folder("disruptor-control-probe.log")' in read("src/game/input/control_probe.cpp")
+    and "return disruptor::user_folder::prepare(program);" in read("src/game/host.cpp"),
+    "in the source, each writable path of the game, from settings to the notes of a crash, is named in the user folder "
+    "the game host gives before anything else runs, a configured memory card folder is moved there by the rule the "
+    "user folder test checks, and exe_dir_from_argv is left only at its ten program-file sites",
+)
+require(
+    'constexpr const char* kInstalledName = "DisruptorRecompData";' in read("src/game/settings/user_folder.h")
+    and 'return (local / kInstalledName).lexically_normal();' in folder
+    and 'case Copy::portable: return (folder_of(program).parent_path() / "data").lexically_normal();' in folder
+    and 'kind(root / ".portable") == fs::file_type::not_found ? Copy::installed : Copy::portable' in folder
+    and "const fs::path data = disruptor::user_folder::prepare(program);" in window
+    and 'const std::pair<std::wstring, std::wstring> folder{L"PSX_USER_DIR", data.wstring()};' in window
+    and '{L"PSX_USER_DIR", trial.wstring()},' in upgrade
+    and 'const fs::path trial = data / "cache" / "state-trial";' in upgrade
+    and "carry" not in launcher_cmake
+    and not (ROOT / "src/launcher/carry.cpp").exists(),
+    "an installed copy keeps the player's files in local application data, a portable one beside its program folder, "
+    "the launcher and the game find the same folder and the trial run gets one of its own",
 )
 
 print("Disruptor launcher source contract: PASS")

@@ -29,7 +29,7 @@ options = read("src/game/settings/options.cpp")
 saved = read("src/game/settings/saved.cpp")
 pages = read("src/launcher/launcher_settings.cpp")
 page_kinds = read("src/launcher/launcher_settings.h")
-window = read("src/launcher/main.cpp")
+window = "".join(read(f"src/launcher/{name}") for name in ("main.cpp", "session.h", "session.cpp", "view.cpp", "game_process.cpp"))
 report = read("src/launcher/report.cpp")
 log = read("src/launcher/startup_log.cpp")
 playing = read("docs/PLAYING.md")
@@ -50,9 +50,9 @@ require(
     and 'L"Experimental", L"Troubleshooting"};\n' in pages
     and '    {"disruptor.detailed_logging", Page::troubleshooting},\n' in pages
     and pages.count("Page::troubleshooting") == 1
-    and '    L"Switch on, play until the problem shows, close the game, then press Report a problem.",\n};\n' in window
-    and "        SetWindowTextW(page_note, page_notes[std::clamp(page, 0, static_cast<int>(std::size(page_notes)) - 1)]);\n" in window
-    and window.count('    L"",\n') == 2,
+    and '    "Switch on, play until the problem shows, close the game, then press Report a problem.",\n};\n' in window
+    and "    const char* note = page_notes[std::clamp(page_, 0, static_cast<int>(std::size(page_notes)) - 1)];\n" in window
+    and window.count('    "",\n') == 5,
     "the launcher's sixth page is Troubleshooting: the switch alone, with a note that says what to do with it",
 )
 require(
@@ -135,15 +135,17 @@ require(
     and "    if (found.size() > most_freeze_dumps) found.resize(most_freeze_dumps);\n" in report
     and '        note += narrow(name.native()) + ": " + (present ? listed(root / name) : "none") + "\\r\\n";\n' in report
     and '    write(folder / "system.txt", without_user_names(note));\n' in report
-    and "            game = start_game(root, verified);\n            game_started = GetTickCount64();\n" in window
-    and '                note_exit(app->root / "startup.log", code, (GetTickCount64() - app->game_started) / 1000);\n' in window
+    and "    : process_(start_game(program, data, disc)), started_(GetTickCount64()) {}\n" in window
+    and "unsigned long long GameProcess::seconds() const { return (GetTickCount64() - started_) / 1000; }\n" in window
+    and "        game_ = std::make_unique<GameProcess>(program_, data_, verified_);\n" in window
+    and '    note_exit(data_ / "startup.log", code, seconds);\n' in window
     and '"%slauncher: the game ended with code 0x%08lX after %llu s\\r\\n"' in log,
     "a report takes how the last run ended and lists every file with its time, and the launcher heads the log with when "
     "the game started and ends it with how it ended and after how long: a freeze dump is taken when its name says it was "
     "made since that start, and a link is never followed",
 )
 require(
-    "switch on **Detailed logging** on the launcher's **Troubleshooting** page" in " ".join(playing.split())
+    "Switch on **Detailed logging** on the launcher's **Troubleshooting** page" in " ".join(playing.split())
     and "PSX_DISRUPTOR_DETAILED_LOGGING" not in playing,
     "the guide sends a player to the switch before the report",
 )

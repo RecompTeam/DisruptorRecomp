@@ -920,6 +920,29 @@ bool known_disc(DiscImage &other, KnownDisc &known) {
     return false;
 }
 
+bool wad_piece_bytes(DiscImage &disc, uint32_t index, uint32_t at, uint32_t bytes, std::vector<uint8_t> &out) {
+    Volume volume;
+    if (index >= kTableWords || !open_volume(disc, volume)) return false;
+    const File wad = volume.files["WAD.IN"];
+    if (wad.bytes < kHeadWords * 4) return false;
+    Bytes raw_head;
+    if (!user_data(disc, wad.lba, kHeadWords * 4, raw_head)) return false;
+    std::vector<uint32_t> head(kHeadWords);
+    for (uint32_t word = 0; word < kHeadWords; ++word) head[word] = le32(raw_head.data() + 4 * word);
+    const uint32_t start = head[index];
+    const std::vector<Piece> cut = pieces(head, wad.bytes);
+    const auto piece = std::find_if(cut.begin(), cut.end(), [&](const Piece &one) { return one.start == start; });
+    const uint64_t first = uint64_t{start} + at, last = first + bytes;
+    if (piece == cut.end() || std::find(piece->indexes.begin(), piece->indexes.end(), index) == piece->indexes.end() ||
+        last > piece->end)
+        return false;
+    const uint64_t from = first / kSectorData * kSectorData;
+    Bytes read;
+    if (!user_data(disc, wad.lba + static_cast<uint32_t>(from / kSectorData), static_cast<size_t>(last - from), read)) return false;
+    out.assign(read.begin() + static_cast<std::ptrdiff_t>(first - from), read.end());
+    return true;
+}
+
 bool LanguageDisc::build(DiscImage &home, DiscImage &other, std::string &why) {
     home_ = &home;
     other_ = &other;

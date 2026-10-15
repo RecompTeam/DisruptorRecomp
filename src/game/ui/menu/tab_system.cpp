@@ -4,28 +4,6 @@ namespace disruptor::menu {
 
 namespace {
 
-void draw_fullscreen_controls() {
-    int mode = std::clamp(psx_host_video_get_fullscreen_mode(), 0, 2);
-
-    ImGui::SeparatorText("Window presentation");
-    if (option_list("video.fullscreen", &mode)) {
-        g_menu.fullscreen_apply_failed =
-            psx_host_video_set_fullscreen_mode(mode) == 0;
-        if (!g_menu.fullscreen_apply_failed)
-            mark_fullscreen(mode);
-    }
-    draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
-    if (g_menu.fullscreen_apply_failed) {
-        ImGui::TextColored(
-            ImVec4(1.0f, 0.35f, 0.25f, 1.0f),
-            "The runtime rejected the requested display mode.");
-    }
-    ImGui::TextDisabled(
-        "Menu selections apply immediately and are saved. Alt+Enter remains "
-        "a transient window/fullscreen toggle and does not overwrite the "
-        "saved mode.");
-}
-
 void draw_audio_controls() {
     ImGui::SeparatorText("Audio output");
     int volume = psx_host_audio_get_master_volume();
@@ -49,7 +27,6 @@ void draw_audio_controls() {
 }  // namespace
 
 void draw_system_tab() {
-    draw_fullscreen_controls();
     draw_audio_controls();
     ImGui::TextWrapped(
         "Live menu choices are merged into the runtime's user-owned "

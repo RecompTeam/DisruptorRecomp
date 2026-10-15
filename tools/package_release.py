@@ -45,6 +45,10 @@ def main() -> None:
         "bios/OpenBIOS.LICENSE": build / "bios/OpenBIOS.LICENSE",
         "licenses/PSXRecomp-LICENSE.txt": ROOT / "licenses/PSXRecomp-LICENSE.txt",
         "licenses/Dear-ImGui-LICENSE.txt": ROOT / "licenses/Dear-ImGui-LICENSE.txt",
+        "licenses/Velopack-LICENSE.txt": ROOT / "licenses/Velopack-LICENSE.txt",
+        "licenses/Inter-LICENSE.txt": ROOT / "licenses/Inter-LICENSE.txt",
+        "licenses/Lucide-LICENSE.txt": ROOT / "licenses/Lucide-LICENSE.txt",
+        "licenses/FreeType-LICENSE.txt": ROOT / "licenses/FreeType-LICENSE.txt",
         "licenses/SDL-LICENSE.txt": build / "_deps/sdl3-src/LICENSE.txt",
         "licenses/SDL-hidapi-BSD-LICENSE.txt": build / "_deps/sdl3-src/src/hidapi/LICENSE-bsd.txt",
         "licenses/SDL-yuv2rgb-LICENSE.txt": build / "_deps/sdl3-src/src/video/yuv2rgb/LICENSE",
@@ -80,6 +84,11 @@ def main() -> None:
         "# Third-party notices\n\n"
         "PSXRecomp: copyright Matthew Stan; PolyForm Noncommercial 1.0.0.\n"
         "Dear ImGui: copyright Omar Cornut and contributors; MIT.\n"
+        "Velopack: copyright Caelan Sayler and Velopack Ltd.; MIT.\n"
+        "Inter typeface: copyright The Inter Project Authors; SIL OFL 1.1.\n"
+        "Lucide icons: copyright Lucide Icons and Contributors; ISC.\n"
+        "FreeType: FreeType License. Portions of this software are copyright\n"
+        "(c) 2026 The FreeType Project (https://freetype.org). All rights reserved.\n"
         "SDL: copyright Sam Lantinga and contributors; zlib, with bundled\n"
         "hidapi and YUV conversion notices included.\n"
         "libchdr and its codecs: BSD/MIT/public-domain notices included.\n"

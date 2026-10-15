@@ -15,6 +15,7 @@ struct GameUserSettings {
     bool has_vertical_look = false; bool vertical_look = false;
     bool has_vertical_sensitivity = false; double vertical_sensitivity = 0.08;
     bool has_invert_vertical = false; bool invert_vertical = false;
+    bool has_separate_vertical_speed = false; bool separate_vertical_speed = false;
     bool has_high_precision_camera = false; bool high_precision_camera = false;
     bool has_frame_unlock = false; bool frame_unlock = false;
     bool has_skip_intro = false; bool skip_intro = false;

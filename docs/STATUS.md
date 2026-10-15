@@ -15,7 +15,7 @@ validation is incomplete.
 | Save states | Save states require a matching build and language. The alpha.3 code-generation changes make alpha.1 and alpha.2 states incompatible; use memory-card saves for progress across releases. |
 | Automated checks | Alpha.4 Windows x64 Release build, code-generation audit, and all 77 root CTests passed. |
 | Player package | Windows x64 alpha includes the launcher, OpenBIOS, setup guide, and dependency licenses; players supply their supported BIN/CUE. |
-| Launcher and languages | Disc import and verification, saved settings, presets, and optional French/German/Japanese content from a second owned disc. USA remains the required game disc. |
+| Launcher and languages | Disc import and verification, saved settings and optional French/German/Japanese content from a second owned disc. USA remains the required game disc. |
 | Intro and widescreen fixes | Optional intro skipping, complete widescreen map and selection lists, reduced movie-edge noise, and near-wall hole fixes. |
 | Recent fixes and options | Widescreen front-end menus, loading-screen and pause-text fixes, borderless fullscreen and mouse-focus fixes, improved state resumption, bodies no longer cut by the floor they lie on, gap filling, optional depth sorting, and experimental ambient occlusion. |
 

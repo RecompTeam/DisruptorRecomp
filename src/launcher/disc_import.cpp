@@ -144,8 +144,9 @@ std::string hash_file(File& file, File* output, const std::atomic_bool& cancelle
 const DiscProfile& match_size(uint64_t size, std::span<const DiscProfile> profiles) {
     for (const auto& disc : profiles) if (disc.size == size) return disc;
     throw std::runtime_error(
-        "Unsupported image size or format. Use the USA SLUS-00224 raw MODE2/2352 dump "
-        "(636,350,064 bytes). Cooked ISOs lose required audio/video data. "
+        "Unsupported image size or format.\n"
+        "Use the USA SLUS-00224 raw MODE2/2352 dump of 636,350,064 bytes.\n"
+        "Cooked ISOs lose audio and video the game needs.\n"
         "PAL and Japanese discs are not supported yet.");
 }
 
@@ -154,8 +155,9 @@ const DiscProfile& match_hash(uint64_t size, const std::string& hash,
     for (const auto& disc : profiles)
         if (disc.size == size && disc.sha256 == hash) return disc;
     throw std::runtime_error(
-        "The full disc SHA-256 does not match a supported revision. The image may be modified, "
-        "damaged, or from another region. Use an unmodified USA SLUS-00224 raw dump. "
+        "The full disc SHA-256 does not match a supported revision.\n"
+        "The image may be modified, damaged, or from another region.\n"
+        "Use an unmodified USA SLUS-00224 raw dump.\n"
         "No game data was installed and the game was not started.");
 }
 
@@ -213,9 +215,9 @@ fs::path resolve_image(const fs::path& selected) {
         } else if (std::regex_match(line, track_re) && files == 1 && tracks == 0) ++tracks;
         else if (std::regex_match(line, index_re) && tracks == 1 && indices == 0) ++indices;
         else throw std::runtime_error(
-            "Unsupported CUE layout. The supported USA dump has one BINARY file, one "
-            "MODE2/2352 track, and INDEX 01 at 00:00:00. Multi-track or offset images "
-            "cannot be imported by this build.");
+            "Unsupported CUE layout.\n"
+            "The supported USA dump has one BINARY file, one MODE2/2352 track, and INDEX 01 at 00:00:00.\n"
+            "Multi-track or offset images cannot be imported by this build.");
     }
     if (files != 1 || tracks != 1 || indices != 1)
         throw std::runtime_error("The CUE is incomplete. It needs FILE, TRACK 01 MODE2/2352, and INDEX 01 00:00:00.");

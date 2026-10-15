@@ -21,6 +21,7 @@
 #include "game/input/mouse_aim.h"
 #include "game/session/capsule.h"
 #include "game/input/vertical_camera.h"
+#include "game/settings/user_folder.h"
 #include "../../../psxrecomp/runtime/include/gpu.h"
 
 #include <algorithm>
@@ -47,6 +48,7 @@ extern "C" SDL_Window *sdl_window;
 extern "C" int psx_host_ui_game_input_captured(void);
 extern "C" int psx_netplay_active(void);
 extern "C" void disruptor_name_entry_keys_for_pad(const uint8_t *keys, uint8_t *kept, int count);
+extern "C" int disruptor_key_bound(int scancode);
 
 namespace {
 
@@ -94,6 +96,7 @@ struct MouseAimState {
     bool invert_vertical = false;
     double horizontal_sensitivity = kDefaultHorizontalSensitivity;
     double vertical_sensitivity = kDefaultVerticalSensitivity;
+    bool vertical_follows_horizontal = true;
     double fractional_yaw = 0.0;
     double shown_yaw_fraction = 0.0;  // what fractional_yaw was a frame ago
     double sweep_counts = 0.0;
@@ -162,7 +165,7 @@ void load_configuration() {
     if (g_mouse.configured) return;
     g_mouse.configured = true;
 
-    std::ifstream input("mouse-aim.ini");
+    std::ifstream input(disruptor::user_folder::own_or_shipped("mouse-aim.ini"));
     std::string line;
     while (std::getline(input, line)) {
         const size_t comment = line.find_first_of("#;");
@@ -211,7 +214,7 @@ void set_title(const char *message) {
 
 void open_log() {
     if (g_mouse.log) return;
-    g_mouse.log = std::fopen("disruptor-mouse-aim.log", "wb");
+    g_mouse.log = std::fopen(disruptor::user_folder::in_user_folder("disruptor-mouse-aim.log").string().c_str(), "wb");
     if (!g_mouse.log) return;
     std::fprintf(g_mouse.log,
                  "DISRUPTOR MODERN CONTROLS AND MOUSE CAMERA v3\n"
@@ -336,6 +339,8 @@ void set_capture(bool captured, const char *reason) {
     }
 }
 
+bool key_bound(int scancode) { return disruptor_key_bound(scancode) != 0; }
+
 bool key_down(const Uint8 *keys, int scancode) {
     return keys && scancode >= 0 && keys[scancode] != 0;
 }
@@ -354,23 +359,10 @@ void apply_modern_controls(const Uint8 *keys, uint32_t mouse_buttons) {
         keys = pad_keys.data();
     }
 
+    /* keybinds.ini holds the keys. The arrows also walk forward and back where the player left them free. */
     uint16_t press = 0;
-    if (key_down(keys, SDL_SCANCODE_W) || key_down(keys, SDL_SCANCODE_UP))
-        press |= kPadUp;
-    if (key_down(keys, SDL_SCANCODE_S) || key_down(keys, SDL_SCANCODE_DOWN))
-        press |= kPadDown;
-    if (key_down(keys, SDL_SCANCODE_LEFT))  press |= kPadLeft;
-    if (key_down(keys, SDL_SCANCODE_RIGHT)) press |= kPadRight;
-    if (key_down(keys, SDL_SCANCODE_A))     press |= kPadL2;
-    if (key_down(keys, SDL_SCANCODE_D))     press |= kPadR2;
-    if (key_down(keys, SDL_SCANCODE_SPACE)) press |= kPadCircle;
-    if (key_down(keys, SDL_SCANCODE_E))     press |= kPadTriangle;
-    if (key_down(keys, SDL_SCANCODE_F))     press |= kPadSquare;
-    if (key_down(keys, SDL_SCANCODE_Q))     press |= kPadL1;
-    if (key_down(keys, SDL_SCANCODE_R))     press |= kPadR1;
-    if (key_down(keys, SDL_SCANCODE_TAB))   press |= kPadSelect;
-    if (key_down(keys, SDL_SCANCODE_P))     press |= kPadStart;
-    if (key_down(keys, SDL_SCANCODE_RETURN)) press |= kPadCross;
+    if (key_down(keys, SDL_SCANCODE_UP) && !key_bound(SDL_SCANCODE_UP)) press |= kPadUp;
+    if (key_down(keys, SDL_SCANCODE_DOWN) && !key_bound(SDL_SCANCODE_DOWN)) press |= kPadDown;
 
     if (g_mouse.captured) {
         if ((mouse_buttons & SDL_BUTTON_LMASK) != 0)  press |= kPadCross;
@@ -384,6 +376,10 @@ void apply_modern_controls(const Uint8 *keys, uint32_t mouse_buttons) {
         sio_set_pad_state_slot(0, static_cast<uint16_t>(sampled & ~press));
         g_mouse.interval_modern_press_mask |= press;
     }
+}
+
+double vertical_speed() {
+    return g_mouse.vertical_follows_horizontal ? g_mouse.horizontal_sensitivity : g_mouse.vertical_sensitivity;
 }
 
 void apply_mouse_x(double raw_x) {
@@ -430,7 +426,7 @@ void apply_mouse_y(double raw_y) {
     const double direction = g_mouse.invert_vertical ? 1.0 : -1.0;
     const double old_pitch = g_mouse.vertical_pitch;
     const double new_pitch = std::clamp(
-        old_pitch + raw_y * g_mouse.vertical_sensitivity * direction,
+        old_pitch + raw_y * vertical_speed() * direction,
         -kMaximumPitchUnits, kMaximumPitchUnits);
 
     g_mouse.interval_mouse_y += raw_y;
@@ -851,6 +847,14 @@ extern "C" void disruptor_mouse_set_vertical_look_enabled(int enabled) {
     }
     refresh_live_control_state(next ? "settings-vertical-look-on"
                                     : "settings-vertical-look-off");
+}
+
+extern "C" int disruptor_mouse_vertical_follows_horizontal(void) {
+    return g_mouse.vertical_follows_horizontal ? 1 : 0;
+}
+
+extern "C" void disruptor_mouse_set_vertical_follows_horizontal(int follows) {
+    g_mouse.vertical_follows_horizontal = follows != 0;
 }
 
 extern "C" double disruptor_mouse_vertical_sensitivity(void) {

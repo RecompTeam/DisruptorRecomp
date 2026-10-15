@@ -35,6 +35,7 @@ set(DISRUPTOR_EXTRA_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/frame/frame_rate.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/host.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings/saved.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings/user_folder.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/intro_skip.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/language.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/language_disc.cpp"
@@ -61,15 +62,17 @@ include_directories("${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings")
 add_compile_definitions(PSX_HAS_GAME_USER_SETTINGS=1)
 include("${PSXRECOMP_ROOT}/runtime/runtime.cmake")
 
+# The in-game menu and the launcher both draw with ImGui.
+include(FetchContent)
+FetchContent_Declare(disruptor_imgui
+    URL
+        "https://github.com/ocornut/imgui/archive/refs/tags/v1.92.6.tar.gz"
+    URL_HASH
+        "SHA256=5b17c01f69545bde732b14936d89ce0f508adb83e8b56fa82448371845172bc3"
+    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+FetchContent_MakeAvailable(disruptor_imgui)
+
 if(DISRUPTOR_DEV_MENU)
-    include(FetchContent)
-    FetchContent_Declare(disruptor_imgui
-        URL
-            "https://github.com/ocornut/imgui/archive/refs/tags/v1.92.6.tar.gz"
-        URL_HASH
-            "SHA256=5b17c01f69545bde732b14936d89ce0f508adb83e8b56fa82448371845172bc3"
-        DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
-    FetchContent_MakeAvailable(disruptor_imgui)
 
     if(PSX_SDL3)
         set(DISRUPTOR_IMGUI_SDL_BACKEND
@@ -101,6 +104,7 @@ if(DISRUPTOR_DEV_MENU)
         "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/preferences.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/rows.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/tab_controls.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/tab_display.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/tab_enhancements.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/tab_experimental.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/tab_debug.cpp"
@@ -264,8 +268,12 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
             "$<$<CXX_COMPILER_ID:MSVC>:NOMINMAX>"
             "$<$<CXX_COMPILER_ID:MSVC>:WIN32_LEAN_AND_MEAN>")
 
+    disruptor_unit_test(disruptor_user_folder tests/unit/user_folder_test.cpp RUNTIME_HEADERS
+        SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings/user_folder.cpp")
+
     disruptor_unit_test(disruptor_mouse_aim tests/unit/disruptor_mouse_aim_test.cpp
-        INCLUDES tests/support/stubs
+        SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings/user_folder.cpp"
+        INCLUDES tests/support/stubs "${PSXRECOMP_ROOT}/runtime/include"
         DEFINITIONS PSX_SDL3=1)
     set_tests_properties(disruptor_mouse_aim PROPERTIES
         ENVIRONMENT "PSX_DISRUPTOR_MOUSE_AIM=;PSX_DISRUPTOR_VERTICAL_LOOK=;PSX_DISRUPTOR_MODERN_CONTROLS=;PSX_DISRUPTOR_HIGH_PRECISION_CAMERA=")
@@ -316,6 +324,8 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
     disruptor_unit_test(disruptor_language tests/unit/disruptor_language_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_language_hints tests/unit/disruptor_language_hints_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_language_disc tests/unit/disruptor_language_disc_test.cpp)
+    disruptor_unit_test(disruptor_launcher_menu_art tests/unit/launcher_menu_art_test.cpp
+        SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/launcher/menu_art.cpp")
     disruptor_unit_test(disruptor_language_overlay tests/unit/disruptor_language_overlay_test.cpp
         INCLUDES
             "${PSXRECOMP_ROOT}/runtime/include"

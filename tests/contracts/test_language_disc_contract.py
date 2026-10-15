@@ -396,7 +396,8 @@ require(
     and "disc image" not in system_tab
     and "Restart now" not in system_tab
     and '            if (ImGui::BeginTabItem("Language")) {\n                draw_language_tab();\n' in menu
-    and "open **Settings → Language**, press **Choose a\ndisc image**, then press **Restart now**." in read("docs/PLAYING.md"),
+    and "open **Settings → Language**, press **Choose a disc image**, then press **Restart now**."
+    in " ".join(read("docs/PLAYING.md").split()),
     "the language of the game is chosen on a tab of its own, which the guide names, and the System tab holds none of it",
 )
 

@@ -28,6 +28,10 @@ struct KnownDisc {
 /* Which of the known discs this is, by its boot file alone: whether it fits the US disc is for LanguageDisc::build to say. */
 bool known_disc(DiscImage &other, KnownDisc &known);
 
+/* `bytes` bytes from `at` in the piece of WAD.IN that entry `index` of its table starts. False when the disc has no
+ * such piece, when the bytes run past the piece's end, where the next piece starts, or when the disc reads short. */
+bool wad_piece_bytes(DiscImage &disc, uint32_t index, uint32_t at, uint32_t bytes, std::vector<uint8_t> &out);
+
 /* The US disc with another region's movies, speech and words laid over it, sector by sector. */
 class LanguageDisc {
   public:

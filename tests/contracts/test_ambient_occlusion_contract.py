@@ -109,11 +109,11 @@ require(
     and menu.count('option_toggle("disruptor.ambient_occlusion"') == 1
     and "occlusion" not in experimental
     and experimental.count("ImGui::BeginDisabled()") == experimental.count("ImGui::EndDisabled()") == 1
-    and experimental.count("option_toggle(") == 2
+    and experimental.count("option_toggle(") == 0
     and "ImGui::Checkbox(" not in experimental
     and '            if (ImGui::BeginTabItem("Enhancements")) {\n                draw_enhancements_tab();\n' in menu,
     "the Enhancements tab holds the occlusion: a switch greyed without geometry correction and two bounded sliders greyed without the switch, "
-    "and the Experimental tab keeps two switches and a list",
+    "and the Experimental tab keeps its list alone",
 )
 
 require(
@@ -178,11 +178,11 @@ require(
     and strength.endswith("needs_occlusion")
     and "constexpr const char* needs_occlusion[] = {occlusion_key};\n" in options
     and 'constexpr const char* occlusion_key = "disruptor.ambient_occlusion";\n' in options
-    and '    {"disruptor.ambient_occlusion", Page::enhancements},\n'
-    '    {"disruptor.occlusion_reach", Page::enhancements},\n'
-    '    {"disruptor.occlusion_strength", Page::enhancements},\n' in launcher
-    and launcher.count("Page::experimental") == 3,
-    "the launcher's Enhancements page holds these three rows and its Experimental page the anti-aliasing's three: the switch needs geometry correction, the sliders the switch, "
+    and '    {"disruptor.ambient_occlusion", Page::enhancements, "Shading"},\n'
+    '    {"disruptor.occlusion_reach", Page::enhancements, nullptr, true},\n'
+    '    {"disruptor.occlusion_strength", Page::enhancements, nullptr, true},\n' in launcher
+    and launcher.count("Page::experimental") == 1,
+    "the launcher's Enhancements page holds these three rows and its Experimental page the anti-aliasing list: the switch needs geometry correction, the sliders the switch, "
     "with the menu's own bounds",
 )
 

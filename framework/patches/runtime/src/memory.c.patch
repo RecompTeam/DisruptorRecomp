@@ -1,5 +1,5 @@
 diff --git a/runtime/src/memory.c b/runtime/src/memory.c
-index d96d6d74422c5b80e3ae283d3a2d872686cab632..86e933d5c6a0e4426fc33ac30c09c68cc148754a 100644
+index d96d6d74422c5b80e3ae283d3a2d872686cab632..383b75c2ee77c7fa910bbdf5e582e1583fd5aaea 100644
 --- a/runtime/src/memory.c
 +++ b/runtime/src/memory.c
 @@ -14,6 +14,7 @@
@@ -89,7 +89,27 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..86e933d5c6a0e4426fc33ac30c09c68c
      memset(ram, 0, sizeof(ram));
      memset(scratchpad, 0, sizeof(scratchpad));
      /* Rematch re-enters without process exit — wipe sticky I/O regs that
-@@ -1458,10 +1495,13 @@
+@@ -923,7 +960,8 @@
+     snprintf(reason, sizeof(reason), "MMIO %s @ 0x%08X (phys 0x%08X)", op, vaddr, phys);
+     fprintf(stderr, "%s\n", reason);
+     fflush(stderr);
+-    FILE* cf = fopen("psx_crash.txt", "w");
++    char crash_path[PSX_NOTE_PATH_MAX];
++    FILE* cf = fopen(psx_note_path("psx_crash.txt", crash_path, sizeof(crash_path)), "w");
+     if (cf) { fprintf(cf, "%s\n", reason); fclose(cf); }
+     psx_fatal_halt(reason);
+ }
+@@ -934,7 +972,8 @@
+     fprintf(stderr, "%s\n", reason);
+     fflush(stderr);
+     /* Also write to a crash file for capture when stderr is lost. */
+-    FILE* cf = fopen("psx_crash.txt", "w");
++    char crash_path[PSX_NOTE_PATH_MAX];
++    FILE* cf = fopen(psx_note_path("psx_crash.txt", crash_path, sizeof(crash_path)), "w");
+     if (cf) { fprintf(cf, "%s\n", reason); fclose(cf); }
+     psx_fatal_halt(reason);
+ }
+@@ -1458,10 +1497,13 @@
  }
  
  static void psx_write_word_raw(uint32_t addr, uint32_t val);
@@ -104,7 +124,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..86e933d5c6a0e4426fc33ac30c09c68c
      if (g_ls_mode == 2) { ls_write_hook(addr, 4, val); return; }
      if (g_ds_recording) {
          if (g_dma_exec_depth > 0) ds_note_dma_write();
-@@ -1475,7 +1515,6 @@
+@@ -1475,7 +1517,6 @@
  }
  static void psx_write_word_raw(uint32_t addr, uint32_t val) {
      g_guest_store_count++;
@@ -112,7 +132,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..86e933d5c6a0e4426fc33ac30c09c68c
      /* KSEG2 cache control — before physical translation. */
      if (addr == 0xFFFE0130u) { cache_ctrl = val; return; }
      /* KSEG2 guard — see psx_read_word_raw. */
-@@ -1540,6 +1579,9 @@
+@@ -1540,6 +1581,9 @@
                  return;
              }
          }
@@ -122,7 +142,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..86e933d5c6a0e4426fc33ac30c09c68c
          if (phys == D44_PHYS) d44_note(phys, read_ram_word(phys), val);
          debug_server_trace_write_check(phys, read_ram_word(phys), val, 4);
          parity_trace_note_write(phys, 4, effective_store_pc());
-@@ -1554,12 +1596,18 @@
+@@ -1554,12 +1598,18 @@
          ram[phys + 1] = (uint8_t)(val >> 8);
          ram[phys + 2] = (uint8_t)(val >> 16);
          ram[phys + 3] = (uint8_t)(val >> 24);
@@ -141,7 +161,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..86e933d5c6a0e4426fc33ac30c09c68c
              return;
          }
      }
-@@ -1574,6 +1622,9 @@
+@@ -1574,6 +1624,9 @@
      if (phys >= 0x1F000000u && phys <= 0x1F7FFFFFu) return;
      if (phys >= 0x1F800000u && phys <= 0x1F8003FFu) {
          uint32_t off = phys - 0x1F800000u;
@@ -151,7 +171,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..86e933d5c6a0e4426fc33ac30c09c68c
          debug_server_trace_write_check(phys,
              (uint32_t)scratchpad[off]
            | ((uint32_t)scratchpad[off + 1] << 8)
-@@ -1584,6 +1635,7 @@
+@@ -1584,6 +1637,7 @@
          scratchpad[off + 1] = (uint8_t)(val >> 8);
          scratchpad[off + 2] = (uint8_t)(val >> 16);
          scratchpad[off + 3] = (uint8_t)(val >> 24);
@@ -159,7 +179,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..86e933d5c6a0e4426fc33ac30c09c68c
          return;
      }
      if (phys >= 0x1F801000u && phys <= 0x1F803FFFu) {
-@@ -1662,7 +1714,6 @@
+@@ -1662,7 +1716,6 @@
  }
  static void psx_write_half_raw(uint32_t addr, uint16_t val) {
      g_guest_store_count++;
@@ -167,7 +187,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..86e933d5c6a0e4426fc33ac30c09c68c
      if (sr_ptr && (*sr_ptr & 0x10000u)) return;
  
          /* KSEG2 guard — see psx_read_word_raw. */
-@@ -1670,6 +1721,7 @@
+@@ -1670,6 +1723,7 @@
      uint32_t phys = psx_phys_addr(addr);
  
      if (phys < RAM_SIZE) {
@@ -175,7 +195,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..86e933d5c6a0e4426fc33ac30c09c68c
          debug_server_trace_write_check(phys, (uint32_t)read_ram_half(phys), (uint32_t)val, 2);
          parity_trace_note_write(phys, 2, effective_store_pc());
          card_data_writes_check(phys, (uint32_t)val, 2);
-@@ -1686,6 +1738,7 @@
+@@ -1686,6 +1740,7 @@
      {
          uint32_t off;
          if (mod_gpu_dma_memory_offset(phys, 2u, &off)) {
@@ -183,7 +203,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..86e933d5c6a0e4426fc33ac30c09c68c
              mod_gpu_dma_memory[off] = (uint8_t)val;
              mod_gpu_dma_memory[off + 1u] = (uint8_t)(val >> 8);
              return;
-@@ -1702,6 +1755,7 @@
+@@ -1702,6 +1757,7 @@
      if (phys >= 0x1F000000u && phys <= 0x1F7FFFFFu) return;
      if (phys >= 0x1F800000u && phys <= 0x1F8003FFu) {
          uint32_t off = phys - 0x1F800000u;
@@ -191,7 +211,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..86e933d5c6a0e4426fc33ac30c09c68c
          debug_server_trace_write_check(phys,
              (uint32_t)scratchpad[off] | ((uint32_t)scratchpad[off + 1] << 8),
              (uint32_t)val, 2);
-@@ -1998,7 +2052,6 @@
+@@ -1998,7 +2054,6 @@
  }
  static void psx_write_byte_raw(uint32_t addr, uint8_t val) {
      g_guest_store_count++;
@@ -199,7 +219,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..86e933d5c6a0e4426fc33ac30c09c68c
      if (sr_ptr && (*sr_ptr & 0x10000u)) return;
  
          /* KSEG2 guard — see psx_read_word_raw. */
-@@ -2006,6 +2059,7 @@
+@@ -2006,6 +2061,7 @@
      uint32_t phys = psx_phys_addr(addr);
  
      if (phys < RAM_SIZE) {
@@ -207,7 +227,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..86e933d5c6a0e4426fc33ac30c09c68c
          debug_server_trace_write_check(phys, (uint32_t)ram[phys], (uint32_t)val, 1);
          parity_trace_note_write(phys, 1, effective_store_pc());
          card_data_writes_check(phys, (uint32_t)val, 1);
-@@ -2021,6 +2075,7 @@
+@@ -2021,6 +2077,7 @@
      {
          uint32_t off;
          if (mod_gpu_dma_memory_offset(phys, 1u, &off)) {
@@ -215,7 +235,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..86e933d5c6a0e4426fc33ac30c09c68c
              mod_gpu_dma_memory[off] = val;
              return;
          }
-@@ -2034,6 +2089,7 @@
+@@ -2034,6 +2091,7 @@
      }
      if (phys >= 0x1F000000u && phys <= 0x1F7FFFFFu) return;
      if (phys >= 0x1F800000u && phys <= 0x1F8003FFu) {

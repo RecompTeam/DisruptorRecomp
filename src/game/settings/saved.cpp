@@ -67,6 +67,10 @@ void read_game_user_settings(const toml::value& doc, UserSettings& s) {
             s.invert_vertical = toml::find<bool>(d, "invert_vertical");
             s.has_invert_vertical = true;
         });
+        if (d.contains("separate_vertical_speed")) try_get([&]{
+            s.separate_vertical_speed = toml::find<bool>(d, "separate_vertical_speed");
+            s.has_separate_vertical_speed = true;
+        });
         if (d.contains("high_precision_camera")) try_get([&]{
             s.high_precision_camera = toml::find<bool>(d, "high_precision_camera");
             s.has_high_precision_camera = true;
@@ -185,7 +189,7 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
     if (s.has_mouse_aim || s.has_modern_controls ||
         s.has_horizontal_sensitivity || s.has_invert_horizontal ||
         s.has_vertical_look || s.has_vertical_sensitivity ||
-        s.has_invert_vertical ||
+        s.has_invert_vertical || s.has_separate_vertical_speed ||
         s.has_high_precision_camera || s.has_geometry_correction ||
         s.has_perspective_textures || s.has_frame_unlock ||
         s.has_ambient_occlusion || s.has_occlusion_reach || s.has_occlusion_strength || s.has_smooth_fade ||
@@ -221,6 +225,8 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
         }
         if (s.has_invert_vertical)
             f << "invert_vertical = " << (s.invert_vertical ? "true" : "false") << "\n";
+        if (s.has_separate_vertical_speed)
+            f << "separate_vertical_speed = " << (s.separate_vertical_speed ? "true" : "false") << "\n";
         if (s.has_high_precision_camera)
             f << "high_precision_camera = " << (s.high_precision_camera ? "true" : "false") << "\n";
         if (s.has_geometry_correction)

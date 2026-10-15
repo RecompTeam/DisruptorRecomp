@@ -2,6 +2,7 @@
 
 #include "disc_import.h"
 #include "game/language/language_disc.h"
+#include "raw_image.h"
 
 #include <cstdint>
 #include <exception>
@@ -12,26 +13,6 @@
 namespace fs = std::filesystem;
 namespace disruptor::launcher {
 namespace {
-class RawImage final : public DiscImage {
-public:
-    explicit RawImage(const fs::path& data) : file_(data, std::ios::binary) {
-        std::error_code failed;
-        const auto size = fs::file_size(data, failed);
-        if (file_ && !failed && size % kRawSector == 0) sectors_ = static_cast<uint32_t>(size / kRawSector);
-    }
-    bool raw_sector(uint32_t lba, uint8_t* raw) override {
-        if (lba >= sectors_) return false;
-        file_.clear();
-        file_.seekg(static_cast<std::streamoff>(lba) * kRawSector);
-        return static_cast<bool>(file_.read(reinterpret_cast<char*>(raw), kRawSector));
-    }
-    uint32_t sectors() override { return sectors_; }
-
-private:
-    std::ifstream file_;
-    uint32_t sectors_ = 0;
-};
-
 std::wstring wide(const std::string& ascii) { return {ascii.begin(), ascii.end()}; }
 } // namespace
 

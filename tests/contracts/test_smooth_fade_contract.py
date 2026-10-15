@@ -84,14 +84,14 @@ require(
 )
 require(
     "    toggle<&Settings::has_smooth_fade, &Settings::smooth_fade>(\n"
-    '        "disruptor.smooth_fade", "Smooth distance fade", 0,\n' in options
-    and "where the game steps through twelve shades.\", needs_geometry),\n" in options
+    '        "disruptor.smooth_fade", "Smooth distance fade", 1,\n' in options
+    and "The game itself steps through twelve shades.\", needs_geometry),\n" in options
     and '        if (d.contains("smooth_fade")) try_get([&]{\n            s.smooth_fade = toml::find<bool>(d, "smooth_fade");\n            s.has_smooth_fade = true;\n'
     in saved
     and '        if (s.has_smooth_fade)\n            f << "smooth_fade = " << (s.smooth_fade ? "true" : "false") << "\\n";\n' in saved
     and "s.has_occlusion_strength || s.has_smooth_fade ||" in saved
     and '    {"disruptor.smooth_fade", Page::enhancements},\n' in launcher,
-    "the fade is a saved setting that starts off, needs geometry correction and stands on the launcher's Enhancements page",
+    "the fade is a saved setting that starts on, needs geometry correction and stands on the launcher's Enhancements page",
 )
 require(
     '    const bool fade_applies = applies("disruptor.smooth_fade");\n'

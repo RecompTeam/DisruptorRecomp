@@ -1,0 +1,14 @@
+diff --git a/runtime/src/traps.c b/runtime/src/traps.c
+index 77402276fcb35e9283d89457415d3970ea10d6a7..9ef672e1ffab51e9da330efeff5330eeb79ef2b4 100644
+--- a/runtime/src/traps.c
++++ b/runtime/src/traps.c
+@@ -205,7 +205,8 @@
+ }
+ 
+ static void trap_crash(const char* msg) {
+-    FILE* cf = fopen("psx_crash.txt", "w");
++    char crash_path[PSX_NOTE_PATH_MAX];
++    FILE* cf = fopen(psx_note_path("psx_crash.txt", crash_path, sizeof(crash_path)), "w");
+     if (cf) { fprintf(cf, "%s\n", msg); fclose(cf); }
+     /* Full ring dump, then halt-and-serve (debug builds) / exit(1)
+      * (release). Never returns — call sites' trailing exit(1) are

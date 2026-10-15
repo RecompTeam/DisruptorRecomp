@@ -191,6 +191,8 @@ texture_filtering = "nearest"
 
 [controller]
 default_mode = "digital"
+# A connected gamepad plays beside the keyboard and mouse.
+p1_device = "keyboard+gamepad"
 allow_hybrid = false
 lock_mode = true
 

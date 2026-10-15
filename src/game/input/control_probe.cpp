@@ -10,6 +10,7 @@
  */
 
 #include "psx_sdl.h"
+#include "game/settings/user_folder.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -179,7 +180,7 @@ void begin_probe() {
     g_probe.stats.assign(count, HalfwordStats{});
     sync_previous();
 
-    g_probe.log = std::fopen("disruptor-control-probe.log", "wb");
+    g_probe.log = std::fopen(disruptor::user_folder::in_user_folder("disruptor-control-probe.log").string().c_str(), "wb");
     if (!g_probe.log) {
         set_title("ERROR - could not create disruptor-control-probe.log");
         g_probe.phase = Phase::Complete;

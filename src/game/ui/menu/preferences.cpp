@@ -17,73 +17,27 @@ bool env_override_present(const char *name) {
     return name && std::getenv(name) != nullptr;
 }
 
-static constexpr std::array<SDL_Scancode, PSX_KB_COUNT> kModernKeybinds = {
-    SDL_SCANCODE_W, SDL_SCANCODE_S,
-    SDL_SCANCODE_LEFT, SDL_SCANCODE_RIGHT,
-    SDL_SCANCODE_RETURN, SDL_SCANCODE_SPACE,
-    SDL_SCANCODE_F, SDL_SCANCODE_E,
-    SDL_SCANCODE_Q, SDL_SCANCODE_R,
-    SDL_SCANCODE_A, SDL_SCANCODE_D,
-    SDL_SCANCODE_UNKNOWN, SDL_SCANCODE_UNKNOWN,
-    SDL_SCANCODE_P, SDL_SCANCODE_TAB,
-    SDL_SCANCODE_UNKNOWN, SDL_SCANCODE_UNKNOWN,
-    SDL_SCANCODE_UNKNOWN, SDL_SCANCODE_UNKNOWN,
-    SDL_SCANCODE_UNKNOWN, SDL_SCANCODE_UNKNOWN,
-    SDL_SCANCODE_UNKNOWN, SDL_SCANCODE_UNKNOWN,
-};
-
-static constexpr std::array<SDL_Scancode, PSX_KB_COUNT> kOriginalKeybinds = {
-    SDL_SCANCODE_UP, SDL_SCANCODE_DOWN,
-    SDL_SCANCODE_LEFT, SDL_SCANCODE_RIGHT,
-    SDL_SCANCODE_X, SDL_SCANCODE_S,
-    SDL_SCANCODE_Z, SDL_SCANCODE_A,
-    SDL_SCANCODE_Q, SDL_SCANCODE_W,
-    SDL_SCANCODE_E, SDL_SCANCODE_R,
-    SDL_SCANCODE_T, SDL_SCANCODE_Y,
-    SDL_SCANCODE_RETURN, SDL_SCANCODE_RSHIFT,
-    SDL_SCANCODE_UP, SDL_SCANCODE_DOWN,
-    SDL_SCANCODE_LEFT, SDL_SCANCODE_RIGHT,
-    SDL_SCANCODE_UNKNOWN, SDL_SCANCODE_UNKNOWN,
-    SDL_SCANCODE_UNKNOWN, SDL_SCANCODE_UNKNOWN,
-};
-
-void capture_base_keybinds() {
-    if (g_menu.base_keybinds_valid) return;
-    bool is_packaged_modern_preset = true;
-    for (int i = 0; i < PSX_KB_COUNT; ++i) {
-        g_menu.base_keybinds[static_cast<size_t>(i)] =
-            psx_keybinds_get_button(1, i);
-        if (g_menu.base_keybinds[static_cast<size_t>(i)] !=
-            kModernKeybinds[static_cast<size_t>(i)])
-            is_packaged_modern_preset = false;
+// The keys follow a change of scheme where they are the other scheme's own layout, and keybinds.ini says so.
+void follow_scheme(bool modern, bool save) {
+    disruptor::settings::KeyLayout current;
+    for (int index = 0; index < PSX_KB_COUNT; ++index) {
+        const SDL_Scancode key = psx_keybinds_get_button(1, index);
+        const char *name = key == SDL_SCANCODE_UNKNOWN ? "" : SDL_GetScancodeName(key);
+        current[static_cast<size_t>(index)] = name && *name ? name : "None";
     }
-    /* run.ps1/run.sh install the packaged modern map for an explicit launch
-     * flag.  Treat that exact map as an overlay, not the restore baseline, so
-     * turning Modern controls off live really returns to the packaged classic
-     * mapping.  Any custom/non-exact map is preserved verbatim instead. */
-    if (is_packaged_modern_preset)
-        g_menu.base_keybinds = kOriginalKeybinds;
-    g_menu.base_keybinds_valid = true;
+    const disruptor::settings::KeyLayout next = disruptor::settings::layout_for_scheme(current, modern);
+    if (next == current) return;
+    for (int index = 0; index < PSX_KB_COUNT; ++index) {
+        const std::string &name = next[static_cast<size_t>(index)];
+        psx_keybinds_set_button(1, index, name == "None" ? SDL_SCANCODE_UNKNOWN : SDL_GetScancodeFromName(name.c_str()));
+    }
+    if (save) psx_keybinds_save();
 }
 
 }  // namespace
 
-void apply_modern_keybinds(bool enabled) {
-    capture_base_keybinds();
-    if (!enabled) {
-        for (int i = 0; i < PSX_KB_COUNT; ++i)
-            psx_keybinds_set_button(
-                1, i, g_menu.base_keybinds[static_cast<size_t>(i)]);
-        return;
-    }
-
-    for (int i = 0; i < PSX_KB_COUNT; ++i)
-        psx_keybinds_set_button(
-            1, i, kModernKeybinds[static_cast<size_t>(i)]);
-}
-
 void set_modern_controls_live(bool enabled) {
-    apply_modern_keybinds(enabled);
+    follow_scheme(enabled, true);
     disruptor_modern_controls_set_enabled(enabled ? 1 : 0);
 }
 
@@ -105,7 +59,15 @@ void mark_mouse_aim(bool value) { mark("disruptor.mouse_aim", value); }
 
 void mark_modern_controls(bool value) { mark("disruptor.modern_controls", value); }
 
+// A speed written once writes down the vertical choice the game runs with, as the launcher does.
+void keep_vertical_choice() {
+    const Option *separate = find_option("disruptor.separate_vertical_speed");
+    if (g_preferences.changed.count(separate) == 0 && !env_override_present("PSX_DISRUPTOR_MOUSE_SENSITIVITY_Y"))
+        mark("disruptor.separate_vertical_speed", disruptor_mouse_vertical_follows_horizontal() == 0);
+}
+
 void mark_sensitivity(double value) {
+    keep_vertical_choice();
     g_preferences.pending.has_horizontal_sensitivity = true;
     g_preferences.pending.horizontal_sensitivity = value;
     g_preferences.changed.insert(
@@ -117,6 +79,7 @@ void mark_invert_x(bool value) { mark("disruptor.invert_horizontal", value); }
 void mark_vertical_look(bool value) { mark("disruptor.vertical_look", value); }
 
 void mark_vertical_sensitivity(double value) {
+    keep_vertical_choice();
     g_preferences.pending.has_vertical_sensitivity = true;
     g_preferences.pending.vertical_sensitivity = value;
     g_preferences.changed.insert(
@@ -124,6 +87,11 @@ void mark_vertical_sensitivity(double value) {
 }
 
 void mark_invert_y(bool value) { mark("disruptor.invert_vertical", value); }
+void mark_separate_vertical(bool value) { mark("disruptor.separate_vertical_speed", value); }
+void set_deadzone_live(int percent) {
+    mark("controller.deadzone", percent);
+    psx_input_set_deadzone(g_preferences.pending.deadzone);
+}
 
 void mark_geometry(bool value) { mark("disruptor.geometry_correction", value); }
 
@@ -174,9 +142,7 @@ void mark_smooth_fade(bool value) { mark("disruptor.smooth_fade", value); }
 
 void mark_antialiasing(int level) { mark("disruptor.multisampling", level); }
 
-void mark_downscale_averaging(bool value) { mark("disruptor.downscale_averaging", value); }
 
-void mark_edge_smoothing(bool value) { mark("disruptor.edge_smoothing", value); }
 
 void mark_detailed_logging(bool value) { mark("disruptor.detailed_logging", value); }
 
@@ -292,16 +258,16 @@ void apply_saved_preferences(const PSXRecompV4::UserSettings &settings) {
         !env_override_present("PSX_DISRUPTOR_MOUSE_SENSITIVITY_Y"))
         (void)disruptor_mouse_set_vertical_sensitivity(
             settings.vertical_sensitivity);
+    disruptor_mouse_set_vertical_follows_horizontal(
+        stored(settings, *find_option("disruptor.separate_vertical_speed")) == 0 &&
+        !env_override_present("PSX_DISRUPTOR_MOUSE_SENSITIVITY_Y"));
     if (settings.has_invert_vertical &&
         !env_override_present("PSX_DISRUPTOR_MOUSE_INVERT_Y"))
         disruptor_mouse_set_invert_vertical(
             settings.invert_vertical ? 1 : 0);
 
-    /* An inherited explicit environment override can enable Modern controls
-     * without a run-script switch (and therefore without its preset copy).
-     * Always reconcile the live mode with the in-memory keyboard overlay so
-     * S/A do not retain conflicting classic face-button bindings. */
-    apply_modern_keybinds(disruptor_modern_controls_enabled() != 0);
+    /* A scheme set by the environment alone takes its layout for this run and leaves keybinds.ini as it is. */
+    follow_scheme(disruptor_modern_controls_enabled() != 0, !env_override_present("PSX_DISRUPTOR_MODERN_CONTROLS"));
 
     /* main.cpp applies these fields before the environment layer. Repeat the
      * live application here so a host-UI soft session also gets the saved
@@ -342,8 +308,9 @@ void apply_saved_preferences(const PSXRecompV4::UserSettings &settings) {
     if (settings.has_smooth_fade) gl_renderer_set_smooth_fade(settings.smooth_fade ? 1 : 0);
     if (settings.has_multisampling) gl_renderer_set_multisampling(settings.multisampling);
     if (settings.has_sample_shading) gl_renderer_set_sample_shading(settings.sample_shading ? 1 : 0);
-    if (settings.has_downscale_averaging) gl_renderer_set_downscale_averaging(settings.downscale_averaging ? 1 : 0);
-    if (settings.has_edge_smoothing) gl_renderer_set_edge_smoothing(settings.edge_smoothing ? 1 : 0);
+    // Downscale averaging and edge smoothing are withdrawn for now: off whatever an older file says.
+    gl_renderer_set_downscale_averaging(0);
+    gl_renderer_set_edge_smoothing(0);
     gl_renderer_set_ssao_shape(
         settings.has_occlusion_reach && !env_override_present("PSX_GL_SSAO_RADIUS")
             ? static_cast<float>(settings.occlusion_reach) : -1.0f,
@@ -381,6 +348,10 @@ void apply_pending_preferences() {
     if (changed("disruptor.invert_vertical"))
         disruptor_mouse_set_invert_vertical(
             pending.invert_vertical ? 1 : 0);
+    if (changed("disruptor.separate_vertical_speed"))
+        disruptor_mouse_set_vertical_follows_horizontal(
+            pending.separate_vertical_speed ? 0 : 1);
+    if (changed("controller.deadzone")) psx_input_set_deadzone(pending.deadzone);
     if (changed("disruptor.geometry_correction"))
         gpu_geometry_correction_set(pending.geometry_correction ? 1 : 0);
     if (changed("disruptor.perspective_textures"))
@@ -423,10 +394,6 @@ void apply_pending_preferences() {
         gl_renderer_set_multisampling(pending.multisampling);
         gl_renderer_set_sample_shading(pending.sample_shading ? 1 : 0);
     }
-    if (changed("disruptor.downscale_averaging"))
-        gl_renderer_set_downscale_averaging(pending.downscale_averaging ? 1 : 0);
-    if (changed("disruptor.edge_smoothing"))
-        gl_renderer_set_edge_smoothing(pending.edge_smoothing ? 1 : 0);
     if (changed("disruptor.detailed_logging"))
         disruptor_diagnostics_set_detailed(pending.detailed_logging ? 1 : 0);
     if (changed("disruptor.gap_filling"))
@@ -466,7 +433,6 @@ void load_preferences_for_session() {
         return;
     }
     std::printf("disruptor: settings at start: %s\n", disruptor::settings::describe(settings).c_str());
-    capture_base_keybinds();
     apply_saved_preferences(settings);
     apply_pending_preferences();
     /* A capsule recorded later copies the file: a layer left there by the last session must not go into it. */

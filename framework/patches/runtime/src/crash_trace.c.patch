@@ -1,0 +1,27 @@
+diff --git a/runtime/src/crash_trace.c b/runtime/src/crash_trace.c
+index 8926cd2df341d8fa3d2eef74655bc11927be9946..2cfd1ceed69ad5d4d6f094975be0805264a08681 100644
+--- a/runtime/src/crash_trace.c
++++ b/runtime/src/crash_trace.c
+@@ -35,7 +35,21 @@
+ #include "crash_trace.h"
+ 
+ /* Output path — overwritten per dump. */
+-static const char *kReportPath = "psx_last_run_report.json";
++static char s_note_folder[PSX_NOTE_PATH_MAX - 128];
++static char kReportPath[PSX_NOTE_PATH_MAX] = "psx_last_run_report.json";
++
++int psx_set_note_folder(const char *folder) {
++    if (!folder || strlen(folder) >= sizeof(s_note_folder)) return 0;
++    snprintf(s_note_folder, sizeof(s_note_folder), "%s", folder);
++    psx_note_path("psx_last_run_report.json", kReportPath, sizeof(kReportPath));
++    return 1;
++}
++
++const char *psx_note_path(const char *name, char *out, size_t size) {
++    const int written = s_note_folder[0] ? snprintf(out, size, "%s/%s", s_note_folder, name) : -1;
++    if (written < 0 || (size_t)written >= size) snprintf(out, size, "%s", name);
++    return out;
++}
+ 
+ /* Build identity, embedded into every report so a user-submitted crash can be
+  * correlated to an exact build (issue #1 reports had no version field). The git

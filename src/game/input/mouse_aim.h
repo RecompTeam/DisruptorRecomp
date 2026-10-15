@@ -39,6 +39,9 @@ void disruptor_mouse_set_vertical_look_enabled(int enabled);
 double disruptor_mouse_vertical_sensitivity(void);
 /* Uses the same finite 0.005..2.000 range as horizontal sensitivity. */
 double disruptor_mouse_set_vertical_sensitivity(double sensitivity);
+/* Whether the view tilts at the horizontal speed, which is the default. */
+int  disruptor_mouse_vertical_follows_horizontal(void);
+void disruptor_mouse_set_vertical_follows_horizontal(int follows);
 
 int  disruptor_mouse_invert_vertical(void);
 void disruptor_mouse_set_invert_vertical(int inverted);

@@ -174,6 +174,10 @@ void draw_menu() {
                 draw_controls_tab();
                 ImGui::EndTabItem();
             }
+            if (ImGui::BeginTabItem("Display")) {
+                draw_display_tab();
+                ImGui::EndTabItem();
+            }
             if (ImGui::BeginTabItem("Enhancements")) {
                 draw_enhancements_tab();
                 ImGui::EndTabItem();
@@ -233,8 +237,6 @@ void on_runtime_shutdown(void *) {
     (void)flush_preferences();
     if (disruptor_mouse_captured())
         (void)disruptor_mouse_set_captured(0);
-    if (g_menu.base_keybinds_valid)
-        apply_modern_keybinds(false);
     g_menu.open = false;
     g_menu.restore_mouse_capture = false;
     if (g_menu.imgui_ready) {

@@ -244,16 +244,13 @@ require(
     "    settings.multisampling = PSXRecompV4::kDisruptorSampleCounts[settings.sample_shading ? index - sample_levels : index];\n"
     in options
     and '"disruptor.sample_shading"' not in options
-    and "    toggle<&Settings::has_downscale_averaging, &Settings::downscale_averaging>(\n"
-    '        "disruptor.downscale_averaging", "Downscale averaging", 0,\n' in options
-    and "    toggle<&Settings::has_edge_smoothing, &Settings::edge_smoothing>(\n"
-    '        "disruptor.edge_smoothing", "Edge smoothing", 0,\n' in options
-    and 'textured pictures of the HUD and of menus stay as they are. Movies stay as they are. Unfinished."),\n};\n' in options
+    and '"disruptor.downscale_averaging"' not in options
+    and '"disruptor.edge_smoothing"' not in options
     and "                        std::span<const char* const> needs = {}) {\n"
     "    return {key, Kind::choice, label, saved, get, set, initial, 0, static_cast<int>(choices.size()) - 1,\n"
     "            choices, needs, Unit::none, hint};\n" in options,
-    "the three are saved settings that start off: anti-aliasing one list over the samples and their shading that needs "
-    "geometry correction, the two filters switches that need nothing",
+    "anti-aliasing is a saved setting that starts off, one list over the samples and their shading that needs geometry "
+    "correction, and the two filters are withdrawn from the shared table",
 )
 require(
     '            const int samples = toml::find<int>(d, "multisampling");\n'
@@ -270,11 +267,12 @@ require(
     in saved
     and '        if (s.has_sample_shading)\n            f << "sample_shading = " << (s.sample_shading ? "true" : "false") << "\\n";\n' in saved
     and "        s.has_multisampling || s.has_sample_shading || s.has_downscale_averaging || s.has_edge_smoothing ||\n" in saved
-    and '    {"disruptor.multisampling", Page::experimental},\n'
-    '    {"disruptor.downscale_averaging", Page::experimental},\n    {"disruptor.edge_smoothing", Page::experimental},\n' in launcher
+    and '    {"disruptor.multisampling", Page::experimental},\n' in launcher
+    and '"disruptor.downscale_averaging"' not in launcher
+    and '"disruptor.edge_smoothing"' not in launcher
     and '"disruptor.sample_shading"' not in launcher,
     "each of the four keys is read from the file, the samples only as a count the list has, written back and counted as a "
-    "setting of its own, and the launcher's Experimental page shows the anti-aliasing list over the first two",
+    "setting of its own, so an older file keeps them, and the launcher's Experimental page shows the anti-aliasing list alone",
 )
 require(
     "    if (settings.has_sample_shading) gl_renderer_set_sample_shading(settings.sample_shading ? 1 : 0);\n" in menu
@@ -298,29 +296,22 @@ require(
     "        mark_antialiasing(level);\n"
     "    }\n"
     "    if (!sampling_applies) ImGui::EndDisabled();\n" in experimental
-    and "    bool averaging = gl_renderer_downscale_averaging() != 0;\n"
-    '    if (option_toggle("disruptor.downscale_averaging", &averaging)) {\n'
-    "        gl_renderer_set_downscale_averaging(averaging ? 1 : 0);\n"
-    "        mark_downscale_averaging(averaging);\n"
-    "    }\n" in experimental
-    and "    bool edge_smoothing = gl_renderer_edge_smoothing() != 0;\n"
-    '    if (option_toggle("disruptor.edge_smoothing", &edge_smoothing)) {\n'
-    "        gl_renderer_set_edge_smoothing(edge_smoothing ? 1 : 0);\n"
-    "        mark_edge_smoothing(edge_smoothing);\n"
-    "    }\n" in experimental
+    and "downscale_averaging" not in experimental
+    and "edge_smoothing" not in experimental
     and "    if (settings.has_multisampling) gl_renderer_set_multisampling(settings.multisampling);\n" in menu
-    and "    if (settings.has_downscale_averaging) gl_renderer_set_downscale_averaging(settings.downscale_averaging ? 1 : 0);\n"
-    "    if (settings.has_edge_smoothing) gl_renderer_set_edge_smoothing(settings.edge_smoothing ? 1 : 0);\n" in menu
+    and "    gl_renderer_set_downscale_averaging(0);\n    gl_renderer_set_edge_smoothing(0);\n" in menu
+    and "gl_renderer_set_downscale_averaging(settings" not in menu
+    and "gl_renderer_set_edge_smoothing(settings" not in menu
     and '    if (changed("disruptor.multisampling")) {\n        gl_renderer_set_multisampling(pending.multisampling);\n'
     "        gl_renderer_set_sample_shading(pending.sample_shading ? 1 : 0);\n    }\n" in menu
-    and '    if (changed("disruptor.downscale_averaging"))\n        gl_renderer_set_downscale_averaging(pending.downscale_averaging ? 1 : 0);\n'
-    '    if (changed("disruptor.edge_smoothing"))\n        gl_renderer_set_edge_smoothing(pending.edge_smoothing ? 1 : 0);\n' in menu
+    and 'changed("disruptor.downscale_averaging")' not in menu
+    and 'changed("disruptor.edge_smoothing")' not in menu
     and 'void mark_antialiasing(int level) { mark("disruptor.multisampling", level); }\n' in menu
     and "void gl_renderer_set_downscale_averaging(int enabled) { s_aa_average = enabled != 0; }\n" in renderer
     and "void gl_renderer_set_edge_smoothing(int enabled) { s_aa_edges = enabled != 0; }\n" in renderer,
-    "the Experimental tab switches each of the three at once and stages it for saving, anti-aliasing through the shared table's "
-    "own reading of the samples and their shading, "
-    "and a start with a setting saved applies it",
+    "the Experimental tab switches anti-aliasing at once and stages it for saving through the shared table's own reading of "
+    "the samples and their shading, a start with it saved applies it, and every start keeps the two withdrawn filters off "
+    "whatever an older file says",
 )
 
 

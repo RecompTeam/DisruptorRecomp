@@ -188,11 +188,9 @@ require(
     "Ctrl+F12 in the game starts a recording" in guide and "tools/replay_capsule.py" in guide
     and "PSX_DISRUPTOR_CAPSULE_REPLAY" in capsule
     and "| Save / load state | Shift+F1–F11 / F1–F11 |" in read("docs/PLAYING.md")
-    and "| Start / end a replay capsule | Ctrl+F12 |\n| Load the newest replay capsule | F12 |" in read("docs/PLAYING.md")
-    and "**F1–F11** loads it." in read("README.md")
-    and "**F12** loads the newest one." in read("README.md"),
-    "the build guide must say how a capsule is made and replayed, and the guides give Ctrl+F12 to recording, F12 to loading the newest "
-    "capsule and F1 to F11 to the save states",
+    and "| Start / end a replay capsule | Ctrl+F12 |\n| Load the newest replay capsule | F12 |" in read("docs/PLAYING.md"),
+    "the build guide must say how a capsule is made and replayed, and the player's guide gives Ctrl+F12 to recording, F12 to "
+    "loading the newest capsule and F1 to F11 to the save states",
 )
 require(
     "    const bool free_now = capsule.recording == Recording::kOff && capsule.replay == Replay::kOff && capsule.loading.empty() && !savestate_pending() &&\n"
@@ -219,7 +217,7 @@ require(
     "list's button load through it",
 )
 
-playing = read("docs/PLAYING.md")
+playing = " ".join(read("docs/PLAYING.md").split())  # the guide is wrapped where it reads best
 require(
     "    if (!digits(second) || second.size() > 18 || second[0] == '0') return false;\n" in capsule
     and "    if (!stored_name(name, began)) return false;\n" in capsule

@@ -19,6 +19,7 @@ SDL_Window g_window;
 std::array<std::uint8_t, 2 * 1024 * 1024> g_ram{};
 std::array<Uint8, 512> g_keys{};
 std::array<bool, 512> g_typed_with{};  /* keys the name entry holds back from the pad */
+std::array<bool, 512> g_bound{};       /* keys keybinds.ini puts on a button */
 void (*g_registered_hook)(void) = nullptr;
 std::uint32_t g_noted_at = 0;
 std::uint8_t g_noted = 0;
@@ -61,6 +62,10 @@ void disruptor_capsule_note_byte(std::uint32_t address, std::uint8_t value) {
     g_noted_at = address;
     g_noted = value;
     ++g_notes;
+}
+
+int disruptor_key_bound(int scancode) {
+    return scancode >= 0 && scancode < static_cast<int>(g_bound.size()) && g_bound[static_cast<std::size_t>(scancode)];
 }
 
 void disruptor_name_entry_keys_for_pad(const std::uint8_t *keys, std::uint8_t *kept, int count) {
@@ -209,6 +214,7 @@ void reset_state() {
     g_ram.fill(0);
     g_keys.fill(0);
     g_typed_with.fill(false);
+    g_bound.fill(false);
     g_buttons = 0;
     g_pad_buttons = 0xFFFFu;
     g_relative_x = 0.0f;
@@ -685,60 +691,48 @@ void test_modern_keyboard_mapping_and_merge() {
     reset_state();
     g_mouse.modern_controls_enabled = true;
 
-    /* Preserve an action already supplied by the normal keyboard/controller
-     * sampler while adding all of the modern keyboard actions. */
+    /* keybinds.ini, read by the runtime's own sampler, holds the keys: the scheme adds none of them. */
     g_pad_buttons = static_cast<std::uint16_t>(0xFFFFu & ~kPadSelect);
-    g_keys[SDL_SCANCODE_W] = 1;
-    g_keys[SDL_SCANCODE_S] = 1;
-    g_keys[SDL_SCANCODE_A] = 1;
-    g_keys[SDL_SCANCODE_D] = 1;
-    g_keys[SDL_SCANCODE_SPACE] = 1;
-    g_keys[SDL_SCANCODE_E] = 1;
-    g_keys[SDL_SCANCODE_F] = 1;
-    g_keys[SDL_SCANCODE_Q] = 1;
-    g_keys[SDL_SCANCODE_R] = 1;
-    g_keys[SDL_SCANCODE_P] = 1;
-    g_keys[SDL_SCANCODE_RETURN] = 1;
+    for (const int key : {SDL_SCANCODE_W, SDL_SCANCODE_S, SDL_SCANCODE_A, SDL_SCANCODE_D, SDL_SCANCODE_SPACE,
+                          SDL_SCANCODE_E, SDL_SCANCODE_F, SDL_SCANCODE_Q, SDL_SCANCODE_R, SDL_SCANCODE_P,
+                          SDL_SCANCODE_RETURN, SDL_SCANCODE_LEFT, SDL_SCANCODE_RIGHT, SDL_SCANCODE_TAB})
+        g_keys[static_cast<std::size_t>(key)] = 1;
     apply_modern_controls(g_keys.data(), 0);
-
     expect_pressed(kPadSelect, "existing sampled controller action is preserved");
-    expect_pressed(kPadUp, "W maps to walk forward");
-    expect_pressed(kPadDown, "S maps to walk backward");
-    expect_pressed(kPadL2, "A maps to strafe left");
-    expect_pressed(kPadR2, "D maps to strafe right");
-    expect_pressed(kPadCircle, "Space maps to jump");
-    expect_pressed(kPadTriangle, "E maps to use");
-    expect_pressed(kPadSquare, "F maps to psionic attack");
-    expect_pressed(kPadL1, "Q maps to weapon selection");
-    expect_pressed(kPadR1, "R maps to psionic selection");
-    expect_pressed(kPadStart, "P maps to pause");
-    expect_pressed(kPadCross, "Return maps to confirm/fire");
+    expect(g_pad_buttons == static_cast<std::uint16_t>(0xFFFFu & ~kPadSelect),
+           "the scheme presses no button for a key keybinds.ini may have moved");
 
     reset_state();
     g_mouse.modern_controls_enabled = true;
     g_keys[SDL_SCANCODE_UP] = 1;
     g_keys[SDL_SCANCODE_DOWN] = 1;
-    g_keys[SDL_SCANCODE_LEFT] = 1;
-    g_keys[SDL_SCANCODE_RIGHT] = 1;
-    g_keys[SDL_SCANCODE_TAB] = 1;
     apply_modern_controls(g_keys.data(), 0);
-    expect_pressed(kPadUp, "Up arrow remains a menu/gameplay fallback");
-    expect_pressed(kPadDown, "Down arrow remains a menu/gameplay fallback");
-    expect_pressed(kPadLeft, "Left arrow retains original turn/menu behavior");
-    expect_pressed(kPadRight, "Right arrow retains original turn/menu behavior");
-    expect_pressed(kPadSelect, "Tab maps to the automap");
+    expect_pressed(kPadUp, "the Up arrow also walks forward while it is bound to nothing");
+    expect_pressed(kPadDown, "the Down arrow also walks back while it is bound to nothing");
 
     reset_state();
     g_mouse.modern_controls_enabled = true;
-    g_typed_with[SDL_SCANCODE_E] = true;
-    g_keys[SDL_SCANCODE_E] = 1;
-    g_keys[SDL_SCANCODE_F] = 1;
-    g_keys[SDL_SCANCODE_RETURN] = 1;
+    g_bound[SDL_SCANCODE_UP] = true;
+    g_keys[SDL_SCANCODE_UP] = 1;
+    g_keys[SDL_SCANCODE_DOWN] = 1;
     apply_modern_controls(g_keys.data(), 0);
-    expect_released(kPadTriangle, "a key a name is being typed with is no button");
-    expect_pressed(kPadSquare, "the keys beside it still are");
-    expect_pressed(kPadCross, "and so is Return");
-    expect(g_keys[SDL_SCANCODE_E] == 1, "the keyboard's own state is left as it was");
+    expect_released(kPadUp, "an arrow the player bound does only what keybinds.ini says");
+    expect_pressed(kPadDown, "the other arrow still walks");
+
+    reset_state();
+    g_mouse.modern_controls_enabled = true;
+    g_typed_with[SDL_SCANCODE_DOWN] = true;
+    g_keys[SDL_SCANCODE_DOWN] = 1;
+    g_keys[SDL_SCANCODE_UP] = 1;
+    apply_modern_controls(g_keys.data(), 0);
+    expect_released(kPadDown, "a key a name is being typed with is no button");
+    expect_pressed(kPadUp, "the keys beside it still are");
+    expect(g_keys[SDL_SCANCODE_DOWN] == 1, "the keyboard's own state is left as it was");
+
+    reset_state();
+    g_keys[SDL_SCANCODE_UP] = 1;
+    apply_modern_controls(g_keys.data(), 0);
+    expect_released(kPadUp, "the classic scheme adds nothing");
 }
 
 void test_modern_mouse_buttons_require_capture() {

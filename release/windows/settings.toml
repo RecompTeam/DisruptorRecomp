@@ -5,6 +5,8 @@ modern_controls = true
 vertical_look = false
 geometry_correction = true
 perspective_textures = true
+smooth_fade = true
+depth_sorted_world = true
 # Experimental options stay off until enabled in Settings.
 frame_unlock = false
 

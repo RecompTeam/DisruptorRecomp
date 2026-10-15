@@ -32,11 +32,27 @@ repository instead. `build.sh` and `run.sh` read it too. Set
 compiles through it.
 
 Windows builds also produce `DisruptorLauncher.exe` beside the runtime and
-stage its configuration, help, and initial settings there. The launcher is
-compiled with a static MSVC runtime so setup can open before the game runtime's
-VC++ redistributable is installed. It imports existing disc dumps; physical
-drive reading is outside the current scope. Release packaging includes it
-automatically through `tools/package_release.py` and still excludes game data.
+stage its configuration, help, and initial settings there. The launcher draws
+with Dear ImGui through SDL3's renderer, Direct3D 11 or SDL's software renderer.
+Under MSVC it is compiled with a static
+runtime, with an SDL3 build of its own that holds only the window, its events
+and dialogs, so setup can open before the game runtime's VC++ redistributable
+is installed. There it also links Velopack's C library, which configuring
+downloads, to update a copy the updater installed. A MinGW launcher has no
+updater. It imports existing disc dumps; physical drive reading is outside the
+current scope. Release packaging includes it automatically through
+`tools/package_release.py` and still excludes game data.
+
+The launcher and the game find the player's files by one rule,
+`src/game/settings/user_folder.cpp`. A copy the updater installed keeps them in
+`%LOCALAPPDATA%\DisruptorRecompData`, a portable copy of the updater in `data`
+beside its `current` folder, and any other copy, a build folder included,
+beside the executable. A whole path in `PSX_USER_DIR` names another folder.
+The framework's `main.cpp` asks `psx_game_user_folder` for it before anything
+else and writes settings, bindings, memory cards, caches, mods and the notes of
+a run there. Program files are still found beside the executable. The shipped
+`settings.toml` and `keybinds.ini` are copied into a new folder of the player's
+files.
 
 For launcher-only iteration after configuration:
 
@@ -48,6 +64,7 @@ ctest --test-dir build -C Release -R disruptor_disc_import --output-on-failure
 `DisruptorLauncher.exe --verify IMAGE` checks an image without copying it.
 `--import IMAGE --root FOLDER` performs the normal import without starting the
 game; `--check --root FOLDER` verifies installed data and required build files.
+`--root` names one folder for the program and the player's files alike.
 These diagnostic modes return zero only on success and report to redirected
 stdout/stderr. The GUI always resolves the build folder from its executable,
 so shortcuts work even when opened from a different working directory.
@@ -136,8 +153,9 @@ python tools/framework.py apply
 `apply` refuses to overwrite an edit that `refresh` has not saved, and
 `python tools/framework.py check` tells whether the checkout holds exactly what
 `framework/` describes. Runtime preferences live in
-`settings.toml` beside the executable; game files, generated code, and build
-directories are ignored by Git.
+`settings.toml` in the folder of the player's files, beside the executable in a
+build folder; game files, generated code, and build directories are ignored by
+Git.
 
 The framework reaches the game through one header, `runtime/include/game_host.h`,
 which `src/game/host.cpp` answers. The instructions the game hooks are listed in

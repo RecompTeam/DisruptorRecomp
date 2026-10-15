@@ -10,6 +10,9 @@ bool prerequisite_on(const Option &option) {
         return gpu_geometry_correction_enabled() != 0;
     if (key == "disruptor.mouse_aim") return disruptor_mouse_aim_enabled() != 0;
     if (key == "disruptor.ambient_occlusion") return gl_renderer_ssao() != 0;
+    if (key == "disruptor.vertical_look") return disruptor_mouse_vertical_look_enabled() != 0;
+    if (key == "disruptor.separate_vertical_speed")
+        return disruptor_mouse_vertical_follows_horizontal() == 0;
     return false;
 }
 
@@ -38,9 +41,14 @@ bool option_slider(const char *key, int *value) {
 
 bool option_slider(const char *key, float *value) {
     const Option &option = *find_option(key);
+    // Shown as a multiple of what a new installation has, as the launcher shows it.
+    const float unit = static_cast<float>(option.initial) / 1000.0f;
+    float times = *value / unit;
     const bool moved = ImGui::SliderFloat(
-        option.label, value, option.lowest / 1000.0f,
-        option.highest / 1000.0f, "%.3f", ImGuiSliderFlags_Logarithmic);
+        option.label, &times, option.lowest / 1000.0f / unit,
+        option.highest / 1000.0f / unit, times < 1.0f ? "%.2fx" : "%.1fx",
+        ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_NoRoundToFormat);
+    if (moved) *value = times * unit;
     disruptor::ui::hint(option.hint);
     return moved;
 }

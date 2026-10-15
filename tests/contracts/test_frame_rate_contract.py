@@ -200,11 +200,13 @@ require(
     '            applies("video.frame_interpolation") ? 1 : 0,\n'
     "            &present_enabled))\n"
     "        mark_present_enabled(present_enabled != 0);\n"
+    "    ImGui::Indent();\n"
     "    int present_rate = 0;\n"
     "    if (disruptor_present_rate_control(\n"
     '            find_option("video.frame_interpolation_fps")->label,\n'
     '            find_option("video.frame_interpolation_fps")->hint, &present_rate))\n'
     "        mark_present_rate(present_rate);\n"
+    "    ImGui::Unindent();\n"
     "#endif\n"
     in menu
     and "#ifndef PSX_DISABLE_FRAME_INTERPOLATION\n"

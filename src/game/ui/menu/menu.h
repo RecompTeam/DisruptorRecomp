@@ -20,6 +20,8 @@
 #include "game/input/mouse_aim.h"
 #include "game/frame/present_rate.h"
 #include "game/session/restart.h"
+#include "game/settings/key_layouts.h"
+#include "game/settings/pad_layout.h"
 #include "game/settings/options.h"
 #include "game/ui/hint.h"
 #include "config_loader.h"
@@ -66,6 +68,10 @@ extern "C" void gl_renderer_set_multisampling(int samples);
 extern "C" int gl_renderer_multisampling(void);
 extern "C" void gl_renderer_set_sample_shading(int enabled);
 extern "C" int gl_renderer_sample_shading(void);
+extern "C" int psx_input_deadzone(void);
+extern "C" const char* psx_input_pad_name(int slot);
+extern "C" const char* psx_input_pad_source(const char* field);
+extern "C" void psx_input_set_deadzone(int raw);
 extern "C" void gl_renderer_set_downscale_averaging(int enabled);
 extern "C" int gl_renderer_downscale_averaging(void);
 extern "C" void gl_renderer_set_edge_smoothing(int enabled);
@@ -96,7 +102,6 @@ struct DevMenuState {
     bool aspect_apply_failed = false;
     bool internal_scale_apply_failed = false;
     bool fullscreen_apply_failed = false;
-    bool base_keybinds_valid = false;
     bool record_shown = false;  // armed in the menu, started when it closes
     std::string shown_note;
     std::vector<disruptor::capsule::Stored> capsules;  // read again once a second while the Debug tab shows them
@@ -115,7 +120,6 @@ struct DevMenuState {
     std::vector<unsigned> capsule_film;  // its pictures in order, loaded a few a frame
     int selected_wide_aspect = 0;
     std::string cheat_status;
-    std::array<SDL_Scancode, PSX_KB_COUNT> base_keybinds{};
 };
 
 extern DevMenuState g_menu;
@@ -149,7 +153,6 @@ extern PreferenceState g_preferences;
 extern std::string g_language_disc;
 
 std::string utf8(const fs::path &path);
-void apply_modern_keybinds(bool enabled);
 void set_modern_controls_live(bool enabled);
 void mark(const char *key, int value);
 void mark_mouse_aim(bool value);
@@ -158,6 +161,8 @@ void mark_sensitivity(double value);
 void mark_invert_x(bool value);
 void mark_vertical_look(bool value);
 void mark_vertical_sensitivity(double value);
+void mark_separate_vertical(bool value);
+void set_deadzone_live(int percent);
 void mark_invert_y(bool value);
 void mark_geometry(bool value);
 void mark_textures(bool value);
@@ -174,8 +179,6 @@ void mark_frame_unlock(bool value);
 void mark_occlusion(bool value);
 void mark_smooth_fade(bool value);
 void mark_antialiasing(int level);
-void mark_downscale_averaging(bool value);
-void mark_edge_smoothing(bool value);
 void mark_detailed_logging(bool value);
 void mark_occlusion_shape(int reach, int strength);
 void mark_gap_filling(bool value);
@@ -197,6 +200,7 @@ bool option_list(const char *key, int *index, size_t skipped = 0);
 void draw_status_badge(const char *label, const ImVec4 &colour);
 
 void draw_controls_tab();
+void draw_display_tab();
 void draw_enhancements_tab();
 void draw_experimental_tab();
 void draw_debug_tab();

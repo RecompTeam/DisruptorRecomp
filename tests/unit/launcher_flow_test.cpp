@@ -1,7 +1,11 @@
+#include "choices.h"
 #include "launcher_flow.h"
 
+#include <algorithm>
 #include <atomic>
+#include <cmath>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <stdexcept>
 #include <string>
@@ -205,7 +209,7 @@ void test_the_window_acts_on_an_outcome() {
     step = after(made(Task::verify, true, L"The image is damaged."), false);
     require(same(step, DiscAfter::cleared, false, false, false) && step.status == L"The image is damaged.", "a failed check forgets the disc");
     step = after(made(Task::import, true), false);
-    require(same(step, DiscAfter::taken, false, false, true) && step.status == L"Game data is installed and ready. Select Play game to start.",
+    require(same(step, DiscAfter::taken, false, false, true) && step.status == L"Game data is installed and ready. Press Play to start.",
             "a verified disc is taken and the game is started when that was asked");
     step = after(made(Task::verify, false), false);
     require(same(step, DiscAfter::taken, false, false, false), "and is not started when it was not");
@@ -213,7 +217,7 @@ void test_the_window_acts_on_an_outcome() {
     require(same(step, DiscAfter::taken, false, false, false), "nor after Cancel");
     step = after(made(Task::verify, true, L"", L"The language disc cannot be used."), false);
     require(same(step, DiscAfter::taken, false, false, false) &&
-                step.status == L"The language disc cannot be used.\nChoose English or another disc, then select Play game.",
+                step.status == L"The language disc cannot be used.\nChoose English or another disc, then press Play.",
             "a language disc that no longer fits keeps the game from starting");
 }
 
@@ -250,17 +254,107 @@ void test_the_language_box() {
     require(list.selected == 0 && starts(list.note, L"Add a French"), "a disc in use that is not listed leaves English selected");
 }
 
+void test_the_shown_version() {
+    require(shown_version("v0.1.0-alpha.5") == "v0.1.0-alpha.5", "a release shows its tag alone");
+    require(shown_version("v0.1.0-alpha.4-76-g43bcf0e") == "v0.1.0-alpha.4 (dev)" &&
+                shown_version("v0.1.0-alpha.4-76-g43bcf0e-dirty") == "v0.1.0-alpha.4 (dev)" &&
+                shown_version("v0.1.0-alpha.5-dirty") == "v0.1.0-alpha.5 (dev)",
+            "a build after a tag or with changes shows the tag it follows as a dev build");
+    require(shown_version("v1.2.3-rc-1-2-gabc") == "v1.2.3-rc-1 (dev)", "a tag with dashes keeps them");
+    require(shown_version("43bcf0e") == "dev build" && shown_version("unknown") == "dev build" && shown_version("") == "dev build",
+            "a build without a tag says so");
+}
+
+bool valid_utf8(const std::string& text) {
+    for (std::size_t at = 0; at < text.size();) {
+        const auto lead = static_cast<unsigned char>(text[at]);
+        const std::size_t length = lead < 0x80 ? 1 : (lead & 0xE0) == 0xC0 ? 2 : (lead & 0xF0) == 0xE0 ? 3 : (lead & 0xF8) == 0xF0 ? 4 : 0;
+        if (length == 0 || at + length > text.size()) return false;
+        for (std::size_t next = 1; next < length; ++next)
+            if ((static_cast<unsigned char>(text[at + next]) & 0xC0) != 0x80) return false;
+        at += length;
+    }
+    return true;
+}
+
+void test_fitted_text() {
+    // One unit a code point: what a font of even letters would measure.
+    const auto points = [](const std::string& text) {
+        return static_cast<float>(std::count_if(text.begin(), text.end(), [](char byte) { return (static_cast<unsigned char>(byte) & 0xC0) != 0x80; }));
+    };
+    require(fitted("short", 10.0f, points) == "short", "a text that fits stays whole");
+    for (const std::string letter : {"\xc3\xa9", "\xe2\x82\xac", "\xf0\x9f\x8e\xae"}) {
+        const std::string text = "ab" + letter + letter + letter + "cd";
+        for (float room = 1.0f; room < 7.0f; room += 1.0f) {
+            const std::string cut = fitted(text, room, points);
+            require(valid_utf8(cut) && points(cut) <= room, "a cut text is whole code points and fits, two, three and four bytes alike");
+            require(cut.ends_with("\xe2\x80\xa6"), "a cut text ends with an ellipsis");
+        }
+    }
+    require(fitted("anything", 0.5f, points).empty(), "where not even the ellipsis fits nothing is left");
+}
+
+void test_the_title_bar() {
+    const TitleBar bar{40.0f, 862.0f, 6.0f};
+    const auto at = [&](float x, float y, bool maximized = false) { return hit_at(x, y, 1000.0f, 700.0f, bar, maximized); };
+    require(at(500.0f, 20.0f) == Hit::drag && at(6.0f, 39.0f) == Hit::drag && at(861.0f, 20.0f) == Hit::drag,
+            "the bar left of its buttons moves the window");
+    require(at(862.0f, 20.0f) == Hit::client && at(500.0f, 40.0f) == Hit::client && at(500.0f, 400.0f) == Hit::client,
+            "the buttons and everything under the bar are the window's own");
+    require(at(500.0f, 0.0f) == Hit::top && at(930.0f, 5.0f) == Hit::top && at(500.0f, 699.0f) == Hit::bottom &&
+                at(0.0f, 300.0f) == Hit::left && at(999.0f, 300.0f) == Hit::right,
+            "a press near a side resizes the window, over a button at the top edge too");
+    require(at(994.0f, 300.0f) == Hit::right && at(993.0f, 300.0f) == Hit::client && at(500.0f, 694.0f) == Hit::bottom &&
+                at(500.0f, 693.0f) == Hit::client && at(5.0f, 300.0f) == Hit::left && at(6.0f, 300.0f) == Hit::client,
+            "each side reaches exactly as far in as the edge");
+    require(at(0.0f, 0.0f) == Hit::top_left && at(11.0f, 2.0f) == Hit::top_left && at(2.0f, 11.0f) == Hit::top_left &&
+                at(999.0f, 0.0f) == Hit::top_right && at(988.0f, 3.0f) == Hit::top_right &&
+                at(0.0f, 699.0f) == Hit::bottom_left && at(999.0f, 699.0f) == Hit::bottom_right && at(997.0f, 690.0f) == Hit::bottom_right,
+            "near a corner a press takes the corner");
+    require(at(12.0f, 2.0f) == Hit::top && at(2.0f, 12.0f) == Hit::left, "the corner reaches twice the edge and no further");
+    require(at(0.0f, 0.0f, true) == Hit::drag && at(500.0f, 0.0f, true) == Hit::drag && at(999.0f, 0.0f, true) == Hit::client &&
+                at(0.0f, 300.0f, true) == Hit::client && at(500.0f, 699.0f, true) == Hit::client,
+            "a maximized window is not resized by its sides and its corner button reaches the screen's corner");
+    require(at(-1.0f, 20.0f) == Hit::client && at(500.0f, 700.0f) == Hit::client, "a point outside the window is no part of it");
+}
+
+void test_the_launcher_choices() {
+    const fs::path file = fs::temp_directory_path() / "disruptor-launcher-choices-test.ini";
+    fs::remove(file);
+    LauncherChoices none = read_choices(file);
+    require(none.check_for_updates && !none.window, "without the file updates are checked and no place is known");
+    LauncherChoices chosen;
+    chosen.check_for_updates = false;
+    chosen.window = WindowPlace{-1200, 40, 1100, 760, true};
+    require(write_choices(file, chosen), "the choices are written");
+    const LauncherChoices back = read_choices(file);
+    require(!back.check_for_updates && back.window && back.window->x == -1200 && back.window->y == 40 &&
+                back.window->width == 1100 && back.window->height == 760 && back.window->maximized,
+            "they read back, a place on a monitor left of the main one included");
+    for (const char* broken : {"window = 10 10 50 50 0", "window = 10 10 1000", "window = 10 10 1000 700 2", "window = a b c d e",
+                               "window = 2147483647 10 1000 700 0", "window = 10 -2147483648 1000 700 0",
+                               "window = 1000001 10 1000 700 0"}) {
+        std::ofstream(file, std::ios::binary) << "check_for_updates = true\n" << broken << "\n";
+        require(!read_choices(file).window, "a place too small, cut short, not numbers or beyond any desktop is forgotten");
+    }
+    fs::remove(file);
+}
+
 void test_the_command_line() {
     require(quote(L"a b") == L"\"a b\"" && quote(L"") == L"\"\"" && quote(L"C:\\a\\b") == L"\"C:\\a\\b\"",
             "an argument is quoted, a backslash inside it stays single");
     require(quote(L"C:\\a\\") == L"\"C:\\a\\\\\"" && quote(L"a\"b") == L"\"a\\\"b\"" && quote(L"a\\\"b") == L"\"a\\\\\\\"b\"",
             "backslashes before a quote are doubled and the quote escaped");
     DiscProfile profile{"SLUS-00224", L"Disruptor (USA)", 0, "", L"game.toml"};
-    const fs::path root = L"C:\\Games folder\\Disruptor";
-    const VerifiedDisc disc{&profile, root / "disc", root / "disc" / "Disruptor (USA).cue", nullptr};
-    require(game_command(root, disc) == L"\"C:\\Games folder\\Disruptor\\DisruptorRecompiled.exe\" --no-launcher --game \"game.toml\" "
-                                        L"--disc \"disc\\Disruptor (USA).cue\"",
-            "the game is started without its own launcher, with the disc named relative to the package");
+    const fs::path program = L"C:\\Games folder\\Disruptor";
+    const fs::path data = L"C:\\Users\\Player\\AppData\\Local\\DisruptorRecompData";
+    const VerifiedDisc disc{&profile, data / "disc", data / "disc" / "Disruptor (USA).cue", nullptr};
+    require(game_command(program, disc) ==
+                L"\"C:\\Games folder\\Disruptor\\DisruptorRecompiled.exe\" --no-launcher --game "
+                L"\"C:\\Games folder\\Disruptor\\game.toml\" --disc "
+                L"\"C:\\Users\\Player\\AppData\\Local\\DisruptorRecompData\\disc\\Disruptor (USA).cue\"",
+            "the game is started without its own launcher, its config named in the program folder and the disc "
+            "wherever the player's files are");
 }
 
 void test_the_sliders() {
@@ -293,16 +387,20 @@ void test_the_sliders() {
     const Option* volume = find_option("audio.master_volume");
     const Option* rate = find_option("video.frame_interpolation_fps");
     const Option* reach = find_option("disruptor.occlusion_reach");
-    require(sensitivity && volume && rate && reach && value_text(*sensitivity, 80) == L"0.080" &&
+    require(sensitivity && volume && rate && reach && value_text(*sensitivity, 80) == L"1.0x" && value_text(*sensitivity, 40) == L"0.50x" &&
+                value_text(*sensitivity, 2000) == L"25x" &&
                 value_text(*volume, 55) == L"55%" && value_text(*rate, 120) == L"120 FPS" && value_text(*reach, 240) == L"240",
             "a value is shown in its unit");
-}
-
-void test_a_long_page_scrolls() {
-    require(scrolled_to(0, 1, 9) == 1 && scrolled_to(1, 5, 9) == 2 && scrolled_to(2, -1, 9) == 1 && scrolled_to(1, -9, 9) == 0,
-            "a page of nine rows moves between its first row and its third");
-    require(scrolled_to(0, 1, page_slots) == 0 && scrolled_to(0, 3, 2) == 0 && scrolled_to(4, 0, 3) == 0,
-            "a page that fits stays where it is");
+    const Option* deadzone = find_option("controller.deadzone");
+    disruptor::settings::Settings stick;
+    require(deadzone && disruptor::settings::stored(stick, *deadzone) == 37 && value_text(*deadzone, 37) == L"37%" &&
+                deadzone->initial == static_cast<int>(std::lround(stick.deadzone * 100.0 / 32767.0)),
+            "a fresh installation's dead zone is the runtime's, 12000 of 32767, shown as 37%");
+    deadzone->set(stick, 50);
+    require(deadzone->saved(stick) && stick.deadzone == 16384 && deadzone->get(stick) == 50,
+            "a share of the stick is saved in the stick's raw units and reads back");
+    deadzone->set(stick, deadzone->initial);
+    require(stick.deadzone == 12000, "the start share, which a reset writes, is the runtime's own 12000");
 }
 } // namespace
 
@@ -315,8 +413,11 @@ int main() {
         test_the_running_status();
         test_the_language_box();
         test_the_command_line();
+        test_the_shown_version();
+        test_fitted_text();
+        test_the_title_bar();
+        test_the_launcher_choices();
         test_the_sliders();
-        test_a_long_page_scrolls();
     } catch (const std::exception& error) {
         std::cerr << "FAIL: " << error.what() << '\n';
         return 1;

@@ -10,6 +10,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace disruptor::launcher {
@@ -74,14 +75,29 @@ struct LanguageList {
 // A disc the worker has not described yet is absent from the regions, one it could not name has no value there.
 LanguageList language_list(const std::vector<std::string>& discs, const Regions& regions, const std::string& spoken);
 
+// What the window calls a build from `git describe`: a release's tag alone, the tag it follows and "(dev)" for any
+// other build, "dev build" when there is no tag.
+std::string shown_version(std::string_view described);
+
+// UTF-8 `text` whole when `width` says it fits in `room`, else cut at a code point and ended with an ellipsis, or empty
+// when not even the ellipsis fits.
+std::string fitted(std::string text, float room, const std::function<float(const std::string&)>& width);
+
+// The window draws its own title bar: a press there moves the window, one near a side resizes it.
+enum class Hit { client, drag, top_left, top, top_right, right, bottom_right, bottom, bottom_left, left };
+struct TitleBar {
+    float height = 0.0f;
+    float buttons_left = 0.0f; // the bar's buttons take presses from here to the right
+    float edge = 0.0f;         // how near a side a press resizes; twice that from a corner takes the corner
+};
+Hit hit_at(float x, float y, float width, float height, const TitleBar& bar, bool maximized);
+
 // Windows command-line quoting, including trailing backslashes and quotes.
 std::wstring quote(const std::wstring& argument);
-std::wstring game_command(const std::filesystem::path& root, const VerifiedDisc& disc);
+// Whole paths: the disc lives with the player's files, which need not be beside the program.
+std::wstring game_command(const std::filesystem::path& program, const VerifiedDisc& disc);
 
 constexpr int slider_steps = 200;
-constexpr int page_slots = 7; // rows a settings page shows at once
-// The first row a page shows after a move of `step` rows.
-int scrolled_to(int first, int step, int rows);
 std::wstring value_text(const Option& option, int value);
 // Sensitivity spans 0.005 to 2.000, so its slider is logarithmic like the in-game one.
 int to_position(const Option& option, int value, int highest);

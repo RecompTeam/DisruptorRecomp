@@ -60,6 +60,21 @@ void set_antialiasing(Settings& settings, int index) {
 }
 int vsync(const Settings& settings) { return std::clamp(settings.vsync + 1, 0, 2); }
 void set_vsync(Settings& settings, int index) { settings.has_vsync = true; settings.vsync = index - 1; }
+// settings.toml keeps the dead zone in the stick's raw units, 0 to 32767: shown as a share of the stick's travel.
+constexpr int runtime_deadzone = 12000;
+int percent_of(int raw) { return static_cast<int>(std::lround(raw * 100.0 / 32767.0)); }
+int deadzone_percent(const Settings& settings) { return percent_of(settings.deadzone); }
+void set_deadzone_percent(Settings& settings, int percent) {
+    settings.has_deadzone = true;
+    // The runtime's own 12000 is no whole share: its share, the reset value, writes it back exactly.
+    settings.deadzone = percent == percent_of(runtime_deadzone) ? runtime_deadzone
+                                                                : static_cast<int>(std::lround(percent * 32767.0 / 100.0));
+}
+int scheme(const Settings& settings) { return settings.modern_controls ? 1 : 0; }
+void set_scheme(Settings& settings, int index) {
+    settings.has_modern_controls = true;
+    settings.modern_controls = index == 1;
+}
 
 template <auto Value> int thousandths(const Settings& settings) {
     return static_cast<int>(std::lround(settings.*Value * 1000.0));
@@ -73,6 +88,7 @@ constexpr const char* display_modes[] = {"Windowed", "Borderless fullscreen", "E
 constexpr const char* aspects[] = {"4:3", "16:9", "21:9", "32:9", "Match window (up to 32:9)"};
 constexpr const char* scales[] = {"1x (native)", "2x", "3x", "4x", "5x", "6x", "7x", "8x"};
 constexpr const char* vsyncs[] = {"Adaptive", "Immediate", "Synchronised"};
+constexpr const char* schemes[] = {"Classic", "Modern"};
 constexpr const char* antialiasing_levels[] = {"Off",     "2x MSAA", "4x MSAA", "8x MSAA", "16x MSAA",
                                                "2x SSAA", "4x SSAA", "8x SSAA", "16x SSAA"};
 
@@ -81,16 +97,46 @@ constexpr const char* frames_key = "video.frame_interpolation";
 constexpr const char* rate_key = "video.frame_interpolation_fps";
 constexpr const char* occlusion_key = "disruptor.ambient_occlusion";
 constexpr const char* aim_key = "disruptor.mouse_aim";
+constexpr const char* vertical_key = "disruptor.vertical_look";
+constexpr const char* separate_key = "disruptor.separate_vertical_speed";
 constexpr const char* needs_geometry[] = {geometry_key};
 constexpr const char* needs_frames[] = {frames_key};
 constexpr const char* needs_occlusion[] = {occlusion_key};
 constexpr const char* needs_aim_and_geometry[] = {aim_key, geometry_key};
+constexpr const char* needs_vertical[] = {vertical_key};
+constexpr const char* needs_separate[] = {separate_key};
+constexpr int default_sensitivity = 80;
+
+// A file from before the switch keeps the vertical speed it set where that differs from the horizontal one.
+bool vertical_differs(const Settings& settings) {
+    const long horizontal =
+        settings.has_horizontal_sensitivity ? std::lround(settings.horizontal_sensitivity * 1000.0) : default_sensitivity;
+    return settings.has_vertical_sensitivity && std::lround(settings.vertical_sensitivity * 1000.0) != horizontal;
+}
+bool separate_saved(const Settings& settings) { return settings.has_separate_vertical_speed || vertical_differs(settings); }
+int separate(const Settings& settings) {
+    return settings.has_separate_vertical_speed ? settings.separate_vertical_speed : vertical_differs(settings);
+}
+// Writing a speed first writes down the switch such a file implies, so that a later speed cannot turn it over.
+template <auto Has, auto Value> void set_speed(Settings& settings, int value) {
+    if (!settings.has_separate_vertical_speed) {
+        settings.separate_vertical_speed = vertical_differs(settings);
+        settings.has_separate_vertical_speed = true;
+    }
+    set_thousandths<Has, Value>(settings, value);
+}
 
 template <auto Has, auto Value>
 constexpr Option toggle(const char* key, const char* label, int initial, const char* hint,
                         std::span<const char* const> needs = {}) {
     return {key, Kind::toggle, label, saved<Has>, read<Value>, write<Has, Value>, initial, 0, 1, {}, needs,
             Unit::none, hint};
+}
+
+// A toggle that reads its value through its own functions.
+constexpr Option toggle(const char* key, const char* label, int initial, const char* hint, Saved saved, Get get, Set set,
+                        std::span<const char* const> needs = {}) {
+    return {key, Kind::toggle, label, saved, get, set, initial, 0, 1, {}, needs, Unit::none, hint};
 }
 
 constexpr Option choice(const char* key, const char* label, int initial, const char* hint,
@@ -108,46 +154,54 @@ constexpr Option slider(const char* key, const char* label, int initial, const c
 
 constexpr Option option_list[] = {
     choice("video.fullscreen", "Display mode", 0,
-           "A window, a borderless window the size of the screen, or exclusive fullscreen. Alt+Enter "
-           "switches between a window and fullscreen while playing.", display_modes,
+           "Windowed: a window.\n"
+           "Borderless fullscreen: a window the size of the screen.\n"
+           "Exclusive fullscreen: the screen is the game's alone.\n"
+           "Alt+Enter switches between a window and fullscreen while playing.", display_modes,
            saved<&Settings::has_fullscreen>, read<&Settings::fullscreen>,
            write<&Settings::has_fullscreen, &Settings::fullscreen>),
     choice("video.aspect_ratio", "Aspect ratio", 0,
-           "4:3 is the original picture. The wider choices show more of the world at the sides. Match "
-           "window follows the window's shape, up to 32:9. Movies stay 4:3.", aspects,
+           "4:3: the original picture.\n"
+           "16:9 and wider: more of the world at the sides.\n"
+           "Match window: follows the window's shape, up to 32:9.\n"
+           "Movies stay 4:3.", aspects,
            aspect_saved, aspect, set_aspect),
     choice("video.supersampling", "Internal resolution scale", 3,
-           "Draws the picture at this multiple of the original resolution. Higher is sharper. What it "
-           "costs the graphics card grows roughly with the square of the value.", scales,
+           "Draws the picture at this multiple of the original resolution. Higher is sharper.\n"
+           "The graphics card's work grows with the square of the value.", scales,
            saved<&Settings::has_supersampling>, scale, set_scale),
     choice("video.vsync", "VSync", 2,
-           "Synchronised waits for the display, so the picture never tears. Immediate does not wait. "
-           "Adaptive waits only while the game keeps up with the display.",
+           "Synchronised: waits for the display, the picture never tears.\n"
+           "Immediate: does not wait.\n"
+           "Adaptive: waits only while the game keeps up with the display.",
            vsyncs, saved<&Settings::has_vsync>, vsync, set_vsync),
     slider("disruptor.hud_scale", "HUD size", 100,
-           "Widescreen only. Shrinks the health and ammunition displays toward their screen edges. "
+           "Widescreen only. Shrinks the health and ammunition displays toward the screen edges.\n"
            "The weapon keeps its size.", 50, 100, Unit::percent,
            saved<&Settings::has_hud_scale>, read<&Settings::hud_scale>,
            write<&Settings::has_hud_scale, &Settings::hud_scale>),
 
     toggle<&Settings::has_geometry_correction, &Settings::geometry_correction>(
         "disruptor.geometry_correction", "Exact-provenance geometry", 1,
-        "Places polygons from the game's own arithmetic before it is rounded to whole pixels, which "
-        "steadies the PlayStation's wobbling edges. Other options need it."),
+        "Places polygons from the game's own arithmetic, before it rounds them to whole pixels.\n"
+        "This steadies the PlayStation's wobbling edges.\n"
+        "Other options need it."),
     toggle<&Settings::has_perspective_textures, &Settings::perspective_textures>(
         "disruptor.perspective_textures", "Perspective-correct world textures", 1,
-        "Draws wall and floor textures in true perspective. The PlayStation's own way bends them near "
-        "the viewer.", needs_geometry),
+        "Draws wall and floor textures in true perspective.\n"
+        "The PlayStation's own way bends them near the viewer.", needs_geometry),
     toggle<&Settings::has_gap_filling, &Settings::gap_filling>(
         "disruptor.gap_filling", "Gap filling", 1,
-        "Closes hairline gaps between polygons and keeps the game's own patches off their neighbours.", needs_geometry),
+        "Closes hairline gaps between polygons.\n"
+        "Keeps the game's own patches off their neighbours.", needs_geometry),
     toggle<&Settings::has_depth_sorted_world, &Settings::depth_sorted_world>(
-        "disruptor.depth_sorted_world", "Depth-sorted world", 0,
+        "disruptor.depth_sorted_world", "Depth-sorted world", 1,
         "Draws world polygons by their depth where the game's own order puts a far one over a near "
         "one.", needs_geometry),
     toggle<&Settings::has_smooth_fade, &Settings::smooth_fade>(
-        "disruptor.smooth_fade", "Smooth distance fade", 0,
-        "Fades walls and floors into the distance evenly, where the game steps through twelve shades.", needs_geometry),
+        "disruptor.smooth_fade", "Smooth distance fade", 1,
+        "Fades walls and floors evenly into the distance.\n"
+        "The game itself steps through twelve shades.", needs_geometry),
     toggle<&Settings::has_ambient_occlusion, &Settings::ambient_occlusion>(
         "disruptor.ambient_occlusion", "Ambient occlusion", 0,
         "Shades corners and the floor under things.", needs_geometry),
@@ -164,8 +218,8 @@ constexpr Option option_list[] = {
         "Lets the game run at up to 60 frames a second in place of its original rate."),
     toggle<&Settings::has_frame_interpolation, &Settings::frame_interpolation>(
         "video.frame_interpolation", "In-between frames", 0,
-        "Shows extra pictures between the game's frames, built from the game's own geometry, for "
-        "smoother motion.", needs_geometry),
+        "Shows extra pictures between the game's frames, for smoother motion.\n"
+        "They are built from the game's own geometry.", needs_geometry),
     slider("video.frame_interpolation_fps", "In-between frame rate", 0,
            "Pictures shown per second while in-between frames are on.",
            kDisruptorPresentRateLowest, kDisruptorPresentRateHighest, Unit::frames,
@@ -173,39 +227,49 @@ constexpr Option option_list[] = {
            write<&Settings::has_frame_interpolation_fps, &Settings::frame_interpolation_fps>, needs_frames),
     toggle<&Settings::has_skip_intro, &Settings::skip_intro>(
         "disruptor.skip_intro", "Skip the logos and the title movie", 0,
-        "Starts at the main menu without the logos and the title movie. Escape skips a logo or a "
-        "movie either way."),
+        "Starts at the main menu without the logos and the title movie.\n"
+        "Escape skips a logo or a movie either way."),
 
     toggle<&Settings::has_mouse_aim, &Settings::mouse_aim>(
         "disruptor.mouse_aim", "Horizontal mouse aim", 1,
-        "Turns the view with the mouse. In the game a middle-click captures the mouse, and a "
-        "middle-click or Escape releases it."),
-    toggle<&Settings::has_modern_controls, &Settings::modern_controls>(
-        "disruptor.modern_controls", "Modern keyboard and mouse controls", 1,
-        "WASD moves, the left mouse button fires, the right one uses psionics, Space jumps and E "
-        "interacts."),
+        "Turns the view with the mouse.\n"
+        "In the game a middle-click captures the mouse. A middle-click or Escape releases it."),
+    choice("disruptor.modern_controls", "Control scheme", 1,
+           "Modern: WASD, left click fires, right click uses psionics, side buttons choose.\n"
+           "Classic: the original keys. The mouse only turns.\n"
+           "Keys you set yourself stay either way.",
+           schemes, saved<&Settings::has_modern_controls>, scheme, set_scheme),
     slider("disruptor.horizontal_sensitivity", "Horizontal sensitivity", 80,
            "How far the view turns for a movement of the mouse.", 5, 2000, Unit::thousandths,
            saved<&Settings::has_horizontal_sensitivity>, thousandths<&Settings::horizontal_sensitivity>,
-           set_thousandths<&Settings::has_horizontal_sensitivity, &Settings::horizontal_sensitivity>),
+           set_speed<&Settings::has_horizontal_sensitivity, &Settings::horizontal_sensitivity>),
     toggle<&Settings::has_invert_horizontal, &Settings::invert_horizontal>(
         "disruptor.invert_horizontal", "Invert horizontal mouse", 0,
         "Turns the view left when the mouse moves right."),
     toggle<&Settings::has_high_precision_camera, &Settings::high_precision_camera>(
         "disruptor.high_precision_camera", "Smooth mouse turning", 0,
-        "The game turns in 256 steps of a circle. With this on, the picture also turns by the part of "
-        "a step in between. Needs mouse aim and exact geometry.", needs_aim_and_geometry),
+        "The game turns in 256 steps of a circle.\n"
+        "This also turns the picture by the part of a step in between.\n"
+        "Needs mouse aim and exact geometry.", needs_aim_and_geometry),
     toggle<&Settings::has_vertical_look, &Settings::vertical_look>(
         "disruptor.vertical_look", "Vertical mouse look", 0,
-        "Looks up and down with the mouse, to about 31 degrees each way. The original game has no "
-        "such view. Experimental."),
+        "Looks up and down with the mouse, about 31 degrees each way.\n"
+        "The original game has no such view."),
+    toggle("disruptor.separate_vertical_speed", "Separate vertical speed", 0,
+           "Off: the view tilts at the horizontal speed.\n"
+           "On: the vertical speed below applies.", separate_saved,
+           separate, write<&Settings::has_separate_vertical_speed, &Settings::separate_vertical_speed>, needs_vertical),
     slider("disruptor.vertical_sensitivity", "Vertical sensitivity", 80,
            "How far the view tilts for a movement of the mouse.", 5, 2000, Unit::thousandths,
            saved<&Settings::has_vertical_sensitivity>, thousandths<&Settings::vertical_sensitivity>,
-           set_thousandths<&Settings::has_vertical_sensitivity, &Settings::vertical_sensitivity>),
+           set_speed<&Settings::has_vertical_sensitivity, &Settings::vertical_sensitivity>, needs_separate),
     toggle<&Settings::has_invert_vertical, &Settings::invert_vertical>(
         "disruptor.invert_vertical", "Invert vertical mouse", 0,
-        "Looks down when the mouse moves forward."),
+        "Looks down when the mouse moves forward.", needs_vertical),
+    slider("controller.deadzone", "Stick dead zone", 37,
+           "How far the stick moves before it counts.\n"
+           "Raise it if you walk or turn without touching the stick.", 0, 90,
+           Unit::percent, saved<&Settings::has_deadzone>, deadzone_percent, set_deadzone_percent),
 
     slider("audio.master_volume", "Master volume", 100,
            "The loudness of everything the game plays.", 0, 100, Unit::percent,
@@ -215,23 +279,16 @@ constexpr Option option_list[] = {
         "Silences the game and keeps the volume setting."),
     toggle<&Settings::has_detailed_logging, &Settings::detailed_logging>(
         "disruptor.detailed_logging", "Detailed logging", 0,
-        "Writes more into the game's log for a bug report: how the frames ran, settings changed in the menu, "
-        "controllers coming and going, the graphics driver's complaints. The driver's part starts with the next launch."),
+        "Writes more into the game's log for a bug report.\n"
+        "Frame timing, menu changes, controllers and the graphics driver's complaints.\n"
+        "The driver's part starts with the next launch."),
 
     choice("disruptor.multisampling", "Anti-aliasing (MSAA / SSAA)", 0,
-           "MSAA smooths the edges of polygons and of the HUD's rectangles. SSAA also smooths textures and cut-out "
-           "outlines, at that many times the card's shading, and needs OpenGL 4.0. Video memory grows with the number. "
-           "Unfinished.",
+           "MSAA: smooths the edges of polygons and of the HUD.\n"
+           "SSAA: also smooths textures and cut-out outlines. It shades that many times over and needs OpenGL 4.0.\n"
+           "Video memory grows with the number.",
            antialiasing_levels,
            antialiasing_saved, antialiasing, set_antialiasing, needs_geometry),
-    toggle<&Settings::has_downscale_averaging, &Settings::downscale_averaging>(
-        "disruptor.downscale_averaging", "Downscale averaging", 0,
-        "Averages an internal resolution above the screen's down to it, where one sample a screen pixel is taken "
-        "without it. Movies stay as they are. Unfinished."),
-    toggle<&Settings::has_edge_smoothing, &Settings::edge_smoothing>(
-        "disruptor.edge_smoothing", "Edge smoothing", 0,
-        "Smooths the jagged edges left in the world's picture, sprite outlines among them. With exact geometry the "
-        "textured pictures of the HUD and of menus stay as they are. Movies stay as they are. Unfinished."),
 };
 } // namespace
 

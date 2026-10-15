@@ -8,8 +8,10 @@ recompiler/src/main_psx.cpp
 recompiler/tests/recompiler_patch_test.cpp
 recompiler/tests/test_reachable_discovery_codegen.py
 runtime/CMakeLists.txt
+runtime/include/crash_trace.h
 runtime/include/dirty_ram_interp.h
 +runtime/include/game_host.h
++runtime/include/user_dir.h
 +runtime/include/gte_precision.h
 runtime/include/gpu.h
 +runtime/include/gpu_ws_hud_scale.h
@@ -42,7 +44,9 @@ runtime/include/overlay_dispatch_preamble.c.inc
 runtime/include/ws_aspect_cone_math.h
 runtime/src/boot_state.c
 runtime/src/savestate.c
+runtime/src/crash_trace.c
 runtime/src/dirty_ram_interp.c
+runtime/src/freeze_heartbeat.c
 runtime/src/gpu.c
 runtime/src/gpu_gl_renderer.c
 +runtime/src/gpu_gl_temporal.c.inc
@@ -54,6 +58,7 @@ runtime/src/main.cpp
 runtime/src/memory.c
 runtime/src/overlay_loader.c
 runtime/src/psx_cycles.c
+runtime/src/traps.c
 runtime/src/ws_aspect_cone_math.c
 runtime/tests/test_ws_aspect_cone_math.c
 recompiler/seeds/openbios_elf_seeds.json

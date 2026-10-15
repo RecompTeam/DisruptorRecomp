@@ -208,7 +208,7 @@ require(
     and "constexpr const char* needs_aim_and_geometry[] = {aim_key, geometry_key};\n" in options
     and 'constexpr const char* aim_key = "disruptor.mouse_aim";\n' in options
     and options.count('"disruptor.high_precision_camera"') == launcher.count('"disruptor.high_precision_camera"') == 1
-    and '    {"disruptor.high_precision_camera", Page::controls},\n' in launcher,
+    and '    {"disruptor.high_precision_camera", Page::controls, nullptr, true},\n' in launcher,
     "the launcher offers it on the Controls page, off at first and only with mouse aim and geometry correction",
 )
 

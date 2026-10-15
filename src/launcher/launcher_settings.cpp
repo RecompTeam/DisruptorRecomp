@@ -1,6 +1,8 @@
 #include "launcher_settings.h"
 
+#include "disc_import.h"
 #include "game/frame/present_rate.h"
+#include "game/settings/user_folder.h"
 
 #include <windows.h>
 
@@ -21,46 +23,39 @@ constexpr Placement placed[] = {
     {"video.supersampling", Page::display},
     {"video.vsync", Page::display},
     {"disruptor.hud_scale", Page::display},
-    {"disruptor.geometry_correction", Page::enhancements},
+    {"disruptor.frame_unlock", Page::enhancements, "Frame rate"},
+    {"video.frame_interpolation", Page::enhancements},
+    {"video.frame_interpolation_fps", Page::enhancements, nullptr, true},
+    {"disruptor.geometry_correction", Page::enhancements, "Picture"},
     {"disruptor.perspective_textures", Page::enhancements},
     {"disruptor.gap_filling", Page::enhancements},
-    {"disruptor.depth_sorted_world", Page::enhancements},
     {"disruptor.smooth_fade", Page::enhancements},
-    {"disruptor.ambient_occlusion", Page::enhancements},
-    {"disruptor.occlusion_reach", Page::enhancements},
-    {"disruptor.occlusion_strength", Page::enhancements},
-    {"disruptor.frame_unlock", Page::enhancements},
-    {"video.frame_interpolation", Page::enhancements},
-    {"video.frame_interpolation_fps", Page::enhancements},
-    {"disruptor.skip_intro", Page::enhancements},
-    {"disruptor.mouse_aim", Page::controls},
-    {"disruptor.modern_controls", Page::controls},
+    {"disruptor.depth_sorted_world", Page::enhancements},
+    {"disruptor.ambient_occlusion", Page::enhancements, "Shading"},
+    {"disruptor.occlusion_reach", Page::enhancements, nullptr, true},
+    {"disruptor.occlusion_strength", Page::enhancements, nullptr, true},
+    {"disruptor.skip_intro", Page::enhancements, "Startup"},
+    {"disruptor.modern_controls", Page::controls, "Scheme"},
+    {"disruptor.mouse_aim", Page::controls, "Mouse"},
+    {"disruptor.high_precision_camera", Page::controls, nullptr, true},
     {"disruptor.horizontal_sensitivity", Page::controls},
     {"disruptor.invert_horizontal", Page::controls},
-    {"disruptor.high_precision_camera", Page::controls},
-    {"disruptor.vertical_look", Page::controls},
-    {"disruptor.vertical_sensitivity", Page::controls},
-    {"disruptor.invert_vertical", Page::controls},
+    {"disruptor.vertical_look", Page::controls, "Vertical look"},
+    {"disruptor.invert_vertical", Page::controls, nullptr, true},
+    {"disruptor.separate_vertical_speed", Page::controls, nullptr, true},
+    {"disruptor.vertical_sensitivity", Page::controls, nullptr, true},
+    {"controller.deadzone", Page::controls, "Gamepad"},
     {"audio.master_volume", Page::audio},
     {"audio.muted", Page::audio},
     {"disruptor.multisampling", Page::experimental},
-    {"disruptor.downscale_averaging", Page::experimental},
-    {"disruptor.edge_smoothing", Page::experimental},
     {"disruptor.detailed_logging", Page::troubleshooting},
 };
 
-constexpr PresetValue original_values[] = {
-    {"video.aspect_ratio", 0}, {"disruptor.hud_scale", 100}, {"disruptor.geometry_correction", 0},
-    {"disruptor.perspective_textures", 0}, {"disruptor.frame_unlock", 0},
-    {"video.frame_interpolation", 0}};
-constexpr PresetValue enhanced_values[] = {
-    {"video.aspect_ratio", 1}, {"disruptor.geometry_correction", 1}, {"disruptor.perspective_textures", 1},
-    {"disruptor.frame_unlock", 1}, {"video.frame_interpolation", 1}};
-constexpr Preset preset_list[] = {{L"Original", original_values}, {L"Enhanced", enhanced_values}};
 
 constexpr const char* shipped_keys[] = {
     "disruptor.mouse_aim", "disruptor.modern_controls", "disruptor.vertical_look", "disruptor.geometry_correction",
-    "disruptor.perspective_textures", "disruptor.frame_unlock", "video.frame_interpolation"};
+    "disruptor.perspective_textures", "disruptor.smooth_fade", "disruptor.depth_sorted_world", "disruptor.frame_unlock",
+    "video.frame_interpolation"};
 
 bool listed(const std::vector<std::string>& discs, const std::string& path) {
     return std::find(discs.begin(), discs.end(), path) != discs.end();
@@ -68,7 +63,6 @@ bool listed(const std::vector<std::string>& discs, const std::string& path) {
 } // namespace
 
 std::span<const Placement> layout() { return placed; }
-std::span<const Preset> presets() { return preset_list; }
 std::span<const wchar_t* const> page_labels() { return pages; }
 
 std::wstring wide(std::string_view utf8_text) {
@@ -99,7 +93,7 @@ std::wstring environment_overrides() {
     return names;
 }
 
-SettingsFile::SettingsFile(fs::path path) : path_(std::move(path)) {}
+SettingsFile::SettingsFile(fs::path path, fs::path program) : path_(std::move(path)), program_(std::move(program)) {}
 
 bool SettingsFile::load() {
     settings_ = PSXRecompV4::load_user_settings(path_);
@@ -149,17 +143,16 @@ bool SettingsFile::set(const Option& option, int value) {
     return change([&](Settings& settings) { put(settings, option, value); });
 }
 
-bool SettingsFile::apply(const Preset& preset) {
-    return change([&](Settings& settings) {
-        for (const auto& value : preset.values) put(settings, *find_option(value.key), value.value);
+bool SettingsFile::reset(Page page) {
+    return change([page](Settings& settings) {
+        for (const auto& option : options()) {
+            const auto row = std::ranges::find_if(placed, [&](const Placement& one) { return std::string_view(one.key) == option.key; });
+            if (row != std::end(placed) && row->page == page) option.set(settings, option.initial);
+        }
     });
 }
 
-bool SettingsFile::reset() {
-    return change([](Settings& settings) {
-        for (const auto& option : options()) option.set(settings, option.initial);
-    });
-}
+bool experimental(const Option& option) { return std::string_view(option.key) == "disruptor.vertical_look"; }
 
 bool shipped(const Option& option) {
     const auto same = [&](const char* key) { return std::string_view(key) == option.key; };
@@ -205,9 +198,20 @@ bool SettingsFile::forget_language_disc(const std::string& path) {
     });
 }
 
+// As the game decides: the settings' folder, else game.toml's, else the build folder itself.
 fs::path SettingsFile::saves_folder() const {
     const fs::path beside = path_.parent_path();
-    return settings_.has_memcard_dir ? beside / settings_.memcard_dir : beside;
+    if (settings_.has_memcard_dir) return beside / settings_.memcard_dir;
+    const fs::path program = program_.empty() ? beside : program_;
+    const fs::path game = program / supported_discs().front().game_config;
+    std::error_code missing;
+    if (!fs::is_regular_file(game, missing)) return beside;
+    try {
+        const auto config = PSXRecompV4::load_game_config(game);
+        if (config.runtime.has_memcard_dir) return user_folder::moved_out(config.runtime.memcard_dir, program, beside);
+    } catch (const std::exception&) {
+    }
+    return beside;
 }
 
 } // namespace disruptor::launcher

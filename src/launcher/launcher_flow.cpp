@@ -19,8 +19,8 @@ Outcome run(Request request, const Discs& discs, const std::atomic_bool& cancell
     try {
         if (request.task == Task::take && discs.look(request.source)) {
             if (request.home.empty())
-                throw std::runtime_error("That is a disc of another region. Install the USA disc first: it is the game, "
-                                         "and the other disc gives it a language.");
+                throw std::runtime_error("That is a disc of another region.\n"
+                                         "Install the USA disc first: it is the game, and the other disc gives it a language.");
             outcome.task = Task::language;
         }
         if (outcome.task == Task::language) {
@@ -31,7 +31,7 @@ Outcome run(Request request, const Discs& discs, const std::atomic_bool& cancell
             discs.check_package(outcome.disc);
             if (cancelled) {
                 outcome.disc = {};
-                outcome.error = L"Cancelled. Any completed import is kept; reopen the launcher to verify it again.";
+                outcome.error = L"Cancelled. A finished import is kept.\nReopen the launcher to check it again.";
             } else if (request.launch && !request.spoken.empty()) {
                 if (discs.report) discs.report(L"Checking the language disc...", 100);
                 try {
@@ -81,9 +81,9 @@ Step after(const Outcome& outcome, bool cancelled) {
     } else {
         step.disc = DiscAfter::taken;
         if (!outcome.language_error.empty()) {
-            step.status = outcome.language_error + L"\nChoose English or another disc, then select Play game.";
+            step.status = outcome.language_error + L"\nChoose English or another disc, then press Play.";
         } else {
-            step.status = L"Game data is installed and ready. Select Play game to start.";
+            step.status = L"Game data is installed and ready. Press Play to start.";
             step.launch = outcome.launch && !cancelled;
         }
     }
@@ -93,8 +93,8 @@ Step after(const Outcome& outcome, bool cancelled) {
 std::wstring running_text(const std::wstring& overriding, bool unwritten) {
     std::wstring text = L"Disruptor is running. You can close this launcher and keep playing.";
     if (unwritten)
-        text += L"\nsettings.toml cannot be written, so for the settings it does not name the game uses its own "
-                L"values, which are not always the ones shown here.";
+        text += L"\nsettings.toml cannot be written.\n"
+                L"Where it names no value, the game uses its own, which may differ from what is shown here.";
     if (!overriding.empty())
         text += L"\nPSX_ environment variables are set, and the game lets some of them replace settings for this "
                 L"run: " + overriding;
@@ -118,6 +118,54 @@ LanguageList language_list(const std::vector<std::string>& discs, const Regions&
     return list;
 }
 
+std::string shown_version(std::string_view described) {
+    std::string_view tag = described;
+    bool dev = false;
+    if (tag.ends_with("-dirty")) {
+        tag.remove_suffix(6);
+        dev = true;
+    }
+    const auto hash = tag.rfind("-g");
+    const auto count = hash == std::string_view::npos ? std::string_view::npos : tag.rfind('-', hash - 1);
+    if (count != std::string_view::npos && hash > count + 1 &&
+        std::all_of(tag.begin() + static_cast<std::ptrdiff_t>(count) + 1, tag.begin() + static_cast<std::ptrdiff_t>(hash),
+                    [](char letter) { return letter >= '0' && letter <= '9'; })) {
+        tag = tag.substr(0, count);
+        dev = true;
+    }
+    if (!tag.starts_with('v') || tag.size() < 2 || tag[1] < '0' || tag[1] > '9') return "dev build";
+    return std::string(tag) + (dev ? " (dev)" : "");
+}
+
+std::string fitted(std::string text, float room, const std::function<float(const std::string&)>& width) {
+    if (width(text) <= room) return text;
+    const std::string ellipsis = "\xe2\x80\xa6";
+    if (width(ellipsis) > room) return {};
+    while (!text.empty() && width(text + ellipsis) > room) {
+        while (!text.empty() && (static_cast<unsigned char>(text.back()) & 0xC0) == 0x80) text.pop_back();
+        if (!text.empty()) text.pop_back();
+    }
+    return text + ellipsis;
+}
+
+Hit hit_at(float x, float y, float width, float height, const TitleBar& bar, bool maximized) {
+    if (x < 0.0f || y < 0.0f || x >= width || y >= height) return Hit::client;
+    if (!maximized && bar.edge > 0.0f) {
+        const float corner = bar.edge * 2.0f;
+        const bool left = x < bar.edge, right = x >= width - bar.edge, top = y < bar.edge, bottom = y >= height - bar.edge;
+        const bool near_left = x < corner, near_right = x >= width - corner, near_top = y < corner, near_bottom = y >= height - corner;
+        if ((top && near_left) || (left && near_top)) return Hit::top_left;
+        if ((top && near_right) || (right && near_top)) return Hit::top_right;
+        if ((bottom && near_left) || (left && near_bottom)) return Hit::bottom_left;
+        if ((bottom && near_right) || (right && near_bottom)) return Hit::bottom_right;
+        if (top) return Hit::top;
+        if (bottom) return Hit::bottom;
+        if (left) return Hit::left;
+        if (right) return Hit::right;
+    }
+    return y < bar.height && x < bar.buttons_left ? Hit::drag : Hit::client;
+}
+
 std::wstring quote(const std::wstring& argument) {
     std::wstring result = L"\"";
     size_t slashes = 0;
@@ -132,19 +180,19 @@ std::wstring quote(const std::wstring& argument) {
     return result + L'\"';
 }
 
-std::wstring game_command(const std::filesystem::path& root, const VerifiedDisc& disc) {
-    // Keep disc/config arguments relative and ASCII for the game's path loader.
-    return quote((root / "DisruptorRecompiled.exe").wstring()) + L" --no-launcher --game " +
-        quote(disc.profile->game_config) + L" --disc " + quote(disc.cue.lexically_relative(root).wstring());
+std::wstring game_command(const std::filesystem::path& program, const VerifiedDisc& disc) {
+    return quote((program / "DisruptorRecompiled.exe").wstring()) + L" --no-launcher --game " +
+        quote((program / disc.profile->game_config).wstring()) + L" --disc " + quote(disc.cue.wstring());
 }
-
-int scrolled_to(int first, int step, int rows) { return std::clamp(first + step, 0, std::max(0, rows - page_slots)); }
 
 std::wstring value_text(const Option& option, int value) {
     wchar_t text[32] = L"";
     if (option.unit == Unit::percent) swprintf(text, 32, L"%d%%", value);
     else if (option.unit == Unit::frames) swprintf(text, 32, L"%d FPS", value);
-    else if (option.unit == Unit::thousandths) swprintf(text, 32, L"%.3f", value / 1000.0);
+    else if (option.unit == Unit::thousandths) {
+        const double times = static_cast<double>(value) / option.initial;
+        swprintf(text, 32, times < 1.0 ? L"%.2fx" : times < 10.0 ? L"%.1fx" : L"%.0fx", times);
+    }
     else swprintf(text, 32, L"%d", value);
     return text;
 }

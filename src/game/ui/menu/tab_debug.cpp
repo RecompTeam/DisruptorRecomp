@@ -164,6 +164,12 @@ void draw_debug_tab() {
         "next start.");
 
     ImGui::Separator();
+    ImGui::TextDisabled("Vertical pitch asked for: %+.2f degrees, at most 30.94 either way.",
+                        disruptor_mouse_vertical_pitch() * (360.0 / 256.0));
+    ImGui::TextDisabled("Mouse captured before this menu opened: %s. The menu releases it while open and gives it "
+                        "back when closed.", g_menu.restore_mouse_capture ? "yes" : "no");
+
+    ImGui::Separator();
     draw_capsules();
 }
 

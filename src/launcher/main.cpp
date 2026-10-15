@@ -1,812 +1,489 @@
+#include "activity.h"
 #include "disc_import.h"
-#include "launcher_flow.h"
+#include "game/settings/user_folder.h"
+#include "game_process.h"
 #include "launcher_settings.h"
-#include "region_disc.h"
-#include "report.h"
-#include "startup_log.h"
+#include "session.h"
+#include "update_flow.h"
+#include "updater.h"
+#include "view.h"
+
+#if DISRUPTOR_UPDATER
+#include "Velopack.hpp"
+#endif
+
+#include "imgui.h"
+#include "imgui_impl_sdl3.h"
+#include "imgui_impl_sdlrenderer3.h"
+
+#include <SDL3/SDL.h>
+#include <SDL3/SDL_main.h>
 
 #include <windows.h>
-#include <commctrl.h>
-#include <commdlg.h>
+#include <dwmapi.h>
 #include <shellapi.h>
-#include <uxtheme.h>
-#include <vssym32.h>
 
 #include <algorithm>
 #include <atomic>
-#include <cmath>
-#include <cwchar>
+#include <cwctype>
+#include <charconv>
+#include <chrono>
+#include <exception>
 #include <filesystem>
-#include <map>
-#include <memory>
+#include <fstream>
+#include <functional>
 #include <optional>
-#include <ranges>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
 namespace fs = std::filesystem;
 using namespace disruptor::launcher;
+
 namespace {
-constexpr UINT progress_message = WM_APP + 1;
-constexpr UINT finished_message = WM_APP + 2;
-constexpr int browse_id = 100, play_id = 101, cancel_id = 102, help_id = 103;
-constexpr int language_id = 104, add_disc_id = 105, remove_disc_id = 106, reset_id = 107, saves_id = 108, report_id = 109;
-constexpr int preset_base = 200, option_base = 1000;
-constexpr int client_width = 680, client_height = 664;
-constexpr size_t log_lines = 8;
-constexpr LRESULT status_lines = 3;
-constexpr const wchar_t* image_filter =
-    L"Disc images (*.cue;*.bin;*.iso;*.img)\0*.cue;*.bin;*.iso;*.img\0CUE sheets (*.cue)\0*.cue\0"
-    L"Raw images (*.bin;*.iso;*.img)\0*.bin;*.iso;*.img\0\0";
-constexpr const wchar_t* page_notes[] = {
-    L"HUD size applies in widescreen.",
-    L"Perspective textures and in-between frames need exact geometry.",
-    L"Key bindings are in keybinds.ini beside the launcher.",
-    L"",
-    L"",
-    L"Switch on, play until the problem shows, close the game, then press Report a problem.",
-};
 
-fs::path executable_directory() {
-    std::wstring buffer(32768, L'\0');
-    const auto size = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
-    if (!size || size >= buffer.size()) throw std::runtime_error("Cannot find the launcher's folder.");
-    buffer.resize(size);
-    return fs::path(buffer).parent_path();
-}
+constexpr const char* kRepository = "https://github.com/RecompTeam/DisruptorRecomp";
 
-void check_package(const fs::path& root, const DiscProfile& profile) {
-    for (const auto& name : {fs::path(L"DisruptorRecompiled.exe"), fs::path(profile.game_config),
-                             fs::path(L"bios/openbios.bin")}) {
-        if (!fs::is_regular_file(root / name))
-            throw std::runtime_error("The build is incomplete. Use Extract All on the release ZIP and keep "
-                                     "the launcher, game executable, game.toml, and bios folder together.");
-    }
-    if (fs::file_size(root / "bios/openbios.bin") != 524288)
-        throw std::runtime_error("The bundled OpenBIOS is incomplete. Extract the complete release again.");
-}
-
-HANDLE start_game(const fs::path& root, const VerifiedDisc& disc) {
-    check_package(root, *disc.profile);
-    const auto executable = root / "DisruptorRecompiled.exe";
-    std::wstring command = game_command(root, disc);
-    SECURITY_ATTRIBUTES security{sizeof(security), nullptr, TRUE};
-    std::error_code kept;  // a report takes the run before as well: a crash is often seen after a second start
-    fs::rename(root / "startup.log", root / "startup.previous.log", kept);
-    HANDLE log = CreateFileW((root / "startup.log").c_str(), GENERIC_WRITE, FILE_SHARE_READ,
-                             &security, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
-    HANDLE input = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE,
-                               &security, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (log == INVALID_HANDLE_VALUE || input == INVALID_HANDLE_VALUE) {
-        if (log != INVALID_HANDLE_VALUE) CloseHandle(log);
-        if (input != INVALID_HANDLE_VALUE) CloseHandle(input);
-        throw std::runtime_error("Cannot create startup.log. Put the extracted build in a writable Games folder.");
-    }
-    std::string heading = started_line();
-    for (const auto line : std::views::split(system_note(), std::string_view("\r\n")))
-        if (!line.empty()) heading += "launcher: " + std::string(line.begin(), line.end()) + "\r\n";
-    DWORD written = 0;
-    WriteFile(log, heading.data(), static_cast<DWORD>(heading.size()), &written, nullptr);
-    STARTUPINFOW startup{};
-    startup.cb = sizeof(startup);
-    startup.dwFlags = STARTF_USESTDHANDLES;
-    startup.hStdInput = input;
-    startup.hStdOutput = startup.hStdError = log;
-    PROCESS_INFORMATION process{};
-    const BOOL started = CreateProcessW(executable.c_str(), command.data(), nullptr, nullptr,
-                                        TRUE, CREATE_NO_WINDOW, nullptr, root.c_str(), &startup, &process);
-    const DWORD failure = GetLastError();
-    CloseHandle(log);
-    CloseHandle(input);
-    if (!started)
-        throw std::runtime_error("Windows could not start DisruptorRecompiled.exe (error " +
-            std::to_string(failure) + "). Check that the complete build is extracted and the "
-            "Microsoft Visual C++ x64 Redistributable is installed. See GETTING_STARTED.md.");
-    CloseHandle(process.hThread);
-    return process.hProcess;
-}
-
-std::optional<fs::path> pick_image(HWND owner, const wchar_t* title) {
-    std::wstring selected(32768, L'\0');
-    OPENFILENAMEW picker{};
-    picker.lStructSize = sizeof(picker);
-    picker.hwndOwner = owner;
-    picker.lpstrTitle = title;
-    picker.lpstrFilter = image_filter;
-    picker.lpstrFile = selected.data();
-    picker.nMaxFile = static_cast<DWORD>(selected.size());
-    picker.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR | OFN_EXPLORER;
-    if (!GetOpenFileNameW(&picker)) return std::nullopt;
-    selected.resize(wcslen(selected.c_str()));
-    return fs::path(selected);
-}
-
-struct Update { std::wstring status; unsigned percent; };
-struct Placed { HWND window; int x, y, width, height; bool heading; };
-struct Row {
-    const Option* option;
-    Page page;
-    int order = 0;
-    std::wstring hint;
-    HWND label = nullptr, control = nullptr, value = nullptr;
-};
-
-struct App {
-    fs::path root;
-    SettingsFile settings;
-    HWND window = nullptr, status = nullptr, progress = nullptr, disc_text = nullptr;
-    HWND browse = nullptr, play = nullptr, cancel = nullptr, auto_play = nullptr;
-    HWND language = nullptr, language_note = nullptr, add_disc = nullptr, remove_disc = nullptr;
-    HWND tabs = nullptr, page_note = nullptr, reset = nullptr, scroll = nullptr, tips = nullptr;
-    std::vector<int> page_rows, first_row;
-    std::vector<HWND> preset_buttons;
-    std::vector<Placed> placed;
-    std::vector<Row> rows;
-    std::vector<std::string> discs;
-    Regions regions; // filled by the worker only: an image on a share that is gone must not stall the window
-    HFONT body_font = nullptr, heading_font = nullptr;
-    HBRUSH page_brush = nullptr;
-    std::thread worker;
-    std::atomic_bool cancelled{false};
-    bool busy = false, closing = false, unwritten = false;
-    HANDLE game = nullptr;
-    ULONGLONG game_started = 0;
-    VerifiedDisc verified;
-
-    explicit App(fs::path folder) : root(std::move(folder)), settings(root / "settings.toml") {}
-    ~App() {
-        cancelled = true;
-        if (worker.joinable()) worker.join();
-        if (game) CloseHandle(game);
-        if (body_font) DeleteObject(body_font);
-        if (heading_font) DeleteObject(heading_font);
-        if (page_brush) DeleteObject(page_brush);
-    }
-
-    void say(const std::wstring& text) {
-        std::wstring lines;
-        for (const wchar_t letter : text) {
-            if (letter == L'\n' && (lines.empty() || lines.back() != L'\r')) lines += L'\r';
-            lines += letter;
-        }
-        if (!settings.readable() && text != settings_error()) lines += std::wstring(L"\r\n") + settings_error();
-        SetWindowTextW(status, lines.c_str());
-        ShowScrollBar(status, SB_VERT, SendMessageW(status, EM_GETLINECOUNT, 0, 0) > status_lines);
-    }
-    void match_page() {
-        COLORREF colour = GetSysColor(COLOR_3DFACE);
-        if (HTHEME theme = OpenThemeData(tabs, L"TAB")) {
-            // The theme's fill colour hint is not the colour it paints, so a pane is drawn and its middle read.
-            RECT pane{0, 0, 64, 64};
-            HDC screen = GetDC(tabs), drawn = CreateCompatibleDC(screen);
-            HBITMAP bitmap = CreateCompatibleBitmap(screen, pane.right, pane.bottom);
-            HGDIOBJ before = SelectObject(drawn, bitmap);
-            if (SUCCEEDED(DrawThemeBackground(theme, drawn, TABP_PANE, 0, &pane, nullptr)))
-                colour = GetPixel(drawn, pane.right / 2, pane.bottom / 2);
-            SelectObject(drawn, before);
-            DeleteObject(bitmap);
-            DeleteDC(drawn);
-            ReleaseDC(tabs, screen);
-            CloseThemeData(theme);
-        }
-        if (page_brush) DeleteObject(page_brush);
-        page_brush = CreateSolidBrush(colour);
-    }
-    const wchar_t* settings_error() const {
-        return settings.readable()
-            ? L"Cannot write settings.toml. Put the extracted build in a writable Games folder."
-            : L"settings.toml is not valid TOML, so it is left as it is. Fix or delete it, then reopen the launcher.";
-    }
-    bool editable() const { return !busy && !game && settings.readable(); }
-
-    HWND add(HWND parent, const wchar_t* type, const wchar_t* text, DWORD style, DWORD extended,
-             int x, int y, int width, int height, int id = 0, bool heading = false) {
-        HWND handle = CreateWindowExW(extended, type, text, WS_CHILD | WS_VISIBLE | style, 0, 0, 0, 0, parent,
-            reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)), nullptr, nullptr);
-        placed.push_back({handle, x, y, width, height, heading});
-        return handle;
-    }
-    void lay_out() {
-        const int dpi = static_cast<int>(GetDpiForWindow(window));
-        const auto scale = [dpi](int value) { return MulDiv(value, dpi, 96); };
-        HFONT body = CreateFontW(-MulDiv(10, dpi, 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE,
-            FALSE, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
-        HFONT heading = CreateFontW(-MulDiv(21, dpi, 72), 0, 0, 0, FW_SEMIBOLD, FALSE, FALSE,
-            FALSE, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
-        for (const auto& item : placed) {
-            SendMessageW(item.window, WM_SETFONT, reinterpret_cast<WPARAM>(item.heading ? heading : body), TRUE);
-            SetWindowPos(item.window, nullptr, scale(item.x), scale(item.y), scale(item.width), scale(item.height),
-                         SWP_NOZORDER | SWP_NOACTIVATE);
-        }
-        if (body_font) DeleteObject(body_font);
-        if (heading_font) DeleteObject(heading_font);
-        body_font = body;
-        heading_font = heading;
-        SendMessageW(tips, TTM_SETMAXTIPWIDTH, 0, scale(380));
-        for (int slot = 0; slot < page_slots; ++slot) {
-            TTTOOLINFOW band{sizeof(band), 0, tabs, static_cast<UINT_PTR>(slot)};
-            band.rect = {scale(12), scale(38 + 28 * slot), scale(594), scale(38 + 28 * (slot + 1))};
-            SendMessageW(tips, TTM_NEWTOOLRECTW, 0, reinterpret_cast<LPARAM>(&band));
-        }
-    }
-
-    void show_languages() {
-        discs = settings.language_discs();
-        const LanguageList list = language_list(discs, regions, settings.language_disc());
-        SendMessageW(language, CB_RESETCONTENT, 0, 0);
-        for (const std::wstring& label : list.labels) SendMessageW(language, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(label.c_str()));
-        SendMessageW(language, CB_SETCURSEL, list.selected, 0);
-        SetWindowTextW(language_note, list.note.c_str());
-        EnableWindow(remove_disc, editable() && list.selected > 0);
-    }
-    int page() const {
-        const int chosen = static_cast<int>(SendMessageW(tabs, TCM_GETCURSEL, 0, 0));
-        return std::clamp(chosen, 0, static_cast<int>(page_rows.size()) - 1);
-    }
-    void put_row(const Row& row, int slot) {
-        const int dpi = static_cast<int>(GetDpiForWindow(window)), y = 38 + 28 * slot;
-        for (auto& item : placed) {
-            if (item.window != row.label && item.window != row.control && item.window != row.value) continue;
-            item.y = item.window == row.control ? y : y + 4;
-            SetWindowPos(item.window, nullptr, MulDiv(item.x, dpi, 96), MulDiv(item.y, dpi, 96), 0, 0,
-                         SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
-        }
-    }
-    // A disabled control and a label take no mouse, so the row's band on the page carries the hint as well.
-    void tip_of(int slot, const wchar_t* hint) {
-        TTTOOLINFOW band{sizeof(band), 0, tabs, static_cast<UINT_PTR>(slot)};
-        band.lpszText = const_cast<wchar_t*>(hint);
-        SendMessageW(tips, TTM_UPDATETIPTEXTW, 0, reinterpret_cast<LPARAM>(&band));
-    }
-    void scroll_page(int step) {
-        const int shown = page(), first = scrolled_to(first_row[shown], step, page_rows[shown]);
-        if (first == first_row[shown]) return;
-        first_row[shown] = first;
-        show_settings();
-    }
-    void scroll_request(int code, int thumb) {
-        const int first = first_row[page()];
-        scroll_page(code == SB_LINEUP ? -1 : code == SB_LINEDOWN ? 1 : code == SB_PAGEUP ? -page_slots
-            : code == SB_PAGEDOWN ? page_slots : code == SB_TOP ? -first : code == SB_BOTTOM ? page_rows[page()]
-            : code == SB_THUMBTRACK || code == SB_THUMBPOSITION ? thumb - first : 0);
-    }
-    void show_settings() {
-        const int page = this->page(), first = first_row[page];
-        for (int slot = page_rows[page] - first; slot < page_slots; ++slot) tip_of(slot, L"");
-        for (const auto& row : rows) {
-            const Option& option = *row.option;
-            const int value = settings.shown(option), highest = settings.highest(option);
-            if (option.kind == Kind::toggle) {
-                SendMessageW(row.control, BM_SETCHECK, value ? BST_CHECKED : BST_UNCHECKED, 0);
-            } else if (option.kind == Kind::choice) {
-                SendMessageW(row.control, CB_SETCURSEL, static_cast<WPARAM>(value), 0);
-            } else {
-                const bool logarithmic = option.unit == Unit::thousandths;
-                SendMessageW(row.control, TBM_SETRANGEMIN, FALSE, logarithmic ? 0 : option.lowest);
-                SendMessageW(row.control, TBM_SETRANGEMAX, FALSE, logarithmic ? slider_steps : highest);
-                SendMessageW(row.control, TBM_SETPOS, TRUE, to_position(option, value, highest));
-                SetWindowTextW(row.value, value_text(option, value).c_str());
-            }
-            const bool on = editable() && settings.applies(option);
-            const int slot = row.order - first;
-            const bool here = static_cast<int>(row.page) == page && slot >= 0 && slot < page_slots;
-            if (here) put_row(row, slot);
-            const int shown = here ? SW_SHOW : SW_HIDE;
-            if (here) tip_of(slot, row.hint.c_str());
-            for (HWND part : {row.label, row.control, row.value}) {
-                if (!part) continue;
-                EnableWindow(part, on);
-                ShowWindow(part, shown);
-            }
-        }
-        SCROLLINFO range{sizeof(range), SIF_RANGE | SIF_PAGE | SIF_POS, 0, page_rows[page] - 1,
-                         static_cast<UINT>(page_slots), first, 0};
-        SetScrollInfo(scroll, SB_CTL, &range, TRUE);
-        ShowWindow(scroll, page_rows[page] > page_slots ? SW_SHOW : SW_HIDE);
-        // A row scrolled away with the keyboard on it would leave Tab nowhere to go from.
-        if (HWND focus = GetFocus(); focus && GetParent(focus) == tabs && !IsWindowVisible(focus))
-            SetFocus(page_rows[page] > page_slots ? scroll : tabs);
-        SetWindowTextW(page_note, page_notes[std::clamp(page, 0, static_cast<int>(std::size(page_notes)) - 1)]);
-    }
-    void controls() {
-        EnableWindow(browse, !busy && !game);
-        EnableWindow(play, !busy && !game && verified.profile);
-        EnableWindow(cancel, busy && !closing);
-        EnableWindow(auto_play, !busy && !game);
-        for (HWND button : preset_buttons) EnableWindow(button, editable());
-        for (HWND part : {language, add_disc, reset}) EnableWindow(part, editable());
-        const std::wstring disc = verified.profile
-            ? std::wstring(verified.profile->label) + L", verified."
-            : L"Not installed. Browse to your USA disc image (SLUS-00224) or drop it on this window.";
-        SetWindowTextW(disc_text, disc.c_str());
-        show_languages();
-        show_settings();
-    }
-    void saved(bool written, const std::wstring& done = {}) {
-        if (!written) say(settings_error());
-        else if (!done.empty()) say(done);
-        controls();
-    }
-
-    void begin(Task task, fs::path source, bool launch) {
-        if (worker.joinable()) worker.join();
-        // The game reads the file, not what this window last saw or shows of it.
-        if (launch) unwritten = !settings.complete() && settings.readable();
-        Request request{task, std::move(source), launch, verified.data, settings.language_disc(), settings.language_discs()};
-        if (task == Task::import || task == Task::verify) verified = {}; // release previous read locks before replacing data
-        cancelled = false;
-        busy = true;
-        controls();
-        SendMessageW(progress, PBM_SETPOS, 0, 0);
-        if (task != Task::look)
-            say(task == Task::import ? L"Preparing to import your image..."
-                : task == Task::verify ? L"Checking installed game data..."
-                : task == Task::take ? L"Looking at the image..." : L"Checking the language disc...");
-        worker = std::thread([this, request = std::move(request)]() mutable {
-            unsigned previous = 101;
-            std::wstring previous_status;
-            const auto report = [this, &previous, &previous_status](const std::wstring& text, unsigned percent) {
-                if (previous == percent && previous_status == text) return;
-                previous = percent;
-                previous_status = text;
-                auto update = std::make_unique<Update>(Update{text, percent});
-                if (PostMessageW(window, progress_message, 0, reinterpret_cast<LPARAM>(update.get())))
-                    update.release();
-            };
-            Discs discs;
-            discs.import = [&](const fs::path& image) { return import_disc(image, root, cancelled, report); };
-            discs.verify = [&](const fs::path& cue) { return verify_disc(cue, cancelled, report); };
-            discs.check_package = [&](const VerifiedDisc& disc) { check_package(root, *disc.profile); };
-            discs.look = [](const fs::path& image) { return region_disc(image); };
-            discs.check = [](const fs::path& home, const fs::path& image) { return check_region_disc(home, image); };
-            discs.report = report;
-            auto outcome = std::make_unique<Outcome>(run(std::move(request), discs, cancelled));
-            if (PostMessageW(window, finished_message, 0, reinterpret_cast<LPARAM>(outcome.get())))
-                outcome.release();
-        });
-    }
-    void take_image(const fs::path& image) {
-        if (!busy && !game) begin(Task::take, image, SendMessageW(auto_play, BM_GETCHECK, 0, 0) == BST_CHECKED);
-    }
-    void look() {
-        if (!busy && !settings.language_discs().empty()) begin(Task::look, {}, false);
-    }
-    void launch() {
-        try {
-            game = start_game(root, verified);
-            game_started = GetTickCount64();
-            say(running_text(environment_overrides(), unwritten));
-            SetTimer(window, 1, 500, nullptr);
-        } catch (const std::exception& error) {
-            say(error_text(error));
-        }
-        controls();
-    }
-};
-
-// Controls on a tab page are the tab control's children, so their messages are passed on to the window.
-LRESULT CALLBACK pass_to_window(HWND tab, UINT message, WPARAM wparam, LPARAM lparam, UINT_PTR, DWORD_PTR) {
-    if (message == WM_COMMAND || message == WM_HSCROLL || message == WM_VSCROLL || message == WM_MOUSEWHEEL ||
-        message == WM_CTLCOLORSTATIC || message == WM_CTLCOLORBTN)
-        return SendMessageW(GetParent(tab), message, wparam, lparam);
-    return DefSubclassProc(tab, message, wparam, lparam);
-}
-
-// Under the pointer a list or a slider takes the wheel for itself and changes, where the page was meant to move.
-LRESULT CALLBACK wheel_to_window(HWND control, UINT message, WPARAM wparam, LPARAM lparam, UINT_PTR, DWORD_PTR) {
-    if (message == WM_MOUSEWHEEL) return SendMessageW(GetAncestor(control, GA_ROOT), message, wparam, lparam);
-    return DefSubclassProc(control, message, wparam, lparam);
-}
-
-void create_controls(App& app) {
-    HWND window = app.window;
-    app.add(window, L"STATIC", L"Disruptor Recompiled", SS_LEFT, 0, 28, 16, 624, 42, 0, true);
-
-    app.add(window, L"STATIC", L"Disc", SS_LEFT, 0, 30, 72, 86, 20);
-    app.disc_text = app.add(window, L"STATIC", L"", SS_LEFT, 0, 124, 72, 388, 36);
-    app.browse = app.add(window, L"BUTTON", L"Browse...", BS_PUSHBUTTON | WS_TABSTOP, 0, 524, 68, 126, 30, browse_id);
-    app.auto_play = app.add(window, L"BUTTON", L"Start the game after importing",
-                            BS_AUTOCHECKBOX | WS_TABSTOP, 0, 124, 110, 388, 22);
-    SendMessageW(app.auto_play, BM_SETCHECK, BST_CHECKED, 0);
-
-    app.add(window, L"STATIC", L"Language", SS_LEFT, 0, 30, 146, 86, 20);
-    app.language = app.add(window, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 0,
-                           124, 142, 250, 220, language_id);
-    app.add_disc = app.add(window, L"BUTTON", L"Add disc...", BS_PUSHBUTTON | WS_TABSTOP, 0,
-                           384, 141, 128, 28, add_disc_id);
-    app.remove_disc = app.add(window, L"BUTTON", L"Remove", BS_PUSHBUTTON | WS_TABSTOP, 0,
-                              524, 141, 126, 28, remove_disc_id);
-    app.language_note = app.add(window, L"STATIC", L"", SS_LEFT, 0, 124, 174, 526, 20);
-
-    app.tabs = app.add(window, WC_TABCONTROLW, L"", WS_CLIPCHILDREN | WS_TABSTOP, WS_EX_CONTROLPARENT,
-                       30, 202, 620, 268);
-    SetWindowSubclass(app.tabs, pass_to_window, 1, 0);
-    int index = 0;
-    for (const wchar_t* label : page_labels()) {
-        TCITEMW item{};
-        item.mask = TCIF_TEXT;
-        item.pszText = const_cast<wchar_t*>(label);
-        SendMessageW(app.tabs, TCM_INSERTITEMW, static_cast<WPARAM>(index++), reinterpret_cast<LPARAM>(&item));
-    }
-    std::vector<int> rows_on_page(page_labels().size(), 0);
-    index = 0;
-    for (const auto& placement : layout()) {
-        const Option& option = *find_option(placement.key);
-        const int order = rows_on_page[static_cast<int>(placement.page)]++, y = 38 + 28 * std::min(order, page_slots - 1);
-        const std::wstring label = wide(option.label);
-        const int id = option_base + index++;
-        Row row{&option, placement.page, order, wide(option.hint)};
-        if (option.kind == Kind::toggle) {
-            row.control = app.add(app.tabs, L"BUTTON", label.c_str(), BS_AUTOCHECKBOX | WS_TABSTOP, 0,
-                                  18, y, 560, 24, id);
-        } else {
-            row.label = app.add(app.tabs, L"STATIC", label.c_str(), SS_LEFT, 0, 18, y + 4, 250, 20);
-            if (option.kind == Kind::choice) {
-                row.control = app.add(app.tabs, WC_COMBOBOXW, L"", CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP, 0,
-                                      280, y, 250, 240, id);
-                for (const char* choice : option.choices)
-                    SendMessageW(row.control, CB_ADDSTRING, 0, reinterpret_cast<LPARAM>(wide(choice).c_str()));
-            } else {
-                row.control = app.add(app.tabs, TRACKBAR_CLASSW, L"", TBS_HORZ | TBS_NOTICKS | WS_TABSTOP, 0,
-                                      274, y, 256, 26, id);
-                row.value = app.add(app.tabs, L"STATIC", L"", SS_LEFT, 0, 538, y + 4, 54, 20);
-            }
-            SetWindowSubclass(row.control, wheel_to_window, 2, 0);
-        }
-        app.rows.push_back(row);
-    }
-    app.tips = CreateWindowExW(WS_EX_TOPMOST, TOOLTIPS_CLASSW, nullptr, WS_POPUP | TTS_ALWAYSTIP | TTS_NOPREFIX,
-                               CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, window, nullptr, nullptr,
-                               nullptr);
-    SendMessageW(app.tips, TTM_SETDELAYTIME, TTDT_AUTOPOP, 20000);
-    for (const auto& row : app.rows) {
-        TTTOOLINFOW tool{sizeof(tool), TTF_IDISHWND | TTF_SUBCLASS, app.tabs};
-        tool.uId = reinterpret_cast<UINT_PTR>(row.control);
-        tool.lpszText = const_cast<wchar_t*>(row.hint.c_str());
-        SendMessageW(app.tips, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&tool));
-    }
-    for (int slot = 0; slot < page_slots; ++slot) {
-        TTTOOLINFOW band{sizeof(band), TTF_SUBCLASS, app.tabs, static_cast<UINT_PTR>(slot)};
-        band.lpszText = const_cast<wchar_t*>(L"");
-        SendMessageW(app.tips, TTM_ADDTOOLW, 0, reinterpret_cast<LPARAM>(&band));
-    }
-    app.page_rows = rows_on_page;
-    app.first_row.assign(rows_on_page.size(), 0);
-    app.scroll = app.add(app.tabs, L"SCROLLBAR", L"", SBS_VERT | WS_TABSTOP, 0, 596, 38, 16, 28 * page_slots - 4);
-    app.page_note = app.add(app.tabs, L"STATIC", L"", SS_LEFT, 0, 18, 238, 584, 20);
-
-    app.add(window, L"STATIC", L"Presets", SS_LEFT, 0, 30, 486, 86, 20);
-    int x = 124;
-    index = 0;
-    for (const auto& preset : presets()) {
-        const int width = static_cast<int>(wcslen(preset.label)) * 7 + 44;
-        app.preset_buttons.push_back(app.add(window, L"BUTTON", preset.label, BS_PUSHBUTTON | WS_TABSTOP, 0,
-                                             x, 480, width, 30, preset_base + index++));
-        x += width + 10;
-    }
-    app.reset = app.add(window, L"BUTTON", L"Reset settings", BS_PUSHBUTTON | WS_TABSTOP, 0,
-                        524, 480, 126, 30, reset_id);
-
-    app.status = app.add(window, L"EDIT", L"", ES_MULTILINE | ES_READONLY | ES_AUTOVSCROLL | WS_VSCROLL,
-                         WS_EX_CLIENTEDGE, 30, 520, 620, 66);
-    app.progress = app.add(window, PROGRESS_CLASSW, L"", 0, 0, 30, 592, 620, 12);
-    app.play = app.add(window, L"BUTTON", L"Play game", BS_DEFPUSHBUTTON | WS_TABSTOP, 0, 30, 612, 130, 38, play_id);
-    app.cancel = app.add(window, L"BUTTON", L"Cancel", BS_PUSHBUTTON | WS_TABSTOP, 0, 168, 612, 84, 38, cancel_id);
-    app.add(window, L"BUTTON", L"Report a problem", BS_PUSHBUTTON | WS_TABSTOP, 0, 260, 612, 134, 38, report_id);
-    app.add(window, L"BUTTON", L"Saves folder", BS_PUSHBUTTON | WS_TABSTOP, 0, 402, 612, 118, 38, saves_id);
-    app.add(window, L"BUTTON", L"Help", BS_PUSHBUTTON | WS_TABSTOP, 0, 528, 612, 122, 38, help_id);
-}
-
-void command(App& app, int id, int code) {
-    HWND window = app.window;
-    if ((id == browse_id || id == add_disc_id) && !app.busy && !app.game) {
-        const bool adding = id == add_disc_id;
-        const auto image = pick_image(window, adding ? L"Select a French, German or Japanese Disruptor disc image"
-                                                     : L"Select your Disruptor disc image");
-        if (!image) return;
-        if (!adding) app.take_image(*image);
-        else if (app.verified.profile) app.begin(Task::language, *image, false);
-        else app.say(L"Install the USA disc first: it is the game, and the other disc gives it a language.");
-    } else if ((id == play_id || id == IDOK) && !app.busy && !app.game && app.verified.profile) {
-        const auto cue = app.verified.cue;
-        app.begin(Task::verify, cue, true); // always verify again immediately before Play
-    } else if ((id == cancel_id || id == IDCANCEL) && app.busy) {
-        app.cancelled = true;
-        app.say(L"Cancelling...");
-    } else if (id == help_id) {
-        // Windows players may have no Markdown file association.
-        const auto guide = quote((app.root / "GETTING_STARTED.md").wstring());
-        const auto opened = ShellExecuteW(window, L"open", L"notepad.exe", guide.c_str(), app.root.c_str(), SW_SHOWNORMAL);
-        if (reinterpret_cast<INT_PTR>(opened) <= 32)
-            app.say(L"Open GETTING_STARTED.md in the build folder for setup and troubleshooting help.");
-    } else if (id == saves_id) {
-        ShellExecuteW(window, L"open", app.settings.saves_folder().c_str(), nullptr, nullptr, SW_SHOWNORMAL);
-    } else if (id == report_id) {
-        try {
-            const Report report = make_report(app.root, system_note(), report_stamp());
-            const std::wstring shown = L"/select,\"" + report.path.wstring() + L"\"";
-            ShellExecuteW(window, L"open", L"explorer.exe", shown.c_str(), nullptr, SW_SHOWNORMAL);
-            app.say((report.archived ? L"Report saved as " : L"Report saved in the folder ") + report.path.wstring() +
-                    L".\nAttach it to a bug report at github.com/micmea668/DisruptorRecomp/issues with the level and the steps. "
-                    L"It holds the game's logs, your settings and a note of the system, with user names cut out of "
-                    L"paths. Your disc image, BIOS and saves are never included.");
-        } catch (const std::exception& error) {
-            app.say(wide(error.what()));
-        }
-    } else if (!app.editable()) {
-        return;
-    } else if (id == language_id && code == CBN_SELCHANGE) {
-        const auto chosen = static_cast<size_t>(SendMessageW(app.language, CB_GETCURSEL, 0, 0));
-        if (chosen == 0) {
-            app.saved(app.settings.choose_language_disc({}), L"The game is in English.");
-        } else if (chosen > app.discs.size()) {
-            return;
-        } else if (app.verified.profile) {
-            app.begin(Task::language, from_utf8(app.discs[chosen - 1]), false);
-        } else {
-            app.say(L"Install the USA disc first: it is the game, and the other disc gives it a language.");
-            app.controls();
-        }
-    } else if (id == remove_disc_id) {
-        const auto chosen = static_cast<size_t>(SendMessageW(app.language, CB_GETCURSEL, 0, 0));
-        if (chosen > 0 && chosen <= app.discs.size())
-            app.saved(app.settings.forget_language_disc(app.discs[chosen - 1]),
-                      L"The disc is off the list. Its file is left as it is.");
-    } else if (id == reset_id) {
-        const int answer = MessageBoxW(window,
-            L"Put every setting on these tabs back to what a new installation has?\n"
-            L"The language, the key bindings and your saves stay as they are.",
-            L"Disruptor Launcher", MB_YESNO | MB_ICONQUESTION | MB_DEFBUTTON2);
-        if (answer == IDYES) app.saved(app.settings.reset(), L"The settings are those of a new installation again.");
-    } else if (id >= preset_base && id < preset_base + static_cast<int>(presets().size())) {
-        const Preset& preset = presets()[static_cast<size_t>(id - preset_base)];
-        app.saved(app.settings.apply(preset), std::wstring(L"Preset applied: ") + preset.label + L".");
-    } else if (id >= option_base && id < option_base + static_cast<int>(app.rows.size())) {
-        const Row& row = app.rows[static_cast<size_t>(id - option_base)];
-        if (row.option->kind == Kind::toggle && code == BN_CLICKED) {
-            const bool checked = SendMessageW(row.control, BM_GETCHECK, 0, 0) == BST_CHECKED;
-            app.saved(app.settings.set(*row.option, checked ? 1 : 0));
-        } else if (row.option->kind == Kind::choice && code == CBN_SELCHANGE) {
-            const int chosen = static_cast<int>(SendMessageW(row.control, CB_GETCURSEL, 0, 0));
-            if (chosen >= 0) app.saved(app.settings.set(*row.option, chosen));
-        }
+#if DISRUPTOR_UPDATER
+void velopack_log(void* user, const char* level, const char* message) noexcept {
+    const char kind = level && *level ? static_cast<char>(level[0] | 0x20) : 'i';
+    if (kind != 'i' && kind != 'w' && kind != 'e') return;
+    try {
+        static_cast<Activity*>(user)->add(std::string("Velopack: ") + (message ? message : ""));
+    } catch (...) {
+        // Velopack calls this from Rust: nothing may unwind through it.
     }
 }
+#endif
 
-LRESULT CALLBACK window_proc(HWND window, UINT message, WPARAM wparam, LPARAM lparam) {
-    auto* app = reinterpret_cast<App*>(GetWindowLongPtrW(window, GWLP_USERDATA));
-    if (message == WM_NCCREATE) {
-        app = static_cast<App*>(reinterpret_cast<CREATESTRUCTW*>(lparam)->lpCreateParams);
-        app->window = window;
-        SetWindowLongPtrW(window, GWLP_USERDATA, reinterpret_cast<LONG_PTR>(app));
-    }
-    if (!app) return DefWindowProcW(window, message, wparam, lparam);
-    switch (message) {
-    case WM_CTLCOLORSTATIC:
-    case WM_CTLCOLORBTN:
-        SetBkMode(reinterpret_cast<HDC>(wparam), TRANSPARENT);
-        return reinterpret_cast<LRESULT>(GetParent(reinterpret_cast<HWND>(lparam)) == app->tabs && app->page_brush
-            ? app->page_brush : GetSysColorBrush(COLOR_WINDOW));
-    case WM_THEMECHANGED:
-        app->match_page();
-        InvalidateRect(window, nullptr, TRUE);
-        return 0;
-    case WM_CREATE: {
-        create_controls(*app);
-        app->match_page();
-        app->lay_out();
-        DragAcceptFiles(window, TRUE);
-        DEVMODEW display{};
-        display.dmSize = sizeof(display);
-        if (EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &display))
-            app->settings.set_display_rate(display.dmDisplayFrequency);
-        app->settings.load();
-        app->controls();
-        app->say(app->settings.readable()
-            ? L"No game data installed. Choose your disc image to get started.\n"
-              L"It is copied and verified, and your original files are kept."
-            : app->settings_error());
-        try {
-            auto installed = find_installed_disc(app->root);
-            if (!installed.empty()) {
-                bool legacy = installed != installed_cue(app->root, supported_discs().front());
-                app->begin(legacy ? Task::import : Task::verify, installed, false);
-            }
-        } catch (const std::exception& error) { app->say(error_text(error)); }
-        app->look();
-        return 0;
-    }
-    case WM_COMMAND:
-        command(*app, LOWORD(wparam), HIWORD(wparam));
-        return 0;
-    case WM_HSCROLL:
-        for (const auto& row : app->rows) {
-            if (row.control != reinterpret_cast<HWND>(lparam) || row.option->kind != Kind::slider) continue;
-            const int highest = app->settings.highest(*row.option), before = app->settings.shown(*row.option);
-            const int position = static_cast<int>(SendMessageW(row.control, TBM_GETPOS, 0, 0));
-            const bool moved = position != to_position(*row.option, before, highest);
-            const int value = moved ? from_position(*row.option, position, highest) : before;
-            SetWindowTextW(row.value, value_text(*row.option, value).c_str());
-            // One write when the slider is let go, not one for every step of a drag.
-            if (LOWORD(wparam) == TB_ENDTRACK && app->editable() && moved)
-                app->saved(app->settings.set(*row.option, value));
-        }
-        return 0;
-    case WM_VSCROLL:
-        if (reinterpret_cast<HWND>(lparam) == app->scroll) app->scroll_request(LOWORD(wparam), HIWORD(wparam));
-        return 0;
-    case WM_MOUSEWHEEL: {
-        RECT pages{};
-        GetWindowRect(app->tabs, &pages);
-        const POINT pointer{static_cast<short>(LOWORD(lparam)), static_cast<short>(HIWORD(lparam))};
-        if (PtInRect(&pages, pointer)) app->scroll_page(GET_WHEEL_DELTA_WPARAM(wparam) > 0 ? -1 : 1);
-        return 0;
-    }
-    case WM_NOTIFY:
-        if (reinterpret_cast<NMHDR*>(lparam)->hwndFrom == app->tabs &&
-            reinterpret_cast<NMHDR*>(lparam)->code == TCN_SELCHANGE)
-            app->show_settings();
-        return 0;
-    case WM_DROPFILES: {
-        const auto drop = reinterpret_cast<HDROP>(wparam);
-        std::wstring dropped(32768, L'\0');
-        const UINT size = DragQueryFileW(drop, 0, dropped.data(), static_cast<UINT>(dropped.size()));
-        DragFinish(drop);
-        dropped.resize(size);
-        if (size) app->take_image(fs::path(dropped));
-        return 0;
-    }
-    case WM_DPICHANGED: {
-        const auto* suggested = reinterpret_cast<const RECT*>(lparam);
-        SetWindowPos(window, nullptr, suggested->left, suggested->top, suggested->right - suggested->left,
-                     suggested->bottom - suggested->top, SWP_NOZORDER | SWP_NOACTIVATE);
-        app->lay_out();
-        return 0;
-    }
-    case progress_message: {
-        std::unique_ptr<Update> update(reinterpret_cast<Update*>(lparam));
-        if (!app->cancelled) app->say(update->status);
-        SendMessageW(app->progress, PBM_SETPOS, update->percent, 0);
-        return 0;
-    }
-    case finished_message: {
-        std::unique_ptr<Outcome> outcome(reinterpret_cast<Outcome*>(lparam));
-        if (app->worker.joinable()) app->worker.join();
-        app->busy = false;
-        if (app->closing) { DestroyWindow(window); return 0; }
-        SendMessageW(app->progress, PBM_SETPOS, 0, 0);
-        app->regions = std::move(outcome->regions);
-        Step step = after(*outcome, app->cancelled);
-        if (step.import_next) {
-            app->begin(Task::import, outcome->image, outcome->launch);
-            return 0;
-        }
-        if (step.disc == DiscAfter::cleared) app->verified = {};
-        else if (step.disc == DiscAfter::taken) app->verified = std::move(outcome->disc);
-        if (step.save_language && !app->settings.choose_language_disc(utf8(outcome->image))) step.status = app->settings_error();
-        if (!step.status.empty()) app->say(step.status);
-        if (step.launch) app->launch();
-        app->controls();
-        return 0;
-    }
-    case WM_TIMER:
-        if (app->game) {
-            // Asked of the handle and not of the code: a game may exit with 259, which reads as STILL_ACTIVE.
-            if (WaitForSingleObject(app->game, 0) == WAIT_OBJECT_0) {
-                DWORD code = 1;
-                GetExitCodeProcess(app->game, &code);
-                KillTimer(window, 1);
-                CloseHandle(app->game);
-                app->game = nullptr;
-                app->settings.load(); // the in-game menu writes the same file
-                if (code == 0) {
-                    app->say(L"Game closed. Select Play game to start again.");
-                } else {
-                    wchar_t heading[160];
-                    swprintf(heading, 160, L"The game exited with an error (code 0x%08lX). If a runtime DLL is missing, "
-                             L"install the Visual C++ x64 Redistributable.", code);
-                    const std::wstring tail = log_tail(app->root / "startup.log", log_lines);
-                    app->say(tail.empty() ? std::wstring(heading) + L"\nSee GETTING_STARTED.md."
-                                          : std::wstring(heading) + L"\nThe end of startup.log:\n" + tail);
-                }
-                note_exit(app->root / "startup.log", code, (GetTickCount64() - app->game_started) / 1000);
-                app->controls();
-                app->look();
-            }
-        }
-        return 0;
-    case WM_CLOSE:
-        if (app->busy) {
-            app->closing = true;
-            app->cancelled = true;
-            app->say(L"Finishing cancellation...");
-            app->controls();
-        } else DestroyWindow(window);
-        return 0;
-    case WM_DESTROY: PostQuitMessage(0); return 0;
-    }
-    return DefWindowProcW(window, message, wparam, lparam);
-}
-
-// These diagnostic modes use the same production checks as the GUI. They work
+// These diagnostic modes use the same production checks as the window. They work
 // with redirected stdout/stderr without opening a console window.
-int diagnostic(int count, wchar_t** arguments) {
+// --root names one folder for the program and the player's files alike.
+int diagnostic(int count, wchar_t** arguments, const fs::path& data) {
     if (count < 2) return -1;
     const std::wstring mode = arguments[1];
-    if (mode != L"--verify" && mode != L"--import" && mode != L"--check")
-        throw std::runtime_error("Usage: DisruptorLauncher.exe --verify IMAGE | --import IMAGE [--root FOLDER] | --check [--root FOLDER]");
+    if (mode != L"--verify" && mode != L"--import" && mode != L"--check") return -1;
     const bool needs_image = mode != L"--check";
     if (needs_image && count < 3) throw std::runtime_error("A disc image path is required.");
-    fs::path root = executable_directory();
+    fs::path program = executable_directory();
+    fs::path files = data;
     const int option = needs_image ? 3 : 2;
-    if (count == option + 2 && std::wstring(arguments[option]) == L"--root") root = fs::absolute(arguments[option + 1]);
+    if (count == option + 2 && std::wstring(arguments[option]) == L"--root") program = files = fs::absolute(arguments[option + 1]);
     else if (count != option) throw std::runtime_error("Unexpected launcher arguments.");
     std::atomic_bool cancelled{false};
     VerifiedDisc verified;
     if (mode == L"--verify") verified = verify_disc(arguments[2], cancelled);
-    else if (mode == L"--import") verified = import_disc(arguments[2], root, cancelled);
+    else if (mode == L"--import") verified = import_disc(arguments[2], files, cancelled);
     else {
-        const auto installed = find_installed_disc(root);
+        const auto installed = find_installed_disc(files);
         if (installed.empty()) throw std::runtime_error("No supported disc image is installed.");
         verified = verify_disc(installed, cancelled);
-        check_package(root, *verified.profile);
+        check_package(program, *verified.profile);
     }
     const std::string message = std::string("Verified ") + verified.profile->id + "\n";
     DWORD written = 0;
     WriteFile(GetStdHandle(STD_OUTPUT_HANDLE), message.data(), static_cast<DWORD>(message.size()), &written, nullptr);
     return 0;
 }
+
+struct Arguments {
+    std::string source = kRepository;
+    std::optional<fs::path> status, update_test, screenshot;
+    bool apply = true;
+    bool updates_window = false; // the home page with the Updates window open
+    Screen screen = Screen::home;
+    int page = 0;
+};
+
+Arguments parse(int count, char** values) {
+    Arguments arguments;
+    const std::vector<std::string_view> words(values + 1, values + count);
+    for (std::size_t i = 0; i < words.size(); ++i) {
+        const bool more = i + 1 < words.size();
+        if (words[i] == "--updates-from" && more) arguments.source = std::string(words[++i]);
+        else if (words[i] == "--status" && more) arguments.status = from_utf8(std::string(words[++i]));
+        else if (words[i] == "--update-test" && more) arguments.update_test = from_utf8(std::string(words[++i]));
+        else if (words[i] == "--no-apply") arguments.apply = false;
+        else if (words[i] == "--screenshot" && more) arguments.screenshot = from_utf8(std::string(words[++i]));
+        else if (words[i] == "--screen" && more) {
+            const auto screen = words[++i];
+            arguments.updates_window = screen == "updates";
+            arguments.screen = screen == "settings"   ? Screen::settings
+                               : screen == "help"     ? Screen::help
+                               : screen == "about"    ? Screen::about
+                                                      : Screen::home;
+        } else if (words[i] == "--page" && more) {
+            const auto page = words[++i];
+            std::from_chars(page.data(), page.data() + page.size(), arguments.page);
+        } else {
+            throw std::runtime_error("Usage: DisruptorLauncher.exe --verify IMAGE | --import IMAGE [--root FOLDER] | "
+                                     "--check [--root FOLDER]");
+        }
+    }
+    return arguments;
+}
+
+void wait_for(const Updater& updater) {
+    while (updater.busy()) std::this_thread::sleep_for(std::chrono::milliseconds(20));
+}
+
+int closed(std::ofstream& file, int result) {
+    file.close();
+    return file.fail() ? 6 : result;
+}
+
+// Check, download and hand over to Velopack's updater without a window: what a test needs to see an update applied.
+int checked_update(Updater& updater, Activity& activity, std::ofstream& report, bool apply, const fs::path& data) {
+    UpdateView view = updater.view();
+    report << "installed=" << view.installed << "\nportable=" << view.portable << "\n";
+    if (view.state == UpdateState::unavailable) {
+        report << "error=" << view.error << "\n";
+        return 2;
+    }
+    report << "pending=" << (view.state == UpdateState::ready) << "\n";
+    updater.check();
+    wait_for(updater);
+    view = updater.view();
+    report << "latest=" << view.latest << "\nbytes=" << view.download_bytes << "\ndelta=" << view.delta << "\n";
+    if (view.state == UpdateState::available) {
+        updater.download();
+        wait_for(updater);
+        view = updater.view();
+        report << "downloaded=" << (view.state == UpdateState::ready) << "\n";
+    }
+    if (view.state != UpdateState::ready) {
+        report << "state=" << static_cast<int>(view.state) << "\nerror=" << view.error << "\n";
+        return view.state == UpdateState::current ? 0 : 3;
+    }
+    if (!apply) return 0;
+    const bool applying = apply_update(updater, executable_directory(), data, activity, true, false);
+    report << "applying=" << applying << "\n";
+    return applying ? 0 : 5;
+}
+
+int update_test(Updater& updater, Activity& activity, const fs::path& report_path, bool apply, const fs::path& data) {
+    std::ofstream report(report_path, std::ios::binary);
+    if (!report) return 6;
+    const int result = checked_update(updater, activity, report, apply, data);
+    return closed(report, result);
+}
+
+int write_status(const Updater& updater, const fs::path& path) {
+    const UpdateView view = updater.view();
+    std::ofstream status(path, std::ios::binary);
+    if (!status) return 6;
+    status << "installed=" << view.installed << "\nportable=" << view.portable << "\nstate=" << static_cast<int>(view.state)
+           << "\nlatest=" << view.latest << "\nerror=" << view.error << "\n";
+    return closed(status, 0);
+}
+
+// A GUI program's C streams reach no redirected handle, so a message for a script is written to the handle itself.
+void write_error(const std::string& what) {
+    const std::string text = what + "\n";
+    DWORD written = 0;
+    WriteFile(GetStdHandle(STD_ERROR_HANDLE), text.data(), static_cast<DWORD>(text.size()), &written, nullptr);
+}
+
+bool g_unattended = false; // a picture or a test: no dialog may wait for a person
+
+void fail_window(const char* what) {
+    if (g_unattended) write_error(what);
+    else SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Disruptor Recompiled", what, nullptr);
+}
+
+// The window draws its own title bar. Windows 11 still rounds its corners and draws its edge in the launcher's colour.
+void shape_frame(SDL_Window* window) {
+    constexpr DWORD use_dark_mode = 20, corner_preference = 33, border_colour = 34, round_corners = 2;
+    const auto handle = static_cast<HWND>(
+        SDL_GetPointerProperty(SDL_GetWindowProperties(window), SDL_PROP_WINDOW_WIN32_HWND_POINTER, nullptr));
+    if (!handle) return;
+    const BOOL dark = TRUE;
+    DwmSetWindowAttribute(handle, use_dark_mode, &dark, sizeof(dark));
+    DwmSetWindowAttribute(handle, corner_preference, &round_corners, sizeof(round_corners));
+    const COLORREF edge = RGB(38, 50, 40);
+    DwmSetWindowAttribute(handle, border_colour, &edge, sizeof(edge));
+}
+
+SDL_HitTestResult SDLCALL hit_test(SDL_Window* window, const SDL_Point* point, void* data) {
+    int width = 0, height = 0;
+    SDL_GetWindowSize(window, &width, &height);
+    const bool maximized = (SDL_GetWindowFlags(window) & SDL_WINDOW_MAXIMIZED) != 0;
+    switch (hit_at(static_cast<float>(point->x), static_cast<float>(point->y), static_cast<float>(width),
+                   static_cast<float>(height), static_cast<const View*>(data)->title_bar(), maximized)) {
+    case Hit::client: return SDL_HITTEST_NORMAL;
+    case Hit::drag: return SDL_HITTEST_DRAGGABLE;
+    case Hit::top_left: return SDL_HITTEST_RESIZE_TOPLEFT;
+    case Hit::top: return SDL_HITTEST_RESIZE_TOP;
+    case Hit::top_right: return SDL_HITTEST_RESIZE_TOPRIGHT;
+    case Hit::right: return SDL_HITTEST_RESIZE_RIGHT;
+    case Hit::bottom_right: return SDL_HITTEST_RESIZE_BOTTOMRIGHT;
+    case Hit::bottom: return SDL_HITTEST_RESIZE_BOTTOM;
+    case Hit::bottom_left: return SDL_HITTEST_RESIZE_BOTTOMLEFT;
+    case Hit::left: return SDL_HITTEST_RESIZE_LEFT;
+    }
+    return SDL_HITTEST_NORMAL;
+}
+
+// A place is used only when its title bar would be on a monitor that is there now.
+bool on_a_display(const WindowPlace& place) {
+    int count = 0;
+    SDL_DisplayID* displays = SDL_GetDisplays(&count);
+    bool seen = false;
+    for (int index = 0; displays && index < count && !seen; ++index) {
+        SDL_Rect usable{};
+        if (!SDL_GetDisplayUsableBounds(displays[index], &usable)) continue;
+        const long long left = std::max<long long>(place.x, usable.x);
+        const long long right = std::min<long long>(0LL + place.x + place.width, 0LL + usable.x + usable.w);
+        const long long top = std::max<long long>(place.y, usable.y);
+        const long long bottom = std::min<long long>(0LL + place.y + 40, 0LL + usable.y + usable.h);
+        seen = right - left >= 120 && bottom - top >= 20;
+    }
+    SDL_free(displays);
+    return seen;
+}
+
+// Direct3D 11 where there is one, else whatever SDL can draw with, SDL's own software renderer last: setup, settings
+// and a report must open on a machine whose driver cannot run the game.
+SDL_Renderer* make_renderer(SDL_Window* window) {
+    if (SDL_Renderer* renderer = SDL_CreateRenderer(window, nullptr)) return renderer;
+    return SDL_CreateRenderer(window, SDL_SOFTWARE_RENDERER);
+}
+
+int run_window(const Arguments& arguments, Updater& updater, Activity& activity, const fs::path& program,
+               const fs::path& data) {
+    g_unattended = arguments.screenshot.has_value();
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+        fail_window(SDL_GetError());
+        return 1;
+    }
+    float scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
+    if (scale <= 0.0f || arguments.screenshot) scale = 1.0f;
+    const SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_BORDERLESS | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN;
+    int width = static_cast<int>(1060 * scale), height = static_cast<int>(720 * scale);
+    // A first start takes most of a tall screen, so the home page has room for the release notes.
+    SDL_Rect usable{};
+    if (!arguments.screenshot && SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &usable) && usable.h > 0) {
+        height = std::clamp(static_cast<int>(static_cast<float>(usable.h) * 0.78f), height, static_cast<int>(900 * scale));
+        width = std::max(std::min(height * 1060 / 720, static_cast<int>(static_cast<float>(usable.w) * 0.9f)),
+                         static_cast<int>(900 * scale));
+        width = std::min(width, usable.w);
+        height = std::min(height, usable.h);
+    }
+    const fs::path choices_file = data / "launcher.ini";
+    const std::optional<WindowPlace> saved = arguments.screenshot ? std::nullopt : read_choices(choices_file).window;
+    const bool placed = saved && on_a_display(*saved);
+    SDL_Window* window = SDL_CreateWindow("Disruptor Recompiled", placed ? saved->width : width,
+                                          placed ? saved->height : height, flags);
+    SDL_Renderer* renderer = window ? make_renderer(window) : nullptr;
+    if (!renderer) {
+        fail_window(SDL_GetError());
+        if (window) SDL_DestroyWindow(window);
+        SDL_Quit();
+        return 1;
+    }
+    SDL_SetWindowMinimumSize(window, static_cast<int>(900 * scale), static_cast<int>(620 * scale));
+    SDL_SetRenderVSync(renderer, 1);
+    shape_frame(window);
+    if (placed) SDL_SetWindowPosition(window, saved->x, saved->y);
+    // The place the window is restored to: kept while it is maximized or minimized, so it is what closing saves.
+    std::optional<WindowPlace> normal = placed ? saved : std::nullopt;
+    const auto note_normal = [&] {
+        if (SDL_GetWindowFlags(window) & (SDL_WINDOW_MAXIMIZED | SDL_WINDOW_MINIMIZED | SDL_WINDOW_HIDDEN)) return;
+        WindowPlace now;
+        SDL_GetWindowPosition(window, &now.x, &now.y);
+        SDL_GetWindowSize(window, &now.width, &now.height);
+        normal = now;
+    };
+    if (!arguments.screenshot) {
+        SDL_ShowWindow(window);
+        note_normal();
+        if (placed && saved->maximized) SDL_MaximizeWindow(window);
+    }
+
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.IniFilename = nullptr;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    Session session(program, data, activity);
+    View view(session, updater, activity, choices_file);
+    view.style(scale);
+    view.show(arguments.screen, arguments.page);
+    if (arguments.updates_window) view.open_updates();
+    view.attach(window, renderer);
+    SDL_SetWindowHitTest(window, hit_test, &view);
+    ImGui_ImplSDL3_InitForSDLRenderer(window, renderer);
+    // An open gamepad makes SDL poll every millisecond: the launcher only lists them.
+    ImGui_ImplSDL3_SetGamepadMode(ImGui_ImplSDL3_GamepadMode_Manual, nullptr, 0);
+    ImGui_ImplSDLRenderer3_Init(renderer);
+
+    const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(window));
+    session.open(mode ? mode->refresh_rate : 0.0);
+    if (view.choices().check_for_updates && updater.view().state == UpdateState::idle) updater.check();
+    SDL_Texture* picture = nullptr;
+    if (arguments.screenshot) {
+        wait_for(updater);
+        for (int waited = 0; waited < 6000 && session.busy(); ++waited) {
+            session.poll();
+            SDL_Delay(20);
+        }
+        picture = SDL_CreateTexture(renderer, SDL_PIXELFORMAT_RGBA32, SDL_TEXTUREACCESS_TARGET, width, height);
+        if (!picture || !SDL_SetRenderTarget(renderer, picture)) {
+            if (picture) SDL_DestroyTexture(picture);
+            picture = nullptr;
+        }
+    }
+
+    const auto frame = [&] {
+        session.poll();
+        ImGui_ImplSDLRenderer3_NewFrame();
+        ImGui_ImplSDL3_NewFrame();
+        ImGui::NewFrame();
+        const bool leave = view.draw();
+        ImGui::Render();
+        SDL_SetRenderScale(renderer, io.DisplayFramebufferScale.x, io.DisplayFramebufferScale.y);
+        SDL_SetRenderDrawColor(renderer, 11, 15, 12, 255);
+        SDL_RenderClear(renderer);
+        ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
+        return leave;
+    };
+
+    int result = 0;
+    if (arguments.screenshot) {
+        result = 1;
+        if (picture) {
+            for (int i = 0; i < 4; ++i) frame();
+            SDL_Surface* pixels = SDL_RenderReadPixels(renderer, nullptr);
+            const std::u8string name = arguments.screenshot->u8string();
+            if (pixels && SDL_SaveBMP(pixels, reinterpret_cast<const char*>(name.c_str()))) result = 0;
+            else write_error(std::string("The picture was not saved: ") + SDL_GetError());
+            SDL_DestroySurface(pixels);
+            SDL_SetRenderTarget(renderer, nullptr);
+            SDL_DestroyTexture(picture);
+        } else {
+            write_error(std::string("There is no picture to draw into: ") + SDL_GetError());
+        }
+    } else {
+        bool running = true;
+        int settle = 3;
+        while (running) {
+            SDL_Event event;
+            const bool working = session.busy() || updater.busy() || view.redraw();
+            if (SDL_WaitEventTimeout(&event, working || settle > 0 ? 16 : 250)) {
+                do {
+                    // Releases still reach ImGui, which saw the presses made before the key button listened.
+                    if (view.listening_pad()) {
+                        if (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {
+                            view.take_pad_button(event.gbutton.button);
+                            continue;
+                        }
+                        if (event.type == SDL_EVENT_GAMEPAD_AXIS_MOTION) {
+                            view.take_pad_axis(event.gaxis.which, event.gaxis.axis, event.gaxis.value);
+                            continue;
+                        }
+                        if (event.type == SDL_EVENT_KEY_DOWN) {
+                            if (event.key.scancode == SDL_SCANCODE_ESCAPE) view.stop_pad_capture();
+                            continue;
+                        }
+                    }
+                    if (event.type == SDL_EVENT_KEY_DOWN && view.listening()) {
+                        if (!event.key.repeat) view.take_key(SDL_GetScancodeName(event.key.scancode));
+                        continue;
+                    }
+                    ImGui_ImplSDL3_ProcessEvent(&event);
+                    if (event.type == SDL_EVENT_QUIT || event.type == SDL_EVENT_WINDOW_CLOSE_REQUESTED) {
+                        if (session.close()) running = false;
+                    } else if (event.type == SDL_EVENT_DROP_BEGIN) {
+                        view.dragging(true);
+                    } else if (event.type == SDL_EVENT_DROP_COMPLETE) {
+                        view.dragging(false);
+                    } else if (event.type == SDL_EVENT_DROP_FILE && event.drop.data) {
+                        view.dropped(from_utf8(event.drop.data));
+                    } else if (event.type == SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED) {
+                        view.style(SDL_GetWindowDisplayScale(window));
+                    } else if (event.type == SDL_EVENT_WINDOW_MOVED || event.type == SDL_EVENT_WINDOW_RESIZED) {
+                        note_normal();
+                    }
+                } while (SDL_PollEvent(&event));
+                settle = 3;
+            } else if (settle > 0) {
+                --settle;
+            }
+            if (session.closed()) running = false;
+            if (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED) {
+                session.poll();
+                continue;
+            }
+            if (frame()) running = false;
+            SDL_RenderPresent(renderer);
+        }
+    }
+
+    if (!arguments.screenshot) {
+        LauncherChoices kept = view.choices();
+        note_normal();
+        if (normal) {
+            normal->maximized = (SDL_GetWindowFlags(window) & SDL_WINDOW_MAXIMIZED) != 0;
+            kept.window = normal;
+        }
+        write_choices(choices_file, kept);
+    }
+    ImGui_ImplSDLRenderer3_Shutdown();
+    ImGui_ImplSDL3_Shutdown();
+    ImGui::DestroyContext();
+    SDL_DestroyRenderer(renderer);
+    SDL_DestroyWindow(window);
+    SDL_Quit();
+    return result;
+}
+
 } // namespace
 
-int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
-    int count = 0;
-    wchar_t** arguments = CommandLineToArgvW(GetCommandLineW(), &count);
+int main(int count, char** values) {
+#if DISRUPTOR_UPDATER
+    Velopack::VelopackApp::Build().SetAutoApplyOnStartup(false).Run();
+#endif
+    static Activity activity;
+    int wide_count = 0;
+    wchar_t** wide_arguments = CommandLineToArgvW(GetCommandLineW(), &wide_count);
     try {
-        if (!arguments) throw std::runtime_error("Cannot read launcher arguments.");
-        int result = diagnostic(count, arguments);
-        LocalFree(arguments);
-        arguments = nullptr;
+        if (!wide_arguments) throw std::runtime_error("Cannot read launcher arguments.");
+        const fs::path program = executable_directory();
+        const fs::path data = disruptor::user_folder::prepare(program);
+        // One launcher for a folder of the player's files: two would write them at once.
+        std::wstring key = fs::weakly_canonical(data).wstring();
+        for (wchar_t& letter : key) letter = static_cast<wchar_t>(std::towlower(letter));
+        const std::wstring one = L"Local\\DisruptorLauncher-" + std::to_wstring(std::hash<std::wstring>{}(key));
+        HANDLE single = CreateMutexW(nullptr, TRUE, one.c_str());
+        if (single && GetLastError() == ERROR_ALREADY_EXISTS) {
+            if (count > 1) write_error("The launcher of this copy is already open.");
+            else fail_window("The launcher is already open.");
+            LocalFree(wide_arguments);
+            return 1;
+        }
+        const int result = diagnostic(wide_count, wide_arguments, data);
+        LocalFree(wide_arguments);
+        wide_arguments = nullptr;
         if (result >= 0) return result;
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
         // The Language row names the disc and checks it: the game would let this variable replace it unchecked.
         SetEnvironmentVariableW(L"PSX_DISRUPTOR_LANGUAGE_DISC", nullptr);
-        INITCOMMONCONTROLSEX controls{sizeof(controls), ICC_PROGRESS_CLASS | ICC_TAB_CLASSES | ICC_BAR_CLASSES};
-        InitCommonControlsEx(&controls);
-        App app(executable_directory());
-        WNDCLASSW cls{};
-        cls.lpfnWndProc = window_proc;
-        cls.hInstance = instance;
-        cls.hCursor = LoadCursorW(nullptr, IDC_ARROW);
-        cls.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
-        cls.hbrBackground = reinterpret_cast<HBRUSH>(COLOR_WINDOW + 1);
-        cls.lpszClassName = L"DisruptorLauncher";
-        if (!RegisterClassW(&cls)) throw std::runtime_error("Cannot create the launcher window.");
-        const auto dpi = GetDpiForSystem();
-        RECT bounds{0, 0, MulDiv(client_width, dpi, 96), MulDiv(client_height, dpi, 96)};
-        const DWORD style = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX | WS_CLIPCHILDREN;
-        AdjustWindowRectExForDpi(&bounds, style, FALSE, WS_EX_CONTROLPARENT, dpi);
-        HWND window = CreateWindowExW(WS_EX_CONTROLPARENT, cls.lpszClassName, L"Disruptor Launcher", style,
-            CW_USEDEFAULT, CW_USEDEFAULT, bounds.right - bounds.left, bounds.bottom - bounds.top,
-            nullptr, nullptr, instance, &app);
-        if (!window) throw std::runtime_error("Cannot create the launcher window.");
-        ShowWindow(window, show);
-        MSG message{};
-        while (GetMessageW(&message, nullptr, 0, 0) > 0) {
-            if (!IsDialogMessageW(window, &message)) {
-                TranslateMessage(&message);
-                DispatchMessageW(&message);
-            }
-        }
-        return 0;
+        const Arguments arguments = parse(count, values);
+        Updater updater(arguments.source, activity);
+#if DISRUPTOR_UPDATER
+        if (updater.view().state != UpdateState::unavailable) vpkc_set_logger(velopack_log, &activity);
+#endif
+        if (arguments.status) return write_status(updater, *arguments.status);
+        if (arguments.update_test) return update_test(updater, activity, *arguments.update_test, arguments.apply, data);
+        return run_window(arguments, updater, activity, program, data);
     } catch (const std::exception& error) {
         if (count > 1) {
-            DWORD written = 0;
-            const std::string text = std::string(error.what()) + "\n";
-            WriteFile(GetStdHandle(STD_ERROR_HANDLE), text.data(), static_cast<DWORD>(text.size()), &written, nullptr);
-        } else MessageBoxW(nullptr, error_text(error).c_str(), L"Disruptor Launcher", MB_OK | MB_ICONERROR);
-        if (arguments) LocalFree(arguments);
+            write_error(error.what());
+        } else {
+            fail_window(utf8(fs::path(error_text(error))).c_str());
+        }
+        if (wide_arguments) LocalFree(wide_arguments);
         return 1;
     }
 }

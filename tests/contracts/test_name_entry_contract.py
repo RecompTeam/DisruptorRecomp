@@ -219,7 +219,7 @@ require(
     "        disruptor_name_entry_keys_for_pad(keys, pad_keys.data(), static_cast<int>(pad_keys.size()));\n"
     "        keys = pad_keys.data();\n" in controls
     and controls.index("disruptor_name_entry_keys_for_pad(keys, pad_keys.data()")
-    < controls.index("    if (key_down(keys, SDL_SCANCODE_W)")
+    < controls.index("    if (key_down(keys, SDL_SCANCODE_UP)")
     and "    const bool taking = taking_text();\n    if (run_in_step()) g_withheld.reset();\n" in module
     and "        if (keys[scancode] == 0) g_withheld.reset(key);\n"
     "        else if (taking && in_typing_block(scancode)) g_withheld.set(key);\n"

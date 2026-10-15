@@ -1,0 +1,44 @@
+diff --git a/runtime/src/freeze_heartbeat.c b/runtime/src/freeze_heartbeat.c
+index ab7eb0e2dffb8f93d95b19a6ffb23160de299e5e..2e841b976d0ab104faf2aff86598e93979052d65 100644
+--- a/runtime/src/freeze_heartbeat.c
++++ b/runtime/src/freeze_heartbeat.c
+@@ -379,9 +379,11 @@
+         return;
+ #endif
+ 
+-    char path[128];
+-    snprintf(path, sizeof(path),
++    char name[128];
++    snprintf(name, sizeof(name),
+              "psx_freeze_dump_%s_%lld.json", s_backend, wall);
++    char path[PSX_NOTE_PATH_MAX];
++    psx_note_path(name, path, sizeof(path));
+ 
+     FILE *f = fopen(path, "wb");
+     if (!f) { s_dump_in_progress = 0; return; }
+@@ -911,8 +913,10 @@
+     /* Atomic overwrite via .tmp + rename. Avoids a reader catching a
+      * mid-write file and parsing partial JSON. Cheap on Windows
+      * (MoveFileEx with REPLACE_EXISTING). */
+-    char tmp_path[64];
+-    snprintf(tmp_path, sizeof(tmp_path), HB_FILE ".tmp");
++    char tmp_path[PSX_NOTE_PATH_MAX];
++    char hb_path[PSX_NOTE_PATH_MAX];
++    psx_note_path(HB_FILE ".tmp", tmp_path, sizeof(tmp_path));
++    psx_note_path(HB_FILE, hb_path, sizeof(hb_path));
+ 
+     FILE *f = fopen(tmp_path, "wb");
+     if (!f) return;
+@@ -920,10 +924,10 @@
+     fclose(f);
+ 
+ #ifdef _WIN32
+-    MoveFileExA(tmp_path, HB_FILE,
++    MoveFileExA(tmp_path, hb_path,
+                 MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+ #else
+-    rename(tmp_path, HB_FILE);
++    rename(tmp_path, hb_path);
+ #endif
+ }
+ 

@@ -95,7 +95,7 @@ require("v1.92.6.tar.gz" in cmake and
         "Dear ImGui source must remain versioned and integrity-pinned")
 menu_files = menu_sources(ROOT)
 require([name.rsplit("/", 1)[1] for name in menu_files] == [
-            "menu.h", "preferences.cpp", "rows.cpp", "tab_controls.cpp", "tab_enhancements.cpp",
+            "menu.h", "preferences.cpp", "rows.cpp", "tab_controls.cpp", "tab_display.cpp", "tab_enhancements.cpp",
             "tab_experimental.cpp", "tab_debug.cpp", "tab_cheats.cpp", "tab_system.cpp", "tab_language.cpp",
             "menu.cpp"] and
         sorted(menu_files) == sorted(
@@ -486,9 +486,13 @@ require("MoveFileExW" in config_cpp and "MOVEFILE_REPLACE_EXISTING" in config_cp
 require("load_preferences_for_session();" in
         function_body(menu, "on_runtime_ready"),
         "preferences must load independently of opening the ImGui menu")
-require("apply_modern_keybinds(disruptor_modern_controls_enabled() != 0)" in
-        function_body(menu, "apply_saved_preferences"),
-        "saved or environment-enabled modern controls must install conflict-free binds")
+require("follow_scheme(disruptor_modern_controls_enabled() != 0, "
+        "!env_override_present(\"PSX_DISRUPTOR_MODERN_CONTROLS\"));" in
+        function_body(menu, "apply_saved_preferences") and
+        "    follow_scheme(enabled, true);\n    disruptor_modern_controls_set_enabled(enabled ? 1 : 0);\n" in
+        function_body(menu, "set_modern_controls_live") and
+        "apply_modern_keybinds" not in menu and "base_keybinds" not in menu,
+        "the keys follow the scheme by keybinds.ini's one layout, saved unless the environment chose the scheme")
 for token in (
     'option_toggle("disruptor.vertical_look", &vertical_look)',
     'option_slider("disruptor.vertical_sensitivity", &vertical_sensitivity)',
@@ -817,9 +821,14 @@ HELPERS = (
     "\n"
     "bool option_slider(const char *key, float *value) {\n"
     "    const Option &option = *find_option(key);\n"
+    "    // Shown as a multiple of what a new installation has, as the launcher shows it.\n"
+    "    const float unit = static_cast<float>(option.initial) / 1000.0f;\n"
+    "    float times = *value / unit;\n"
     "    const bool moved = ImGui::SliderFloat(\n"
-    "        option.label, value, option.lowest / 1000.0f,\n"
-    '        option.highest / 1000.0f, "%.3f", ImGuiSliderFlags_Logarithmic);\n'
+    "        option.label, &times, option.lowest / 1000.0f / unit,\n"
+    '        option.highest / 1000.0f / unit, times < 1.0f ? "%.2fx" : "%.1fx",\n'
+    "        ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_NoRoundToFormat);\n"
+    "    if (moved) *value = times * unit;\n"
     "    disruptor::ui::hint(option.hint);\n"
     "    return moved;\n"
     "}\n"
@@ -833,7 +842,7 @@ HELPERS = (
     "    return moved;\n"
     "}\n"
 )
-shared_labels = re.findall(r'\b(?:toggle<[^>]*>|choice|slider)\(\s*"[\w.]+",\s*"([^"]+)"', options)
+shared_labels = re.findall(r'\b(?:toggle(?:<[^>]*>)?|choice|slider)\(\s*"[\w.]+",\s*"([^"]+)"', options)
 shared_choices = re.findall(r'"([^"]+)"', "".join(re.findall(r"constexpr const char\* \w+\[\] = \{([^}]*)\};", options)))
 drawn_keys = set(re.findall(r'\boption_(?:toggle|slider|list)\("([\w.]+)"', menu)) | set(
     re.findall(r'find_option\("([\w.]+)"\)->label', menu))
@@ -866,6 +875,9 @@ LIVE = (
     "        return gpu_geometry_correction_enabled() != 0;\n"
     '    if (key == "disruptor.mouse_aim") return disruptor_mouse_aim_enabled() != 0;\n'
     '    if (key == "disruptor.ambient_occlusion") return gl_renderer_ssao() != 0;\n'
+    '    if (key == "disruptor.vertical_look") return disruptor_mouse_vertical_look_enabled() != 0;\n'
+    '    if (key == "disruptor.separate_vertical_speed")\n'
+    "        return disruptor_mouse_vertical_follows_horizontal() == 0;\n"
     "    return false;\n"
     "}\n"
     "\n"
@@ -880,7 +892,7 @@ needs_lists = {
     name: [key_names[word.strip()] for word in words.split(",")]
     for name, words in re.findall(r"constexpr const char\* (needs_\w+)\[\] = \{([^}]*)\};", options)
 }
-table_rows = re.split(r"\n    (?=toggle<|choice\(|slider\()", options[options.index("constexpr Option option_list[]") :])[1:]
+table_rows = re.split(r"\n    (?=toggle[<(]|choice\(|slider\()", options[options.index("constexpr Option option_list[]") :])[1:]
 needing = {}
 for row in table_rows:
     row = row.split("\n};")[0]
@@ -889,7 +901,7 @@ for row in table_rows:
         needing[re.search(r'"([\w.]+)"', row)[1]] = needs_lists[ending[1]]
 asked = set(re.findall(r'\bapplies\("([\w.]+)"\)', menu))
 told = set(re.findall(r'key == "([\w.]+)"', function_body(menu, "prerequisite_on")))
-require(RULE in options and LIVE in menu and len(needing) == 11 and
+require(RULE in options and LIVE in menu and len(needing) == 14 and
         needing["disruptor.high_precision_camera"] == ["disruptor.mouse_aim", "disruptor.geometry_correction"] and
         asked == set(needing) - {"video.frame_interpolation_fps"} and
         told == {key for keys in needing.values() for key in keys} - {"video.frame_interpolation"} and
@@ -914,7 +926,7 @@ def greyed_by_own_rule(source: str, key: str) -> bool:
 
 
 greyed = asked - {"video.frame_interpolation"}
-require(len(greyed) == 9 and all(greyed_by_own_rule(menu, key) for key in greyed) and
+require(len(greyed) == 12 and all(greyed_by_own_rule(menu, key) for key in greyed) and
         not greyed_by_own_rule(menu.replace("    if (!textures_apply) ImGui::BeginDisabled();\n",
                                             "    if (false) ImGui::BeginDisabled();\n"), "disruptor.perspective_textures") and
         not greyed_by_own_rule(menu.replace('applies("disruptor.gap_filling")', 'applies("disruptor.vsync")'),
@@ -925,7 +937,21 @@ HINT = (
     "inline void hint(const char *text) {\n"
     "    if (!ImGui::BeginItemTooltip()) return;\n"
     "    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30.0f);\n"
-    "    ImGui::TextUnformatted(text);\n"
+    "    for (std::string_view rest = text;;) {\n"
+    "        const std::size_t end = rest.find('\\n');\n"
+    "        const std::string_view line = rest.substr(0, end);\n"
+    "        if (const std::size_t name = disruptor::settings::choice_name(line)) {\n"
+    "            ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.44f, 0.81f, 0.48f, 1.0f));\n"
+    "            ImGui::TextUnformatted(line.data(), line.data() + name);\n"
+    "            ImGui::PopStyleColor();\n"
+    "            ImGui::SameLine(0.0f, 0.0f);\n"
+    "            ImGui::TextUnformatted(line.data() + name, line.data() + line.size());\n"
+    "        } else {\n"
+    "            ImGui::TextUnformatted(line.data(), line.data() + line.size());\n"
+    "        }\n"
+    "        if (end == std::string_view::npos) break;\n"
+    "        rest.remove_prefix(end + 1);\n"
+    "    }\n"
     "    ImGui::PopTextWrapPos();\n"
     "    ImGui::EndTooltip();\n"
     "}\n"
@@ -934,16 +960,34 @@ LITERAL = r'"((?:[^"\\]|\\.)*)"'
 shared_hints = [
     "".join(re.findall(LITERAL, pieces))
     for pieces in re.findall(
-        r'\b(?:toggle<[^>]*>|choice|slider)\(\s*"[\w.]+",\s*"[^"]+",\s*-?\d+,\s*((?:"(?:[^"\\]|\\.)*"\s*)+)', options)
+        r'\b(?:toggle(?:<[^>]*>)?|choice|slider)\(\s*"[\w.]+",\s*"[^"]+",\s*-?\d+,\s*((?:"(?:[^"\\]|\\.)*"\s*)+)', options)
 ]
 written = "".join(re.findall(LITERAL, menu + present))
 require(HINT in read("src/game/ui/hint.h") and len(shared_hints) == 31 and
         all(20 <= len(text) <= 240 for text in shared_hints) and
         not [text for text in shared_hints if text[:32] in written] and
         "Needs mouse aim and exact geometry." in shared_hints[
-            [key for key in re.findall(r'\b(?:toggle<[^>]*>|choice|slider)\(\s*"([\w.]+)"', options)].index(
+            [key for key in re.findall(r'\b(?:toggle(?:<[^>]*>)?|choice|slider)\(\s*"([\w.]+)"', options)].index(
                 "disruptor.high_precision_camera")],
         "the menu must show an option's description from the shared table while the pointer rests on its control, "
         "and write none of the descriptions itself")
+
+
+runtime = read("psxrecomp/runtime/src/main.cpp")
+require('[controller]\ndefault_mode = "digital"\n# A connected gamepad plays beside the keyboard and mouse.\n'
+        'p1_device = "keyboard+gamepad"\n' in read("game.toml")
+        and "if (gc.runtime.has_default_p1_device) p1_device = gc.runtime.default_p1_device;" in runtime
+        and runtime.index("if (gc.runtime.has_default_p1_device)") < runtime.index("if (us.has_p1_device) p1_device = us.p1_device;")
+        and 'else if (d == "keyboard+gamepad") { p.kind = 2; p.keyboard_too = true; }' in runtime
+        and "    p.keyboard_too = false;\n" in function_body(runtime, "set_player_device")
+        and "        return controller_pad_buttons(p.handle, suppress_stick_axes) & pad_from_keyboard(player);\n"
+        in function_body(runtime, "pad_buttons_for")
+        and "if (keyboard[axis] != 0x80) out[axis] = keyboard[axis];" in function_body(runtime, "pad_sticks_for")
+        and "if (p.kind == 1 || p.keyboard_too || dev_any) {" in function_body(runtime, "hybrid_dpad_active"),
+        "Player 1 reads the keyboard and the first gamepad together unless settings.toml names a device")
+require("if (changed(\"controller.deadzone\")) psx_input_set_deadzone(pending.deadzone);" in menu
+        and "    mark(\"controller.deadzone\", percent);\n    psx_input_set_deadzone(g_preferences.pending.deadzone);\n" in menu
+        and "psx_input_pad_name(0)" in menu,
+        "the game's Controls tab names the pad it reads and moves the dead zone live, as the launcher saves it")
 
 print("developer menu contract: PASS")
