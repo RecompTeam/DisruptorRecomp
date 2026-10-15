@@ -1,0 +1,15 @@
+version: 2
+updates:
+  # The C and C++ dependencies are fetched by CMake at pinned hashes, which Dependabot cannot read.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    cooldown:
+      default-days: 7
+    commit-message:
+      prefix: "ci(deps)"
+    groups:
+      actions-minor-patch:
+        patterns: ["*"]
+        update-types: ["minor", "patch"]
