@@ -39,15 +39,8 @@ A French, German or Japanese disc of yours can give the game its language.
 
 ## Launcher
 
-Drop the disc, press Play. The image is checked byte for byte.
-
-The launcher keeps the game up to date.
-
-By default it looks for a new release at every start.
-
-It downloads only what changed when it can and installs it with one click.
-
-Saves and settings stay.
+Drop the disc and press Play. The image is checked byte for byte.\
+Updates install with one click. Saves and settings stay.
 
 <table>
   <tr>
