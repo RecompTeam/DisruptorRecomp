@@ -1,8 +1,9 @@
 # Getting started
 
-This Windows x64 alpha runs from your own **Disruptor (USA, SLUS-00224)** disc
-image. Game assets are not included. You do not need to build the project,
-extract its executable or supply a PlayStation BIOS: OpenBIOS is included.
+This alpha for Windows x64 and Linux x64 runs from your own **Disruptor (USA,
+SLUS-00224)** disc image. Game assets are not included. You do not need to
+build the project, extract its executable or supply a PlayStation BIOS:
+OpenBIOS is included.
 
 Join the [community Discord](https://discord.gg/hWbFatkXpU) to talk about the
 project and share feedback.

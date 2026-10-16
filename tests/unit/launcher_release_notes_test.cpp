@@ -50,7 +50,7 @@ void shipped() {
     require(newest && text.find("## " + newest->version) == text.find("## "), "a version it lacks gets the shipped changelog's first section");
     for (const char* tag : {"v0.1.0-alpha.1", "v0.1.0-alpha.2", "v0.1.0-alpha.3", "v0.1.0-alpha.4", "v0.1.0-alpha.5"}) {
         const auto section = release_notes(text, std::string(tag) + "-3-g0123abc");
-        require(section && section->version == tag && section->markdown.size() > 80 && section->markdown.find("## ") == std::string::npos,
+        require(section && section->version == tag && section->markdown.size() > 80 && section->markdown.find("\n## ") == std::string::npos && !section->markdown.starts_with("## "),
                 "every release so far has its own section in the shipped changelog");
     }
 }

@@ -50,10 +50,10 @@ A release is a Velopack `Setup.exe` and a portable ZIP, packed from a Release
 configuration whose `PSX_GAME_VERSION` is the release's version:
 
 ```powershell
-python tools/package_release.py --version v0.1.0-alpha.6 --build build --zstd-license <zstd LICENSE>
+python tools/package_release.py --version v0.2.0-alpha.1 --build build --zstd-license <zstd LICENSE>
 ```
 
-- `CHANGELOG.md` needs the release's `## v0.1.0-alpha.6` section first. It
+- `CHANGELOG.md` needs the release's `## v0.2.0-alpha.1` section first. It
   becomes the package's notes, which the launcher shows, and the GitHub
   release's text.
 - The .NET SDK runs the pinned Velopack packer, the version of the C library
@@ -82,7 +82,7 @@ newer than the ones 22.04 ships. The C++ runtime is linked statically and OpenGL
 From Windows, with that build reachable through WSL:
 
 ```powershell
-python tools/package_release.py --platform linux --version v0.1.0-alpha.6 `
+python tools/package_release.py --platform linux --version v0.2.0-alpha.1 `
     --build \\wsl.localhost\<distro>\<checkout>\build --zstd-license <zstd LICENSE>
 ```
 
