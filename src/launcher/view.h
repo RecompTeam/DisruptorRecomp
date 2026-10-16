@@ -101,7 +101,8 @@ private:
     bool segmented(const char* id, int* index, std::span<const char* const> choices, float width);
     bool updates_popup(const UpdateView& update);
     void help();
-    void blocks(const std::vector<Block>& list, float width);
+    // `compact` sets a card's notes tighter than the Help page's guide.
+    void blocks(const std::vector<Block>& list, float width, bool compact = false);
     bool news(const UpdateView& update);
     // A line of the guide wrapped to `width`: its links open, its code spans copy themselves.
     void rich(const Line& line, float width, bool strong = false, bool faint = false, float leading = 1.5f);

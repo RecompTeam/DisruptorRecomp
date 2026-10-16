@@ -682,9 +682,8 @@ bool View::news(const UpdateView& update) {
         ImGui::SameLine(right_edge - bold_->CalcTextSizeA(ImGui::GetFontSize(), FLT_MAX, 0.0f, more).x);
         if (link(more)) updates_open_ = true;
     }
-    ImGui::Dummy(ImVec2(0.0f, 2.0f * scale_));
     ImGui::BeginChild("news text", ImVec2(0.0f, 0.0f));
-    blocks(news_blocks_, ImGui::GetContentRegionAvail().x - 14.0f * scale_);
+    blocks(news_blocks_, ImGui::GetContentRegionAvail().x - 14.0f * scale_, true);
     ImGui::EndChild();
     card_end();
     return true;
@@ -1950,7 +1949,7 @@ void View::help() {
     ImGui::PopStyleColor();
 }
 
-void View::blocks(const std::vector<Block>& list, float width) {
+void View::blocks(const std::vector<Block>& list, float width, bool compact) {
     const float size = ImGui::GetFontSize();
     const auto listed = [&](std::size_t index) {
         return index < list.size() && (list[index].kind == BlockKind::bullet || list[index].kind == BlockKind::numbered);
@@ -1959,7 +1958,8 @@ void View::blocks(const std::vector<Block>& list, float width) {
         const Block& block = list[index];
         switch (block.kind) {
         case BlockKind::heading:
-            ImGui::Dummy(ImVec2(0.0f, 6.0f * scale_));
+            if (!compact) ImGui::Dummy(ImVec2(0.0f, 6.0f * scale_));
+            else if (index > 0) ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 4.0f * scale_);
             ImGui::PushFont(bold_, kFontSize * (block.level <= 2 ? 1.2f : 1.08f));
             rich(block.text, width, true);
             ImGui::PopFont();
@@ -2023,7 +2023,7 @@ void View::blocks(const std::vector<Block>& list, float width) {
         }
         // A heading stands close to what it heads, blocks apart, the items of a list closer.
         if (block.kind == BlockKind::heading) ImGui::SetCursorPosY(ImGui::GetCursorPosY() - 3.0f * scale_);
-        else if (!(listed(index) && listed(index + 1))) ImGui::Dummy(ImVec2(0.0f, 5.0f * scale_));
+        else if (!compact && !(listed(index) && listed(index + 1))) ImGui::Dummy(ImVec2(0.0f, 5.0f * scale_));
     }
 }
 
