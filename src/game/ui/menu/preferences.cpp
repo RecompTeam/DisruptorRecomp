@@ -17,7 +17,6 @@ bool env_override_present(const char *name) {
     return name && std::getenv(name) != nullptr;
 }
 
-// The keys follow a change of scheme where they are the other scheme's own layout, and keybinds.ini says so.
 void follow_scheme(bool modern, bool save) {
     disruptor::settings::KeyLayout current;
     for (int index = 0; index < PSX_KB_COUNT; ++index) {
@@ -243,6 +242,7 @@ void apply_saved_preferences(const PSXRecompV4::UserSettings &settings) {
         !env_override_present("PSX_DISRUPTOR_MODERN_CONTROLS"))
         set_modern_controls_live(settings.modern_controls);
     disruptor_selection_wheels_set_enabled(settings.has_selection_wheels && settings.selection_wheels);
+    disruptor_number_keys_set_enabled(settings.has_number_keys && settings.number_keys);
     if (settings.has_horizontal_sensitivity &&
         !env_override_present("PSX_DISRUPTOR_MOUSE_SENSITIVITY"))
         (void)disruptor_mouse_set_horizontal_sensitivity(
@@ -335,6 +335,8 @@ void apply_pending_preferences() {
         set_modern_controls_live(pending.modern_controls);
     if (changed("disruptor.selection_wheels"))
         disruptor_selection_wheels_set_enabled(pending.selection_wheels);
+    if (changed("disruptor.number_keys"))
+        disruptor_number_keys_set_enabled(pending.number_keys);
     if (changed("disruptor.horizontal_sensitivity"))
         (void)disruptor_mouse_set_horizontal_sensitivity(
             pending.horizontal_sensitivity);

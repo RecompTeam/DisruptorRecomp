@@ -49,6 +49,7 @@ int g_vertical_input_allowed = 1;
 bool g_wheel_consuming = false;
 
 constexpr std::uint32_t kTestYawAddress = 0x80077624u;
+constexpr std::uint32_t kTestHeldWeaponAddress = 0x80071484u;
 
 }  // namespace
 
@@ -59,6 +60,9 @@ SDL_Window *sdl_window = &g_window;
 void mod_register_frame_hook(void (*hook)(void)) {
     g_registered_hook = hook;
 }
+
+int g_chosen_weapon = -1;
+void disruptor_weapon_chosen(std::uint8_t weapon) { g_chosen_weapon = weapon; }
 
 void disruptor_capsule_note_byte(std::uint32_t address, std::uint8_t value) {
     g_noted_at = address;
@@ -204,8 +208,7 @@ const char *SDL_GetError() {
     return "mock relative-mode failure";
 }
 
-// Include the implementation so its internal pure helpers and state can be
-// exercised against the mocks above without exposing a test-only production ABI.
+// Include the implementation to reach its internal helpers and state without a test-only ABI.
 #include "../../src/game/input/mouse_aim.cpp"
 
 namespace {
@@ -437,6 +440,28 @@ void test_vertical_direction_inversion_and_clamp() {
                  "negative pitch is clamped symmetrically");
 }
 
+void test_pause_holds_the_camera() {
+    reset_state();
+    g_mouse.enabled = true;
+    g_mouse.mouse_aim_enabled = true;
+    g_mouse.captured = true;
+    g_mouse.configured = true;
+    g_mouse.horizontal_sensitivity = 0.08;
+    g_mouse.log = std::tmpfile();
+    psx_write_byte(kTestYawAddress, 100);
+    psx_write_byte(kSceneModeAddress, 4u);
+    g_relative_x = 25.0f;
+    mouse_aim_frame();
+    expect(psx_read_byte(kTestYawAddress) == 100, "the mouse does not turn the camera while the game is paused");
+    expect_close(g_relative_x, 0.0, "and the motion made in the pause is dropped");
+    psx_write_byte(kSceneModeAddress, 0u);
+    mouse_aim_frame();
+    expect(psx_read_byte(kTestYawAddress) == 100, "so the camera does not jump when the pause ends");
+    g_relative_x = 25.0f;
+    mouse_aim_frame();
+    expect(psx_read_byte(kTestYawAddress) == 98, "and turns again in play");
+}
+
 void test_simultaneous_relative_axes_sample() {
     reset_state();
     g_mouse.enabled = true;
@@ -659,7 +684,7 @@ void test_focus_and_the_players_choice() {
 
 void prepare_weapon_input() {
     reset_state();
-    g_mouse.enabled = g_mouse.modern_controls_enabled = g_mouse.configured = true;
+    g_mouse.enabled = g_mouse.modern_controls_enabled = g_mouse.number_keys_enabled = g_mouse.configured = true;
     g_mouse.log = std::tmpfile();
     for (unsigned weapon = 0; weapon < 10; ++weapon)
         psx_write_byte(kWeaponOwnershipBase + weapon * 4, 1u);
@@ -679,6 +704,7 @@ void test_direct_weapon_mapping() {
                "each digit and keypad key selects its retail weapon ID");
         expect(g_noted_at == kCurrentWeaponAddress && g_noted == weapon && g_notes == 1,
                "direct weapon selection is recorded for replay");
+        expect(g_chosen_weapon == weapon, "a number key tells the game which weapon the player chose");
         auto expected = before;
         expected[kCurrentWeaponAddress & 0x001fffffu] = weapon;
         expect(std::equal(g_ram.begin(), g_ram.end(), expected.begin()),
@@ -712,10 +738,90 @@ void test_weapon_selection_guards() {
     }
 
     prepare_weapon_input();
-    psx_write_byte(kCurrentWeaponAddress, 0u);
-    g_keys[SDL_SCANCODE_1] = 1;
+    psx_write_byte(kCurrentWeaponAddress, 1u);
+    g_keys[SDL_SCANCODE_2] = 1;
     mouse_aim_frame();
     expect(g_notes == 0, "selecting the equipped weapon is a no-op");
+
+    prepare_weapon_input();
+    psx_write_byte(kCurrentWeaponAddress, 0u);
+    g_chosen_weapon = -1;
+    g_keys[SDL_SCANCODE_1] = 1;
+    mouse_aim_frame();
+    expect(g_chosen_weapon == 0 && g_notes == 1 && g_noted_at == kCurrentWeaponAddress && g_noted == 0,
+           "the baton already in hand still takes the player's choice, and a capsule records it");
+
+    prepare_weapon_input();
+    psx_write_byte(kCurrentWeaponAddress, 1u);
+    psx_write_byte(kTestHeldWeaponAddress, 0u);
+    g_keys[SDL_SCANCODE_3] = 1;
+    mouse_aim_frame();
+    mouse_aim_frame();
+    expect(psx_read_byte(kCurrentWeaponAddress) == 1u && g_notes == 0, "a pick while the game still changes weapons waits");
+    g_keys[SDL_SCANCODE_3] = 0;
+    mouse_aim_frame();
+    g_keys[SDL_SCANCODE_4] = 1;
+    mouse_aim_frame();
+    psx_write_byte(kTestHeldWeaponAddress, 1u);
+    g_chosen_weapon = -1;
+    mouse_aim_frame();
+    expect(psx_read_byte(kCurrentWeaponAddress) == 3u && g_notes == 1 && g_noted == 3u && g_chosen_weapon == 3,
+           "once the change is done the last pick is made, recorded and told");
+    mouse_aim_frame();
+    expect(g_notes == 1, "and only once");
+
+    prepare_weapon_input();
+    psx_write_byte(kCurrentWeaponAddress, 1u);
+    psx_write_byte(kTestHeldWeaponAddress, 0u);
+    g_keys[SDL_SCANCODE_3] = 1;
+    mouse_aim_frame();
+    g_keys[SDL_SCANCODE_3] = 0;
+    mouse_aim_frame();
+    g_keys[SDL_SCANCODE_2] = 1;
+    mouse_aim_frame();
+    psx_write_byte(kTestHeldWeaponAddress, 1u);
+    mouse_aim_frame();
+    expect(psx_read_byte(kCurrentWeaponAddress) == 1u && g_notes == 0, "picking the weapon the change goes to drops a waiting pick");
+
+    prepare_weapon_input();
+    psx_write_byte(kCurrentWeaponAddress, 1u);
+    psx_write_byte(kTestHeldWeaponAddress, 0u);
+    g_keys[SDL_SCANCODE_3] = 1;
+    mouse_aim_frame();
+    disruptor_weapon_keys_state_loaded();
+    psx_write_byte(kTestHeldWeaponAddress, 1u);
+    mouse_aim_frame();
+    expect(psx_read_byte(kCurrentWeaponAddress) == 1u && g_notes == 0, "a loaded state forgets a waiting pick");
+
+    prepare_weapon_input();
+    psx_write_byte(kCurrentWeaponAddress, 1u);
+    psx_write_byte(kTestHeldWeaponAddress, 0u);
+    g_keys[SDL_SCANCODE_3] = 1;
+    mouse_aim_frame();
+    g_mouse.number_keys_enabled = false;
+    mouse_aim_frame();
+    g_mouse.number_keys_enabled = true;
+    psx_write_byte(kTestHeldWeaponAddress, 1u);
+    g_chosen_weapon = -1;
+    mouse_aim_frame();
+    expect(psx_read_byte(kCurrentWeaponAddress) == 1u && g_notes == 0 && g_chosen_weapon == -1,
+           "switching number keys off forgets a waiting pick");
+
+    prepare_weapon_input();
+    psx_write_byte(kCurrentWeaponAddress, 0u);
+    psx_write_byte(kTestHeldWeaponAddress, 1u);
+    g_keys[SDL_SCANCODE_3] = 1;
+    mouse_aim_frame();
+    g_keys[SDL_SCANCODE_3] = 0;
+    mouse_aim_frame();
+    g_chosen_weapon = -1;
+    g_keys[SDL_SCANCODE_1] = 1;
+    mouse_aim_frame();
+    expect(g_chosen_weapon == 0 && g_notes == 1 && g_noted == 0u,
+           "the baton a change goes to takes the player's choice at once");
+    psx_write_byte(kTestHeldWeaponAddress, 0u);
+    mouse_aim_frame();
+    expect(psx_read_byte(kCurrentWeaponAddress) == 0u && g_notes == 1, "and drops the pick that waited");
 
     prepare_weapon_input();
     g_bound[SDL_SCANCODE_3] = true;
@@ -725,6 +831,31 @@ void test_weapon_selection_guards() {
     g_keys[SDL_SCANCODE_KP_3] = 1;
     mouse_aim_frame();
     expect(psx_read_byte(kCurrentWeaponAddress) == 2u, "the keypad's free 3 still picks the 18mm Auto");
+
+    prepare_weapon_input();
+    g_mouse.number_keys_enabled = false;
+    g_keys[SDL_SCANCODE_2] = 1;
+    mouse_aim_frame();
+    expect(g_notes == 0, "number keys pick nothing while their setting is off");
+    disruptor_number_keys_set_enabled(1);
+    mouse_aim_frame();
+    expect(g_notes == 0, "a number held while the setting comes on does not pick");
+    g_keys[SDL_SCANCODE_2] = 0;
+    mouse_aim_frame();
+    g_mouse.modern_controls_enabled = false;
+    g_keys[SDL_SCANCODE_2] = 1;
+    mouse_aim_frame();
+    expect(psx_read_byte(kCurrentWeaponAddress) == 1u, "number keys pick in the Classic scheme too");
+
+    prepare_weapon_input();
+    g_mouse.number_keys_enabled = false;
+    g_mouse.mouse_aim_enabled = g_mouse.vertical_look_enabled = g_mouse.modern_controls_enabled = false;
+    g_mouse.high_precision_camera = false;
+    g_mouse.enabled = false;
+    disruptor_number_keys_set_enabled(1);
+    g_keys[SDL_SCANCODE_3] = 1;
+    mouse_aim_frame();
+    expect(psx_read_byte(kCurrentWeaponAddress) == 2u, "number keys pick with every mouse option off too");
 }
 
 void test_weapon_key_edges_through_menus() {
@@ -764,21 +895,21 @@ void test_weapon_key_edges_through_menus() {
     expect(g_notes == 0, "focus returning cannot turn a held keypad key into a selection");
 }
 
-void test_weapon_keys_follow_modern_controls() {
+void test_weapon_keys_follow_their_option() {
     prepare_weapon_input();
-    disruptor_modern_controls_set_enabled(0);
+    disruptor_number_keys_set_enabled(0);
     g_keys[SDL_SCANCODE_2] = 1;
     mouse_aim_frame();
-    expect(g_notes == 0, "original controls leave digit keys alone");
-    disruptor_modern_controls_set_enabled(1);
+    expect(g_notes == 0, "with their option off the number keys leave digits alone");
+    disruptor_number_keys_set_enabled(1);
     mouse_aim_frame();
-    expect(g_notes == 0, "enabling modern controls while a number is held does not select");
+    expect(g_notes == 0, "turning the option on while a number is held does not select");
     g_keys[SDL_SCANCODE_2] = 0;
     mouse_aim_frame();
     g_keys[SDL_SCANCODE_2] = 1;
     mouse_aim_frame();
     expect(psx_read_byte(kCurrentWeaponAddress) == 1u,
-           "modern controls enable fresh direct-selection presses");
+           "the option on, a fresh press selects");
 }
 
 void test_weapon_selection_with_mouse_aim() {
@@ -1206,6 +1337,7 @@ int main(int argc, char **argv) {
         test_motion_safety_clamp();
         test_vertical_direction_inversion_and_clamp();
         test_simultaneous_relative_axes_sample();
+        test_pause_holds_the_camera();
         test_capture_release_and_frame_motion();
         test_focus_and_the_players_choice();
         test_high_precision_camera_residual();
@@ -1213,7 +1345,7 @@ int main(int argc, char **argv) {
         test_direct_weapon_mapping();
         test_weapon_selection_guards();
         test_weapon_key_edges_through_menus();
-        test_weapon_keys_follow_modern_controls();
+        test_weapon_keys_follow_their_option();
         test_weapon_selection_with_mouse_aim();
         test_wheel_consumes_camera_and_keyboard_input();
         test_modern_mouse_buttons_require_capture();

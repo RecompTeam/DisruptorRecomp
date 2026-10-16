@@ -64,6 +64,8 @@ constexpr int64_t kNearest = 8;
 constexpr int64_t kBodyReach = 64;
 constexpr int64_t kHalvedBelow = kNearest + 2 * kBodyReach;
 constexpr int64_t kSlotShift = 3;
+constexpr int64_t kFartherSlots = (kBodyLead >> kSlotShift) + 1;  /* the game's own lead can sort a body this many slots before a face it lies past */
+constexpr int64_t kLastSlot = 509;  /* 0x80040EC4 clears 512 entries from two before the table's slot 0 */
 constexpr uint32_t kSlotBytes = 4u;
 constexpr uint32_t kOrderingTable = 836u;  /* gp + 836: the ordering table's first slot */
 constexpr uint32_t kFadeStart = 1172u;  /* gp + 1172: the range the deferred pass fades from (0x80043184) */
@@ -362,17 +364,33 @@ struct Walk {
     int64_t reached;
 };
 
-/* A body's camera depth and its reach towards the eye, half its width in the world, both in GTE units. */
+/* A body's camera depth and its reach towards the eye, half its width in the world, both in GTE units, and its middle on the screen. */
 struct Front {
     double depth;
     double reach;
+    double x;
+    double row;
 };
 
 [[nodiscard]] std::optional<Front> front_of(const Sprite& sprite) {
-    if (sprite.depth <= 0 || !sprite.shape) return std::nullopt;
+    if (sprite.depth <= 0 || !sprite.shape || !sprite.place) return std::nullopt;
     const double depth = static_cast<double>(sprite.depth) * kGteDepthPerSpriteDepth;
     const double width = static_cast<double>(sprite.shape->width) / kOne * sprite.depth / kFocal * kGteDepthPerSpriteDepth;
-    return Front{.depth = depth, .reach = width / 2.0};
+    return Front{.depth = depth,
+                 .reach = width / 2.0,
+                 .x = static_cast<double>(sprite.place->x) / kOne,
+                 .row = static_cast<double>(sprite.shape->row) / kOne};
+}
+
+/* How far `point` lies past the plane through `corner` square to `normal`, on the side away from the eye; negative on its side. */
+[[nodiscard]] double past_plane(const std::array<double, 3>& normal, double length, const std::array<double, 3>& corner,
+                                const std::array<double, 3>& point) {
+    double eye = 0.0, side = 0.0;
+    for (std::size_t axis = 0; axis < 3; ++axis) {
+        eye -= normal[axis] * corner[axis];
+        side += normal[axis] * (point[axis] - corner[axis]);
+    }
+    return (eye * side < 0.0 ? 1.0 : -1.0) * std::fabs(side) / length;
 }
 
 /* The nearest depth of a triangle (screen place and 1 / z at each corner) over the box, 0 when it is not over it: on a plane
@@ -410,14 +428,18 @@ struct Front {
     return nearest > 0.0 ? 1.0 / nearest : 0.0;
 }
 
-/* Whether the world polygon at `at` is an upright face in front of the body over its box: somewhere in the box its depth,
- * from the corners the GTE projected into the words the game stored, is nearer than the body's by more than its reach. */
-[[nodiscard]] bool occludes(const CPUState& cpu, uint32_t at, uint32_t tag, const Box& box, const Front& front) {
+/* How the world polygon at `at` (corners from the GTE) hides the body, nearer than it by more than its reach: an upright face
+ * over its box stands in front of it, another over the box's upper half lies over it as a floor over a drone. The lower half
+ * is left out, as there the floor before a body lying on it falls. An upright face nearer than the body over the upper half,
+ * with the body's middle past its plane, is one the body lies behind (`past`), as a pickup under a shut door. */
+enum class Cover { none, front, past, over };
+
+[[nodiscard]] Cover occludes(const CPUState& cpu, uint32_t at, uint32_t tag, const Box& box, const Front& front) {
     const uint32_t code = cpu.read_byte(at + 7u);
-    if ((code & 0xE0u) != 0x20u) return false;
+    if ((code & 0xE0u) != 0x20u) return Cover::none;
     const bool quad = (code & 0x08u) != 0u, textured = (code & 0x04u) != 0u, gouraud = (code & 0x10u) != 0u;
     const uint32_t corners = quad ? 4u : 3u;
-    if (tag >> 24 != 1u + corners * (textured ? 2u : 1u) + (gouraud ? corners - 1u : 0u)) return false;
+    if (tag >> 24 != 1u + corners * (textured ? 2u : 1u) + (gouraud ? corners - 1u : 0u)) return Cover::none;
     const uint32_t stride = 4u + (textured ? 4u : 0u) + (gouraud ? 4u : 0u);
     int32_t num = 1, den = 1;
     gte_ws_x_squash(&num, &den);
@@ -428,13 +450,17 @@ struct Front {
         int32_t x16 = 0, y16 = 0;
         uint16_t z = 0;
         if (gte_precision_load_word_ex(word - kKseg0, cpu.read_word(word), &x16, &y16, &z) != GTE_PRECISION_LOOKUP_ACCEPTED || z == 0u) {
-            return false;
+            return Cover::none;
         }
         const double x = static_cast<double>(x16) / kOne, y = static_cast<double>(y16) / kOne;
         place[corner] = {x, y, static_cast<double>(z)};
         camera[corner] = {(x - kFocal) * unsquash * z / kFocal, (y - kHorizon) * z / kFocal, static_cast<double>(z)};
     }
     constexpr std::array<std::array<uint32_t, 3>, 2> kTriangles{{{0u, 1u, 2u}, {1u, 3u, 2u}}};
+    const Box upper{.left = box.left, .top = box.top, .right = box.right, .bottom = box.top + (box.bottom - box.top) / 2};
+    const std::array<double, 3> middle{(front.x - kFocal) * unsquash * front.depth / kFocal, (front.row - kHorizon) * front.depth / kFocal,
+                                       front.depth};
+    Cover found = Cover::none;
     for (uint32_t triangle = 0; triangle < (quad ? 2u : 1u); ++triangle) {
         const auto& [a, b, c] = kTriangles[triangle];
         std::array<double, 3> u{}, v{};
@@ -444,14 +470,22 @@ struct Front {
         }
         const std::array<double, 3> normal{u[1] * v[2] - u[2] * v[1], u[2] * v[0] - u[0] * v[2], u[0] * v[1] - u[1] * v[0]};
         const double length = std::sqrt(normal[0] * normal[0] + normal[1] * normal[1] + normal[2] * normal[2]);
-        if (length == 0.0 || std::fabs(normal[1]) >= kUpright * length) continue;
-        const double nearest = nearest_over({{{place[a][0], place[a][1], 1.0 / place[a][2]},
-                                              {place[b][0], place[b][1], 1.0 / place[b][2]},
-                                              {place[c][0], place[c][1], 1.0 / place[c][2]}}},
-                                            box);
-        if (nearest > 0.0 && nearest < front.depth - front.reach) return true;
+        if (length == 0.0) continue;
+        const bool upright = std::fabs(normal[1]) < kUpright * length;
+        const auto over = [&](const Box& part) {
+            return nearest_over({{{place[a][0], place[a][1], 1.0 / place[a][2]},
+                                  {place[b][0], place[b][1], 1.0 / place[b][2]},
+                                  {place[c][0], place[c][1], 1.0 / place[c][2]}}},
+                                part);
+        };
+        const double nearest = over(upright ? box : upper);
+        if (upright && nearest > 0.0 && past_plane(normal, length, camera[a], middle) > 0.0) {
+            const double above = over(upper);
+            if (above > 0.0 && above < front.depth) return Cover::past;
+        }
+        if (found == Cover::none && nearest > 0.0 && nearest < front.depth - front.reach) found = upright ? Cover::front : Cover::over;
     }
-    return false;
+    return found;
 }
 
 /* A funnel's POLY_FT4: the CPU placed its corners, so the GTE kept no projection for them, as it does for the world's. */
@@ -463,8 +497,9 @@ struct Front {
 }
 
 /* The world sprites over `box` along the table's chain from slot `from` down to slot `to`, in the order they are drawn,
- * and with `chain` every node on the way. An upright face in front of the body ends the walk in its slot when `may_stop`,
- * the sprites of that slot staying where they are; otherwise, or when the chain does not reach `to`, nothing. */
+ * and with `chain` every node on the way. When `may_stop` an upright face in front of the body ends the walk in its slot,
+ * the sprites of that slot staying where they are, and a face over it ends it where it began; otherwise, or when the chain
+ * does not reach `to`, nothing. */
 [[nodiscard]] std::optional<Walk> passed_sprites(const CPUState& cpu, uint32_t table, int64_t from, int64_t to, const Box& box,
                                                  const Front& front, bool may_stop, std::vector<uint32_t>* chain = nullptr) {
     const uint32_t first = table + static_cast<uint32_t>(from) * kSlotBytes;
@@ -493,12 +528,37 @@ struct Front {
                 passed.push_back(Passed{.before = before, .node = node, .at = at, .slot = slot});
                 continue;
             }
-        } else if (occludes(cpu, at, tag, box, front)) {
+        } else if (const Cover cover = occludes(cpu, at, tag, box, front); cover != Cover::none) {
             if (!may_stop) return std::nullopt;
+            if (cover == Cover::over) return Walk{.sprites = {}, .reached = from};
             std::erase_if(passed, [slot](const Passed& sprite) { return sprite.slot == slot; });
             return Walk{.sprites = passed, .reached = slot};
         }
         before = at;
+    }
+    return std::nullopt;
+}
+
+/* The slot of the farthest face linked from slot `from` down to the body's slot `to` that the body lies behind: the game's own
+ * lead sorted the body in front of it. Nothing when there is none or the chain does not reach `to`. */
+[[nodiscard]] std::optional<int64_t> face_behind(const CPUState& cpu, uint32_t table, int64_t from, int64_t to, const Box& box,
+                                                 const Front& front) {
+    const uint32_t first = table + static_cast<uint32_t>(from) * kSlotBytes;
+    const uint32_t last = table + static_cast<uint32_t>(to) * kSlotBytes;
+    uint32_t at = first;
+    int64_t slot = from;
+    std::optional<int64_t> behind;
+    for (int link = 0; link < kLinksWalked; ++link) {
+        const uint32_t node = cpu.read_word(at) & kTagNext;
+        if (node == kTagNext) return std::nullopt;
+        at = kKseg0 | psx_mod_gpu_dma_resolve_address(node);
+        if (at == last) return behind;
+        if (at >= table && at < first) {
+            slot = (at - table) / kSlotBytes;
+            continue;
+        }
+        const uint32_t tag = cpu.read_word(at);
+        if (!behind && !world_sprite(cpu, at, tag) && occludes(cpu, at, tag, box, front) == Cover::past) behind = slot;
     }
     return std::nullopt;
 }
@@ -569,7 +629,8 @@ std::vector<Passed> g_moved;
 }
 
 /* The frame's records are 0 to `last` (the game counts them from 0 each frame, 0x80040EC8): a led key is never nearer than
- * one the game put nearer, and only ever goes farther to stay so, which no wall forbids. */
+ * one the game put nearer, and only ever goes farther to stay so, which no wall forbids. A body taken behind a face orders the
+ * rest by its game key, so a body in front of that face stays in front of it. */
 void keep_order(CPUState& cpu, std::size_t last, uint32_t first_key) {
     std::vector<std::size_t> order(last + 1);
     for (std::size_t index = 0; index <= last; ++index) order[index] = index;
@@ -582,18 +643,26 @@ void keep_order(CPUState& cpu, std::size_t last, uint32_t first_key) {
             record.led = least;
             cpu.write_half(first_key + kRecordBytes * static_cast<uint32_t>(index), static_cast<uint16_t>(least));
         }
-        floor = record.led;
+        floor = std::max(floor, std::min(record.led, record.key));
         behind = record.key;
     }
 }
 
-/* Where a body's walk takes its key from `key`: nearer by led(), the world sprites over it moved along, held by a wall in
- * front of it. The game's key when the walk cannot be made or does not get there. */
+/* Where a body's walk takes its key from `key`: back to the slot of a face it lies behind that the game sorted farther, or
+ * nearer by led(), the world sprites over it moved along, held by a wall in front of it. The game's key when the walk cannot
+ * be made or does not get there. */
 [[nodiscard]] int32_t walk_body(CPUState& cpu, int32_t key, const Sprite& record) {
     const auto nearer = static_cast<int32_t>(led(key));
-    if (nearer >> kSlotShift == key >> kSlotShift) return nearer;
     const std::optional<Box> box = box_of(record);
     const std::optional<Front> front = front_of(record);
+    const int64_t own = key >> kSlotShift;
+    if (box && front && own < kLastSlot) {
+        const uint32_t table = cpu.read_word(cpu.gpr[kGlobals] + kOrderingTable);
+        if (const std::optional<int64_t> behind = face_behind(cpu, table, std::min(own + kFartherSlots, kLastSlot), own, *box, *front)) {
+            return static_cast<int32_t>(*behind << kSlotShift | (key & ((1 << kSlotShift) - 1)));
+        }
+    }
+    if (nearer >> kSlotShift == own) return nearer;
     if (!box || !front) return key;
     const std::optional<int64_t> reached = move_over(cpu, key, nearer, *box, *front);
     if (!reached) return key;
@@ -618,7 +687,7 @@ void lead_shadow(CPUState& cpu, const Sprite& body, uint32_t packet) {
     uint32_t& range = cpu.gpr[kFunnels.back().range_gpr];
     const std::optional<Front> front = front_of(body);
     if (body.walked == body.key || static_cast<int32_t>(range) != body.key || !front || !writable(cpu)) return;
-    if (body.walked >> kSlotShift != body.key >> kSlotShift &&
+    if (body.walked < body.key && body.walked >> kSlotShift != body.key >> kSlotShift &&
         !join_over(cpu, body.key, body.walked, packet_box(cpu, packet), *front)) {
         return;
     }

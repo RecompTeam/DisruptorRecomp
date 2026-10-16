@@ -16,6 +16,9 @@ void disruptor_mouse_aim_set_enabled(int enabled);
 
 int  disruptor_modern_controls_enabled(void);
 void disruptor_modern_controls_set_enabled(int enabled);
+int  disruptor_number_keys_enabled(void);
+void disruptor_number_keys_set_enabled(int enabled);
+void disruptor_weapon_keys_state_loaded(void);
 
 int  disruptor_high_precision_camera_enabled(void);
 void disruptor_high_precision_camera_set_enabled(int enabled);

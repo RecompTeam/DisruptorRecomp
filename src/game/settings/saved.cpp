@@ -33,6 +33,10 @@ void read_game_user_settings(const toml::value& doc, UserSettings& s) {
             s.selection_wheels = toml::find<bool>(d, "selection_wheels");
             s.has_selection_wheels = true;
         });
+        if (d.contains("number_keys")) try_get([&]{
+            s.number_keys = toml::find<bool>(d, "number_keys");
+            s.has_number_keys = true;
+        });
         if (d.contains("horizontal_sensitivity")) try_get([&]{
             double n = 0.0;
             try {
@@ -176,7 +180,6 @@ void read_game_user_settings(const toml::value& doc, UserSettings& s) {
 }
 
 void write_game_user_settings(std::ostream& f, const UserSettings& s) {
-    // A TOML basic string: a quote, a backslash and a control character are escaped.
     auto quoted = [](const std::string& text) {
         std::string out = "\"";
         for (const char letter : text) {
@@ -190,7 +193,7 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
         return out + "\"";
     };
 
-    if (s.has_mouse_aim || s.has_modern_controls || s.has_selection_wheels ||
+    if (s.has_mouse_aim || s.has_modern_controls || s.has_selection_wheels || s.has_number_keys ||
         s.has_horizontal_sensitivity || s.has_invert_horizontal ||
         s.has_vertical_look || s.has_vertical_sensitivity ||
         s.has_invert_vertical || s.has_separate_vertical_speed ||
@@ -209,6 +212,8 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
             f << "modern_controls = " << (s.modern_controls ? "true" : "false") << "\n";
         if (s.has_selection_wheels)
             f << "selection_wheels = " << (s.selection_wheels ? "true" : "false") << "\n";
+        if (s.has_number_keys)
+            f << "number_keys = " << (s.number_keys ? "true" : "false") << "\n";
         if (s.has_horizontal_sensitivity &&
             std::isfinite(s.horizontal_sensitivity) &&
             s.horizontal_sensitivity >= 0.005 &&

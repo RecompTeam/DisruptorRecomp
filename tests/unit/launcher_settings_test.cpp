@@ -230,6 +230,12 @@ void described() {
     const Option& wheels = *find_option("disruptor.selection_wheels");
     require(wheels.kind == Kind::toggle && wheels.initial == 0 && stored(settings, wheels) == 0,
             "one option controls both wheels and starts disabled");
+    const Option& numbers = *find_option("disruptor.number_keys");
+    require(numbers.kind == Kind::toggle && numbers.initial == 0 && stored(settings, numbers) == 0,
+            "the number keys pick no weapon until their option is on");
+    require(experimental(wheels) && experimental(numbers) && experimental(*find_option("disruptor.vertical_look")) &&
+                !experimental(*find_option("disruptor.modern_controls")),
+            "the wheels, the number keys and the vertical look carry the experimental tag, the scheme does not");
     require(logging.kind == Kind::toggle && logging.initial == 0 && stored(settings, logging) == 0 && stored(settings, volume) == 100,
             "an option the file does not name has a fresh installation's value, and the detailed log starts off");
     logging.set(settings, 1);

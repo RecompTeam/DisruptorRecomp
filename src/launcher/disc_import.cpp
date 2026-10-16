@@ -239,8 +239,7 @@ struct Sha256 {
 };
 #endif
 
-// CUE files are usually UTF-8, or on Windows the system ANSI encoding and elsewhere Latin-1. Installed filenames
-// are ASCII, so the game's existing narrow-path loader can read them too.
+// CUE files are usually UTF-8, on Windows the system ANSI encoding, elsewhere Latin-1. Installed names are ASCII.
 std::wstring decode(const std::string& text) {
 #ifndef _WIN32
     std::wstring result;
@@ -424,9 +423,7 @@ fs::path resolve_image(const fs::path& selected) {
 VerifiedDisc verify_disc(const fs::path& selected, const std::atomic_bool& cancelled,
                          const Progress& progress, std::span<const DiscProfile> profiles) {
     check_cancel(cancelled);
-    // Hold both CUE and data locks: the table of contents must not change after
-    // verification either. Reading the CUE again in resolve_image is safe with
-    // shared read access, while all writers remain excluded.
+    // Both CUE and data stay locked so the table of contents cannot change after verification.
     std::shared_ptr<File> cue_lock;
     if (upper(selected.extension().string()) == ".CUE") cue_lock = std::make_shared<File>(selected);
     const fs::path data = resolve_image(selected);
@@ -462,23 +459,19 @@ VerifiedDisc import_disc(const fs::path& selected, const fs::path& package,
         profile = &match_hash(source.size(), hash, profiles);
     }
     write_cue(staging.path);
-    // Read back the actual installed bytes, not just the source or a cached verdict.
     { const auto verified = verify_disc(staging.path / "disc.cue", cancelled, progress, profiles); }
     check_cancel(cancelled);
     const auto destination = installed_cue(package, *profile).parent_path();
     fs::path backup;
     if (fs::exists(destination)) {
         try {
-            // Re-selecting a correct image should not accumulate duplicate
-            // installations. Only a failed existing verification needs repair.
             return verify_disc(destination / "disc.cue", cancelled, progress, profiles);
         } catch (const std::exception&) {
             check_cancel(cancelled);
         }
-        // A repaired installation preserves every previous file in a sibling
-        // backup. No existing data is deleted, including unexpected user files.
+        // Nothing is deleted: the old installation moves to a sibling backup, unexpected user files included.
         backup = unique_directory(parent, ".previous-" + std::string(profile->id) + "-");
-        fs::remove(backup); // the directory we just created is empty
+        fs::remove(backup);
         fs::rename(destination, backup);
     }
     try {
@@ -488,8 +481,7 @@ VerifiedDisc import_disc(const fs::path& selected, const fs::path& package,
         if (!backup.empty()) { std::error_code ignored; fs::rename(backup, destination, ignored); }
         throw;
     }
-    // Publication is complete. Cancellation after this point must not label
-    // successfully installed data as an incomplete import.
+    // Past publication a cancel must not mark installed data as an incomplete import.
     const std::atomic_bool committed{false};
     return verify_disc(destination / "disc.cue", committed, progress, profiles);
 }
@@ -499,7 +491,7 @@ fs::path find_installed_disc(const fs::path& package) {
         auto cue = installed_cue(package, profile);
         if (fs::exists(cue)) return cue;
     }
-    // Upgrade the old manual layout automatically, without changing its files.
+    // The old manual layout, left in place.
     for (const auto& name : {L"Disruptor (USA).cue", L"Disruptor (USA).bin"}) {
         auto path = package / "input" / name;
         if (fs::exists(path)) return path;

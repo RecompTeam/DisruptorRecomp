@@ -11,12 +11,19 @@ void draw_controls_tab() {
     }
     draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
 
+    bool number_keys = disruptor_number_keys_enabled() != 0;
+    if (option_toggle("disruptor.number_keys", &number_keys)) {
+        disruptor_number_keys_set_enabled(number_keys ? 1 : 0);
+        mark("disruptor.number_keys", number_keys ? 1 : 0);
+    }
+    draw_status_badge("EXPERIMENTAL", ImVec4(1.0f, 0.73f, 0.25f, 1.0f));
+
     bool wheels = disruptor_selection_wheels_enabled() != 0;
     if (option_toggle("disruptor.selection_wheels", &wheels)) {
         disruptor_selection_wheels_set_enabled(wheels ? 1 : 0);
         mark("disruptor.selection_wheels", wheels ? 1 : 0);
     }
-    draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
+    draw_status_badge("EXPERIMENTAL", ImVec4(1.0f, 0.73f, 0.25f, 1.0f));
     ImGui::TextDisabled("Change single keys in the launcher, on its Controls page.");
 
     ImGui::SeparatorText("Mouse");

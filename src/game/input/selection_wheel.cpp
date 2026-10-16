@@ -1,5 +1,6 @@
 #include "game/input/selection_wheel.h"
 
+#include "game/input/baton_choice.h"
 #include "game/input/mouse_aim.h"
 #include "game/input/vertical_camera.h"
 #include "game/session/capsule.h"
@@ -102,8 +103,7 @@ void inventory() {
         entry.owned = psx_read_word(owned + static_cast<uint32_t>(i) * 4u) == 1u;
         entry.equipped = equipped == i;
         entry.resource = -1;
-        // The native HUD totals both pools for IDs 1..7. Baton and the two
-        // special weapons have no numeric ammo display.
+        // The native HUD totals both pools for IDs 1..7, the rest show no ammo.
         if (weapons && i > 0 && i < 8) {
             const uint8_t primary = psx_read_byte(kPrimaryAmmoIndex + static_cast<uint32_t>(i));
             const uint8_t secondary = psx_read_byte(kSecondaryAmmoIndex + static_cast<uint32_t>(i));
@@ -119,15 +119,17 @@ void inventory() {
 
 void equip() {
     if (!gameplay_ready()) return;
-    inventory(); // Recheck ownership at confirmation, not just when it opened.
+    inventory();
     const View &view = g_wheel.view;
     const int picked = view.highlighted;
     if (picked < 0 || picked >= view.count || !view.entries[static_cast<size_t>(picked)].owned) return;
     const uint32_t address = view.kind == Kind::weapons ? kSelectedWeapon : kSelectedPsionic;
     const uint8_t current = psx_read_byte(address);
-    if ((current >= view.count && current != 0xFFu) || current == picked) return;
+    const bool baton = view.kind == Kind::weapons && picked == 0;
+    if ((current >= view.count && current != 0xFFu) || (current == picked && !baton)) return;
     psx_write_byte(address, static_cast<uint8_t>(picked));
     disruptor_capsule_note_byte(address, static_cast<uint8_t>(picked));
+    if (view.kind == Kind::weapons) disruptor_weapon_chosen(static_cast<uint8_t>(picked));
 }
 
 void cycle(int direction) {
@@ -193,8 +195,6 @@ extern "C" uint16_t disruptor_selection_wheel_filter_press(uint16_t press) {
 }
 
 extern "C" void disruptor_selection_wheel_controller_axis(int axis, int value) {
-    // SDL's left stick axes are 0 and 1 in both supported versions. Events
-    // retain the host stick even when the emulated pad is in digital mode.
     const float position = std::clamp(static_cast<float>(value) / 32768.0f, -1.0f, 1.0f);
     if (axis == 0) g_wheel.controller_x = position;
     if (axis == 1) g_wheel.controller_y = position;
@@ -267,9 +267,13 @@ extern "C" int disruptor_selection_wheel_frame(void) {
                 if (entry.owned && (g_wheel.view.highlighted < 0 || entry.equipped))
                     g_wheel.view.highlighted = i;
             }
-            opened = true;
-            float dx = 0, dy = 0;
-            motion(dx, dy); // Opening never carries an old aiming movement into the wheel.
+            if (g_wheel.view.highlighted < 0) {
+                g_wheel.view = View{};
+            } else {
+                opened = true;
+                float dx = 0, dy = 0;
+                motion(dx, dy); // Opening never carries an old aiming movement into the wheel.
+            }
         }
     }
     if (disruptor_selection_wheel_open()) {

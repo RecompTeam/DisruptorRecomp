@@ -22,6 +22,7 @@
 #include "game/session/capsule.h"
 #include "game/input/vertical_camera.h"
 #include "game/settings/user_folder.h"
+#include "game/input/baton_choice.h"
 #include "game/input/selection_wheel.h"
 #include "../../../psxrecomp/runtime/include/gpu.h"
 
@@ -56,6 +57,7 @@ namespace {
 
 constexpr uint32_t kPlayerYawAddress = 0x80077624u;
 constexpr uint32_t kCurrentWeaponAddress = 0x80077627u;
+constexpr uint32_t kHeldWeaponAddress = 0x80071484u;  // gp + 0x338: the weapon a change has reached
 constexpr uint32_t kWeaponOwnershipBase = 0x800770F4u;
 constexpr uint32_t kSceneModeAddress = 0x8007145Cu;
 /* Retail weapon IDs follow the HUD names: baton, 18mm Semi, 18mm Auto,
@@ -100,6 +102,7 @@ struct MouseAimState {
     bool mouse_aim_enabled = false;
     bool vertical_look_enabled = false;
     bool modern_controls_enabled = false;
+    bool number_keys_enabled = false;
     bool high_precision_camera = false;
     bool configured = false;
     bool captured = false;
@@ -109,6 +112,7 @@ struct MouseAimState {
     bool middle_was_down = false;
     bool escape_was_down = false;
     std::array<bool, kWeaponKeys.size()> weapon_was_down{};
+    int pending_weapon = -1;  // picked while the game was still changing weapons
     bool invert_horizontal = false;
     bool invert_vertical = false;
     double horizontal_sensitivity = kDefaultHorizontalSensitivity;
@@ -388,11 +392,20 @@ void select_weapon(int weapon) {
      * the change and owns its animation; ammunition and inventory stay put. */
     const uint8_t current = psx_read_byte(kCurrentWeaponAddress);
     if ((current >= 10u && current != 0xFFu) ||
-        psx_read_word(kWeaponOwnershipBase + static_cast<uint32_t>(weapon) * 4u) != 1u ||
-        current == static_cast<uint8_t>(weapon))
+        psx_read_word(kWeaponOwnershipBase + static_cast<uint32_t>(weapon) * 4u) != 1u)
         return;
+    if (current == static_cast<uint8_t>(weapon)) {
+        g_mouse.pending_weapon = -1;
+        if (weapon != 0) return;
+    } else if (current < 10u && current != psx_read_byte(kHeldWeaponAddress)) {
+        // The game's own selector waits too: a pick mid-change turns the old weapon back up.
+        g_mouse.pending_weapon = weapon;
+        return;
+    }
+    g_mouse.pending_weapon = -1;
     psx_write_byte(kCurrentWeaponAddress, static_cast<uint8_t>(weapon));
     disruptor_capsule_note_byte(kCurrentWeaponAddress, static_cast<uint8_t>(weapon));
+    disruptor_weapon_chosen(static_cast<uint8_t>(weapon));
 }
 
 /* Merge host controls into the already sampled port-1 pad word.  This runs
@@ -400,22 +413,23 @@ void select_weapon(int weapon) {
  * refreshed on the next frame and no synthetic button can stick.  Keyboard
  * controls remain live while uncaptured; mouse actions require capture so a
  * desktop click cannot fire into gameplay accidentally. */
-void apply_modern_controls(const Uint8 *keys, uint32_t mouse_buttons) {
-    if (!g_mouse.modern_controls_enabled) {
-        sample_weapon_keys(keys, nullptr);
-        return;
-    }
+void apply_number_keys(const Uint8 *keys, bool focused) {
+    std::array<Uint8, 512> pad_keys{};  /* SDL's scancode count, in 2 and 3 alike */
+    if (keys && g_mouse.number_keys_enabled)
+        disruptor_name_entry_keys_for_pad(keys, pad_keys.data(), static_cast<int>(pad_keys.size()));
+    const int weapon = sample_weapon_keys(keys, g_mouse.number_keys_enabled && keys ? pad_keys.data() : nullptr);
+    if (!g_mouse.number_keys_enabled) g_mouse.pending_weapon = -1;
+    if (focused) select_weapon(weapon >= 0 ? weapon : g_mouse.pending_weapon);
+}
 
-    const Uint8 *raw_keys = keys;
+void apply_modern_controls(const Uint8 *keys, uint32_t mouse_buttons) {
+    if (!g_mouse.modern_controls_enabled) return;
+
     std::array<Uint8, 512> pad_keys{};  /* SDL's scancode count, in 2 and 3 alike */
     if (keys) {
         disruptor_name_entry_keys_for_pad(keys, pad_keys.data(), static_cast<int>(pad_keys.size()));
         keys = pad_keys.data();
     }
-
-    const int weapon = sample_weapon_keys(raw_keys, keys);
-    if (sdl_window && (SDL_GetWindowFlags(sdl_window) & SDL_WINDOW_INPUT_FOCUS) != 0)
-        select_weapon(weapon);
 
     /* keybinds.ini holds the keys. The arrows also walk forward and back where the player left them free. */
     uint16_t press = 0;
@@ -682,8 +696,10 @@ void mouse_aim_frame() {
     g_mouse.escape_was_down = escape_down;
     g_mouse.left_was_down = left_down;
 
+    apply_number_keys(keys, focused);
     apply_modern_controls(keys, g_mouse.swallow_left ? buttons & ~static_cast<uint32_t>(SDL_BUTTON_LMASK) : buttons);
-    if (g_mouse.captured &&
+    // Scene mode 0 is play: the pause (4) and the game's own lists leave the camera to the game, and the motion is dropped.
+    if (g_mouse.captured && psx_read_byte(kSceneModeAddress) == 0u &&
         (g_mouse.mouse_aim_enabled || g_mouse.vertical_look_enabled)) {
         /* SDL drains both relative axes in one call.  Keep this a single
          * coherent sample so enabling one axis can never consume the other. */
@@ -778,6 +794,7 @@ struct MouseAimRegistration {
         g_mouse.enabled = g_mouse.mouse_aim_enabled ||
                           g_mouse.vertical_look_enabled ||
                           g_mouse.modern_controls_enabled ||
+                          g_mouse.number_keys_enabled ||
                           g_mouse.high_precision_camera;
         /* Keep one dormant hook installed even when every launch-time option
          * is off.  The in-game settings menu can then enable controls without
@@ -802,6 +819,7 @@ void refresh_live_control_state(const char *event) {
     g_mouse.enabled = g_mouse.mouse_aim_enabled ||
                       g_mouse.vertical_look_enabled ||
                       g_mouse.modern_controls_enabled ||
+                      g_mouse.number_keys_enabled ||
                       g_mouse.high_precision_camera;
 
     if ((!g_mouse.mouse_aim_enabled || !g_mouse.high_precision_camera) &&
@@ -851,6 +869,19 @@ extern "C" void disruptor_modern_controls_set_enabled(int enabled) {
     sample_weapon_keys(SDL_GetKeyboardState(nullptr), nullptr);
     refresh_live_control_state(next ? "settings-modern-controls-on"
                                     : "settings-modern-controls-off");
+}
+
+extern "C" void disruptor_weapon_keys_state_loaded(void) { g_mouse.pending_weapon = -1; }
+
+extern "C" int disruptor_number_keys_enabled(void) {
+    return g_mouse.number_keys_enabled ? 1 : 0;
+}
+
+extern "C" void disruptor_number_keys_set_enabled(int enabled) {
+    if (g_mouse.number_keys_enabled == (enabled != 0)) return;
+    g_mouse.number_keys_enabled = enabled != 0;
+    sample_weapon_keys(SDL_GetKeyboardState(nullptr), nullptr);
+    refresh_live_control_state(enabled ? "settings-number-keys-on" : "settings-number-keys-off");
 }
 
 extern "C" int disruptor_high_precision_camera_enabled(void) {

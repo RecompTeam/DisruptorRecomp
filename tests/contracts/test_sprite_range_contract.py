@@ -10,8 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 LOAD_ADDRESS = 0x80011200
 ROM_TEXT_OFFSET = 0x800
 
-# Per funnel: the step aside taken from the projection's X operand, three eighths of it added to the depth,
-# and the range read again for the fade and for the sort slot after the projection.
+# Per funnel: step aside from the projection's X, three eighths added to depth, range read again for fade and sort slot.
 RETAIL_INSTRUCTIONS = {
     0x8003B8B0: 0x00E09021,
     0x8003B8C4: 0x00121040,
@@ -94,9 +93,7 @@ RETAIL_INSTRUCTIONS = {
     0x800433A4: 0x001420C3,
     0x800433AC: 0x0C013180,
 }
-# Per funnel: its first instruction, where the step aside is taken from X, where the range is made, the projection
-# seam, where a culled sprite leaves to, the register of X (None: the word at 0x18 of the stack), of the depth and
-# of the range, and the game's own leads and floors that write the range register before and after the projection.
+# Per funnel: first instruction, step-aside and range sites, projection seam, cull exit, X/depth/range registers, the leads and floors.
 EFFECT_LEADS = {0x8003C68C, 0x8003C69C, 0x8003C6F8}
 FUNNELS = (
     (0x8003B78C, 0x8003B8B0, 0x8003B8D4, 0x8003B98C, 0x8003BB94, 7, 16, 18, set(), {0x8003BA78}),
@@ -393,7 +390,7 @@ require(
     and "    if (!reached) return key;\n" in source
     and "        const int32_t least = record.key > behind && floor != INT32_MIN ? floor + 1 : floor;\n" in source
     and "        if (record.led < least) {\n" in source
-    and "    if (nearer >> kSlotShift == key >> kSlotShift) return nearer;\n" in source
+    and "    if (nearer >> kSlotShift == own) return nearer;\n" in source
     and source.count("    g_moved.clear();\n") == 1
     and "        if (rest != sprite.node) return false;\n" in source
     and "        if (after == static_cast<int64_t>(chain.size())) return false;\n" in source,
@@ -404,17 +401,43 @@ require(
     and "constexpr double kUpright = 0.6;" in source
     and "        if (gte_precision_load_word_ex(word - kKseg0, cpu.read_word(word), &x16, &y16, &z) != GTE_PRECISION_LOOKUP_ACCEPTED"
     in source
-    and "        if (length == 0.0 || std::fabs(normal[1]) >= kUpright * length) continue;\n" in source
-    and "        if (nearest > 0.0 && nearest < front.depth - front.reach) return true;\n" in source
+    and "        const bool upright = std::fabs(normal[1]) < kUpright * length;\n" in source
+    and "        const double nearest = over(upright ? box : upper);\n"
+    "        if (upright && nearest > 0.0 && past_plane(normal, length, camera[a], middle) > 0.0) {\n"
+    "            const double above = over(upper);\n"
+    "            if (above > 0.0 && above < front.depth) return Cover::past;\n"
+    "        }\n"
+    "        if (found == Cover::none && nearest > 0.0 && nearest < front.depth - front.reach)"
+    " found = upright ? Cover::front : Cover::over;\n"
+    in source
+    and "    return (eye * side < 0.0 ? 1.0 : -1.0) * std::fabs(side) / length;\n" in source
+    and "    const Box upper{.left = box.left, .top = box.top, .right = box.right, .bottom = box.top + (box.bottom - box.top) / 2};\n"
+    in source
     and "    for (const auto& point : shape) nearest = std::max(nearest, point[2]);\n" in source
-    and "        } else if (occludes(cpu, at, tag, box, front)) {\n            if (!may_stop) return std::nullopt;\n"
+    and "        } else if (const Cover cover = occludes(cpu, at, tag, box, front); cover != Cover::none) {\n"
+    "            if (!may_stop) return std::nullopt;\n"
+    "            if (cover == Cover::over) return Walk{.sprites = {}, .reached = from};\n"
     in source
     and "            std::erase_if(passed, [slot](const Passed& sprite) { return sprite.slot == slot; });\n" in source
-    and source.count("occludes(") == 2
+    and source.count("occludes(") == 3
     and "    const std::optional<Walk> walk = passed_sprites(cpu, table, key >> kSlotShift, nearer >> kSlotShift, box, front, true);\n"
     in source
     and "passed_sprites(cpu, table, key >> kSlotShift, nearer >> kSlotShift, box, front, false, &chain);" in source,
-    "an upright face that the GTE put in front of the body over its box holds the body in its slot, and fails the shadow's walk",
+    "an upright face that the GTE put in front of the body over its box, or over its upper half with the body's middle past "
+    "its plane, holds the body in its slot, and fails the shadow's walk",
+)
+require(
+    "constexpr int64_t kFartherSlots = (kBodyLead >> kSlotShift) + 1;" in source
+    and "constexpr int64_t kLastSlot = 509;" in source
+    and "        if (!behind && !world_sprite(cpu, at, tag) && occludes(cpu, at, tag, box, front) == Cover::past) behind = slot;\n"
+    in source
+    and "        if (const std::optional<int64_t> behind = face_behind(cpu, table, std::min(own + kFartherSlots, kLastSlot), own, *box, *front)) {\n"
+    "            return static_cast<int32_t>(*behind << kSlotShift | (key & ((1 << kSlotShift) - 1)));\n"
+    in source
+    and "        floor = std::max(floor, std::min(record.led, record.key));\n" in source
+    and "    if (body.walked < body.key && body.walked >> kSlotShift != body.key >> kSlotShift &&\n" in source,
+    "a face the body lies behind that the game's own lead sorted farther takes the body back to its slot, within the "
+    "table, with its shadow and without taking the bodies in front of it along",
 )
 require(
     "[[nodiscard]] bool comparator_active() { return g_ls_mode != 0 || g_ls_replay_active != 0; }" in source
@@ -436,7 +459,7 @@ require(
     and "    return std::clamp(key - start, 0, kFadeLast) >> kFadeStep;\n" in source
     and "    if (body.walked == body.key || static_cast<int32_t>(range) != body.key || !front || !writable(cpu)) return;\n"
     in source
-    and "    if (body.walked >> kSlotShift != body.key >> kSlotShift &&\n"
+    and "    if (body.walked < body.key && body.walked >> kSlotShift != body.key >> kSlotShift &&\n"
     "        !join_over(cpu, body.key, body.walked, packet_box(cpu, packet), *front)) {\n"
     in source,
     "the record key is the one the game just stored, the shadow's range is its body's, and a CLUT is put back only for "

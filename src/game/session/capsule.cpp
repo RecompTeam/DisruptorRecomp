@@ -3,6 +3,7 @@
 /* PSX_DISRUPTOR_CAPSULE_RECORD=<frames> is the key for a script: two seconds in, it records that many frames and ends the run. */
 /* Measured: a loaded state takes its interrupts a few instructions apart, so one frame in four differs in a few bytes, nine in a row at most. */
 #include "game/session/capsule.h"
+#include "game/input/baton_choice.h"
 
 #include <algorithm>
 #include <chrono>
@@ -296,6 +297,7 @@ std::string folder_url(const std::filesystem::path &folder) {
 namespace {
 
 namespace fs = std::filesystem;
+constexpr uint32_t kWeaponInHand = 0x80077627u;
 using disruptor::capsule::Frame;
 
 constexpr size_t kRamBytes = 0x200000;
@@ -515,10 +517,12 @@ void replay_frame() {
     if (frame.byte_at != 0u) {
         psx_write_byte(frame.byte_at, frame.byte);
         disruptor_capsule_note_byte(frame.byte_at, frame.byte);  /* a recording made inside a replay holds the byte too */
+        if (frame.byte_at == kWeaponInHand) disruptor_weapon_chosen(frame.byte);
     }
     if (frame.byte2_at != 0u) {
         psx_write_byte(frame.byte2_at, frame.byte2);
         disruptor_capsule_note_byte(frame.byte2_at, frame.byte2);
+        if (frame.byte2_at == kWeaponInHand) disruptor_weapon_chosen(frame.byte2);
     }
     disruptor_mouse_set_vertical_pitch(static_cast<double>(frame.pitch));
 }
@@ -652,6 +656,7 @@ extern "C" void disruptor_capsule_before_input(void) {
         say("REC");
         capsule.first_cycle = psx_get_cycle_count();
         open_frame();
+        if (disruptor_baton_held_by_choice()) disruptor_capsule_note_byte(kWeaponInHand, 0u);  /* the state forgets the choice */
         break;
     case Recording::kOn:
         if (capsule.end_asked) {

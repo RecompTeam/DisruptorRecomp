@@ -133,7 +133,6 @@ constexpr Option toggle(const char* key, const char* label, int initial, const c
             Unit::none, hint};
 }
 
-// A toggle that reads its value through its own functions.
 constexpr Option toggle(const char* key, const char* label, int initial, const char* hint, Saved saved, Get get, Set set,
                         std::span<const char* const> needs = {}) {
     return {key, Kind::toggle, label, saved, get, set, initial, 0, 1, {}, needs, Unit::none, hint};
@@ -236,10 +235,14 @@ constexpr Option option_list[] = {
         "In the game a middle-click captures the mouse. A middle-click or Escape releases it."),
     choice("disruptor.modern_controls", "Control scheme", 1,
            "Modern: WASD, left click fires, right click uses psionics, side buttons choose.\n"
-           "Modern: number keys 1 to 9 and 0 pick a weapon, on the keypad too.\n"
            "Classic: the original keys. The mouse only turns.\n"
            "Keys you set yourself stay either way.",
            schemes, saved<&Settings::has_modern_controls>, scheme, set_scheme),
+    toggle<&Settings::has_number_keys, &Settings::number_keys>(
+        "disruptor.number_keys", "Number keys pick weapons", 0,
+        "1 to 9 and 0 pick a weapon you own, on the keypad too.\n"
+        "1 is the baton, 2 the 18mm Semi, then on in the order of the weapon list.\n"
+        "A number key you bind to an action does only that action."),
     toggle<&Settings::has_selection_wheels, &Settings::selection_wheels>(
         "disruptor.selection_wheels", "Weapon and psionic wheels", 0,
         "Replaces both selection lists with wheels.\n"

@@ -1,8 +1,8 @@
 diff --git a/runtime/src/gpu_gl_renderer.c b/runtime/src/gpu_gl_renderer.c
-index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c1c2078a60e810bf1dc6386cd85924d7922898a4 100644
+index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..cccbcd8ef6a99d1c6ebfcb7eb7c5ffe634550abe 100644
 --- a/runtime/src/gpu_gl_renderer.c
 +++ b/runtime/src/gpu_gl_renderer.c
-@@ -1,747 +1,1130 @@
+@@ -1,747 +1,1134 @@
 -/* gpu_gl_renderer.c — hardware OpenGL renderer backend.
 - *
 - * ARCHITECTURE (v2 — GPU-authoritative VRAM)
@@ -660,6 +660,9 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c1c2078a60e810bf1dc6386cd85924d7
 +static float         s_ssao_radius = 160.0f, s_ssao_strength = 0.8f;
 +static float         s_ssao_tilt = 0.35f;  /* the sine of the angle under which a joint between two faces is no corner: 20 degrees */
 +static GLuint        s_ssao_prog = 0, s_ssao_mix_prog = 0;
++static GLuint        s_rim_prog = 0;  /* see grown_rims_erase */
++static GLint         s_rim_uDepth = -1, s_rim_uClear = -1, s_rim_uReach = -1, s_rim_uRows = -1;
++static const char   *RIM_FS;
 +static GLint         s_ssao_uDepth = -1, s_ssao_uTex = -1, s_ssao_uUvRect = -1, s_ssao_uTexel = -1, s_ssao_uProj = -1, s_ssao_uAo = -1,
 +                     s_ssao_uFade = -1;
 +static float         s_ssao_fade_from = 0.0f, s_ssao_fade_to = 0.0f;
@@ -1324,6 +1327,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c1c2078a60e810bf1dc6386cd85924d7
 +                                              * collapsed to 12fps); with the RB
 +                                              * attached the pass costs ~2us. */
 +static int    s_wide_base[WIDE_MAX_SURF];    /* base_x per surface (-1 = free) */
++static float  s_wide_fill[WIDE_MAX_SURF][4]; /* the colour the frame's fill left: what a void shows */
 +static int    g_wide_w        = 0;           /* wide width (native px); 0 = disabled */
 +static int    g_wide_off      = 0;           /* centering OFFSET (native px) */
 +static GLuint g_wide_cur      = 0;           /* active mirror FBO (0 = no mirror) */
@@ -1865,7 +1869,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c1c2078a60e810bf1dc6386cd85924d7
  static const char *INTERP_FS =
      "#version 330\n"
      "in vec2 v_uv; uniform sampler2D u_prev; uniform sampler2D u_curr;\n"
-@@ -757,2715 +1140,4429 @@
+@@ -757,2715 +1144,4512 @@
      "  }\n"
      "  frag=mix(prev,curr,alpha);\n"
      "}\n";
@@ -4719,7 +4723,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c1c2078a60e810bf1dc6386cd85924d7
 +    geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 1);
 +    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
 +    glDepthFunc(GL_LESS);
-+    glDepthMask(GL_FALSE);
++    glDepthMask(pass < 1.0f ? GL_TRUE : GL_FALSE);  /* a grown copy leaves its depth as a mark, see grown_rims_erase */
 +}
 +static void filler_pass_end(void) {
 +    s_fill_pass = 0.0f;
@@ -4727,6 +4731,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c1c2078a60e810bf1dc6386cd85924d7
 +    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 +    glStencilMask(0x01);
 +    glDepthFunc(GL_ALWAYS);
++    glDepthMask(GL_FALSE);
 +}
 +
 +/* Under a batch, the edges of its exact world polygons: exact corners open the hairline gaps that whole pixels closed. */
@@ -6288,6 +6293,13 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c1c2078a60e810bf1dc6386cd85924d7
 +        s_ssao_prog = build_program(PRESENT_VS, SSAO_FS);
 +        s_ssao_mix_prog = build_program(PRESENT_VS, SSAO_MIX_FS);
 +        s_aa_prog = build_program(PRESENT_VS, AA_FS);
++        s_rim_prog = build_program(PRESENT_VS, RIM_FS);
++        if (s_rim_prog) {
++            s_rim_uDepth = p_glGetUniformLocation(s_rim_prog, "u_depth");
++            s_rim_uClear = p_glGetUniformLocation(s_rim_prog, "u_clear");
++            s_rim_uReach = p_glGetUniformLocation(s_rim_prog, "u_reach");
++            s_rim_uRows = p_glGetUniformLocation(s_rim_prog, "u_rows");
++        }
 +        glGetIntegerv(PSXGL_MAX_SAMPLES, &s_msaa_most);
 +        if (s_aa_prog) {
 +            s_aa_uTex = p_glGetUniformLocation(s_aa_prog, "u_tex");
@@ -7540,6 +7552,10 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c1c2078a60e810bf1dc6386cd85924d7
 +    float g = ((color >> 5) & 0x1F) / 31.0f;
 +    float b = ((color >> 10) & 0x1F) / 31.0f;
 +    float a = (color >> 15) & 1 ? 1.0f : 0.0f;
++    {
++        const int i = wide_surface_of(fbo);
++        if (i >= 0) { s_wide_fill[i][0] = r; s_wide_fill[i][1] = g; s_wide_fill[i][2] = b; s_wide_fill[i][3] = a; }
++    }
 +    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, wide_drawn(fbo));
 +    glViewport(0, 0, g_wide_w * s_scale, H);
 +    glEnable(GL_SCISSOR_TEST);
@@ -8146,6 +8162,77 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c1c2078a60e810bf1dc6386cd85924d7
 +    p_glUseProgram(0);
 +    aa_end(thread, vao, grown, 1, lx, ly, lw, lh);
 +    return 1;
++}
++
++/* A grown copy fills a crack between polygons. Beside a void it hung there as a strip of texture, so where its mark is left
++ * and no geometry lies on both sides of the pixel within one and a half native pixels, the void's colour comes back. */
++static const char *RIM_FS =
++    "#version 330\n"
++    "out vec4 frag;\n"
++    "uniform sampler2D u_depth; uniform vec4 u_clear; uniform int u_reach; uniform ivec2 u_rows;  /* the rows copied */\n"
++    "/* 0 geometry (16777207 is what has no depth), 1 a copy's mark at 0.9999995, 2 nothing */\n"
++    "int kind(ivec2 p){\n"
++    "  ivec2 size = textureSize(u_depth, 0);\n"
++    "  if (p.x < 0 || p.y < u_rows.x || p.x >= size.x || p.y >= u_rows.y) return 2;\n"
++    "  float q = floor(texelFetch(u_depth, p, 0).r * 16777215.0 + 0.5);\n"
++    "  return q <= 16777208.0 ? 0 : q <= 16777213.0 ? 1 : 2; }\n"
++    "bool reaches(ivec2 p, ivec2 d){\n"
++    "  for (int i = 1; i <= u_reach; ++i) if (kind(p + d * i) == 0) return true;\n"
++    "  return false; }\n"
++    "void main(){\n"
++    "  ivec2 p = ivec2(gl_FragCoord.xy);\n"
++    "  if (kind(p) != 1) discard;\n"
++    "  if ((reaches(p, ivec2(1, 0)) && reaches(p, ivec2(-1, 0))) || (reaches(p, ivec2(0, 1)) && reaches(p, ivec2(0, -1)))) discard;\n"
++    "  frag = u_clear; }\n";
++typedef struct { GLuint fbo, depth; int w, h; } RimTargets;
++static RimTargets s_rims_main, s_rims_thread;
++
++/* Rows y0..y1 of `fbo` (w by h texels, `scale` of them a native pixel), its void `clear`. */
++static void grown_rims_erase(RimTargets *t, GLuint vao, GLuint fbo, int w, int h, int y0, int y1, int scale,
++                             const float clear[4]) {
++    if (!s_rim_prog || !s_geometry_correction || !s_grown_under || w <= 0 || h <= 0 || y1 <= y0) return;
++    if (!t->fbo || t->w != w || t->h != h) {
++        if (t->fbo) p_glDeleteFramebuffers(1, &t->fbo);
++        if (t->depth) glDeleteTextures(1, &t->depth);
++        t->fbo = 0;
++        t->w = t->h = 0;
++        t->depth = ssao_depth_texture(w, h);
++        p_glGenFramebuffers(1, &t->fbo);
++        p_glBindFramebuffer(PSXGL_FRAMEBUFFER, t->fbo);
++        p_glFramebufferTexture2D(PSXGL_FRAMEBUFFER, PSXGL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, t->depth, 0);
++        glDrawBuffer(GL_NONE);
++        glReadBuffer(GL_NONE);
++        const int complete = p_glCheckFramebufferStatus(PSXGL_FRAMEBUFFER) == PSXGL_FRAMEBUFFER_COMPLETE;
++        p_glBindFramebuffer(PSXGL_FRAMEBUFFER, 0);
++        if (!complete) return;
++        t->w = w;
++        t->h = h;
++    }
++    glDisable(GL_SCISSOR_TEST);
++    p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, fbo);
++    p_glBindFramebuffer(PSXGL_DRAW_FRAMEBUFFER, t->fbo);
++    p_glBlitFramebuffer(0, y0, w, y1, 0, y0, w, y1, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
++    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, fbo);
++    glViewport(0, 0, w, h);
++    glEnable(GL_SCISSOR_TEST);
++    glScissor(0, y0, w, y1 - y0);
++    glDisable(GL_BLEND);
++    glDisable(GL_DEPTH_TEST);
++    glDisable(GL_STENCIL_TEST);
++    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
++    p_glActiveTexture(PSXGL_TEXTURE0);
++    glBindTexture(GL_TEXTURE_2D, t->depth);
++    p_glUseProgram(s_rim_prog);
++    p_glUniform1i(s_rim_uDepth, 0);
++    p_glUniform4f(s_rim_uClear, clear[0], clear[1], clear[2], clear[3]);
++    p_glUniform1i(s_rim_uReach, (3 * scale + 1) / 2);
++    p_glUniform2i(s_rim_uRows, y0, y1);
++    p_glBindVertexArray(vao);
++    glDrawArrays(GL_TRIANGLES, 0, 3);
++    p_glBindVertexArray(0);
++    p_glUseProgram(0);
++    glDisable(GL_SCISSOR_TEST);
++    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, 0);
 +}
 +
 +#ifndef PSX_DISABLE_FRAME_INTERPOLATION
@@ -8976,7 +9063,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c1c2078a60e810bf1dc6386cd85924d7
      uint64_t freq = SDL_GetPerformanceFrequency();
      uint64_t deadline = SDL_GetPerformanceCounter();
      uint64_t diag_start = deadline, diag_swaps = 0, diag_captures = 0;
-@@ -3477,7 +5574,7 @@
+@@ -3477,7 +5661,7 @@
          int uncapped = hz < 0.0;
          uint64_t now = SDL_GetPerformanceCounter();
          if (!uncapped) {
@@ -8985,7 +9072,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c1c2078a60e810bf1dc6386cd85924d7
              uint64_t period = (uint64_t)((double)freq / hz);
              if (!period) period = 1;
              deadline += period;
-@@ -3492,235 +5589,421 @@
+@@ -3492,235 +5676,427 @@
              }
              while (SDL_GetPerformanceCounter() < deadline) {}
              now = SDL_GetPerformanceCounter();
@@ -9543,6 +9630,12 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c1c2078a60e810bf1dc6386cd85924d7
 +    letterbox_rect(ww, wh, &lx, &ly, &lw, &lh);
 +    wide_blit_center(fbo, disp_x, disp_y, disp_h);   /* fast-path: authoritative centre */
 +    wide_resolved(fbo, disp_y, disp_h);
++    {
++        const int i = wide_surface_of(fbo);
++        if (i >= 0 && mirror_depth())
++            grown_rims_erase(&s_rims_main, s_present_vao, fbo, g_wide_w * s_scale, VRAM_H * s_scale, disp_y * s_scale,
++                             (disp_y + disp_h) * s_scale, s_scale, s_wide_fill[i]);
++    }
 +
 +    p_glBindFramebuffer(PSXGL_DRAW_FRAMEBUFFER, 0);
 +    glDisable(GL_SCISSOR_TEST);

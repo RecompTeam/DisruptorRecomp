@@ -20,7 +20,7 @@ int g_modern = 1, g_captured = 1, g_ready = 1, g_netplay = 0, g_ui = 0;
 int g_weapon_key = SDL_SCANCODE_Q, g_psionic_key = SDL_SCANCODE_R;
 SDL_WindowFlags g_flags = SDL_WINDOW_INPUT_FOCUS;
 disruptor::capsule::Frame g_recorded;
-int g_writes = 0, g_failures = 0;
+int g_writes = 0, g_failures = 0, g_chosen = -1;
 }
 
 extern "C" {
@@ -42,6 +42,7 @@ int disruptor_vertical_camera_input_allowed() { return g_ready; }
 int psx_netplay_active() { return g_netplay; }
 int psx_host_ui_game_input_captured() { return g_ui; }
 void disruptor_capsule_note_byte(uint32_t address, uint8_t value) { g_recorded.note_byte(address, value); }
+void disruptor_weapon_chosen(uint8_t weapon) { g_chosen = weapon; }
 void disruptor_name_entry_keys_for_pad(const uint8_t *keys, uint8_t *kept, int count) {
     for (int i = 0; i < count; ++i) kept[i] = g_typing[static_cast<size_t>(i)] ? 0 : keys[i];
 }
@@ -78,7 +79,7 @@ void reset(bool enabled = true) {
     g_modern = g_captured = g_ready = 1; g_netplay = g_ui = 0;
     g_flags = SDL_WINDOW_INPUT_FOCUS;
     g_weapon_key = SDL_SCANCODE_Q; g_psionic_key = SDL_SCANCODE_R;
-    g_recorded = {}; g_writes = 0;
+    g_recorded = {}; g_writes = 0; g_chosen = -1;
     for (uint32_t i = 0; i < 10; ++i) word(0x800770F4u + i * 4, 1);
     for (uint32_t i = 0; i < 5; ++i) word(0x80077B5Cu + i * 4, 1);
     constexpr std::array<uint8_t, 10> primary = {7, 1, 1, 2, 2, 4, 6, 6, 7, 7};
@@ -117,6 +118,11 @@ void test_bindings_and_input_capture() {
     }
     reset(); g_keys[SDL_SCANCODE_R] = 1; frame();
     expect(view().kind == Kind::psionics && view().count == 5, "the same toggle enables the psionic wheel on its binding");
+    reset(); for (uint32_t i = 0; i < 5; ++i) word(0x80077B5Cu + i * 4, 0);
+    g_keys[SDL_SCANCODE_R] = 1; frame();
+    expect(!disruptor_selection_wheel_open(), "the psionic wheel stays shut before the first psionic is found");
+    g_keys[SDL_SCANCODE_R] = 0; frame(); word(0x80077B60u, 1); g_keys[SDL_SCANCODE_R] = 1; frame();
+    expect(view().kind == Kind::psionics && view().highlighted == 1, "and opens on the first psionic picked up");
     reset(); g_weapon_key = SDL_SCANCODE_E; g_keys[SDL_SCANCODE_Q] = 1; frame();
     expect(!disruptor_selection_wheel_open(), "Q opens no wheel once the weapon choice is bound to another key");
     reset(); g_psionic_key = SDL_SCANCODE_F; g_keys[SDL_SCANCODE_R] = 1; frame();
@@ -131,9 +137,14 @@ void test_equip_and_record() {
     expect(!disruptor_selection_wheel_open() && psx_read_byte(0x80077627u) == 3 && g_writes == 1,
            "releasing the selector equips exactly one owned weapon");
     expect(g_recorded.byte_at == 0x80077627u && g_recorded.byte == 3, "a weapon wheel selection is recorded");
+    expect(g_chosen == 3, "and told as the player's choice");
     reset(); frame(kPsionic); g_dx = 100; frame(kPsionic); frame();
+    expect(g_chosen == -1, "a psionic is no weapon choice");
     expect(psx_read_byte(0x80077629u) == 1 && g_writes == 1 && g_recorded.byte_at == 0x80077629u,
            "the psionic wheel selects Drain and records only its selected ID");
+    reset(); g_ram[0x77627] = 0; frame(kWeapon); frame();
+    expect(g_chosen == 0 && g_recorded.byte_at == 0x80077627u && g_recorded.byte == 0,
+           "confirming the baton already in hand still tells the player's choice and records it");
     expect(psx_read_word(0x80077668u) == 100 && psx_read_word(0x80077B60u) == 1,
            "selecting a psionic changes neither energy nor ownership");
 }

@@ -37,8 +37,7 @@ STAGED = (
     "}\n"
 )
 MERGED = (
-    "    for (const Option *option : g_preferences.changed)\n"
-    "        option->set(settings, option->get(pending));\n"
+    "    for (const Option *option : g_preferences.changed)\n        option->set(settings, option->get(pending));\n"
 )
 loader = read("src/game/settings/saved.cpp")
 
@@ -61,7 +60,7 @@ require(
     geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 1);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_FALSE);
     glDepthFunc(GL_LESS);
-    glDepthMask(GL_FALSE);
+    glDepthMask(pass < 1.0f ? GL_TRUE : GL_FALSE);  /* a grown copy leaves its depth as a mark, see grown_rims_erase */
 }
 static void filler_pass_end(void) {
     s_fill_pass = 0.0f;
@@ -69,8 +68,10 @@ static void filler_pass_end(void) {
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     glStencilMask(0x01);
     glDepthFunc(GL_ALWAYS);
+    glDepthMask(GL_FALSE);
 }
-""" in renderer
+"""
+    in renderer
     and """    if (s_fill_pass > 0.0f) {  /* a filler obeys the mask and leaves it as it is */
         if (!s_mask_check) { glDisable(GL_STENCIL_TEST); return; }
         glEnable(GL_STENCIL_TEST);
@@ -79,9 +80,10 @@ static void filler_pass_end(void) {
         glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
         return;
     }
-""" in renderer,
-    "a filler pass draws colour alone where the kept depth is farther, and leaves the mask bit, the stencil and the depth as "
-    "it found them",
+"""
+    in renderer,
+    "a filler pass draws colour where the kept depth is farther and leaves the mask bit and the stencil as it found them, "
+    "a grown copy leaves its depth as a mark",
 )
 
 require(
@@ -89,7 +91,8 @@ require(
     const float width = s_crack_fill * (float)scale;
     return width < 1.0f ? 1.0f : width > s_line_width_max ? s_line_width_max : width;
 }
-""" in renderer
+"""
+    in renderer
     and """static void tex_batch_outline(int nverts, int semi) {
     int exact = 0;
     for (int i = 0; i < nverts && !exact; i += 3) exact = s_tb[i * TEXV + 19] > 1.5f;
@@ -105,7 +108,8 @@ require(
     glPolygonMode(GL_FRONT_AND_BACK, GL_FILL);
     filler_pass_end();
 }
-""" in renderer,
+"""
+    in renderer,
     "the outline of a batch's exact polygons is a line of the asked width within what the context draws, drawn as a "
     "filler pass, and the fill mode is put back",
 )
@@ -123,7 +127,10 @@ copies = flush.index(
 require(
     "    const int fillers = s_tb_fillers;\n" in flush
     and "        s_draw_filler = mirror_depth() && fillers;\n" in flush
-    and outline < copies < flush.index("filler_pass_end();", copies) < flush.index("tex_batch_draw_passes(nverts, semi);", flush.index("filler_pass_end();", copies)),
+    and outline
+    < copies
+    < flush.index("filler_pass_end();", copies)
+    < flush.index("tex_batch_draw_passes(nverts, semi);", flush.index("filler_pass_end();", copies)),
     "under a batch the mirror draws the outlines, then the grown copies, then the batch itself, and the presenter is told "
     "that the batch holds copies",
 )
@@ -136,9 +143,11 @@ require(
     if (enabled && !mirror_depth()) memset(s_wide_depth_shown, 0xFF, sizeof s_wide_depth_shown);
     s_grown_under = enabled != 0;
     s_crack_fill = width;
-""" in renderer
+"""
+    in renderer
     and "int gl_renderer_gap_fill(void) { return s_grown_under || s_crack_fill > 0.0f; }\n" in renderer
-    and '            const char *fill = getenv("PSX_GL_CRACK_FILL"), *under = getenv("PSX_GL_GROWN_UNDER");\n' in renderer,
+    and '            const char *fill = getenv("PSX_GL_CRACK_FILL"), *under = getenv("PSX_GL_GROWN_UNDER");\n'
+    in renderer,
     "the setting switches both fillers together, draws what is open under the old rule, starts the presenter's history "
     "anew and has the mirror's depth made afresh",
 )
@@ -153,7 +162,8 @@ require(
         mark_gap_filling(gaps);
     }
     if (!gaps_apply) ImGui::EndDisabled();
-""" in enhancements
+"""
+    in enhancements
     and menu.count('option_toggle("disruptor.gap_filling"') == 1
     and enhancements.count("ImGui::BeginDisabled()") == enhancements.count("ImGui::EndDisabled()"),
     "the setting is on the Enhancements tab alone, greyed without geometry correction, applied and staged when changed",
@@ -166,10 +176,12 @@ require(
     and '    toggle<&Settings::has_gap_filling, &Settings::gap_filling>(\n        "disruptor.gap_filling",' in options
     and """    if (settings.has_gap_filling && !env_override_present("PSX_GL_CRACK_FILL") && !env_override_present("PSX_GL_GROWN_UNDER"))
         gl_renderer_set_gap_fill(settings.gap_filling ? 1 : 0);
-""" in menu
+"""
+    in menu
     and """    if (changed("disruptor.gap_filling"))
         gl_renderer_set_gap_fill(pending.gap_filling ? 1 : 0);
-""" in menu,
+"""
+    in menu,
     "a change is staged as an option of the shared table, merged into the file's settings, applied at the next start unless the "
     "environment decides either filler, and applied when another run saved it",
 )
@@ -178,12 +190,15 @@ require(
     """        if (d.contains("gap_filling")) try_get([&]{
             s.gap_filling = toml::find<bool>(d, "gap_filling");
             s.has_gap_filling = true;
-""" in loader
+"""
+    in loader
     and """        if (s.has_gap_filling)
             f << "gap_filling = " << (s.gap_filling ? "true" : "false") << "\\n";
-""" in loader
+"""
+    in loader
     and "s.has_gap_filling" in between(loader, "    if (s.has_mouse_aim", "{\n")
-    and "    bool has_gap_filling = false; bool gap_filling = true;\n" in read("src/game/settings/game_user_settings.h"),
+    and "    bool has_gap_filling = false; bool gap_filling = true;\n"
+    in read("src/game/settings/game_user_settings.h"),
     "the settings file keeps the choice, which is on until changed",
 )
 
@@ -205,12 +220,17 @@ def depth_step(clip_z: str) -> int:
     return round(single((single(float(clip_z)) + 1.0) * 0.5) * (2**24 - 1))
 
 
-copy_frame = re.findall(r"u_visual_options\.w >= 1\.0 \? ([0-9.]+) : u_visual_options\.w > 0\.0 \? ([0-9.]+) : \(\(u_visual > 0\.5", renderer)
-copy_between = re.findall(r'u_visual_options\.w >= 1\.0 \? ([0-9.]+) : \(u_visual_options\.w > 0\.0 \? ([0-9.]+) "', presenter)
+copy_frame = re.findall(
+    r"u_visual_options\.w >= 1\.0 \? ([0-9.]+) : u_visual_options\.w > 0\.0 \? ([0-9.]+) : \(\(u_visual > 0\.5",
+    renderer,
+)
+copy_between = re.findall(
+    r'u_visual_options\.w >= 1\.0 \? ([0-9.]+) : \(u_visual_options\.w > 0\.0 \? ([0-9.]+) "', presenter
+)
 require(
     len(copy_frame) == 1
     and copy_frame == copy_between
-    and ") : 0.999999), 1.0);\\n\"\n" in renderer
+    and ') : 0.999999), 1.0);\\n"\n' in renderer
     and renderer.count("glClearDepth(1.0);") == 2
     and "glClearDepth(1.0);" in presenter
     and "PSXGL_DEPTH24_STENCIL8" in renderer
@@ -218,10 +238,27 @@ require(
     and depth_step(copy_frame[0][0]) < depth_step("0.999999")
     and depth_step(repr(1.0 - 32.0 / 65535.0)) < depth_step("0.999999")
     and "#define TEMP_ORDER_FAR 0.999999f\n" in presenter
-    and "        p_glUniform4f(u->options,0,0,s->tint,GROWN_COPY_PASS); glDepthFunc(GL_LESS); glDepthMask(GL_FALSE);\n" in presenter,
+    and "        p_glUniform4f(u->options,0,0,s->tint,GROWN_COPY_PASS); glDepthFunc(GL_LESS); glDepthMask(GL_TRUE);\n"
+    in presenter,
     "a grown copy stands a sixteenth past its polygon, so in both shaders its depth lies between that of what has no depth and the "
     "cleared one, two steps of a 24-bit buffer from each, and the farthest depth a 16-bit camera depth stores is nearer than both: a copy "
     "fills only what nothing has left a depth on, where an outline also covers what has no depth of its own",
+)
+
+
+require(
+    "static void grown_rims_erase(RimTargets *t, GLuint vao, GLuint fbo, int w, int h, int y0, int y1, int scale,\n"
+    in renderer
+    and '    "  return q <= 16777208.0 ? 0 : q <= 16777213.0 ? 1 : 2; }\\n"\n' in renderer
+    and '    "  for (int i = 1; i <= u_reach; ++i) if (kind(p + d * i) == 0) return true;\\n"\n' in renderer
+    and '    "  if ((reaches(p, ivec2(1, 0)) && reaches(p, ivec2(-1, 0))) || (reaches(p, ivec2(0, 1)) && reaches(p, ivec2(0, -1)))) discard;\\n"\n'
+    in renderer
+    and "    p_glUniform1i(s_rim_uReach, (3 * scale + 1) / 2);\n" in renderer
+    and renderer.count("grown_rims_erase(&s_rims_main, s_present_vao, fbo,") == 1
+    and presenter.count("grown_rims_erase(&s_rims_thread,s_interp_thread_vao,s_temp_fbo,") == 1
+    and depth_step("0.999999") < depth_step(copy_frame[0][1]) < depth_step("1.0"),
+    "a copy's depth marks where it filled: on a frame shown and on an in-between one, a marked pixel with no geometry on both "
+    "sides within one and a half native pixels, along a row or a column, takes the void's colour back",
 )
 
 print("Disruptor gap filling source contract: PASS")

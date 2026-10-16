@@ -11,6 +11,7 @@
 #define TEMP_MAX_TEXTURES 16
 #define TEMP_NEAR_CORNERS 384 /* of near faces in one frame, kept by the level's point: 30 were the most seen */
 #define TEMP_BACKDROP_MOST 12.0f /* frame pixels the panorama is carried between two frames: a faster turn steps the rest */
+#define TEMP_BACKDROP_END_CARRY 2.0f /* an end carried outward goes this many times the panorama's way: at 1 a window left 164 px */
 typedef struct {
     int first, count, first_tri, textured, mode, semi, mask, check, filter;
     int twin[4], sy, sh, texture;
@@ -781,7 +782,7 @@ static void temporal_submit_faces(const TemporalScene *s,const TemporalCommand *
     for (int round=fillers;round>=(s_temp_part==1);--round) {  /* its grown copies first, then the batch over them */
     const int shaded=shaded_scene && !round;
     if (round) {
-        p_glUniform4f(u->options,0,0,s->tint,GROWN_COPY_PASS); glDepthFunc(GL_LESS); glDepthMask(GL_FALSE);
+        p_glUniform4f(u->options,0,0,s->tint,GROWN_COPY_PASS); glDepthFunc(GL_LESS); glDepthMask(GL_TRUE);
         glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_FALSE); s_temp_filling=1;
     } else if (fillers) {
         glDepthFunc(GL_ALWAYS); glDepthMask(GL_TRUE); p_glUniform4f(u->options,0,0,s->tint,0);
@@ -971,8 +972,8 @@ static int temporal_present(float alpha,int lx,int ly,int lw,int lh) {
         const int t=c->textured;
         int split=0;
         memcpy(s_temp_scratch,s->vertices+c->first*TEXV,c->count*TEXV*sizeof(float));
-        /* The panorama on its way from where it stood a frame earlier. A free edge moves, an end of the span slides its
-         * texture by what the frame wants and that way together, as far as its column and the tile itself go. */
+        /* The panorama on its way from where it stood a frame earlier. A free edge moves, so does an end carried outward with
+         * the opening the world turns with. An end carried inward slides its texture by the frame's want and that way. */
         if (t && c->mode==GL_TRIANGLES && s->backdrop) for (int j=0;j+2<c->count;j+=3) {
             const float moved=(1.0f-alpha)*s->backdrop_back;
             float *v=&s_temp_scratch[j*TEXV], low=v[2], high=v[2];
@@ -982,9 +983,17 @@ static int temporal_present(float alpha,int lx,int ly,int lw,int lh) {
                 float *corner=v+k*TEXV;
                 if (corner[19]>-2.5f) { corner[0]=corner[20]=corner[0]+moved; continue; }
                 const int end=corner[19]<-3.5f;
-                corner[2]+=psx_ws_screen_tile_slide(0.0f,moved-corner[22]*s->backdrop_scale,s->backdrop_scale,end,
-                                                    psx_ws_screen_tile_room(corner[2],s->backdrop_column,end),
-                                                    high-low>1.0f ? high-low-1.0f : 0.0f);
+                const float room=psx_ws_screen_tile_room(corner[2],s->backdrop_column,end);
+                float carried=0.0f;
+                if (end ? moved>0.0f : moved<0.0f) {
+                    /* Past the texels its column has beyond the end the tile's texture would stretch. */
+                    const float spare=(room-(end ? corner[22] : -corner[22]))*s->backdrop_scale;
+                    const float extra=(TEMP_BACKDROP_END_CARRY-1.0f)*fabsf(moved);
+                    carried=moved+(moved>0.0f ? 1.0f : -1.0f)*(spare>0.0f ? fminf(extra,spare) : 0.0f);
+                }
+                corner[0]=corner[20]=corner[0]+carried;
+                corner[2]+=psx_ws_screen_tile_slide(0.0f,moved-carried-corner[22]*s->backdrop_scale,s->backdrop_scale,end,
+                                                    room,high-low>1.0f ? high-low-1.0f : 0.0f);
                 corner[22]=0.0f;
             }
         }
@@ -1055,6 +1064,10 @@ static int temporal_present(float alpha,int lx,int ly,int lw,int lh) {
                             GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT,GL_NEAREST);
         p_glBindFramebuffer(PSXGL_FRAMEBUFFER,s_temp_fbo);
     }
+    if (s_temp_marked)
+        grown_rims_erase(&s_rims_thread,s_interp_thread_vao,s_temp_fbo,s->width*s->scale,VRAM_H*s->scale,0,
+                         s->height*s->scale,s->scale,s->clear);
+    p_glBindFramebuffer(PSXGL_FRAMEBUFFER,s_temp_fbo);
 #ifndef PSX_NO_DEBUG_TOOLS
     temporal_dump_frame(0,0,s->width*s->scale,s->height*s->scale,alpha,s->mesh_stats.departed_faces);
     if (temporal_edge_diag())

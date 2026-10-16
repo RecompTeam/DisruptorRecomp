@@ -2,6 +2,8 @@
 
 #include "config_loader.h"
 #include "game/language/language.h"
+#include "game/input/baton_choice.h"
+#include "game/input/mouse_aim.h"
 #include "game/input/selection_wheel.h"
 #include "game/render/far_rendering.h"
 #include "game/render/precision_routes.h"
@@ -59,6 +61,8 @@ void psx_game_state_loaded(void) {
     disruptor_capsule_state_loaded();
     disruptor_selection_wheel_cancel();
     disruptor_name_entry_state_loaded();
+    disruptor_weapon_choice_state_loaded();
+    disruptor_weapon_keys_state_loaded();
     disruptor_mover_motion_state_loaded();
     disruptor_far_rendering_abandon_metrics();
 }

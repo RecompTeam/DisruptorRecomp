@@ -13,9 +13,7 @@ RETURN = 0x8001D3D0
 CALL = 0x0C007121
 PRESSED = 21
 
-# The routine's first instruction and the copy of its argument, the buttons pressed, into $s5. Its one call.
-# The row read and told from the rows above the name's. A letter's code read from the name and turned into its
-# sign. The cursor read, stored and held at 8, and the row set to 6 from DONE. The blank a letter wraps to.
+# Routine entry and argument copy into $s5, row and letter reads, the cursor held at 8, the row set to 6 from DONE, the wrapping blank.
 RETAIL_INSTRUCTIONS = {
     0x8001C484: 0x27BDFFA8,
     0x8001C49C: 0x0080A821,
@@ -34,7 +32,7 @@ RETAIL_INSTRUCTIONS = {
     0x8001D2A4: 0x34030024,
 }
 ENTRY_LIST = (
-    'mod_function_entry_funcs = ["0x80011888", "0x8001A46C", "0x8001C484", "0x80020DD8", "0x80039450", "0x8003B78C", "0x80040E68", '
+    'mod_function_entry_funcs = ["0x80011888", "0x8001A46C", "0x8001C484", "0x80020DD8", "0x80032514", "0x80039450", "0x8003B78C", "0x80040E68", '
     '"0x80044A10", "0x80044BDC", "0x80046134", "0x8004B3D4", "0x8004D348", "0x8004D410"]'
 )
 LOADS = range(0x20, 0x27)

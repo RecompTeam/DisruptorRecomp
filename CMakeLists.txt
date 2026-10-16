@@ -49,6 +49,7 @@ set(DISRUPTOR_EXTRA_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/language_hints.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/language_source.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/restart.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/baton_choice.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/mouse_aim.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/name_entry.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/selection_wheel.cpp"
@@ -358,6 +359,7 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
     disruptor_unit_test(disruptor_far_rendering tests/unit/disruptor_far_rendering_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_render_arena tests/unit/disruptor_render_arena_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_name_entry tests/unit/disruptor_name_entry_test.cpp RUNTIME_HEADERS)
+disruptor_unit_test(disruptor_baton_choice tests/unit/disruptor_baton_choice_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_backdrop_tiles tests/unit/disruptor_backdrop_tiles_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_intro_skip tests/unit/disruptor_intro_skip_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_frame_rate tests/unit/disruptor_frame_rate_test.cpp RUNTIME_HEADERS)

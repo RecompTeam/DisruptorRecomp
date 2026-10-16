@@ -1,8 +1,8 @@
 diff --git a/runtime/src/main.cpp b/runtime/src/main.cpp
-index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526087c68f5 100644
+index 81e048307ec9dd9fc7234a1e6285042ffab16457..2d85922f7b46cfa9734286186dd098f01529ba1a 100644
 --- a/runtime/src/main.cpp
 +++ b/runtime/src/main.cpp
-@@ -1,9 +1,16 @@
+@@ -1,9 +1,14 @@
 -﻿/* main.cpp — Phase 3 runtime entry point.
 +/* main.cpp — Phase 3 runtime entry point.
   *
@@ -11,16 +11,14 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
   * VRAM at each vblank via callback from gpu_vblank_tick().
   */
 +
-+/* Keep the Windows min/max macros out of this C++ translation unit. SDL may
-+ * include windows.h before the explicit platform includes below, so this must
-+ * be defined before any runtime header is included. */
++/* Defined before any runtime header: SDL may include windows.h first, and its min/max macros break this C++ unit. */
 +#if defined(_WIN32) && !defined(NOMINMAX)
 +#define NOMINMAX
 +#endif
  
  #include "cpu_state.h"
  #include "psx_bios_image.h"    /* the active BIOS's self-description */
-@@ -35,6 +42,11 @@
+@@ -35,6 +40,11 @@
  #include "gpu_render.h"
  #include "gpu_gl_renderer.h"
  #include "gpu_vk_renderer.h"
@@ -32,7 +30,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  #include "frame_pacing.h"
  #include "latency_ring.h"
  #include "sio.h"
-@@ -59,6 +71,10 @@
+@@ -59,6 +69,10 @@
  #include "game_options.h"
  #include "mod_plugins.h"
  #include "mod_runtime.h"
@@ -43,7 +41,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  #include "dirty_ram_interp.h"
  #include "crc32.h"
  #include "disc_identity.h"
-@@ -87,6 +103,9 @@
+@@ -87,6 +101,9 @@
  #endif
  #include <algorithm>
  #include <atomic>
@@ -53,12 +51,11 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  #include <cctype>
  #include <cmath>
  #include <cstdio>
-@@ -100,6 +119,12 @@
+@@ -100,6 +117,11 @@
  #include <string>
  #include <vector>
  
-+/* Internal GL seam: host-menu suspension is a separate reason from FMV/
-+ * content suspension, so either owner can release independently. */
++/* Host-menu suspension is a separate reason from FMV/content suspension, so each owner releases independently. */
 +extern "C" void gl_renderer_set_host_ui_suspended(int suspended);
 +extern "C" void gl_renderer_set_hidden_rows(int rows);
 +extern "C" int gl_renderer_debug_messages(void);
@@ -66,7 +63,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  #ifdef _WIN32
  #ifndef WIN32_LEAN_AND_MEAN
  #define WIN32_LEAN_AND_MEAN
-@@ -108,7 +133,7 @@
+@@ -108,7 +130,7 @@
  #include <ws2tcpip.h>
  #include <iphlpapi.h>
  #include <windows.h>
@@ -75,16 +72,12 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  #else
  #include <arpa/inet.h>
  #include <ifaddrs.h>
-@@ -131,6 +156,20 @@
+@@ -131,6 +153,16 @@
  #ifndef DEFAULT_DEBUG_PORT
  #error DEFAULT_DEBUG_PORT must be defined by the runtime target.
  #endif
 +
-+/* SDL_RenderSetVSync was added in SDL 2.0.18. Keep the explicitly supported
-+ * SDL2 fallback buildable against older distro/toolchain copies; its OpenGL
-+ * renderer can still release the swap interval through the public GL API.
-+ * Use a project-local name because SDL3's psx_sdl.h already defines its own
-+ * psx_sdl_render_set_vsync compatibility helper. */
++/* SDL_RenderSetVSync needs SDL 2.0.18. Project-local name: SDL3's psx_sdl.h already defines psx_sdl_render_set_vsync. */
 +static int sdl_render_set_vsync_compat(SDL_Renderer *renderer, int enabled) {
 +#if defined(PSX_SDL3) || SDL_VERSION_ATLEAST(2, 0, 18)
 +    return SDL_RenderSetVSync(renderer, enabled);
@@ -96,7 +89,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  
  extern "C" uint64_t gte_get_exec_count(void);
  
-@@ -164,11 +203,12 @@
+@@ -164,11 +196,12 @@
   * every install must arm it — not just repo checkouts that happen to carry a
   * loose EXE copy next to game.toml. Source order:
   *   1. The local EXE file from game.toml (dev checkouts; recompiler input).
@@ -111,7 +104,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
                                   const std::string &disc_path) {
      const uint32_t phys_lo = load_address & 0x1FFFFFFFu;
      /* 1. Local EXE file (skip the 2048-byte PS-X EXE header). */
-@@ -177,9 +217,12 @@
+@@ -177,9 +210,12 @@
          if (ef) {
              std::streamsize sz = ef.tellg();
              if (sz > 2048) {
@@ -127,19 +120,16 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
                      ef.seekg(2048, std::ios::beg);
                      if (ef.read((char *)img, img_len)) {
                          dirty_ram_register_text_image(phys_lo, img, img_len);
-@@ -193,7 +236,10 @@
+@@ -193,7 +229,7 @@
              }
          }
      }
 -    /* 2. Extract the boot EXE from the disc image. */
-+    /* 2. Extract the boot EXE from the disc image. Its declared load address
-+     * can precede the code-only image consumed by the recompiler, so slice by
-+     * the configured physical load and text size rather than blindly copying
-+     * from payload byte zero. */
++    /* Slice the boot EXE by the configured physical load and text size: its declared load address can precede the code-only image. */
      if (!disc_path.empty()) {
          PS1::ISOReader iso;
          if (iso.Open(disc_path)) {
-@@ -239,17 +285,38 @@
+@@ -239,17 +275,38 @@
                  uint8_t *file = (uint8_t *)std::malloc(ent.size);
                  if (file) {
                      size_t got = iso.ReadFile(boot_name, file, ent.size);
@@ -185,7 +175,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
                              return;
                          }
                      }
-@@ -302,6 +369,7 @@
+@@ -302,6 +359,7 @@
   * SDL controller (or uses the keyboard) and feeds each PSX pad slot. */
  struct PlayerInput {
      int   kind = 0;            /* 0=none, 1=keyboard, 2=controller */
@@ -193,7 +183,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
      char  guid[40] = {0};      /* SDL joystick GUID string when kind==controller */
      /* Pad input mode (PSXRecompV4::PadMode): 0=hybrid (default), 1=analog,
       * 2=digital. hybrid_analog is the per-frame auto-switch latch used only in
-@@ -313,10 +381,20 @@
+@@ -313,10 +371,18 @@
      SDL_JoystickID      instance = -1;
  };
  static PlayerInput g_players[2];
@@ -207,20 +197,16 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
   * 640*scale x 512*scale. Allocated once the supersampling scale is known
   * (sized for the native 640x512 when supersampling is off). */
  static uint32_t*     sdl_pixel_buf = nullptr;
-+/* Live OpenGL internal-scale changes may grow the CPU fallback/readback path.
-+ * Never shrink this allocation during a session: if a GL target rebuild fails,
-+ * the previous (larger) renderer scale must remain safe to present. */
++/* Never shrink during a session: if a GL target rebuild fails, the previous larger scale must stay safe to present. */
 +static int           sdl_pixel_buf_scale_capacity = 0;
  
  typedef void (*ModFrameHook)(void);
  
-@@ -337,8 +415,118 @@
+@@ -337,8 +403,115 @@
      for (size_t i = 0; i < count; i++) hooks[i]();
  }
  
-+/* Optional game-owned in-game UI.  Keep the registration state here rather
-+ * than in a renderer so input routing and renderer lifetime remain coordinated
-+ * and a build with no provider has no extra source or link dependency. */
++/* Optional game-owned in-game UI, so a build with no provider has no extra source or link dependency. */
 +struct HostUiState {
 +    PsxHostUiHooks hooks{};
 +    bool registered = false;
@@ -258,8 +244,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
 +
 +static void host_ui_runtime_ready(SDL_Window *window, int backend) {
 +    HostUiState& state = host_ui_state();
-+    /* A lobby soft-return may create another game session in the same process.
-+     * Close the prior provider lifetime defensively before opening a new one. */
++    /* A lobby soft-return may open another game session in this process: close the prior provider first. */
 +    if (state.session_live && state.registered &&
 +        state.hooks.on_runtime_shutdown)
 +        state.hooks.on_runtime_shutdown(state.hooks.userdata);
@@ -333,7 +318,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  static std::atomic<int> g_smooth_60fps{0};
  
  struct Smooth60State {
-@@ -352,6 +540,7 @@
+@@ -352,6 +525,7 @@
  };
  
  static Smooth60State g_smooth_60_state;
@@ -341,7 +326,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  
  /* Present-path session state — must reset on rematch (function-local statics
   * survive soft-return and poison FMV/FPS after session_reboot). */
-@@ -379,12 +568,14 @@
+@@ -379,12 +553,14 @@
  }
  
  static void smooth_60_reset(void) {
@@ -356,7 +341,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  }
  
  static void present_session_reset(void) {
-@@ -402,10 +593,24 @@
+@@ -402,10 +578,24 @@
      smooth_60_reset();
  }
  
@@ -381,7 +366,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
      s_disabled_frame_presented = false;
      s_force_present_after_load = true;
      smooth_60_reset();
-@@ -419,8 +624,10 @@
+@@ -419,8 +609,10 @@
       * tiles + force several swaps so the window actually updates. Safe no-op
       * when the GL pipeline was never brought up. */
      gl_renderer_invalidate_present();
@@ -394,7 +379,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  static uint64_t smooth_60_frame_hash(const uint32_t* pixels, size_t count) {
      uint64_t hash = 1469598103934665603ull;
      const size_t step = std::max<size_t>(1, count / 4096u);
-@@ -504,6 +711,13 @@
+@@ -504,6 +696,13 @@
  extern "C" void psx_smooth_60fps_set(int enabled) {
      g_smooth_60fps.store(enabled ? 1 : 0, std::memory_order_release);
  }
@@ -408,7 +393,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  #if defined(PSX_WEB)
  extern "C" EMSCRIPTEN_KEEPALIVE void psx_web_set_smooth_60fps(int enabled) {
      psx_smooth_60fps_set(enabled);
-@@ -515,6 +729,8 @@
+@@ -515,6 +714,8 @@
  static bool          g_video_aa    = true;  /* linear present filtering */
  static int           g_video_texfilter = 0; /* 0=nearest, 1=bilinear */
  static int           g_video_renderer = PSXRecompV4::DEFAULT_VIDEO_RENDERER;
@@ -417,7 +402,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  static int           g_fullscreen     = 0;  /* tri-state: 0 windowed, 1 borderless (desktop)
                                                * fullscreen, 2 exclusive fullscreen */
  static int           g_video_screen   = 0;  /* 0=raw,1=crt,2=composite,3=trinitron */
-@@ -599,10 +815,17 @@
+@@ -599,10 +800,17 @@
  static int           g_video_vsync        = 1;
  static int           g_frame_interpolation = 0;
  static int           g_frame_interpolation_fps = 0;
@@ -435,15 +420,11 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  static int           g_mod_controller_mode_override[2] = { -1, -1 };
  static_assert((int)PSX_MOD_CONTROLLER_HYBRID ==
                (int)PSXRecompV4::PAD_MODE_HYBRID);
-@@ -630,6 +853,111 @@
+@@ -630,6 +838,106 @@
      return 0;                                            /* windowed */
  }
  
-+/* SDL2 selects borderless vs exclusive through SDL_SetWindowFullscreen's
-+ * flag. SDL3 moved that distinction into the window's optional fullscreen
-+ * display mode: NULL means borderless desktop and a concrete display mode
-+ * means exclusive. Keep that difference behind one helper so startup, the
-+ * host UI, and the fullscreen hotkey all agree. */
++/* SDL2 selects borderless via the flag, SDL3 via a NULL fullscreen display mode (a concrete one is exclusive). */
 +static int psx_window_fullscreen_mode(SDL_Window *window) {
 +    if (!window) return g_fullscreen;
 +    const Uint32 flags = (Uint32)SDL_GetWindowFlags(window);
@@ -457,7 +438,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
 +}
 +
 +#if defined(_WIN32) && defined(PSX_SDL3)
-+/* Keeps a borderless OpenGL window from covering its screen exactly (host_borderless.h). SDL fits it to the screen again when it is restored, so this is asked every frame. */
++/* Keeps a borderless OpenGL window from covering its screen exactly (host_borderless.h). SDL refits it on restore, so asked every frame. */
 +static void psx_borderless_keep_windowed(void) {
 +    int hidden = 0;
 +    if (sdl_window && g_video_renderer == 1 && psx_window_fullscreen_mode(sdl_window) == 1) {
@@ -515,8 +496,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
 +        if (!SDL_SetWindowFullscreenMode(window, &closest)) return 0;
 +        if (!SDL_SetWindowFullscreen(window, true)) return 0;
 +    }
-+    /* Fullscreen transitions may be asynchronous. Settle the request before
-+     * reporting success so the live getter and menu cannot disagree. */
++    /* Fullscreen transitions may be asynchronous: settle before reporting success. */
 +    if (!SDL_SyncWindow(window)) return 0;
 +#else
 +    if (SDL_SetWindowFullscreen(
@@ -547,19 +527,14 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  /* FMV auto-skip detection hooks (cdrom.c / mdec.c). */
  extern "C" int      cdrom_xa_stream_active(void);
  extern "C" uint32_t mdec_get_decode_count(void);
-@@ -653,14 +981,108 @@
+@@ -653,14 +961,100 @@
  /* Display aspect W:H (default 4:3 = native). Wider aspects enable the
   * widescreen hack: GTE X-squash + stretched present (see [video] aspect_ratio
   * in config_loader.h). */
 +static int           g_video_depth24_trailing_margin = 8;
  static int           g_video_aspect_num = 4;
  static int           g_video_aspect_den = 3;
-+/* Host-UI aspect requests may arrive while the current frame is being
-+ * composed. Keep the renderer/GTE/GPU transition at the next presentation
-+ * boundary instead of changing projection state halfway through a frame.
-+ * Fixed requests are packed as numerator:denominator; the two reserved values
-+ * select adaptive mode. Zero means no pending request. A single atomic makes
-+ * the most recent fixed/adaptive selection win without a mixed transition. */
++/* Aspect requests wait for the next presentation boundary. Packed numerator:denominator, two reserved values select adaptive, 0 is none. */
 +static std::atomic<uint32_t> g_pending_video_aspect{0};
 +static constexpr uint32_t PENDING_VIDEO_ASPECT_ADAPTIVE_ON  = 0xFFFFFFFFu;
 +static constexpr uint32_t PENDING_VIDEO_ASPECT_ADAPTIVE_OFF = 0xFFFFFFFEu;
@@ -583,8 +558,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
 +
 +extern "C" void psx_host_video_get_display_aspect(
 +    int *numerator, int *denominator) {
-+    /* Report an accepted pending selection immediately so a host UI does not
-+     * visibly snap back during the one-frame handoff to the present thread. */
++    /* Report an accepted pending selection at once so a host UI does not snap back for a frame. */
 +    uint32_t packed = g_pending_video_aspect.load(std::memory_order_acquire);
 +    const bool fixed_pending =
 +        packed != 0 &&
@@ -628,9 +602,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
 +
 +extern "C" int psx_host_video_set_internal_scale(int scale) {
 +    if (scale < 1 || scale > SW_MAX_INTERNAL_SCALE) return 0;
-+    /* The developer UI itself is OpenGL-backed. Software and Vulkan keep
-+     * startup-only allocation rules until their presentation resources gain
-+     * an equivalent transactional rebuild. */
++    /* The developer UI is OpenGL-backed. Software and Vulkan keep startup-only allocation until they gain a transactional rebuild. */
 +    if (!host_ui_state().session_live ||
 +        host_ui_state().backend != PSX_HOST_UI_BACKEND_OPENGL) {
 +        return 0;
@@ -656,7 +628,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  
  extern "C" int psx_mod_set_fixed_display_aspect(
      uint32_t numerator, uint32_t denominator) {
-@@ -738,6 +1160,10 @@
+@@ -738,6 +1132,10 @@
  
  extern "C" int psx_mod_set_frame_interpolation(
      uint32_t frames_per_second) {
@@ -667,7 +639,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
      if (frames_per_second != 0 &&
          (frames_per_second < 60 || frames_per_second > 1000)) {
          std::fprintf(stderr,
-@@ -768,10 +1194,15 @@
+@@ -768,10 +1166,15 @@
              "interpolation; guest timing remains stock\n");
      }
      return 1;
@@ -683,7 +655,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
      if (blend_mode != PSX_MOD_FRAME_INTERPOLATION_LINEAR &&
          blend_mode != PSX_MOD_FRAME_INTERPOLATION_MOTION_ADAPTIVE) {
          std::fprintf(stderr,
-@@ -784,6 +1215,7 @@
+@@ -784,6 +1187,7 @@
          blend_mode == PSX_MOD_FRAME_INTERPOLATION_MOTION_ADAPTIVE
              ? "motion-adaptive clarity" : "linear crossfade");
      return 1;
@@ -691,7 +663,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  }
  
  extern "C" int psx_mod_set_auto_skip_fmv(int enabled) {
-@@ -867,6 +1299,8 @@
+@@ -867,6 +1271,8 @@
   * 4:3, wider for wide aspects. Height is always 480*scale. Set at window
   * creation alongside SDL_RenderSetLogicalSize. */
  static int           g_logical_w = 640;
@@ -700,14 +672,13 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  
  /* Clamp a requested window width to the primary display's usable area so an
   * oversized choice (e.g. 1920 on a 1080p panel) still fits on screen. Keeps
-@@ -886,6 +1320,103 @@
+@@ -886,6 +1292,93 @@
  static int aspect_gcd(int a, int b) {
      while (b) { int t = a % b; a = b; b = t; }
      return a > 0 ? a : 1;
 +}
 +
-+/* Resize only an ordinary window. Fullscreen owns the display mode/desktop
-+ * extent; its compositor instead follows the logical/present aspect below. */
++/* Fullscreen owns the display mode, so only an ordinary window is resized. */
 +static void reshape_window_for_fixed_aspect(int num, int den) {
 +    if (!sdl_window ||
 +        (SDL_GetWindowFlags(sdl_window) & SDL_WINDOW_FULLSCREEN) != 0)
@@ -721,9 +692,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
 +    SDL_SetWindowSize(sdl_window, width, height);
 +}
 +
-+/* One transition funnel for adaptive resizing and explicit host-UI choices.
-+ * It runs only from sdl_vblank_present, after game hooks have completed, so a
-+ * frame cannot mix old projection state with a new presentation shape. */
++/* Runs only from sdl_vblank_present after game hooks, so a frame never mixes old projection state with a new shape. */
 +static void apply_live_display_aspect(int num, int den,
 +                                      bool reshape_fixed_window) {
 +    const bool changed =
@@ -749,9 +718,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
 +        gpu_ws_configure(num, den, g_ws_anchor_addr,
 +                         g_ws_hud_sprt ? 1 : 0, mode);
 +    } else {
-+        /* Preserve authentic 4:3 boot rendering even when a host UI selects a
-+         * wide output before game entry. The normal engagement path will pick
-+         * up the already-updated num:den once gameplay begins. */
++        /* Authentic 4:3 boot even when a host UI selects wide before game entry: engagement picks up the updated num:den. */
 +        g_ws_engaged = !wide;
 +        gte_set_display_aspect(4, 3);
 +        gpu_ws_configure(4, 3, g_ws_anchor_addr,
@@ -759,9 +726,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
 +    }
 +
 +    if (changed && g_gl_active) {
-+        /* Do not crossfade or reuse a stale destination rectangle across an
-+         * aspect transition. This also forces an otherwise-identical next
-+         * frame through the GL present path. */
++        /* No crossfade or stale destination rectangle across an aspect transition, and the next frame takes the GL present path. */
 +        gl_renderer_invalidate_present();
 +    }
 +}
@@ -775,8 +740,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
 +
 +    if (packed == PENDING_VIDEO_ASPECT_ADAPTIVE_ON) {
 +        g_ws_adaptive_view = true;
-+        /* The developer-facing match-window mode supports every intermediate
-+         * window ratio, but never exposes more than the audited 32:9 view. */
++        /* Every intermediate window ratio, capped at the audited 32:9 view. */
 +        g_ws_adaptive_max_num = 32;
 +        g_ws_adaptive_max_den = 9;
 +        update_adaptive_widescreen();
@@ -786,8 +750,6 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
 +        return;
 +    }
 +    if (packed == PENDING_VIDEO_ASPECT_ADAPTIVE_OFF) {
-+        /* Leave the current effective aspect in place. A subsequent fixed
-+         * selection can choose and reshape a canonical fixed output. */
 +        g_ws_adaptive_view = false;
 +        std::fprintf(stdout,
 +            "psxrecomp: live adaptive display aspect disabled\n");
@@ -804,7 +766,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  }
  
  /* Follow the host window without feeding its absolute pixel size into guest
-@@ -911,23 +1442,7 @@
+@@ -911,23 +1404,7 @@
          den /= divisor;
      }
      if (num == g_video_aspect_num && den == g_video_aspect_den) return;
@@ -829,7 +791,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  }
  
  /* SDL GL attributes are global inputs to the next context creation.  Set the
-@@ -939,6 +1454,7 @@
+@@ -939,6 +1416,7 @@
      SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
      SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
      SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
@@ -837,7 +799,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  }
  
  /* Live native-wide vs squash toggle (ws_nw TCP command) for A/B comparison.
-@@ -955,8 +1471,107 @@
+@@ -955,8 +1433,99 @@
  }
  extern "C" int psx_ws_get_native_wide(void) { return g_ws_native_wide; }
  
@@ -851,8 +813,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
 +    if (mode < -1 || mode > 1) return 0;
 +    g_video_vsync = mode;
 +#ifndef PSX_SDL_NO_RENDER
-+    /* gl_renderer_set_swap_interval remembers this request but keeps the
-+     * physical interval at zero while interpolation owns presentation. */
++    /* gl_renderer_set_swap_interval keeps the physical interval at zero while interpolation owns presentation. */
 +    if (g_gl_active) gl_renderer_set_swap_interval(mode);
 +    if (g_vk_active) vk_renderer_set_present_mode(mode);
 +#endif
@@ -890,7 +851,6 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
 +                                                  int blend_mode) {
 +#ifdef PSX_DISABLE_FRAME_INTERPOLATION
 +    (void)target_fps; (void)blend_mode;
-+    /* A disable request is harmless; activation is unavailable in this build. */
 +    return enabled ? 0 : 1;
 +#else
 +    enabled = enabled ? 1 : 0;
@@ -901,9 +861,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
 +        blend_mode != PSX_MOD_FRAME_INTERPOLATION_MOTION_ADAPTIVE &&
 +        blend_mode != PSX_HOST_FRAME_INTERPOLATION_GEOMETRY)
 +        return 0;
-+    /* Interpolation is implemented only by the GL backend and renderer changes
-+     * are restart-owned.  Do not let an in-game control advertise success on a
-+     * software/Vulkan session. */
++    /* Interpolation is GL-only and renderer changes are restart-owned: do not advertise success on software/Vulkan. */
 +    if (enabled && !g_gl_active) return 0;
 +    if (enabled && blend_mode == PSX_HOST_FRAME_INTERPOLATION_GEOMETRY &&
 +        !gpu_geometry_correction_enabled())
@@ -919,10 +877,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
 +        gl_renderer_interpolation_diag(&actual, nullptr, nullptr,
 +                                       nullptr, nullptr, nullptr);
 +        if (actual != enabled) {
-+            /* Context/thread creation and display-rate validation live in the
-+             * GL backend.  Do not advertise a requested state which the
-+             * renderer could not actually enter.  Restore a previously-live
-+             * interpolator when a target change was rejected. */
++            /* GL validates context, thread and display rate: restore the previous interpolator when a target change is rejected. */
 +            if (actual != previous_actual) {
 +                gl_renderer_set_interpolation(
 +                    previous_actual, g_host_refresh_hz,
@@ -933,8 +888,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
 +            gl_renderer_set_swap_interval(g_video_vsync);
 +            return 0;
 +        }
-+        /* Re-assert the requested user interval.  The GL backend defers it
-+         * while interpolation is enabled and restores it on disable. */
++        /* GL defers the user interval while interpolation is enabled and restores it on disable. */
 +        gl_renderer_set_swap_interval(g_video_vsync);
 +    }
 +    g_frame_interpolation = enabled;
@@ -947,14 +901,13 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  /* Present straight from the FBO (fast, no readback). Set PSX_GL_FORCE_CPU_PRESENT=1
   * to force the software readout path instead — a diagnostic/fallback that also
   * keeps CPU VRAM current every frame (so screenshots reflect the screen). */
-@@ -994,6 +1609,16 @@
+@@ -994,6 +1563,15 @@
  static int g_turbo_load_release_frames = TURBO_LOADS_RELEASE_FRAMES;
  static SDL_AudioDeviceID sdl_audio_device;
  static int16_t       sdl_audio_buf[2048 * 2];
 +static std::atomic<int> g_audio_master_volume_percent{100};
 +static std::atomic<int> g_audio_master_muted{0};
-+/* Legacy queued audio has two producer sites (ordinary pump and turbo-mute
-+ * tail); both share the same applied gain so either path transitions smoothly. */
++/* Legacy queued audio has two producer sites (pump and turbo-mute tail) sharing one applied gain. */
 +static float g_audio_legacy_applied_master_gain = -1.0f;
 +/* Callback-owned; reset only after the audio device has stopped. */
 +static float g_audio_drc_applied_master_gain = -1.0f;
@@ -964,7 +917,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  
  /* DRC bridge. Producer (sdl_audio_pump) runs on the main loop thread under
   * SDL_LockAudioDevice; consumer (sdl_drc_callback) runs on the SDL audio
-@@ -1026,10 +1651,36 @@
+@@ -1026,10 +1604,34 @@
  int g_audio_host_rate = 44100;
  }
  
@@ -992,21 +945,18 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
      if (!s_drc_ready) { std::memset(stream, 0, (size_t)len); return; }
      int frames = len / (int)(2 * sizeof(int16_t)); /* stereo S16 */
      rab_pull(&s_drc, reinterpret_cast<int16_t*>(stream), frames);
-+    /* Apply user gain at the final pull boundary so the default bridge path
-+     * responds on the next device callback instead of waiting for the DRC
-+     * ring's buffered audio to drain. */
++    /* Gain applies at the final pull so the default bridge responds on the next callback, not after the DRC ring drains. */
 +    sdl_audio_apply_master_gain(
 +        reinterpret_cast<int16_t*>(stream), frames,
 +        &g_audio_drc_applied_master_gain);
      /* T3 tap in bridge mode: the exact device-rate bytes the host consumes.
       * This callback is the tap's single writer while the bridge is active. */
      audio_trace_pcm(AUDIO_TAP_HOST, reinterpret_cast<const int16_t*>(stream),
-@@ -1092,6 +1743,25 @@
+@@ -1092,6 +1694,23 @@
      return exe_dir;
  }
  
-+// The folder of the player's files: settings, bindings, memory cards, caches, mods and the run's notes. The exe
-+// folder unless the game host names another first thing in main; program files keep the exe folder.
++// The player's files folder: the exe folder unless the game host names another first thing in main.
 +static std::filesystem::path g_user_dir;
 +
 +static std::filesystem::path user_dir_from_argv(const char* argv0) {
@@ -1018,8 +968,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
 +    return psx_moved_to_user_dir(path, exe_dir_from_argv(argv0), user_dir_from_argv(argv0));
 +}
 +
-+// A writable path from the settings or the command line: a relative one in the user folder, a whole one that names
-+// the exe folder moved there.
++// A writable path from the settings or command line: relative to the user folder, one naming the exe folder moved there.
 +static std::filesystem::path under_user_dir(const std::filesystem::path& path, const char* argv0) {
 +    return path.is_relative() ? user_dir_from_argv(argv0) / path : in_user_dir(path, argv0);
 +}
@@ -1027,7 +976,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  static std::filesystem::path resolve_existing_runtime_path(const char* requested,
                                                             const char* argv0) {
      namespace fs = std::filesystem;
-@@ -1112,7 +1782,7 @@
+@@ -1112,7 +1731,7 @@
  }
  
  static std::filesystem::path sidecar_cfg_path(const char* argv0, const char* filename) {
@@ -1036,7 +985,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  }
  
  static std::filesystem::path read_cached_path(const char* argv0, const char* filename) {
-@@ -1174,22 +1844,40 @@
+@@ -1174,22 +1793,39 @@
          return false;
      }
  #ifdef _WIN32
@@ -1056,8 +1005,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
 -    if (!GetOpenFileNameA(&ofn)) return false;
 -    out = path_buf;
 -    return true;
-+    /* IFileOpenDialog, not GetOpenFileName: that one moves the process's working directory into every folder the
-+     * player opens (measured, OFN_NOCHANGEDIR or not), and the freeze heartbeat writes its files there. */
++    /* IFileOpenDialog, not GetOpenFileName: that moves the working directory into the opened folder (measured) and the heartbeat writes there. */
 +    const auto wide = [](const char* text) {
 +        std::wstring out(static_cast<size_t>(MultiByteToWideChar(CP_UTF8, 0, text, -1, nullptr, 0)), L'\0');
 +        MultiByteToWideChar(CP_UTF8, 0, text, -1, out.data(), static_cast<int>(out.size()));
@@ -1093,14 +1041,13 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  #else
      (void)filter;
      (void)out;
-@@ -1205,6 +1893,46 @@
+@@ -1205,6 +1841,45 @@
          title, cli_flag);
      return false;
  #endif
 +}
 +
-+/* The dialog runs on a thread of its own: on the game's thread it would stop the frames, and the freeze watchdog
-+ * takes two seconds without a frame for a hang and writes a dump. */
++/* The dialog runs on its own thread: on the game's, the freeze watchdog takes two seconds without a frame for a hang. */
 +/* Never destroyed: the dialog's thread may still be in the dialog when the program ends. */
 +static PsxHostPickSlot& s_disc_pick = *new PsxHostPickSlot;
 +static std::thread& s_disc_worker = *new std::thread;
@@ -1140,7 +1087,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  }
  
  static std::string uppercase_ascii(std::string s) {
-@@ -1539,10 +2267,9 @@
+@@ -1539,10 +2214,9 @@
  }
  
  // Fallback memcard directory used when no game config (or its [runtime]
@@ -1153,17 +1100,16 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  }
  
  static void close_controller(void);
-@@ -1590,6 +2317,9 @@
+@@ -1590,6 +2264,8 @@
  }
  
  static void shutdown_runtime(void) {
-+    /* UI teardown may destroy GL resources; it must run while the game window
-+     * and main renderer context are still alive.  The helper is idempotent. */
++    /* UI teardown may destroy GL resources, so it runs while the window and main context are alive. Idempotent. */
 +    host_ui_runtime_shutdown();
      /* (sljit removed 2026-07-15: overlay_compile_worker_stop joined the
       * off-thread JIT worker here; the worker no longer exists.) */
      psx_netplay_shutdown();
-@@ -1607,6 +2337,8 @@
+@@ -1607,6 +2283,8 @@
          psx_sdl_audio_close(sdl_audio_device);   /* stops the pull callback */
          sdl_audio_device = 0;
      }
@@ -1172,7 +1118,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
      if (s_drc_ready) { rab_free(&s_drc); s_drc_ready = false; }
      close_controller();
      debug_server_shutdown();
-@@ -1615,6 +2347,7 @@
+@@ -1615,6 +2293,7 @@
  /* Tear down the game window/GL/audio after a lobby soft-return. Leaves SDL
   * subsystems and the lobby WebSocket intact for the next launcher session. */
  static void teardown_game_session_keep_lobby(void) {
@@ -1180,7 +1126,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
      netplay_host_present_restore();
      psx_netplay_shutdown();
      memcard_flush_all();
-@@ -1623,6 +2356,8 @@
+@@ -1623,6 +2302,8 @@
          psx_sdl_audio_close(sdl_audio_device);
          sdl_audio_device = 0;
      }
@@ -1189,7 +1135,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
      if (s_drc_ready) { rab_free(&s_drc); s_drc_ready = false; }
      close_controller();
      if (g_vk_active) {
-@@ -1637,6 +2372,7 @@
+@@ -1637,6 +2318,7 @@
      if (sdl_renderer) { SDL_DestroyRenderer(sdl_renderer); sdl_renderer = nullptr; }
      if (sdl_window) { SDL_DestroyWindow(sdl_window); sdl_window = nullptr; }
      if (sdl_pixel_buf) { std::free(sdl_pixel_buf); sdl_pixel_buf = nullptr; }
@@ -1197,14 +1143,11 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
      psx_lobby_set_ready(0);
      psx_lobby_clear_launch_pending();
      psx_clear_return_to_lobby();
-@@ -1653,6 +2389,24 @@
+@@ -1653,6 +2335,21 @@
      }
  }
  
-+/* Smooth live master-volume changes over one produced/device block. The DRC
-+ * path invokes this on its final audio callback; legacy queued audio invokes
-+ * it immediately before queueing. Separate per-path applied gains are owned by
-+ * their respective threads, while the requested controls are atomic. */
++/* Smooths master-volume changes over one block. Applied gains are per-path and thread-owned, the requested controls atomic. */
 +static void sdl_audio_apply_master_gain(int16_t* buf, int frames,
 +                                        float* applied_gain) {
 +    if (!buf || frames <= 0 || !applied_gain) return;
@@ -1222,7 +1165,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  /* Fade-in state: samples of rising ramp still to apply after an unmute.
   * Consumed by sdl_audio_pump across however many pump calls it spans.
   * MUST fit sdl_audio_buf (2048 frames): the fade-out tail renders this many
-@@ -1661,7 +2415,7 @@
+@@ -1661,7 +2358,7 @@
  static int       sdl_audio_fadein_left  = 0;
  
  static void sdl_audio_pump(bool discard_output = false) {
@@ -1231,7 +1174,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  
      const uint32_t bytes_per_frame = sizeof(int16_t) * 2u;
      const bool legacy = audio_legacy_mode();
-@@ -1751,6 +2505,8 @@
+@@ -1751,6 +2448,8 @@
          sdl_audio_fadein_left -= ramp;
      }
      if (legacy) {
@@ -1240,7 +1183,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
          /* T3 tap: the exact post-fade bytes handed to the host audio queue. */
          audio_trace_pcm(AUDIO_TAP_HOST, sdl_audio_buf, frames);
          psx_sdl_audio_queue(sdl_audio_device, sdl_audio_buf,
-@@ -1883,6 +2639,7 @@
+@@ -1883,6 +2582,7 @@
  
      g_runtime_perf.frequency = SDL_GetPerformanceFrequency();
      if (!g_runtime_perf.frequency) g_runtime_perf.frequency = 1;
@@ -1248,7 +1191,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
      if (const char *interval = std::getenv("PSX_RUNTIME_PERF_DIAG_MS")) {
          char *tail = nullptr;
          long requested = std::strtol(interval, &tail, 10);
-@@ -2026,12 +2783,32 @@
+@@ -2026,12 +2726,32 @@
      if (end >= start) *total += end - start;
  }
  
@@ -1281,7 +1224,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
      if (!g_runtime_perf.enabled) return;
  
      uint64_t now = SDL_GetPerformanceCounter();
-@@ -2052,12 +2829,31 @@
+@@ -2052,12 +2772,31 @@
      uint64_t overlay_load_us = 0, overlay_load_max_us = 0, overlay_load_last_us = 0;
      overlay_loader_get_load_timing(&overlay_load_us, &overlay_load_max_us,
                                     &overlay_load_last_us);
@@ -1313,7 +1256,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
          for (int i = 0; i < 6; i++) last_up[i] = up[i];
          have_last = true;
          return;
-@@ -2072,6 +2868,14 @@
+@@ -2072,6 +2811,14 @@
          "cpu=%.1f tex=%.1f draw=%.1f ms/s; "
          "work guest=%.1f pacer=%.1f autocapture=%.1f provider_poll=%.1f ms/s, "
          "dirty=%.0f insn/s %.0f dispatch/s; "
@@ -1328,7 +1271,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
          "overlay native=+%llu interp=+%llu hot_native=0x%08X/+%llu "
          "shadow=+%llu div=+%llu first_div=0x%08X "
          "loads=+%u revalidations=+%u "
-@@ -2096,6 +2900,26 @@
+@@ -2096,6 +2843,26 @@
          runtime_perf_ticks_ms(current.provider_poll_ticks - last.provider_poll_ticks) / dt,
          (double)(current.dirty_insns - last.dirty_insns) / dt,
          (double)(current.dirty_dispatches - last.dirty_dispatches) / dt,
@@ -1355,7 +1298,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
          (unsigned long long)(current.overlay_native - last.overlay_native),
          (unsigned long long)(current.overlay_interp - last.overlay_interp),
          current.overlay_hot_native_pc,
-@@ -2118,11 +2942,13 @@
+@@ -2118,11 +2885,13 @@
      last_underruns = underruns;
      last_overflows = overflows;
      last_overlay_load_us = overlay_load_us;
@@ -1370,7 +1313,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
      {   /* Tag audio events with the vblank frame counter. */
          extern uint64_t s_frame_count;
          audio_trace_note_frame((uint32_t)s_frame_count);
-@@ -2145,11 +2971,14 @@
+@@ -2145,11 +2914,14 @@
              spu_render(sdl_audio_buf, tail);
              sdl_audio_gain_ramp(sdl_audio_buf, tail, g0, 0.0f);
              audio_trace_event(AUDIO_EV_MUTE, (uint32_t)tail, 0);
@@ -1387,7 +1330,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
                  psx_sdl_audio_lock(sdl_audio_device);
                  rab_push(&s_drc, sdl_audio_buf, tail);
                  psx_sdl_audio_unlock(sdl_audio_device);
-@@ -2232,6 +3061,9 @@
+@@ -2232,6 +3004,9 @@
  static int controller_device_index = 0;
  static int controller_deadzone = 12000;
  static int controller_anti_deadzone = 0;
@@ -1397,7 +1340,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  static std::array<PsxButtonMap, 16> controller_map = {{
      { PAD_UP,       "up",       {} },
      { PAD_DOWN,     "down",     {} },
-@@ -2266,6 +3098,7 @@
+@@ -2266,6 +3041,7 @@
  static std::filesystem::path resolve_overlay_capture_path(
          const std::filesystem::path& project_root,
          const std::filesystem::path& exe_dir,
@@ -1405,7 +1348,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
          const std::string& game_id) {
      std::string direct;
      std::string store_root;
-@@ -2322,14 +3155,14 @@
+@@ -2322,14 +3098,14 @@
      if (!direct.empty()) result = root_relative(direct);
      else if (!store_root.empty())
          result = root_relative(store_root) / game_id / "overlay_captures.json";
@@ -1422,7 +1365,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
      }
      return result.lexically_normal();
  }
-@@ -2440,6 +3273,24 @@
+@@ -2440,6 +3216,24 @@
          }
      }
      return sources;
@@ -1447,15 +1390,11 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  }
  
  static void set_default_controller_mapping(void) {
-@@ -2506,8 +3357,16 @@
+@@ -2506,8 +3300,12 @@
  static void load_input_config(const char* argv0) {
      set_default_controller_mapping();
  
-+    /* Keyboard bindings are independent of the gamepad input.ini.  Load them
-+     * before the first-run input.ini creation branch: that branch returns
-+     * after writing the default controller file, and previously left the
-+     * compiled legacy keyboard defaults active for the entire first session
-+     * even when a packaged keybinds.ini was already present. */
++    /* Keyboard bindings load before the first-run input.ini branch, which returns early and used to leave the legacy defaults active. */
 +    const std::string keybinds_dir = (user_dir_from_argv(argv0) / "").string();
 +    psx_keybinds_init(keybinds_dir.c_str());
 +
@@ -1465,7 +1404,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
      std::error_code ec;
      if (!fs::exists(config_path, ec)) {
          std::ofstream out(config_path, std::ios::binary);
-@@ -2557,11 +3416,6 @@
+@@ -2557,11 +3355,6 @@
          for (auto& entry : controller_map) entry.sources.clear();
      }
  
@@ -1477,7 +1416,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  }
  
  static void close_player(PlayerInput& p) {
-@@ -2650,9 +3504,11 @@
+@@ -2650,9 +3443,11 @@
       * only when the player uses the d-pad. */
      p.hybrid_analog = true;
      p.guid[0] = '\0';
@@ -1489,7 +1428,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
      else if (d == "auto" || d == "gamepad" || d == "controller") {
          /* First available SDL game controller (guid empty -> open_player falls
           * back to the first connected pad). Lets a user default to "my
-@@ -2691,12 +3547,26 @@
+@@ -2691,12 +3486,26 @@
      }
  }
  
@@ -1517,7 +1456,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
      return psx_keybinds_pad_word(keys, player);
  }
  
-@@ -2747,6 +3617,8 @@
+@@ -2747,6 +3556,8 @@
   * 1 or 2 — selects which keybinds.ini section drives a keyboard port. */
  static uint16_t pad_buttons_for(const PlayerInput& p, int player, bool suppress_stick_axes) {
      if (p.kind == 1) return pad_from_keyboard(player);
@@ -1526,7 +1465,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
      if (p.kind == 2) return controller_pad_buttons(p.handle, suppress_stick_axes);
      return 0xFFFF;
  }
-@@ -2770,7 +3642,7 @@
+@@ -2770,7 +3581,7 @@
          /* Keyboard analog: the configurable left/right stick-direction binds
           * (default = arrow keys on the LEFT stick; RIGHT stick unbound), so the
           * old keyboard analog behaviour is preserved unless the user rebinds. */
@@ -1535,7 +1474,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
          psx_keybinds_sticks(keys, player, out);
          return;
      }
-@@ -2788,6 +3660,12 @@
+@@ -2788,6 +3599,12 @@
              if (SDL_GameControllerGetButton(p.handle, SDL_CONTROLLER_BUTTON_DPAD_DOWN))  out[1] = 0xFF;
          }
      }
@@ -1548,7 +1487,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  }
  
  /* HYBRID-mode auto-switch detectors (mirror the DualShock analog LED toggling).
-@@ -2838,8 +3716,8 @@
+@@ -2838,8 +3655,8 @@
              if (controller_dpad_active(handle)) return true;
          }
      }
@@ -1559,7 +1498,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
          if (psx_keybinds_dpad_active(keys, player)) return true;
      }
      return false;
-@@ -3028,7 +3906,7 @@
+@@ -3028,7 +3845,7 @@
       * sticks onto the analog stick, so an analog-mode P1 steers from whatever
       * is plugged in (P1 binds). */
      if (dev_here && eff_analog) {
@@ -1568,7 +1507,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
          psx_keybinds_sticks(keys, 1, st);
          dev_any_controller_sticks(st);
      }
-@@ -3095,6 +3973,16 @@
+@@ -3095,6 +3912,16 @@
   * onto local_slot (host→sim P1, guest→sim P2). Never writes SIO. Exclusive
   * capture — no keyboard-all / all-controllers merge — so peers hash-agree. */
  static void capture_local_human_pad(PsxNetPad* out) {
@@ -1585,7 +1524,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
      int idx = psx_netplay_input_player();
      if (idx < 0 || idx > 1) idx = 0;
      if (!capture_pad_slot_exclusive(idx, out)) {
-@@ -3228,11 +4116,12 @@
+@@ -3228,11 +4055,12 @@
          if (!g_headless) {
              SDL_Event ev;
              while (SDL_PollEvent(&ev)) {
@@ -1599,7 +1538,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  #if defined(PSX_SDL3)
                      ev.key.key == SDLK_ESCAPE) {
  #else
-@@ -3261,6 +4150,24 @@
+@@ -3261,6 +4089,22 @@
  static void sample_pad_into_sio(int override) {
      if (override >= 0) {
          apply_input_override_to_sio(override);
@@ -1608,9 +1547,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
 +    const uint32_t ui_flags = psx_host_ui_capture_flags();
 +    if (ui_flags & (PSX_HOST_UI_CAPTURE_KEYBOARD |
 +                    PSX_HOST_UI_CAPTURE_GAMEPAD)) {
-+        /* Poll-based input bypasses SDL event consumption.  Publish a fully
-+         * neutral sample (buttons and sticks) while preserving each port's
-+         * current digital/analog presentation mode. */
++        /* Poll-based input bypasses SDL event consumption: publish a neutral sample, keeping each port's mode. */
 +        for (int s = 0; s < 2; s++) {
 +            PsxNetPad pad{};
 +            pad.buttons = 0xFFFFu;
@@ -1624,7 +1561,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
          return;
      }
      for (int s = 0; s < 2; s++) {
-@@ -3465,14 +4372,17 @@
+@@ -3465,14 +4309,17 @@
   * (MotK 512). Present width is never shrunk — cropping the GL/SDL rect left a
   * flickering black pillar when upload coverage varied.
   *
@@ -1644,7 +1581,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
      uint32_t lim = gpu_depth24_rgb_limit(display_x, w);
      if (lim > 0u && lim < w && lim < start)
          start = lim;
-@@ -3482,8 +4392,51 @@
+@@ -3482,8 +4329,44 @@
      }
  }
  
@@ -1678,25 +1615,18 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  /* Called from gpu_vblank_tick() at each simulated vblank. */
  static void sdl_vblank_present(void) {
 +    psx_borderless_keep_windowed();
-+    /* A host UI normally submits its request from the GL render callback near
-+     * the end of this function. Apply on scope exit, after the old-aspect frame
-+     * has been presented, so the next guest frame and its eventual present use
-+     * one coherent aspect. The scope also covers every skipped/early-return
-+     * vblank path. */
++    /* Applies on scope exit, after the old-aspect frame is presented, covering every early-return vblank path. */
 +    struct PendingAspectBoundary {
 +        ~PendingAspectBoundary() {
 +            apply_pending_display_aspect();
-+            /* SDL resize events were consumed during this vblank. Commit
-+             * their ratio only after the old-aspect frame has presented so
-+             * projection, packet correction and destination sizing advance
-+             * together for the next guest frame. */
++            /* Resize events commit their ratio after the old-aspect frame presents, so projection, correction and destination advance together. */
 +            update_adaptive_widescreen();
 +        }
 +    } pending_aspect_boundary;
  #ifndef PSX_NO_DEBUG_TOOLS
      debug_server_set_fmv_quiet(mdec_recently_active(2));
      /* Debug server: pause gate, poll commands, record frame, check watchpoints. */
-@@ -3582,6 +4535,7 @@
+@@ -3582,6 +4465,7 @@
          /* Pump SDL events to prevent window freeze. */
          SDL_Event ev;
          while (SDL_PollEvent(&ev)) {
@@ -1704,7 +1634,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
              if (ev.type == SDL_QUIT) {
                  if (psx_netplay_active()) {
                      netplay_soft_exit("sdl_window_close");
-@@ -3603,18 +4557,34 @@
+@@ -3603,18 +4487,34 @@
                      close_controller();
                      refresh_player_devices();
                  }
@@ -1740,7 +1670,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
                  /* Save states: Shift+F1-F12 = save slot 0-11, F1-F12 = load.
                   * (F11 is a save slot per the user's spec, so fullscreen is
                   * Alt+Enter / Cmd+Ctrl+F only — no F11.) */
-@@ -3649,21 +4619,34 @@
+@@ -3649,21 +4549,32 @@
                   * detects "currently fullscreen, either mode". */
                  else if ((key == SDLK_RETURN && (mod & KMOD_ALT)) ||
                           (key == SDLK_f && (mod & (KMOD_GUI | KMOD_CTRL)))) {
@@ -1777,16 +1707,14 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
 +
 +    if (g_gl_active) {
 +        const uint32_t ui_flags = psx_host_ui_capture_flags();
-+        /* Visible UI must stay on the main GL context even if a provider omits
-+         * the explicit suspension flag.  The interpolation thread never calls
-+         * the host render hook. */
++        /* Visible UI must stay on the main GL context even if a provider omits the suspension flag. */
 +        gl_renderer_set_host_ui_suspended(
 +            (ui_flags & (PSX_HOST_UI_VISIBLE |
 +                         PSX_HOST_UI_SUSPEND_INTERPOLATION)) != 0);
      }
  
      /* Sample each player's device and feed the matching SIO pad slot.
-@@ -3697,6 +4680,9 @@
+@@ -3697,6 +4608,9 @@
          }
      } netplay_tail(override);
  
@@ -1796,7 +1724,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
      if (psx_netplay_active()) {
          psx_netplay_finish_frame();
      } else if (g_headless) {
-@@ -3704,6 +4690,9 @@
+@@ -3704,6 +4618,9 @@
      } else {
          sample_pad_into_sio(override);
      }
@@ -1806,7 +1734,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  
      /* Latency ring: open this present cycle's slot, stamping when input was
       * sampled into SIO.  Always-on; queried via the debug server "latency". */
-@@ -3789,16 +4778,21 @@
+@@ -3789,16 +4706,21 @@
          }
      }
  
@@ -1832,7 +1760,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
          netplay_tail.skip_pace();
          return;
      }
-@@ -3813,16 +4807,23 @@
+@@ -3813,16 +4735,23 @@
      }
  #endif
  
@@ -1859,7 +1787,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
              turbo_skip = (turbo_skip + 1) % TURBO_PRESENT_EVERY;
              if (turbo_skip != 0) {
                  netplay_tail.skip_pace();
-@@ -3916,30 +4917,12 @@
+@@ -3916,30 +4845,12 @@
      /* Mod hooks. Run after all normal input sampling. */
      mod_call_frame_hooks();
  
@@ -1891,7 +1819,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  
      /* ---- Display from our VRAM ---- */
      uint32_t w = 0, h = 0;
-@@ -3963,7 +4946,8 @@
+@@ -3963,7 +4874,8 @@
              /* After savestate load, always restage once even if we blanked
               * earlier in the session — otherwise the window keeps a stale
               * pre-load frame while vblanks (and FPS) keep advancing. */
@@ -1901,7 +1829,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
                  s_disabled_frame_presented = true;
                  s_force_present_after_load = false;
                  if (g_gl_active) {
-@@ -3988,7 +4972,7 @@
+@@ -3988,7 +4900,7 @@
           * of truth, shared with the GTE/GPU squash so content and present stay
           * locked: we squash IFF we stretch. depth24 always classifies as FMV
           * even if the ws layer is not engaged yet (4:3 titles). */
@@ -1910,7 +1838,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
          /* MDEC movies are already decoded at their authored cadence and are
           * CPU/upload heavy. High-refresh crossfades only contend with decoding
           * and can starve audio, so present native-4:3/MDEC phases directly.
-@@ -3996,19 +4980,25 @@
+@@ -3996,19 +4908,22 @@
           * decode; the activity stamp also covers authentic 4:3 configurations. */
          if (g_gl_active)
              gl_renderer_set_interpolation_suspended(
@@ -1925,10 +1853,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
 -        /* Native-wide present: on a game frame, if the active backend has the
 -         * wide compositor, present the wider surface (canonical width + EXTRA)
 -         * from the displayed buffer's surface. FMV/menu frames stay 4:3. */
-+        /* A native-wide frame and the same-width high-precision experiment both
-+         * present from an independent compositor surface. Native-wide adds
-+         * reveal columns; classic squash mode keeps `present_w == w` and uses
-+         * the second surface solely to isolate visual correction from VRAM. */
++        /* Native-wide and the same-width precision experiment present from a second compositor surface, which isolates correction from VRAM. */
 +        const bool corrected_present =
 +            (!fmv_frame && !di.depth24 && g_ws_engaged &&
 +             gpu_geometry_correction_enabled() && gr_wide_supported());
@@ -1942,18 +1867,11 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  
          /* Native-wide invariant: canonical (320-wide) content is NEVER
           * stretched across the wide window — a game frame that cannot present
-@@ -4045,6 +5035,22 @@
+@@ -4045,6 +4960,15 @@
                  if (gl_renderer_present_wide_fbo((int)di.display_x, (int)di.display_y,
                                                   (int)h, g_video_aa ? 1 : 0))
                      return;
-+                /* A correction/native-wide surface can be unavailable for its
-+                 * first frame (allocation failure, an as-yet unknown display
-+                 * base, or a live mode transition).  The GL renderer's CPU
-+                 * mirror is intentionally native-scale even when the FBO uses
-+                 * SSAA, so falling through to the generic CPU-hires path would
-+                 * upload a 1x image as though it were Nx and show a tiny box.
-+                 * Present the authoritative canonical FBO for this frame; the
-+                 * compositor can retry on the next one. */
++                /* No correction surface this frame: present the canonical FBO, the CPU mirror is 1x under SSAA and would show a tiny box. */
 +                pres_entry->path          = PRES_PATH_CANONICAL;
 +                pres_entry->wide_fellback = 1;
 +                pres_entry->present_w     = (uint16_t)w;
@@ -1965,7 +1883,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
              } else {
                  gl_renderer_present_vram((int)di.display_x, (int)di.display_y,
                                           (int)present_w, (int)h, g_video_aa ? 1 : 0,
-@@ -4142,6 +5148,7 @@
+@@ -4142,6 +5066,7 @@
                            h * (uint32_t)active_scale,
                            !g_gl_active && !g_vk_active && !di.depth24 && !fmv_frame);
  
@@ -1973,7 +1891,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
          /* Frame blending (CRT-persistence masker for 30fps double-buffered
           * content). Some games (e.g. Crash Bash menus/characters) leave a
           * dynamic object in only one of the two display buffers per 30fps cycle,
-@@ -4183,6 +5190,7 @@
+@@ -4183,6 +5108,7 @@
                  }
              }
          }
@@ -1981,7 +1899,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
      }
  
      /* Update only the active display rectangle. The backing texture is sized
-@@ -4245,7 +5253,7 @@
+@@ -4245,7 +5171,7 @@
          if (!g_present_vsync_disabled && present_ms > 250) {
              g_present_slow_count++;
              if (g_present_slow_count >= 3 &&
@@ -1990,7 +1908,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
                  g_present_vsync_disabled = 1;
              }
          }
-@@ -4314,7 +5322,8 @@
+@@ -4314,7 +5240,8 @@
      };
  
      std::filesystem::path ae_np_lan_file() {
@@ -2000,16 +1918,14 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
      }
  
      bool ae_np_read_lan_state(AeLanLobbyState* state) {
-@@ -4867,11 +5876,29 @@
+@@ -4867,11 +5794,27 @@
  #endif
  
  int main(int argc, char** argv) {
 -    /* Force line-buffered output so messages appear even if killed. */
 -    std::setvbuf(stdout, nullptr, _IOLBF, 0);
 -    std::setvbuf(stderr, nullptr, _IOLBF, 0);
-+    /* Keep startup diagnostics visible even if the process is killed. MSVC's
-+     * CRT rejects a zero-sized _IOLBF buffer via its invalid-parameter handler,
-+     * so use the portable zero-sized _IONBF form for both standard streams. */
++    /* Unbuffered stdout/stderr keep diagnostics if killed: MSVC rejects a zero-sized _IOLBF buffer, so use _IONBF. */
 +    std::setvbuf(stdout, nullptr, _IONBF, 0);
 +    std::setvbuf(stderr, nullptr, _IONBF, 0);
      std::fprintf(stderr, "psxrecomp: main() entered\n");
@@ -2033,7 +1949,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  
      /* Install crash handlers early so they catch issues during init too.
       * Writes psx_last_run_report.json on signal/SEH/atexit/fail-fast. */
-@@ -5047,7 +6074,11 @@
+@@ -5047,7 +5990,11 @@
      bool ws_offered = true; /* game.toml [widescreen] offer; false hides the launcher toggle + clamps 4:3 */
      bool ws_ultrawide_offered = false;
      bool ws_adaptive_view_supported = false;
@@ -2045,7 +1961,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
      bool skip_fmv_offered = true;
      bool turbo_loads_offered = true;
      bool vulkan_offered = false; /* game.toml [video] offer_vulkan; developer opt-in for launcher visibility */
-@@ -5084,6 +6115,7 @@
+@@ -5084,6 +6031,7 @@
       * path is resolved (arm_text_image_guard). */
      std::string text_guard_exe_path;
      uint32_t    text_guard_load_addr = 0;
@@ -2053,7 +1969,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  
      if (game_config_path) {
          try {
-@@ -5095,7 +6127,7 @@
+@@ -5095,7 +6043,7 @@
              game_has_disc_crc = gc.has_disc_crc;
              game_disc_crc     = gc.disc_crc;
              if (!gc.discs.empty()) resolved_disc = gc.discs.front();
@@ -2062,7 +1978,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
              if (gc.runtime.has_window_title) window_title  = gc.runtime.window_title;
              if (gc.runtime.has_debug_port)   debug_port    = gc.runtime.debug_port;
              /* On-the-fly string translation / localization (framework feature —
-@@ -5135,6 +6167,8 @@
+@@ -5135,6 +6083,8 @@
              for (uint32_t site : gc.vsync_event_horizon_extra_sites)
                  psx_vsync_query_hle_add_extra_event_horizon_site(site);
              g_video_scale      = gc.runtime.video_supersampling;
@@ -2071,7 +1987,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
              g_video_aa         = gc.runtime.video_antialiasing;
              g_video_texfilter  = gc.runtime.video_texture_filter;
              g_video_renderer   = gc.runtime.video_renderer;
-@@ -5143,8 +6177,10 @@
+@@ -5143,8 +6093,10 @@
              g_video_aspect_den = gc.runtime.video_aspect_den;
              g_low_latency_input = gc.runtime.video_low_latency_input ? 1 : 0;
              g_video_vsync       = gc.runtime.video_vsync;
@@ -2082,7 +1998,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
              g_fmv_skip_total_table = gc.runtime.video_fmv_skip_total_table;
              g_fmv_skip_movie_id    = gc.runtime.video_fmv_skip_movie_id;
              if (gc.runtime.video_fmv_skip_end_total)
-@@ -5308,8 +6344,10 @@
+@@ -5308,8 +6260,10 @@
              ws_offered = gc.ws_offered;
              ws_ultrawide_offered = gc.ws_ultrawide_offered;
              ws_adaptive_view_supported = gc.ws_adaptive_view;
@@ -2093,7 +2009,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
              skip_fmv_offered = gc.runtime.video_offer_skip_fmv;
              turbo_loads_offered = gc.runtime.offer_turbo_loads;
              vulkan_offered = gc.vulkan_offered;
-@@ -5336,6 +6374,7 @@
+@@ -5336,6 +6290,7 @@
                  p1_mode = gc.runtime.default_p1_mode;
                  p2_mode = gc.runtime.default_p2_mode;
              }
@@ -2101,7 +2017,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
              ctrl_locked_p1_mode = gc.runtime.default_p1_mode;
              ctrl_locked_p2_mode = gc.runtime.default_p2_mode;
              ctrl_allow_hybrid = gc.runtime.controller_allow_hybrid;
-@@ -5363,6 +6402,7 @@
+@@ -5363,6 +6318,7 @@
               * user's disc image instead. */
              text_guard_exe_path  = gc.exe_path.string();
              text_guard_load_addr = gc.load_address;
@@ -2109,7 +2025,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
              /* HLE-tier scheduler subsystem replacement default (env
               * PSX_HLE_SCHEDULER still wins; latched at first dispatch). */
              psx_hle_scheduler_set_default(gc.runtime.hle_scheduler ? 1 : 0);
-@@ -5386,11 +6426,12 @@
+@@ -5386,11 +6342,12 @@
               * precompiled overlay DLLs. */
              if (gc.runtime.overlay_cache) {
                  std::filesystem::path exe_dir = exe_dir_from_argv(argv[0]);
@@ -2125,7 +2041,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
                      if (!overlay_capture_set_path(captures_path.string().c_str()))
                          throw std::runtime_error("overlay capture path exceeds runtime limit");
                  }
-@@ -5487,7 +6528,7 @@
+@@ -5487,7 +6444,7 @@
                                      game_config_path ? game_config_path : "game.toml")) +
                                  " --recompiler " + cmd_quote((tk / "psxrecomp-game.exe").string()) +
                                  " --runtime-include " + cmd_quote((tk / "include").string()) +
@@ -2134,7 +2050,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
                                  (g_psx_cps_mode ? " --cps" : "") +
                                  " --compiler tcc --tcc " +
                                  cmd_quote((tk / "tcc" / "tcc.exe").string());
-@@ -5567,6 +6608,10 @@
+@@ -5567,6 +6524,10 @@
          }
      }
  
@@ -2145,7 +2061,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
      if (!game_name.empty()) s_picker_game_name = game_name;
  
      /* Layer the launcher-written settings.toml (next to the exe) over the
-@@ -5579,7 +6624,10 @@
+@@ -5579,7 +6540,10 @@
      bool has_netplay_player_name = false;
      {
          std::filesystem::path settings_path =
@@ -2157,7 +2073,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  #if defined(RECOMP_LAUNCHER)
          g_lnch_settings_path = settings_path;
  #endif
-@@ -5640,6 +6688,10 @@
+@@ -5640,6 +6604,10 @@
           * Config + env own it until a launcher toggle exists; if one is
           * added, restore this line together with the UI. The seed write
           * below still persists the effective value for inspection. */
@@ -2168,7 +2084,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
          if (us.has_bios_hle)       bios_hle_requested = us.bios_hle;
          if (us.has_fullscreen)     g_fullscreen      = us.fullscreen;
          if (us.has_aspect_ratio) {
-@@ -5648,6 +6700,10 @@
+@@ -5648,6 +6616,10 @@
          }
          if (us.has_adaptive_view) g_ws_adaptive_view = us.adaptive_view;
          if (us.has_spu_hq)         g_audio_spu_hq    = us.spu_hq;
@@ -2179,7 +2095,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
          /* Bundled BIOS: ignore any persisted bios_path (same clamp-as-well-
           * as-hide treatment as lock_mode / ws_offered below) so a stale
           * settings.toml or launcher-less build can never point a bundled
-@@ -5669,9 +6725,9 @@
+@@ -5669,9 +6641,9 @@
          }
          if (us.has_disc_path && !disc_override_path)
              resolved_disc = normalize_disc_path_for_launch(us.disc_path);
@@ -2192,7 +2108,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
          if (us.has_memcard1_enabled) memcard1_enabled = us.memcard1_enabled;
          if (us.has_memcard2_enabled) memcard2_enabled = us.memcard2_enabled;
          if (us.has_language) resolved_language = us.language;
-@@ -5682,10 +6738,30 @@
+@@ -5682,10 +6654,28 @@
          if (us.has_deadzone)  resolved_deadzone = us.deadzone;
          if (us.has_low_latency_input) g_low_latency_input = us.low_latency_input ? 1 : 0;
          if (us.has_vsync)             g_video_vsync       = us.vsync;
@@ -2202,9 +2118,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
          if (us.has_frame_interpolation_fps)
              g_frame_interpolation_fps = us.frame_interpolation_fps;
 +#if defined(PSX_FRAME_INTERPOLATION_GEOMETRY_DEFAULT)
-+        /* Migrate legacy image-blend preferences to geometry at startup.
-+         * Explicit environment selection below can still opt into legacy
-+         * modes for one-run comparisons. */
++        /* Migrate legacy image-blend preferences to geometry. Environment selection below can still opt into legacy modes. */
 +        g_frame_interpolation_blend_default =
 +            PSX_HOST_FRAME_INTERPOLATION_GEOMETRY;
 +        g_frame_interpolation_blend = g_frame_interpolation_blend_default;
@@ -2223,14 +2137,12 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
          if (us.has_parappa_timing_mode || us.has_parappa_timing_extra_early ||
              us.has_parappa_timing_extra_late) {
              parappa_apply_timing_setting(
-@@ -5782,25 +6858,65 @@
+@@ -5782,25 +6772,63 @@
          g_video_aspect_den = ws_offered ? 9 : 3;
      }
      if (!ws_adaptive_view_supported) g_ws_adaptive_view = false;
 -    g_ws_adaptive_max_num = ws_ultrawide_offered ? 21 : 16;
-+    /* A title that explicitly opts into resize-driven presentation has
-+     * accepted the runtime's full validated aspect range. Launcher-only
-+     * ultrawide support remains capped at its historical 21:9 choice. */
++    /* A title opting into resize-driven presentation accepts the full aspect range, launcher ultrawide stays capped at 21:9. */
 +    g_ws_adaptive_max_num = ws_adaptive_view_supported
 +        ? 32 : (ws_ultrawide_offered ? 21 : 16);
      g_ws_adaptive_max_den = 9;
@@ -2294,7 +2206,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
              strcmp(e, "1") == 0) {
              g_frame_interpolation_blend_default =
                  PSX_MOD_FRAME_INTERPOLATION_MOTION_ADAPTIVE;
-@@ -5810,6 +6926,11 @@
+@@ -5810,6 +6838,11 @@
          }
          g_frame_interpolation_blend = g_frame_interpolation_blend_default;
      }
@@ -2306,7 +2218,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
      {
          const char *mode_env = std::getenv("PSX_PARAPPA_TIMING_MODE");
          const char *early_env = std::getenv("PSX_PARAPPA_TIMING_EXTRA_EARLY");
-@@ -5827,9 +6948,7 @@
+@@ -5827,9 +6860,7 @@
       * not with the later renderer/port overrides. Explicit slot paths from a
       * shared settings.toml must not escape the isolated directory. */
      if (cli_memcard_dir) {
@@ -2317,7 +2229,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
          memcard_dir = memcard_dir.lexically_normal();
          memcard1_path.clear();
          memcard2_path.clear();
-@@ -5892,7 +7011,7 @@
+@@ -5892,7 +6923,7 @@
      {
          std::string mod_error;
          if (!PSXRecompV4::mod_runtime_initialize(
@@ -2326,14 +2238,12 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
                  game_entry_pc, text_guard_exe_path, &mod_error)) {
              std::fprintf(stderr, "psxrecomp: mods unavailable: %s\n",
                           mod_error.c_str());
-@@ -5916,7 +7035,13 @@
+@@ -5916,7 +6947,11 @@
      if (want_launcher) {
          if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMECONTROLLER) == 0) {
              int lr = 2; /* 0 = launch, 1 = quit, 2 = unavailable */
 -            PSXRecompV4::UserSettings seed;
-+            /* Merge launcher edits into the canonical file instead of
-+             * constructing a fresh snapshot.  Game-owned sections and settings
-+             * not exposed by recomp-ui must survive a later launcher save. */
++            /* Merge launcher edits into the canonical file: game-owned and recomp-ui-hidden settings must survive a later save. */
 +            PSXRecompV4::UserSettings seed =
 +                PSXRecompV4::load_user_settings(
 +                    user_dir_from_argv(argv[0]) / "settings.toml");
@@ -2341,32 +2251,30 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
              seed.renderer = g_video_renderer;             seed.has_renderer = true;
              seed.supersampling = g_video_scale;           seed.has_supersampling = true;
              seed.antialiasing = g_video_aa;               seed.has_antialiasing = true;
-@@ -6374,9 +7499,9 @@
+@@ -6374,9 +7409,8 @@
                  p1_mode = seed.p1_mode; p2_mode = seed.p2_mode;
                  if (seed.has_deadzone) resolved_deadzone = seed.deadzone;
                  g_video_win_w = seed.window_width;
 -                /* Persist the user's choices next to the exe. */
-+                /* Persist the user's choices in the user folder. */
                  PSXRecompV4::save_user_settings(
 -                    exe_dir_from_argv(argv[0]) / "settings.toml", seed);
 +                    user_dir_from_argv(argv[0]) / "settings.toml", seed);
              }
          }
      }
-@@ -6415,6 +7540,12 @@
+@@ -6415,6 +7449,11 @@
      g_turbo_load_release_frames = TURBO_LOADS_RELEASE_FRAMES;
      if (!turbo_loads_offered)
          g_turbo_loads_enabled = 0;
 +#ifdef PSX_DISABLE_FRAME_INTERPOLATION
-+    /* Clamp each runtime session after configuration and launcher selection.
-+     * Legacy settings and environment variables cannot revive this feature. */
++    /* Legacy settings and environment variables cannot revive this feature. */
 +    g_frame_interpolation = 0;
 +    g_frame_interpolation_fps = 0;
 +#endif
      g_frame_interpolation_blend = g_frame_interpolation_blend_default;
      mod_runtime_activate_plugins();
      if (g_mod_controller_mode_override[0] >= 0)
-@@ -6450,9 +7581,7 @@
+@@ -6450,9 +7489,7 @@
      if (cli_renderer   >= 0) g_video_renderer = cli_renderer;
      if (cli_window_title)    window_title     = cli_window_title;
      if (cli_memcard_dir) {
@@ -2377,7 +2285,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
          memcard_dir = memcard_dir.lexically_normal();
          memcard1_path.clear();
          memcard2_path.clear();
-@@ -6527,6 +7656,22 @@
+@@ -6527,6 +7564,22 @@
      gr_set_scale(g_video_scale);
      g_video_scale = gr_scale(); /* reflect any clamp / alloc fallback */
      gr_set_texture_filter(g_video_texfilter);
@@ -2400,7 +2308,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
      /* Display aspect. Identity at the default 4:3. The present letterbox uses
       * this aspect; native-wide fills it with a genuinely wider frame (no
       * stretch), squash mode stretches the 4:3 frame into it. */
-@@ -6633,6 +7778,7 @@
+@@ -6633,6 +7686,7 @@
       * the local EXE file (dev checkouts) and the disc image (every install). */
      if (game_config_path)
          arm_text_image_guard(text_guard_exe_path, text_guard_load_addr,
@@ -2408,7 +2316,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
                               disc_path_str);
      mod_runtime_enable_disc_patches();
      {
-@@ -6691,6 +7837,7 @@
+@@ -6691,6 +7745,7 @@
  
    if (g_headless) {
      std::fprintf(stdout, "psxrecomp: headless frontend enabled\n");
@@ -2416,7 +2324,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
    } else {
      /* ---- SDL init ---- */
      /* Scale quality governs SDL's logical-size -> window scaling. Linear when
-@@ -6763,6 +7910,11 @@
+@@ -6763,6 +7818,11 @@
       * the image), 2 = exclusive fullscreen (real display-mode change), 0 =
       * windowed. Matches the in-game Alt+Enter / Cmd+Ctrl+F hotkey behaviour. */
      win_flags |= psx_fullscreen_flag_for_mode(g_fullscreen);
@@ -2428,14 +2336,12 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
      /* Open at the user-chosen window size (default 1280 wide) instead of the
       * old hardcoded 640x480, so the game doesn't boot into a tiny window. The
       * height follows the configured display aspect (4:3 native, wider for the
-@@ -6780,6 +7932,17 @@
+@@ -6780,6 +7840,15 @@
          std::fprintf(stderr, "SDL_CreateWindow failed: %s\n", SDL_GetError());
          return 1;
      }
 +#if defined(PSX_SDL3)
-+    /* SDL3's creation flag can request fullscreen but cannot select its
-+     * exclusive display mode. Complete a configured exclusive startup now,
-+     * before renderer/context creation, so mode 2 is not silently borderless. */
++    /* SDL3's creation flag cannot select the exclusive display mode: finish an exclusive startup before context creation. */
 +    if (g_fullscreen == 2 && !window_hidden &&
 +        !psx_apply_window_fullscreen_mode(sdl_window, g_fullscreen)) {
 +        std::fprintf(stderr,
@@ -2446,7 +2352,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  
      /* Sync-to-host-refresh: with SDL PRESENTVSYNC on, a fixed 59.94 Hz wall-clock
       * pacer fights a 60.00 Hz panel — rendered frames slip onto an uneven vblank
-@@ -6909,6 +8072,7 @@
+@@ -6909,6 +7978,7 @@
          std::fprintf(stderr, "failed to allocate %dx staging buffer\n", g_video_scale);
          return 1;
      }
@@ -2454,7 +2360,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  
    if (!g_gl_active && !g_vk_active) {
      sdl_texture = SDL_CreateTexture(
-@@ -6924,6 +8088,12 @@
+@@ -6924,6 +7994,12 @@
      SDL_SetTextureScaleMode(sdl_texture,
                              g_video_aa ? SDL_ScaleModeLinear : SDL_ScaleModeNearest);
    }
@@ -2467,7 +2373,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
    }
  
      /* Register vblank presentation callback. */
-@@ -7012,6 +8182,9 @@
+@@ -7012,6 +8088,9 @@
              bios_hle_requested = (e[0] && e[0] != '0');
          if (const char* e = std::getenv("PSX_BIOS_HLE_KEEP_INTRO"))
              bios_hle_keep_intro = (e[0] && e[0] != '0');
@@ -2477,7 +2383,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
  
          PsxBiosHleRequest req;
          req.bios_hle               = bios_hle_requested ? 1 : 0;
-@@ -7062,6 +8235,10 @@
+@@ -7062,6 +8141,10 @@
      if (game_entry_pc != 0) {
          savestate_configure(memcard_dir.string().c_str(),
                              memory_get_bios_checksum(), game_entry_pc);
@@ -2488,7 +2394,7 @@ index 81e048307ec9dd9fc7234a1e6285042ffab16457..a476a7f51c44d31c99dd66256c1eb526
          /* Headless / agent load: PSX_LOAD_SLOT=N stages F1..F12 load (0..11)
           * at the next safe block boundary after boot. */
          if (const char *ls = std::getenv("PSX_LOAD_SLOT")) {
-@@ -7260,7 +8437,8 @@
+@@ -7260,7 +8343,8 @@
       * see exactly which targets led to the null PC. (CLAUDE.md ring-buffer
       * model: consume the always-on ring after the fact, not arm-and-time.) */
      {

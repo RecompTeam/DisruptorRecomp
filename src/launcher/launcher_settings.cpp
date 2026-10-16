@@ -36,6 +36,7 @@ constexpr Placement placed[] = {
     {"disruptor.occlusion_strength", Page::enhancements, nullptr, true},
     {"disruptor.skip_intro", Page::enhancements, "Startup"},
     {"disruptor.modern_controls", Page::controls, "Scheme"},
+    {"disruptor.number_keys", Page::controls},
     {"disruptor.selection_wheels", Page::controls},
     {"disruptor.mouse_aim", Page::controls, "Mouse"},
     {"disruptor.high_precision_camera", Page::controls, nullptr, true},
@@ -206,7 +207,10 @@ bool SettingsFile::reset(Page page) {
     });
 }
 
-bool experimental(const Option& option) { return std::string_view(option.key) == "disruptor.vertical_look"; }
+bool experimental(const Option& option) {
+    const std::string_view key = option.key;
+    return key == "disruptor.vertical_look" || key == "disruptor.number_keys" || key == "disruptor.selection_wheels";
+}
 
 bool shipped(const Option& option) {
     const auto same = [&](const char* key) { return std::string_view(key) == option.key; };

@@ -1131,12 +1131,47 @@ void test_a_wall_in_front_stops_a_body() {
         g_projected.clear();
         add_face(70u, kPackets + 192u, wall(4000u));
         record(cpu);
-        expect(read_half(key_at(5u)) == 536u, "a wall within the body's reach does not hold it");
+        expect(read_half(key_at(5u)) == 560u, "a wall within the body's reach holds it when the body's middle is past it, as a shut door over a pickup");
+        cpu = body_before_its_record(5u, 600u);
+        g_projected.clear();
+        add_face(70u, kPackets + 192u, {{{100.0, 115.0, 4000u}, {260.0, 115.0, 4000u}, {100.0, 160.0, 4000u}, {260.0, 160.0, 4000u}}});
+        record(cpu);
+        expect(read_half(key_at(5u)) == 536u, "but not over the lower half of the box only, as the riser of a step before a body");
+        cpu = body_before_its_record(5u, 600u);
+        g_projected.clear();
+        add_face(70u, kPackets + 192u, {{{100.0, 60.0, 3500u}, {260.0, 60.0, 12000u}, {100.0, 160.0, 3500u}, {260.0, 160.0, 12000u}}});
+        record(cpu);
+        expect(read_half(key_at(5u)) == 536u, "nor a wall within its reach with the body's middle on the eye's side, as one it lies along");
+        cpu = body_before_its_record(5u, 600u);
+        g_projected.clear();
+        add_face(70u, kPackets + 192u, {{{215.0, 60.0, 5500u}, {260.0, 60.0, 7040u}, {215.0, 160.0, 5500u}, {260.0, 160.0, 7040u}}});
+        record(cpu);
+        expect(read_half(key_at(5u)) == 536u, "nor a slanted wall the body's middle is past whose part over the box lies behind the body");
         cpu = body_before_its_record(5u, 600u);
         g_projected.clear();
         add_face(70u, kPackets + 192u, kFloor);
         record(cpu);
         expect(read_half(key_at(5u)) == 536u, "nor the floor in front of it");
+        cpu = body_before_its_record(5u, 600u);
+        g_projected.clear();
+        add_face(70u, kPackets + 192u, {{{100.0, 66.67, 1200u}, {260.0, 66.67, 1200u}, {100.0, 93.33, 2400u}, {260.0, 93.33, 2400u}}});
+        record(cpu);
+        expect(read_half(key_at(5u)) == 600u, "a level face over the top of the body, nearer than its reach, keeps the game's key, as a floor over a drone does");
+        cpu = body_before_its_record(5u, 600u);
+        g_projected.clear();
+        add_face(70u, kPackets + 192u, {{{100.0, 66.67, 1200u}, {150.0, 66.67, 1200u}, {100.0, 93.33, 2400u}, {150.0, 93.33, 2400u}}});
+        record(cpu);
+        expect(read_half(key_at(5u)) == 600u, "so does a floor edge over one side of the body, away from its middle");
+        cpu = body_before_its_record(5u, 600u);
+        g_projected.clear();
+        add_face(70u, kPackets + 192u, {{{100.0, 66.67, 3000u}, {260.0, 66.67, 3000u}, {100.0, 93.33, 6000u}, {260.0, 93.33, 6000u}}});
+        record(cpu);
+        expect(read_half(key_at(5u)) == 536u, "a level face over the top of the body within its reach does not hold it");
+        cpu = body_before_its_record(5u, 600u);
+        g_projected.clear();
+        add_face(70u, kPackets + 192u, {{{100.0, 125.0, 1200u}, {260.0, 125.0, 1200u}, {100.0, 135.0, 2400u}, {260.0, 135.0, 2400u}}});
+        record(cpu);
+        expect(read_half(key_at(5u)) == 536u, "nor a level face in front over the lower half of the box only, as the floor before a body lying on it is");
         cpu = body_before_its_record(5u, 600u);
         g_projected.clear();
         add_face(70u, kPackets + 192u, wall(2000u, 280.0, 320.0));
@@ -1255,6 +1290,84 @@ void test_walls_hold_bodies_in_order() {
 }
 
 
+/* The fourth funnel projects its actor again, at `depth` this time. */
+void project_at(CPUState &cpu, std::int32_t depth) {
+    const std::uint32_t reciprocal = static_cast<std::uint32_t>(65536 / depth);
+    at_the_seam(cpu, kTestFunnels[3], 100, 37, depth);
+    put(kTable + 2u * static_cast<std::uint32_t>(depth), reciprocal, 2);
+    cpu.gpr[18] = (448u * 160u * reciprocal) >> 16;
+    cpu.gpr[19] = (224u * 160u * reciprocal) >> 16;
+    disruptor_sprite_depth_instruction_hook(&cpu, kTestFunnels[3].projection, kStoreWord, 1);
+}
+
+void test_a_face_sorted_behind_a_body_it_hides() {
+    constexpr Box kFeet{.left = 140, .top = 136, .right = 240, .bottom = 146};
+    {
+        CPUState cpu = body_before_its_record(5u, 600u);
+        g_projected.clear();
+        add_face(76u, kPackets + 192u, wall(4000u));
+        record(cpu);
+        expect(read_half(key_at(5u)) == 608u, "a face the game sorted behind a body lying past it takes the body to its slot, drawn before it");
+        shadow(cpu, kFeet);
+        expect(cpu.gpr[23] == 608u, "and the body's shadow with it");
+        cpu = body_before_its_record(5u, 600u);
+        g_projected.clear();
+        add_face(79u, kPackets + 192u, wall(4000u));
+        record(cpu);
+        expect(read_half(key_at(5u)) == 632u, "as far as the game's own lead and a slot more");
+        cpu = body_before_its_record(5u, 600u);
+        g_projected.clear();
+        add_face(80u, kPackets + 192u, wall(4000u));
+        record(cpu);
+        expect(read_half(key_at(5u)) == 536u, "but no farther");
+        cpu = body_before_its_record(5u, 600u);
+        g_projected.clear();
+        add_face(76u, kPackets + 192u, wall(2000u, 280.0, 320.0));
+        record(cpu);
+        expect(read_half(key_at(5u)) == 536u, "nor for a face that is not over the body");
+        cpu = body_before_its_record(5u, 600u);
+        g_projected.clear();
+        add_face(76u, kPackets + 192u, {{{100.0, 60.0, 3500u}, {260.0, 60.0, 12000u}, {100.0, 160.0, 3500u}, {260.0, 160.0, 12000u}}});
+        record(cpu);
+        expect(read_half(key_at(5u)) == 536u, "nor for one whose plane has the body's middle on the eye's side");
+        cpu = body_before_its_record(5u, 600u);
+        g_projected.clear();
+        add_face(76u, kPackets + 192u, {{{100.0, 60.0, 2651u}, {240.0, 60.0, 33445u}, {100.0, 160.0, 2651u}, {240.0, 160.0, 33445u}}});
+        record(cpu);
+        expect(read_half(key_at(5u)) == 536u, "nor for a wall nearer than the body's reach that the body is not past, as one it lies along");
+        cpu = body_before_its_record(5u, 600u);
+        g_projected.clear();
+        add_face(76u, kPackets + 192u, {{{100.0, 160.0, 2000u}, {260.0, 160.0, 2000u}, {100.0, 115.0, 2000u}, {260.0, 60.0, 2000u}}});
+        record(cpu);
+        expect(read_half(key_at(5u)) == 608u, "a quad whose first triangle lies over the lower half only still takes the body back by its second");
+        cpu = body_before_its_record(5u, 600u);
+        g_projected.clear();
+        add_face(76u, kPackets + 192u, wall(4000u));
+        put(kPackets + 192u, 12u << 24 | 0x00FFFFFFu, 4);
+        record(cpu);
+        expect(read_half(key_at(5u)) == 536u, "a chain that ends before the body's slot takes it nowhere, a face on the way or not");
+        cpu = body_before_its_record(5u, 600u);
+        g_projected.clear();
+        add_face(76u, kPackets + 192u, wall(4000u));
+        put(kPackets + 192u, 12u << 24 | ((kPackets + 192u) & 0x00FFFFFFu), 4);
+        record(cpu);
+        expect(read_half(key_at(5u)) == 536u, "nor one that runs in a circle after the face");
+    }
+    {
+        CPUState cpu = body_before_its_record(0u, 600u);
+        g_projected.clear();
+        add_face(76u, kPackets + 192u, wall(4000u));
+        record(cpu);
+        project_at(cpu, 400);
+        another_record(cpu, 1u, 601u);
+        expect(read_half(key_at(0u)) == 608u && read_half(key_at(1u)) == 601u,
+               "a body in front of that face, sorted farther by the game, stays in front of it: no nearer than its own key");
+    }
+    g_projected.clear();
+    forget();
+}
+
+
 void test_the_nearest_depth_over_a_box() {
     const auto near = [](const Box &box, std::array<std::array<double, 3>, 3> corners) {
         for (auto &corner : corners) corner[2] = 1.0 / corner[2];
@@ -1295,6 +1408,7 @@ int main() {
     test_the_shadow_keeps_the_order_of_what_it_takes_along();
     test_a_wall_in_front_stops_a_body();
     test_walls_hold_bodies_in_order();
+    test_a_face_sorted_behind_a_body_it_hides();
     test_the_nearest_depth_over_a_box();
     expect(g_places.empty() && g_sizes.empty(), "no test leaves a place or a size behind");
     if (g_failures) return 1;
