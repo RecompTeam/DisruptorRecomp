@@ -171,6 +171,8 @@ for constant in (
     "constexpr uint32_t kMovieTables = 0x8005701Cu, kMovieTable = 0x28u;",
     "constexpr std::array<uint32_t, 3> kWidths = {0x80056E40u, 0x80056E80u, 0x80056EC4u};",
     "constexpr uint32_t kMenuDraw = 0x8001A46Cu;",
+    "constexpr uint32_t kStripDraw = 0x800429DCu;",
+    "constexpr uint32_t kMenuX = 5, kStripX = 6;",
     "constexpr size_t kCallWindow = 14;",
     'constexpr char kHomeBoot[] = "SLUS_002.24";',
 ):
@@ -179,12 +181,12 @@ require(
     "    if (!open_volume(home, mine) || !mine.files.count(kHomeBoot) || !open_volume(other, theirs)) {" in disc
     and "    if (language == known.end()) {" in disc
     and '        {"SLES_005.64", "French", 0x80057A68u, {0x8005786Cu, 0x800578ACu, 0x800578F0u}, true,' in disc
-    and "         0x8001A4E0u}," in disc
+    and "         0x8001A4E0u, 0x80042D64u}," in disc
     and "         true, Hints::kSame, 1, {{'k', \"j\"}}," in disc
     and '        {"SLES_005.65", "German", 0x80057548u, {0x80057344u, 0x80057384u, 0x800573C8u}, true,' in disc
     and "         true, Hints::kSame, 4, {{'k', \"j\"}, {'l', \"\\x8F\"}, {'m', \"\\x90\"}, {'n', \"SS\"}}," in disc
-    and "         0x8001A518u}," in disc
-    and '        {"SLPS_008.04", "Japanese", 0x800543DCu, {}, false, false, Hints::kTall, 0, {}, {}, {}, {}, {}, {}, 0},' in disc,
+    and "         0x8001A518u, 0x80042E08u}," in disc
+    and '        {"SLPS_008.04", "Japanese", 0x800543DCu, {}, false, false, Hints::kTall, 0, {}, {}, {}, {}, {}, {}, 0, 0},' in disc,
     "the game disc must be the US one and the other disc one of the versions the build has tables for",
 )
 require(
@@ -250,11 +252,14 @@ require(
     and "    step = to - from;\n    return step > kAnyX && step <= 32767;" in disc
     and "            if (mine[i].has_x && theirs[j].has_x) {\n"
     "                if (mine[i].x != theirs[j].x) routine.push_back({mine[i].at + 8, mine[i].x, theirs[j].x});\n"
-    "            } else if (relative_x(mine[i].x_word, theirs[j].x_word, step) || relative_origin(mine[i], theirs[j], step)) {\n"
+    "            } else if (relative_x(mine[i].x_word, theirs[j].x_word, drawn_by.x_register, step) || relative_origin(mine[i], theirs[j], step)) {\n"
     "                if (step != 0) routine.push_back({mine[i].at + 8, kAnyX, step});\n"
     "            } else {\n"
     "                whole = false;" in disc
-    and "    if (mine >> 26 != 0x09 || mine >> 16 != theirs >> 16 || (mine >> 16 & 31) != 5 || (mine >> 21 & 31) == 0) return false;" in disc
+    and "    if (mine >> 26 != 0x09 || mine >> 16 != theirs >> 16 || (mine >> 16 & 31) != reg || (mine >> 21 & 31) == 0) return false;" in disc
+    and "            if (writes(word(at), x_register)) {" in disc
+    and "    std::vector<Place> places = other_places(home, other, {kMenuDraw, language.menu_draw, kMenuX});\n"
+    "    const std::vector<Place> lines = other_places(home, other, {kStripDraw, language.strip_draw, kStripX});\n" in disc
     and "    return step > kAnyX && step <= 32767;" in disc
     and "    return value > kAnyX && value <= 32767;" in disc
     and "using pack_rules::kAnyX;" in disc

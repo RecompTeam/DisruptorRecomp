@@ -202,6 +202,8 @@ uint32_t addiu_x(int x) { return 0x24050000u | static_cast<uint32_t>(x & 0xFFFF)
 constexpr uint32_t kMoveZero = 0x00002821u;  /* addu $a1, $zero, $zero */
 constexpr uint32_t kLoadX = 0x8FA50010u;  /* lw $a1, 16($sp) */
 constexpr uint32_t kOtherDraw = 0x8001A4E0u;
+const disruptor::StringRoutine kMenu{disruptor::kMenuDraw, kOtherDraw, 5};
+constexpr uint32_t kOtherStrip = 0x80042D64u;
 
 struct PackEntry {
     uint32_t address;
@@ -293,6 +295,13 @@ void test_the_pack_pairs_the_two_executables() {
     expect(disruptor::build_pack(home, other, language, pack, why) && unpack(pack).size() == 5 && g_unpacked_places.size() == 1 &&
                g_unpacked_places[0].returns_to == 0x80010000u + 0x1800u + 64 + 56 + 8 && g_unpacked_places[0].from == 20 && g_unpacked_places[0].to == -300,
            "the pack ends with the places, each a return address and two x in 16 bits");
+    add_call(home, 4, 0x3406008Du, disruptor::kStripDraw);
+    add_call(other, 4, 0x34060078u, kOtherStrip);
+    language.strip_draw = kOtherStrip;
+    expect(disruptor::build_pack(home, other, language, pack, why) && unpack(pack).size() == 5 && g_unpacked_places.size() == 2 &&
+               g_unpacked_places[0].from == 20 && g_unpacked_places[1].from == 141 && g_unpacked_places[1].to == 120,
+           "the places of the pause menu's lines follow the menu's");
+    language.strip_draw = 0;
     home.resize(0x2000);
     other.resize(0x2000);
 
@@ -389,7 +398,7 @@ void test_places_come_from_calls_that_pair_up() {
         Bytes home(0x800, 0), other(0x800, 0);
         for (const auto &[id, x] : mine) add_call(home, id, x, disruptor::kMenuDraw);
         for (const auto &[id, x] : theirs) add_call(other, id, x, kOtherDraw);
-        return disruptor::other_places(home, other, kOtherDraw);
+        return disruptor::other_places(home, other, kMenu);
     };
     const auto returns_to = [](size_t call) { return 0x80010000u + static_cast<uint32_t>(call * 64 + 56 + 8); };
     std::vector<disruptor::Place> found = places({{1, ori_x(48)}, {2, ori_x(28)}, {3, ori_x(252)}, {4, ori_x(48)}, {5, addiu_x(-40)}},
@@ -405,7 +414,7 @@ void test_places_come_from_calls_that_pair_up() {
         add_call(other, 1, kMixX, kOtherDraw, 2, {{5, other_input}});
         add_call(home, 2, ori_x(1), disruptor::kMenuDraw);
         add_call(other, 2, ori_x(2), kOtherDraw);
-        return disruptor::other_places(home, other, kOtherDraw).size();
+        return disruptor::other_places(home, other, kMenu).size();
     };
     const auto behind = [](uint32_t last_write, const std::map<size_t, uint32_t> &also) {
         Bytes home(0x800, 0), other(0x800, 0);
@@ -416,7 +425,7 @@ void test_places_come_from_calls_that_pair_up() {
         add_call(other, 1, last_write, kOtherDraw, 2, theirs);
         add_call(home, 2, ori_x(1), disruptor::kMenuDraw);
         add_call(other, 2, ori_x(2), kOtherDraw);
-        return disruptor::other_places(home, other, kOtherDraw).size();
+        return disruptor::other_places(home, other, kMenu).size();
     };
     expect(behind(0x48850000u, {}) == 2, "a move of $a1 to a coprocessor leaves the constant in it");
     expect(behind(0x01095021u, {{4, 0x03E00008u}}) == 0, "a constant from before a return is not the x: it is another routine's");
@@ -432,7 +441,7 @@ void test_places_come_from_calls_that_pair_up() {
         add_call(other, 1, copy, kOtherDraw, 2, {{9, other_fill}, {5, between}});
         add_call(home, 2, ori_x(1), disruptor::kMenuDraw);
         add_call(other, 2, ori_x(2), kOtherDraw);
-        return disruptor::other_places(home, other, kOtherDraw).size();
+        return disruptor::other_places(home, other, kMenu).size();
     };
     expect(linked(kCopyRa, 0x341F003Fu, 0x341F002Bu, 0x01095021u) == 2 && linked(kCopyRa, 0x341F003Fu, 0x341F002Bu, 0x04110001u) == 0 &&
                linked(kCopyRa, 0x341F003Fu, 0x341F002Bu, 0x04100001u) == 0,
@@ -459,10 +468,10 @@ void test_places_come_from_calls_that_pair_up() {
     found = places({{1, 0x24A57FFFu}, {2, ori_x(1)}}, {{1, 0x24A58000u}, {2, ori_x(2)}});
     expect(found.empty(), "a step past what a pack's sixteen bits hold is not carried");
     std::int32_t step = 0;
-    expect(disruptor::relative_x(0x24A5003Eu, 0x24A5002Au, step) && step == -20 && disruptor::relative_x(0x26050005u, 0x26050009u, step) && step == 4,
+    expect(disruptor::relative_x(0x24A5003Eu, 0x24A5002Au, 5, step) && step == -20 && disruptor::relative_x(0x26050005u, 0x26050009u, 5, step) && step == 4,
            "a sum into $a1 from one register in both executables gives the step between the two constants");
-    expect(!disruptor::relative_x(0x24A50005u, 0x26050009u, step) && !disruptor::relative_x(0x24A40005u, 0x24A40009u, step) &&
-               !disruptor::relative_x(0x24050005u, 0x24050009u, step) && !disruptor::relative_x(0x34A50005u, 0x34A50009u, step),
+    expect(!disruptor::relative_x(0x24A50005u, 0x26050009u, 5, step) && !disruptor::relative_x(0x24A40005u, 0x24A40009u, 5, step) &&
+               !disruptor::relative_x(0x24050005u, 0x24050009u, 5, step) && !disruptor::relative_x(0x34A50005u, 0x34A50009u, 5, step),
            "a sum from two registers, into another register, from zero, or no sum at all gives no step");
     constexpr uint32_t kCopyS1 = 0x02202821u, kCopyV1 = 0x00602821u;  /* addu $a1, $s1, $zero and addu $a1, $v1, $zero */
     /* A call with a constant x whose stretch fills a register, then a call that copies the register into $a1, then one with a constant x. */
@@ -479,7 +488,7 @@ void test_places_come_from_calls_that_pair_up() {
         add_call(other, 2, copy, kOtherDraw);
         add_call(home, 3, ori_x(1), disruptor::kMenuDraw);
         add_call(other, 3, ori_x(2), kOtherDraw);
-        return disruptor::other_places(home, other, kOtherDraw);
+        return disruptor::other_places(home, other, kMenu);
     };
     found = traced(kCopyS1, 0x3411003Fu, 0x3411002Bu);
     expect(found.size() == 2 && found[0].returns_to == returns_to(1) && found[0].home_x == -32768 && found[0].other_x == -20 && found[1].home_x == 1,
@@ -494,14 +503,14 @@ void test_places_come_from_calls_that_pair_up() {
         Bytes home(0x800, 0), other(0x800, 0);
         add_call(home, 1, kCopyV1, disruptor::kMenuDraw, 2, {{9, 0x3403003Fu}, {5, between}});
         add_call(other, 1, kCopyV1, kOtherDraw, 2, {{9, 0x3403002Bu}, {5, between}});
-        return disruptor::other_places(home, other, kOtherDraw);
+        return disruptor::other_places(home, other, kMenu);
     };
     expect(in_one_stretch(0x01095021u).size() == 1 && in_one_stretch(0x0320F809u).empty(),
            "a register calls do not keep is traced where no call lies between, and a call through a register is a call");
-    expect(disruptor::copied_into_a1(kCopyS1) == 17 && disruptor::copied_into_a1(0x00112821u) == 17 && disruptor::copied_into_a1(0x02202825u) == 17,
+    expect(disruptor::copied_into(kCopyS1, 5) == 17 && disruptor::copied_into(0x00112821u, 5) == 17 && disruptor::copied_into(0x02202825u, 5) == 17,
            "a copy into $a1 is an addu or an or with $zero on either side");
-    expect(disruptor::copied_into_a1(kMoveZero) == 0 && disruptor::copied_into_a1(0x02302821u) == 0 && disruptor::copied_into_a1(0x02202021u) == 0 &&
-               disruptor::copied_into_a1(0x02202823u) == 0 && disruptor::copied_into_a1(0x34112821u) == 0,
+    expect(disruptor::copied_into(kMoveZero, 5) == 0 && disruptor::copied_into(0x02302821u, 5) == 0 && disruptor::copied_into(0x02202021u, 5) == 0 &&
+               disruptor::copied_into(0x02202823u, 5) == 0 && disruptor::copied_into(0x34112821u, 5) == 0,
            "zero, a sum of two registers, a copy into another register, a difference and an ori whose constant reads as a copy are none");
     Bytes two(0x800, 0), other_two(0x800, 0);
     add_call(two, 1, 0x36050005u, disruptor::kMenuDraw);
@@ -512,7 +521,7 @@ void test_places_come_from_calls_that_pair_up() {
     }
     add_call(two, 2, ori_x(1), disruptor::kMenuDraw);
     add_call(other_two, 2, ori_x(2), kOtherDraw);
-    found = disruptor::other_places(two, other_two, kOtherDraw);
+    found = disruptor::other_places(two, other_two, kMenu);
     expect(found.size() == 1 && found[0].home_x == 1, "a call of another routine moves all the same");
     found = places({{1, ori_x(1)}, {8, ori_x(5)}, {2, ori_x(2)}, {3, ori_x(3)}}, {{1, ori_x(10)}, {9, ori_x(5)}, {2, ori_x(20)}, {3, ori_x(30)}});
     expect(found.size() == 3 && found[1].home_x == 2 && found[2].other_x == 30, "one unpaired call on each side leaves the calls around it trusted");
@@ -532,17 +541,26 @@ void test_places_come_from_calls_that_pair_up() {
     };
     second_call_close_behind(home, 7, disruptor::kMenuDraw);
     second_call_close_behind(other, 8, kOtherDraw);
-    found = disruptor::other_places(home, other, kOtherDraw);
+    found = disruptor::other_places(home, other, kMenu);
     expect(found.empty(), "an x from before the call before is not this call's, and a call with no x of its own keeps its routine's calls");
-    expect(disruptor::other_places(Bytes(0x700, 0), other, kOtherDraw).empty() && disruptor::other_places(home, Bytes(), kOtherDraw).empty(),
+    expect(disruptor::other_places(Bytes(0x700, 0), other, kMenu).empty() && disruptor::other_places(home, Bytes(), kMenu).empty(),
            "an executable too short to hold code gives no places");
     const auto with_between = [](uint32_t between) {
         Bytes mine(0x800, 0), theirs(0x800, 0);
         add_call(mine, 1, ori_x(1), disruptor::kMenuDraw, 6, {{3, between}});
         add_call(theirs, 1, ori_x(2), kOtherDraw, 6, {{3, between}});
-        return disruptor::other_places(mine, theirs, kOtherDraw).size();
+        return disruptor::other_places(mine, theirs, kMenu).size();
     };
     expect(with_between(0x01095021u) == 1 && with_between(0x0320F809u) == 0, "a constant from before a call through a register is not this call's x");
+    const auto lines = [](uint32_t mine_x, uint32_t their_x) {
+        Bytes mine(0x800, 0), theirs(0x800, 0);
+        add_call(mine, 1, mine_x, disruptor::kStripDraw);
+        add_call(theirs, 1, their_x, kOtherStrip);
+        return disruptor::other_places(mine, theirs, {disruptor::kStripDraw, kOtherStrip, 6});
+    };
+    found = lines(0x3406008Du, 0x34060078u);
+    expect(found.size() == 1 && found[0].home_x == 141 && found[0].other_x == 120, "the pause menu's line routine takes its x in $a2");
+    expect(lines(ori_x(141), ori_x(120)).empty(), "a constant in $a1 is none of its x");
 }
 
 void test_the_executable_takes_the_other_tables() {
@@ -791,9 +809,17 @@ void test_the_two_discs_become_one() {
     expect(piece_sector(163, 0).tag == 'F' && disruptor::le32(piece_sector(163, 0).data.data() + 4) == 0x1000 && piece_sector(163, 1).tag == 'U' &&
                piece_sector(163, 0x73800 / 0x800 - 1).data[0] == 0x60,
            "a level has the other disc's header and the US pictures");
-    expect(piece_sector(163, 0x73800 / 0x800).tag == 'F' && piece_sector(163, 0x73800 / 0x800).data[0] == 0xB1 && piece_sector(163, 0x73800 / 0x800 + 1).data[0] == 0xB1 &&
+    const Bytes level_header = piece_sector(163, 0).data;
+    expect(disruptor::le32(level_header.data() + 4 * 79) == 0xB0B0B0B0u && disruptor::le32(level_header.data() + 4 * 80) == 0x260u &&
+               disruptor::le32(level_header.data() + 4 * 81) == 0x160u && disruptor::le32(level_header.data() + 4 * 82) == 0xB0B0B0B0u,
+           "but the header's place of the shadows' picture is the US one, beside the US pictures");
+    expect(piece_sector(163, 0x73800 / 0x800 + 1).tag == 'F' && piece_sector(163, 0x73800 / 0x800 + 1).data[0] == 0xB1 &&
                piece_sector(163, 0x73800 / 0x800 + 2).tag == 'U' && piece_sector(163, 0x73800 / 0x800 + 2).data[0] == 0x62,
            "then the other disc's second part, as long as its header says, then the US disc's later parts");
+    const Bytes placing = piece_sector(163, 0x73800 / 0x800).data;
+    expect(placing[0] == 0x61 && placing[31] == 0x61 && placing[32] == 0xB1 && placing[47] == 0xB1 && placing[48] == 0x61 && placing[91] == 0x61 &&
+               placing[92] == 0xB1 && placing[2047] == 0xB1,
+           "in that second part the tables that place the pictures are the US disc's, as its pictures are");
     expect(entry(306) == entry(163) + 0x73800 + 0x1000 + 0x800 && piece_sector(306, 0).tag == 'U' &&
                entry(311) == entry(306) + disruptor::le32(discs.home_wad.data() + 4 * 311) - discs.home_menu,
            "the menu piece keeps its US size and place in the order");
@@ -969,6 +995,55 @@ void test_discs_that_do_not_fit_are_refused() {
         make_discs(discs);
         disruptor::put_le32(discs.other.data.data() + 230 * kSectorData + discs.other_level + 4, second);
         expect(!disc.build(discs.home, discs.other, why), "so is a level of the other disc whose second part leaves no room for its pictures");
+    }
+    for (const uint32_t word : {70u, 71u, 72u, 73u, 74u}) {
+        Discs discs;
+        make_discs(discs);
+        uint8_t *at = discs.other.data.data() + 230 * kSectorData + discs.other_level + 4 * word;
+        disruptor::put_le32(at, disruptor::le32(at) + 1);
+        expect(!disc.build(discs.home, discs.other, why) && why.find("places its pictures") != std::string::npos,
+               "a level whose tables of its pictures are sized otherwise on the other disc is refused");
+    }
+    {
+        Discs discs;
+        make_discs(discs);
+        for (MemoryImage *image : {&discs.home, &discs.other}) {
+            const uint32_t level = image == &discs.home ? 220 * kSectorData + discs.home_level : 230 * kSectorData + discs.other_level;
+            disruptor::put_le32(image->data.data() + level + 4 * 73, 0x100);
+        }
+        expect(!disc.build(discs.home, discs.other, why) && why.find("places its pictures") != std::string::npos,
+               "so is one whose tables reach past the other disc's second part");
+    }
+    const auto with_words = [](Discs &discs, const std::array<uint32_t, 5> &home_words, const std::array<uint32_t, 5> &other_words) {
+        for (uint32_t index = 0; index < 5; ++index) {
+            disruptor::put_le32(discs.home.data.data() + 220 * kSectorData + discs.home_level + 4 * (70 + index), home_words[index]);
+            disruptor::put_le32(discs.other.data.data() + 230 * kSectorData + discs.other_level + 4 * (70 + index), other_words[index]);
+        }
+    };
+    for (const auto &[home_words, other_words] : {std::pair<std::array<uint32_t, 5>, std::array<uint32_t, 5>>{{4, 8, 1, 2, 1}, {4, 0, 2, 2, 1}},
+                                                  {{4, 8, 1, 3, 0}, {4, 8, 1, 0, 4}}}) {
+        Discs discs;
+        make_discs(discs);
+        with_words(discs, home_words, other_words);
+        expect(!disc.build(discs.home, discs.other, why) && why.find("places its pictures") != std::string::npos,
+               "tables of the same lengths made of other counts are sized otherwise too");
+    }
+    {
+        Discs discs;
+        make_discs(discs);
+        with_words(discs, {4, 8, 1, 130, 1}, {4, 8, 1, 130, 1});
+        expect(disc.build(discs.home, discs.other, why), "tables that run into the second part's next sector are taken");
+        const Bytes head = read(disc, 220).data;
+        const uint32_t first = 220 + (disruptor::le32(head.data() + 4 * 163) + 0x73800) / kSectorData;
+        Bytes composed;
+        for (uint32_t sector = 0; sector < 0x1000 / kSectorData; ++sector) {
+            const Bytes data = read(disc, first + sector).data;
+            composed.insert(composed.end(), data.begin(), data.end());
+        }
+        Bytes expected(0x1000, 0xB1);
+        std::fill_n(expected.begin(), 32, uint8_t{0x61});
+        std::fill_n(expected.begin() + 48, 130 * 16 + 12, uint8_t{0x61});
+        expect(composed == expected, "the whole second part is the other disc's but for the two tables, the second one across a sector's end");
     }
 }
 

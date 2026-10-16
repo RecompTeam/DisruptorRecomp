@@ -127,6 +127,13 @@ Bytes level_like(uint32_t second, uint32_t later, uint32_t pictures, uint8_t val
     disruptor::put_le32(piece.data() + 4, second);
     std::fill(piece.begin() + pictures, piece.begin() + pictures + second, static_cast<uint8_t>(value + 1));
     std::fill(piece.begin() + pictures + second, piece.end(), static_cast<uint8_t>(value + 2));
+    /* Header words 70..74 size the texture tables: 4 records of 8 bytes, a blob of 8, 1 record of 8, then 2 of 16 and 1 of
+     * 12 bytes, so the tables are bytes 0..31 and 48..91 of the second part. */
+    for (const auto &[word, count] : {std::pair<uint32_t, uint32_t>{70, 4}, {71, 8}, {72, 1}, {73, 2}, {74, 1}}) {
+        disruptor::put_le32(piece.data() + 4 * word, count);
+    }
+    disruptor::put_le32(piece.data() + 4 * 80, 0x200u + value);  /* the shadows' picture, x and y told apart */
+    disruptor::put_le32(piece.data() + 4 * 81, 0x100u + value);
     return piece;
 }
 

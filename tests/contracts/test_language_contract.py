@@ -26,6 +26,11 @@ MENU_DRAW = 0x8001A46C
 MENU_DRAW_END = 0x8001A6A8
 MENU_DRAW_HASH = "fff16046098263f730ade1904d023480666e0f9dad1a90373788a2f2f0b286a4"
 MENU_DRAW_TAKES_X = (0x8001A47C, 0x00A09821)  # move $s3, $a1
+# The pause menu's line routine (list, string, x, y), whole, and the instruction that takes x from $a2.
+STRIP_DRAW = 0x800429DC
+STRIP_DRAW_END = 0x80042BB8
+STRIP_DRAW_HASH = "6b5a00ff0109987f4309f88c39514959585b2fc74521a459c7f48d9b9077d0da"
+STRIP_DRAW_TAKES_X = (0x800429F4, 0x00C0A021)  # move $s4, $a2
 JR_RA = 0x03E00008
 # The hint module's three hooked routines and the US calls for a hint, told apart by return address.
 HINT_ROUTINES = (0x80011888, 0x8004D348, 0x8004D410)
@@ -99,9 +104,12 @@ require(
     and "0x80044AE8u" not in source
     and "constexpr int kStringRegister = 4;" in source
     and '        if (!psx_mod_register_function_entry_plugin("disruptor.language.text", routine, text_entry))' in source
-    and '    if (!psx_mod_register_function_entry_plugin("disruptor.language.layout", kMenuDraw, menu_entry))' in source
+    and "    for (const uint32_t routine : {kMenuDraw, kStripDraw}) {\n"
+    '        if (!psx_mod_register_function_entry_plugin("disruptor.language.layout", routine, place_entry))' in source
     and "constexpr uint32_t kMenuDraw = 0x8001A46Cu;" in source
+    and "constexpr uint32_t kStripDraw = 0x800429DCu;" in source
     and "constexpr int kXRegister = 5;" in source
+    and "constexpr int kStripXRegister = 6;" in source
     and "constexpr int kReturnRegister = 31;" in source
     and source.count("psx_mod_register_function_entry_plugin(") == 2,
     "the two routines that return a width must be hooked at their audited entries, with the string in $a0",
@@ -122,10 +130,12 @@ require(
     and "    if (!changed || words.empty() || words.size() > kLongestString) return 0u;" in source
     and source.count("g_signs") == 3
     and "    const auto place = g_places.find(cpu->gpr[kReturnRegister]);\n"
-    "    if (place == g_places.end()) return;\n"
+    "    if (place == g_places.end() || !called_from(place->first, routine)) return;\n"
+    "    const int x = routine == kStripDraw ? kStripXRegister : kXRegister;\n"
     "    const auto [home_x, other_x] = place->second;\n"
-    "    if (home_x == kAnyX) cpu->gpr[kXRegister] += static_cast<uint32_t>(other_x);\n"
-    "    else if (static_cast<int32_t>(cpu->gpr[kXRegister]) == home_x) cpu->gpr[kXRegister] = static_cast<uint32_t>(other_x);" in source
+    "    if (home_x == kAnyX) cpu->gpr[x] += static_cast<uint32_t>(other_x);\n"
+    "    else if (static_cast<int32_t>(cpu->gpr[x]) == home_x) cpu->gpr[x] = static_cast<uint32_t>(other_x);" in source
+    and "    return word == (0x0C000000u | (routine >> 2 & 0x03FFFFFFu));" in source
     and "constexpr int32_t kAnyX = -32768;" in rules
     and "using rules::kAnyX;" in source
     and source.count("if (!cpu || !may_run()) return;\n    if (g_state == State::kUnread) read_pack();\n    if (g_state != State::kOn) return;\n") == 2
@@ -133,7 +143,8 @@ require(
     and "    return psx_mod_game_started() && !psx_netplay_active() && g_ls_mode == 0 && g_ls_replay_active == 0;" in source
     and "    if (g_state == State::kOn || !may_run()) return 0;\n    const int taken = take_pack(data, size);" in source
     and source.count("take_pack(") == 2,
-    "a text hook may change $a0 alone and the menu hook $a1 alone, where the pack names the call and either the US x is the one "
+    "a text hook may change $a0 alone, the menu hook $a1 alone and the pause menu's line hook $a2 alone, where the pack names a jal of "
+    "that routine and either the US x is the one "
     "it expects or the place is a step, "
     "only with a pack taken, and neither they nor the loader may act under netplay, lockstep or a replay",
 )
@@ -151,8 +162,10 @@ require(
     and "constexpr uint32_t kRamFirst = 0x80000000u;" in rules
     and "constexpr uint32_t kRamEnd = 0x80200000u;" in rules
     and "constexpr size_t kLongestString = 96;" in rules
-    and source.count("psx_mod_read_") == 1,
-    "a string may be read from main RAM only, through the one bounded reader",
+    and source.count("psx_mod_read_") == 2
+    and source.count("if (!rules::readable(") == 2
+    and "    if (!rules::readable(at)) return false;\n    uint32_t word = 0;\n" in source,
+    "guest memory may be read from main RAM only: a string through the one bounded reader, a place's call where it is bounded too",
 )
 require(
     "        if (!guest_string(address, text) || rules::hash_of(text) != hash || !rules::entry_fits(text, words, format)) return 0;" in source
@@ -230,9 +243,10 @@ for name in ("game.toml", "game-widescreen.toml"):
     entries = re.search(r"mod_function_entry_funcs\s*=\s*\[([^\]]*)\]", read(name))
     require(
         entries is not None
-        and all(f'"0x{routine:08X}"' in entries.group(1) for routine in (*ROUTINES, MENU_DRAW, *HINT_ROUTINES))
+        and all(f'"0x{routine:08X}"' in entries.group(1) for routine in (*ROUTINES, MENU_DRAW, STRIP_DRAW, *HINT_ROUTINES))
         and f'"0x{COUNTING_ROUTINE:08X}"' not in entries.group(1),
-        f"{name} must emit an entry hook for the two width routines, the menu's and the hint's three, and none for the counting one",
+        f"{name} must emit an entry hook for the two width routines, the menu's, the pause menu's line routine and the hint's three, and "
+        "none for the counting one",
     )
 
 image_path = ROOT / "input" / "SLUS_002.24.code"
@@ -263,6 +277,12 @@ if image_path.exists():
         hashlib.sha256(menu).hexdigest() == MENU_DRAW_HASH and takes_x == MENU_DRAW_TAKES_X[1],
         "the menu's string routine must be the audited one and take its x from $a1",
     )
+    lines = image[ROM_TEXT_OFFSET + STRIP_DRAW - LOAD_ADDRESS:ROM_TEXT_OFFSET + STRIP_DRAW_END - LOAD_ADDRESS]
+    takes_line_x = struct.unpack_from("<I", image, ROM_TEXT_OFFSET + STRIP_DRAW_TAKES_X[0] - LOAD_ADDRESS)[0]
+    require(
+        hashlib.sha256(lines).hexdigest() == STRIP_DRAW_HASH and takes_line_x == STRIP_DRAW_TAKES_X[1],
+        "the pause menu's line routine must be the audited one and take its x from $a2",
+    )
 
 def hook_at_entry(own: str, routine: int) -> bool:
     """Whether a generated routine runs its entry hook once, before its first block and with nothing between."""
@@ -277,7 +297,7 @@ def hook_at_entry(own: str, routine: int) -> bool:
 generated = list((ROOT / "generated").glob("SLUS_002.24.code_full_*.c"))
 if generated:
     text = "".join(path.read_text(encoding="utf-8") for path in generated)
-    for routine in (*ROUTINES, MENU_DRAW, *HINT_ROUTINES):
+    for routine in (*ROUTINES, MENU_DRAW, STRIP_DRAW, *HINT_ROUTINES):
         hook = f"psx_mod_function_entry(cpu, 0x{routine:08X}u);"
         start = text.find(f"\nvoid func_{routine:08X}(CPUState* cpu)\n{{")
         own = text[start:text.find("\nvoid func_", start + 1)] if start >= 0 else ""

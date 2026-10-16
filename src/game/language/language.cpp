@@ -13,10 +13,12 @@
  * it came from, and the parts it took are looked up in turn. The game's own
  * memory is never written, so its buffers keep the sizes the US text needs.
  *
- * Menus draw through func_8001A46C(string, x, y, colour). Where the other
- * executable calls it with another x, for words of another length, the pack
- * names the call by its return address and $a1 takes that x, or moves by a
- * step where the x is a sum the two executables end with another constant.
+ * Menus draw through func_8001A46C(string, x, y, colour), the pause menu's
+ * lines through func_800429DC(list, string, x, y). Where the other
+ * executable calls one with another x, for words of another length, the pack
+ * names the call by its return address and the x register takes that x, or
+ * moves by a step where the x is a sum the two executables end with another
+ * constant.
  *
  * The other disc's large menu font has signs the US one lacks. The disc code
  * puts their glyphs where the US routine can reach them, and the pack says
@@ -50,8 +52,11 @@ namespace {
 constexpr std::array<uint32_t, 2> kTextRoutines = {0x80044A10u, 0x80044BDCu};
 constexpr uint32_t kLargeFont = kTextRoutines[1];
 constexpr uint32_t kMenuDraw = 0x8001A46Cu;
+constexpr uint32_t kStripDraw = 0x800429DCu;
 constexpr int kStringRegister = 4;  /* $a0 */
 constexpr int kXRegister = 5;  /* $a1 */
+constexpr int kStripXRegister = 6;  /* $a2 */
+constexpr uint32_t kCallToReturn = 8;  /* a jal and its delay slot */
 constexpr int kReturnRegister = 31;  /* $ra */
 constexpr int kDeepestPart = 2;
 
@@ -279,15 +284,25 @@ void text_entry(CPUState *cpu, uint32_t routine) {
     if (const uint32_t other = stand_in(cpu->gpr[kStringRegister], routine == kLargeFont)) cpu->gpr[kStringRegister] = other;
 }
 
-void menu_entry(CPUState *cpu, uint32_t) {
+/* Whether the call that returns to `returns_to` is a jal of `routine`: a place moves the x of the routine it was found for. */
+bool called_from(uint32_t returns_to, uint32_t routine) {
+    const uint32_t at = returns_to - kCallToReturn;
+    if (!rules::readable(at)) return false;
+    uint32_t word = 0;
+    for (uint32_t byte = 0; byte < 4; ++byte) word |= static_cast<uint32_t>(psx_mod_read_byte(at + byte)) << (8 * byte);
+    return word == (0x0C000000u | (routine >> 2 & 0x03FFFFFFu));
+}
+
+void place_entry(CPUState *cpu, uint32_t routine) {
     if (!cpu || !may_run()) return;
     if (g_state == State::kUnread) read_pack();
     if (g_state != State::kOn) return;
     const auto place = g_places.find(cpu->gpr[kReturnRegister]);
-    if (place == g_places.end()) return;
+    if (place == g_places.end() || !called_from(place->first, routine)) return;
+    const int x = routine == kStripDraw ? kStripXRegister : kXRegister;
     const auto [home_x, other_x] = place->second;
-    if (home_x == kAnyX) cpu->gpr[kXRegister] += static_cast<uint32_t>(other_x);
-    else if (static_cast<int32_t>(cpu->gpr[kXRegister]) == home_x) cpu->gpr[kXRegister] = static_cast<uint32_t>(other_x);
+    if (home_x == kAnyX) cpu->gpr[x] += static_cast<uint32_t>(other_x);
+    else if (static_cast<int32_t>(cpu->gpr[x]) == home_x) cpu->gpr[x] = static_cast<uint32_t>(other_x);
 }
 
 PSX_MOD_CONSTRUCTOR(register_disruptor_language) {
@@ -295,8 +310,10 @@ PSX_MOD_CONSTRUCTOR(register_disruptor_language) {
         if (!psx_mod_register_function_entry_plugin("disruptor.language.text", routine, text_entry))
             std::fprintf(stderr, "disruptor: failed to register the text hook at 0x%08X\n", routine);
     }
-    if (!psx_mod_register_function_entry_plugin("disruptor.language.layout", kMenuDraw, menu_entry))
-        std::fprintf(stderr, "disruptor: failed to register the menu layout hook\n");
+    for (const uint32_t routine : {kMenuDraw, kStripDraw}) {
+        if (!psx_mod_register_function_entry_plugin("disruptor.language.layout", routine, place_entry))
+            std::fprintf(stderr, "disruptor: failed to register the layout hook at 0x%08X\n", routine);
+    }
 }
 
 }  // namespace

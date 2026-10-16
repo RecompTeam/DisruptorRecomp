@@ -26,7 +26,9 @@
  * piece's inside. The menu piece is used at fixed offsets, so it stays and
  * takes the other disc's strings and the signs its fonts lack. A level piece
  * is read as 0x73800 bytes of header and pictures and then as much as the
- * header says, so it takes the other disc's header and that second part.
+ * header says, so it takes the other disc's header and that second part, all
+ * but what places the US pictures in video memory: two tables of the second
+ * part and, in the header, where the shadows' picture is.
  */
 
 #include "game/language/language_disc.h"
@@ -57,6 +59,8 @@ constexpr uint32_t kMenuFirst = 306, kMenuLast = 310;
 constexpr uint32_t kLevelFirst = 163, kLevelLast = 177;
 constexpr uint32_t kLevelHeader = 0x800;
 constexpr uint32_t kLevelPictures = 0x73800;  /* the US loader reads this much before the part the header sizes */
+constexpr uint32_t kTableWord = 70;  /* 0x80015B50: from this header word the loader at 0x80015398 sizes the second part's blocks */
+constexpr uint32_t kShadowWord = 80;  /* 0x80015DCC, 0x80015DF8: this word and the next place the shadows' picture in video memory */
 constexpr size_t kMenuStrings = 79;  /* the menus on every disc, the credits after them differ in count and order */
 constexpr size_t kFontC = 0x5F400, kGlyphC = 168, kGlyphsC = 46, kSignsC = 10;  /* menu font of the US menu piece */
 constexpr size_t kGlyphB = 64, kGlyphsB = 62, kLettersB = 26;  /* the 8x8 font right after it */
@@ -74,6 +78,8 @@ constexpr uint32_t kWidthsA = 0x40u, kWidthsB = 0x44u;
 constexpr int kPalBottom = 252;  /* a PAL movie's top row plus its height */
 constexpr char kHomeBoot[] = "SLUS_002.24";
 constexpr uint32_t kMenuDraw = 0x8001A46Cu;  /* (string, x, y, colour): 0 centres, a negative x is the right edge */
+constexpr uint32_t kStripDraw = 0x800429DCu;  /* (list, string, x, y, ...): the pause menu's lines, its question and answers at a constant x */
+constexpr uint32_t kMenuX = 5, kStripX = 6;  /* the registers the two routines take their x in, $a1 and $a2 */
 constexpr size_t kCallWindow = 14;
 using pack_rules::kAnyX;
 constexpr size_t kTraceWindow = 32;
@@ -111,6 +117,7 @@ struct Language {
     std::map<size_t, std::string> menu_stand_ins;  /* shorter words where the US routine's 256 pixels are too few */
     std::map<uint32_t, std::string> string_stand_ins;  /* the same for strings of the executable, by US address */
     uint32_t menu_draw;
+    uint32_t strip_draw;
 };
 
 const std::vector<Language> &languages() {
@@ -135,7 +142,7 @@ const std::vector<Language> &languages() {
           {73, "SELECTIONNER LA PARTIE"}, {75, "SAUVEGARDE AUTO EN COURS"}, {76, "SAUVEGARDE AUTO REUSSIE"}, {77, "SAUVEGARDE AUTO ECHOUEE"}},
          {{0x80010098u, "REMPLACER PAR M%d f  NON"}, {0x800100B8u, "REMPLACER PAR M%d f  OUI"}, {0x80010140u, "ESSAYEZ LE MODE DUR"},
           {0x8001018Cu, "ECRASER CETTE PARTIE f"}},
-         0x8001A4E0u},
+         0x8001A4E0u, 0x80042D64u},
         {"SLES_005.65", "German", 0x80057548u, {0x80057344u, 0x80057384u, 0x800573C8u}, true,
          true, Hints::kSame, 4, {{'k', "j"}, {'l', "\x8F"}, {'m', "\x90"}, {'n', "SS"}},
          {{0x80010078u, 0x80010068u}, {0x80010098u, 0x8001008Cu}, {0x800100B8u, 0x800100ACu}, {0x800100D8u, 0x800100C8u},
@@ -155,8 +162,8 @@ const std::vector<Language> &languages() {
           {72, "KEIN ZUGRIFF AUF SPIELSTkNDE"}, {76, "AUTOSICHERN ERFOLGREICH"}, {77, "AUTOSICHERN MInLUNGEN"}},
          {{0x80010140u, "JETZT DEN SCHWEREREN MODUS"}, {0x800101F4u, "KARTE IST NICHT FORMATIERT"}, {0x8001020Cu, " "},
           {0x8007123Cu, "%s mznitiyn"}},
-         0x8001A518u},
-        {"SLPS_008.04", "Japanese", 0x800543DCu, {}, false, false, Hints::kTall, 0, {}, {}, {}, {}, {}, {}, 0},
+         0x8001A518u, 0x80042E08u},
+        {"SLPS_008.04", "Japanese", 0x800543DCu, {}, false, false, Hints::kTall, 0, {}, {}, {}, {}, {}, {}, 0, 0},
     };
     return known;
 }
@@ -549,7 +556,7 @@ struct MenuCall {
     uint32_t at = 0;
     uint32_t routine = 0;  /* how many returns precede the call: the same for calls of one routine */
     std::vector<uint32_t> shape;
-    uint32_t x_word = 0;  /* the instruction that last wrote $a1, 0 when none is near */
+    uint32_t x_word = 0;  /* the instruction that last wrote the x register, 0 when none is near */
     bool has_x = false;
     int32_t x = 0;
     uint32_t origin_word = 0;  /* where x_word copies a register: what filled it, 0 when none is near. A call's own link into $ra is not seen */
@@ -591,21 +598,21 @@ bool constant_load(uint32_t word, int32_t &value) {
     return value > kAnyX && value <= 32767;
 }
 
-/* The register a plain copy into $a1 takes, 0 for any other instruction. */
-uint32_t copied_into_a1(uint32_t word) {
+/* The register a plain copy into `reg` takes, 0 for any other instruction. */
+uint32_t copied_into(uint32_t word, uint32_t reg) {
     const uint32_t source = word >> 21 & 31, target = word >> 16 & 31;
-    const bool copy = word >> 26 == 0 && (word >> 11 & 31) == 5 && ((word & 0x7FF) == 0x21 || (word & 0x7FF) == 0x25) && (source == 0) != (target == 0);
+    const bool copy = word >> 26 == 0 && (word >> 11 & 31) == reg && ((word & 0x7FF) == 0x21 || (word & 0x7FF) == 0x25) && (source == 0) != (target == 0);
     return copy ? source | target : 0;
 }
 
 /* An x made by adding a constant to a register, the same register in both executables: how far apart they are. */
-bool relative_x(uint32_t mine, uint32_t theirs, int32_t &step) {
-    if (mine >> 26 != 0x09 || mine >> 16 != theirs >> 16 || (mine >> 16 & 31) != 5 || (mine >> 21 & 31) == 0) return false;
+bool relative_x(uint32_t mine, uint32_t theirs, uint32_t reg, int32_t &step) {
+    if (mine >> 26 != 0x09 || mine >> 16 != theirs >> 16 || (mine >> 16 & 31) != reg || (mine >> 21 & 31) == 0) return false;
     step = static_cast<int16_t>(theirs & 0xFFFF) - static_cast<int16_t>(mine & 0xFFFF);
     return step > kAnyX && step <= 32767;
 }
 
-/* A register copied into $a1 that the same code fills with a constant in both executables: how far apart they are. */
+/* A register copied into the x register that the same code fills with a constant in both executables: how far apart they are. */
 bool relative_origin(const MenuCall &mine, const MenuCall &theirs, int32_t &step) {
     int32_t from = 0, to = 0;
     if (mine.origin_shape != theirs.origin_shape || !constant_load(mine.origin_word, from) || !constant_load(theirs.origin_word, to)) return false;
@@ -613,12 +620,12 @@ bool relative_origin(const MenuCall &mine, const MenuCall &theirs, int32_t &step
     return step > kAnyX && step <= 32767;
 }
 
-/* Every call of the menu's string routine, with its shape and the x it is given when that is a constant. Where
+/* Every call of a string routine, with its shape and the x it is given in `x_register` when that is a constant. Where
  * the x is a copy of a register, the instruction that filled the register is looked for further back. Neither
  * search goes into the delay slot of an earlier return, nor of an earlier call unless a call keeps the register.
  * Both follow addresses, not paths: a constant set before an if and its else is found from the call after them,
  * which is how the compiler lays out the menus' own calls. */
-std::vector<MenuCall> menu_calls(const Bytes &exe, uint32_t routine) {
+std::vector<MenuCall> menu_calls(const Bytes &exe, uint32_t routine, uint32_t x_register) {
     std::vector<MenuCall> calls;
     const uint32_t jal = 0x0C000000u | (routine >> 2 & 0x03FFFFFFu);
     const size_t words = exe.size() > kExeHeader ? (exe.size() - kExeHeader) / 4 : 0;
@@ -634,10 +641,10 @@ std::vector<MenuCall> menu_calls(const Bytes &exe, uint32_t routine) {
         for (size_t step = 0; step <= kCallWindow; ++step) {
             const size_t at = step == 0 ? index + 1 : index - step;
             if (step != 0 && (at == 0 || is_call(word(at - 1)) || word(at - 1) == kReturn)) break;
-            if (writes(word(at), 5)) {
+            if (writes(word(at), x_register)) {
                 call.x_word = word(at);
                 call.has_x = constant_load(word(at), call.x);
-                const uint32_t copied = copied_into_a1(word(at));
+                const uint32_t copied = copied_into(word(at), x_register);
                 const bool kept_by_calls = (copied >= 16 && copied <= 23) || copied == 30;
                 for (size_t back = 1; copied != 0 && back <= kTraceWindow && back < at; ++back) {
                     const uint32_t earlier = word(at - back), before = word(at - back - 1);
@@ -656,14 +663,20 @@ std::vector<MenuCall> menu_calls(const Bytes &exe, uint32_t routine) {
     return calls;
 }
 
-/* Where the other executable draws a menu string at another x: its calls are lined up with the US ones by shape.
+struct StringRoutine {
+    uint32_t home;
+    uint32_t other;
+    uint32_t x_register;
+};
+
+/* Where the other executable draws a string at another x: its calls of the routine are lined up with the US ones by shape.
  * Between two stretches of calls that pair up, each executable may have calls the other lacks. A stretch is
  * trusted only when both have as many of those on either side of it, so that order pairs them too. Within
  * it the calls of one routine move together or not at all: where one of them takes an x that is neither a
  * constant, nor a constant added to a register, nor a copy of a register the same code fills with a constant,
  * the two executables may make it from other numbers, and moving its neighbours alone would pull a screen apart. */
-std::vector<Place> other_places(const Bytes &home, const Bytes &other, uint32_t other_routine) {
-    const std::vector<MenuCall> mine = menu_calls(home, kMenuDraw), theirs = menu_calls(other, other_routine);
+std::vector<Place> other_places(const Bytes &home, const Bytes &other, const StringRoutine &drawn_by) {
+    const std::vector<MenuCall> mine = menu_calls(home, drawn_by.home, drawn_by.x_register), theirs = menu_calls(other, drawn_by.other, drawn_by.x_register);
     std::vector<std::vector<uint16_t>> longest(mine.size() + 1, std::vector<uint16_t>(theirs.size() + 1, 0));
     for (size_t i = mine.size(); i-- > 0;)
         for (size_t j = theirs.size(); j-- > 0;)
@@ -695,7 +708,7 @@ std::vector<Place> other_places(const Bytes &home, const Bytes &other, uint32_t 
             int32_t step = 0;
             if (mine[i].has_x && theirs[j].has_x) {
                 if (mine[i].x != theirs[j].x) routine.push_back({mine[i].at + 8, mine[i].x, theirs[j].x});
-            } else if (relative_x(mine[i].x_word, theirs[j].x_word, step) || relative_origin(mine[i], theirs[j], step)) {
+            } else if (relative_x(mine[i].x_word, theirs[j].x_word, drawn_by.x_register, step) || relative_origin(mine[i], theirs[j], step)) {
                 if (step != 0) routine.push_back({mine[i].at + 8, kAnyX, step});
             } else {
                 whole = false;
@@ -780,7 +793,9 @@ bool build_pack(const Bytes &home, const Bytes &other, const Language &language,
         body.insert(body.end(), words.begin(), words.end());
         ++count;
     }
-    const std::vector<Place> places = other_places(home, other, language.menu_draw);
+    std::vector<Place> places = other_places(home, other, {kMenuDraw, language.menu_draw, kMenuX});
+    const std::vector<Place> lines = other_places(home, other, {kStripDraw, language.strip_draw, kStripX});
+    places.insert(places.end(), lines.begin(), lines.end());
     if (count > pack_rules::kMostStrings || places.size() > pack_rules::kMostPlaces) {
         why = "the executables differ in more strings or places than a pack holds";
         return false;
@@ -891,6 +906,31 @@ bool place_control_names(Bytes &patched, const Bytes &home, const std::vector<st
 
 bool is_movie(const std::string &name) {
     return name.size() > 4 && name.compare(name.size() - 4, 4, ".STR") == 0;
+}
+
+}  // namespace
+
+namespace {
+
+/* The two blocks at the head of a level's second part that place its pictures in video memory: 8-byte records from 0, then
+ * after a blob and more 8-byte records, records of 16 and 12 bytes. A PAL disc with pictures of its own has its own here. */
+constexpr uint32_t kPlacementWords = 5;
+
+struct TextureTables {
+    std::array<uint32_t, kPlacementWords> words;
+    uint64_t records;
+    uint64_t tiles_at;
+    uint64_t tiles;
+};
+
+TextureTables texture_tables(const uint8_t *header) {
+    TextureTables tables{};
+    for (uint32_t index = 0; index < kPlacementWords; ++index) tables.words[index] = le32(header + 4 * (kTableWord + index));
+    const auto word = [&tables](uint32_t index) { return uint64_t{tables.words[index]}; };
+    tables.records = word(0) * 8;
+    tables.tiles_at = tables.records + word(1) + word(2) * 8;
+    tables.tiles = word(3) * 16 + word(4) * 12;
+    return tables;
 }
 
 }  // namespace
@@ -1049,7 +1089,7 @@ bool LanguageDisc::build(DiscImage &home, DiscImage &other, std::string &why) {
             add(false, first, count);
         } else {
             Bytes header, other_header;
-            if (!user_data(home, first, 8, header) || !user_data(other, other_first, 8, other_header)) {
+            if (!user_data(home, first, kSectorData, header) || !user_data(other, other_first, kSectorData, other_header)) {
                 why = "a disc could not be read";
                 return false;
             }
@@ -1063,10 +1103,37 @@ bool LanguageDisc::build(DiscImage &home, DiscImage &other, std::string &why) {
                 return false;
             }
             const uint64_t other_pictures = other_bytes - other_second - later;
+            /* The US pictures stay, so the tables that place them in video memory are the US ones too. */
+            const TextureTables tables = texture_tables(header.data());
+            const uint64_t tables_end = tables.tiles_at + tables.tiles;
+            if (tables.words != texture_tables(other_header.data()).words || tables_end > second || tables_end > other_second) {
+                why = "a level of the other disc places its pictures differently";
+                return false;
+            }
+            const uint32_t table_sectors = static_cast<uint32_t>((tables_end + kSectorData - 1) / kSectorData);
+            const uint32_t other_second_first = other_first + static_cast<uint32_t>(other_pictures / kSectorData);
+            Bytes home_tables, their_tables;
+            if (!user_data(home, first + kLevelPictures / kSectorData, table_sectors * kSectorData, home_tables) ||
+                !user_data(other, other_second_first, table_sectors * kSectorData, their_tables)) {
+                why = "a disc could not be read";
+                return false;
+            }
+            Bytes spliced = their_tables;
+            std::copy_n(home_tables.begin(), tables.records, spliced.begin());
+            std::copy_n(home_tables.begin() + static_cast<std::ptrdiff_t>(tables.tiles_at), tables.tiles,
+                        spliced.begin() + static_cast<std::ptrdiff_t>(tables.tiles_at));
+            Bytes placed_header = other_header;
+            std::copy_n(header.begin() + 4 * kShadowWord, 8, placed_header.begin() + 4 * kShadowWord);
+            if (placed_header != other_header) set_data(sectors_, placed_header.data());
             add(true, other_first, kLevelHeader / kSectorData);
             add(false, first + kLevelHeader / kSectorData, (kLevelPictures - kLevelHeader) / kSectorData);
-            add(true, other_first + static_cast<uint32_t>(other_pictures / kSectorData), static_cast<uint32_t>(other_second / kSectorData));
+            const uint32_t second_at = sectors_;
+            add(true, other_second_first, static_cast<uint32_t>(other_second / kSectorData));
             add(false, first + static_cast<uint32_t>((kLevelPictures + second) / kSectorData), static_cast<uint32_t>(later / kSectorData));
+            for (uint32_t sector = 0; sector < table_sectors; ++sector) {
+                const uint8_t *data = spliced.data() + sector * kSectorData;
+                if (std::memcmp(data, their_tables.data() + sector * kSectorData, kSectorData) != 0) set_data(second_at + sector, data);
+            }
         }
     }
     for (uint32_t index = kClipSizeFirst; index <= kClipSizeLast; index += 2) head[index] = their_head[index];

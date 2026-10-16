@@ -170,18 +170,23 @@ std::pair<std::uint32_t, std::string> drawn(std::uint32_t address, std::size_t r
     return {handed, at(handed)};
 }
 
-/* The x the menu's string routine is left with when it is called from this place with this x. */
-int placed(std::uint32_t returns_to, int x) {
+constexpr std::size_t kMenuHook = 2, kStripHook = 3;
+
+/* The x a hooked routine is left with when the jal of `called`, by default that routine, returns to this place. */
+int placed(std::uint32_t returns_to, int x, std::size_t hook = kMenuHook, std::uint32_t called = 0) {
+    const std::uint32_t jal = 0x0C000000u | ((called ? called : g_hooks[hook].first) >> 2 & 0x03FFFFFFu);
+    for (std::uint32_t byte = 0; byte < 4; ++byte) g_ram[returns_to - 8 + byte] = static_cast<std::uint8_t>(jal >> (8 * byte));
+    const std::size_t taken = hook == kStripHook ? 6 : 5;
     CPUState cpu{};
     for (std::uint32_t index = 0; index < 32; ++index) cpu.gpr[index] = 0x1000u + index;
     cpu.gpr[4] = kResume;
-    cpu.gpr[5] = static_cast<std::uint32_t>(x);
+    cpu.gpr[taken] = static_cast<std::uint32_t>(x);
     cpu.gpr[31] = returns_to;
     const CPUState before = cpu;
-    g_hooks[2].second(&cpu, g_hooks[2].first);
-    const int left = static_cast<int>(cpu.gpr[5]);
-    cpu.gpr[5] = static_cast<std::uint32_t>(x);
-    expect(std::memcmp(&cpu, &before, sizeof cpu) == 0, "nothing of the CPU state but $a1 may change");
+    g_hooks[hook].second(&cpu, g_hooks[hook].first);
+    const int left = static_cast<int>(cpu.gpr[taken]);
+    cpu.gpr[taken] = static_cast<std::uint32_t>(x);
+    expect(std::memcmp(&cpu, &before, sizeof cpu) == 0, "nothing of the CPU state but the routine's x register may change");
     return left;
 }
 
@@ -293,10 +298,12 @@ void test_the_large_font_takes_its_signs() {
     expect(load(pack({{kResume, "REPRENDRE"}})) == 1 && drawn(0x80012E00u, 1).first == 0x80012E00u, "a pack without signs leaves none of another's");
 }
 
-void test_three_routines_are_hooked() {
-    expect(g_hooks.size() == 3 && g_hooks[0].first == 0x80044A10u && g_hooks[1].first == 0x80044BDCu && g_hooks[2].first == 0x8001A46Cu,
-           "the two routines that return a width and the menu's string routine must be hooked, and no other");
-    expect(g_hooks[0].second == g_hooks[1].second && g_hooks[2].second != g_hooks[0].second, "one callback serves the two text routines, another the menu's");
+void test_four_routines_are_hooked() {
+    expect(g_hooks.size() == 4 && g_hooks[0].first == 0x80044A10u && g_hooks[1].first == 0x80044BDCu && g_hooks[kMenuHook].first == 0x8001A46Cu &&
+               g_hooks[kStripHook].first == 0x800429DCu,
+           "the two routines that return a width, the menu's string routine and the pause menu's line routine must be hooked, and no other");
+    expect(g_hooks[0].second == g_hooks[1].second && g_hooks[kMenuHook].second != g_hooks[0].second && g_hooks[kStripHook].second == g_hooks[kMenuHook].second,
+           "one callback serves the two text routines, another the two that take a place");
 }
 
 void test_nothing_changes_without_a_pack() {
@@ -415,6 +422,11 @@ void test_menu_strings_take_the_other_places() {
            "a call whose x is a sum moves by the step, whatever x it has");
     expect(placed(0x8001CE14u, 29) == 29 && placed(0x8001CE14u, 14) == 14 && placed(0x8001CE18u, 28) == 28 && placed(0, 0) == 0 && placed(0x8001CE14u, -32768) == -32768,
            "another x at that call, or another call, is left alone");
+    expect(placed(0x8001CE14u, 28, kStripHook) == 14 && placed(0x8001D0C0u, 62, kStripHook) == 42,
+           "a call of the pause menu's line routine takes its place in $a2");
+    expect(placed(0x8001CE14u, 28, kMenuHook, 0x800429DCu) == 28 && placed(0x8001CE14u, 28, kStripHook, 0x8001A46Cu) == 28 &&
+               placed(0x8001CE14u, 28, kMenuHook, 0x8001A470u) == 28,
+           "a place moves only the x of the routine its call is a jal of");
     for (int *mode : {&g_netplay, &g_ls_mode, &g_ls_replay_active}) {
         *mode = 1;
         expect(placed(0x8001CE14u, 28) == 28, "netplay, lockstep and a replay keep the game's own places");
@@ -492,7 +504,7 @@ int main() {
     put(kChoice, "%c) %s");
     put(kLevel, "LEVEL 1%d");
     put(kFirst, "%s1");
-    test_three_routines_are_hooked();
+    test_four_routines_are_hooked();
     test_nothing_changes_without_a_pack();
     test_bad_packs_are_refused();
     test_the_language_disc_brings_the_pack();
