@@ -1,16 +1,13 @@
 diff --git a/runtime/include/gpu_render.h b/runtime/include/gpu_render.h
-index 4953270aaccd4c606f5320f949befcdc544261e6..ab326c2e4fbf9cd5d3353eee4f9c334ce1be44a9 100644
+index 4953270aaccd4c606f5320f949befcdc544261e6..6ac7026a52f829f25a511314aa4f14ac36efed03 100644
 --- a/runtime/include/gpu_render.h
 +++ b/runtime/include/gpu_render.h
-@@ -38,6 +38,48 @@
+@@ -38,6 +38,39 @@
  void gr_set_mask_bits(int set_bit, int check_bit);
  void gr_set_texture_window(uint32_t raw);
  void gr_set_color_modulation(int r, int g, int b, int raw_texture);
 +
-+/* Optional presentation-only geometry correction. The authoritative PSX
-+ * framebuffer is always rasterized from the integer GP0 coordinates. A
-+ * backend may use the precise 16.16 coordinates and fractional camera yaw
-+ * only while mirroring the primitive into a separate display surface. */
++/* Presentation-only geometry: the authoritative framebuffer stays integer, a backend uses 16.16 and yaw only for the display mirror. */
 +void gr_set_geometry_correction(int enabled);
 +void gr_set_world_triangle(int world);
 +void gr_set_precise_triangle(int enabled,
@@ -19,18 +16,13 @@ index 4953270aaccd4c606f5320f949befcdc544261e6..ab326c2e4fbf9cd5d3353eee4f9c334c
 +                             int32_t x2, int32_t y2);
 +/* One-shot presentation positions of a triangle without exact provenance: where its pinned corners project. */
 +void gr_set_unpinned_triangle(int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t x2, int32_t y2);
-+/* One-shot reciprocal-depth metadata for the next textured triangle.  Only a
-+ * backend with a separate presentation surface should implement this; the
-+ * authoritative PS1 framebuffer must retain affine texture interpolation. */
++/* One-shot reciprocal-depth metadata for the next textured triangle, for backends with a separate presentation surface only. */
 +void gr_set_perspective_triangle(int enabled,
 +                                 float q0, float q1, float q2);
-+/* One-shot unnormalized GTE camera depth for temporal vertex identity. This
-+ * metadata never reaches the shaders and is independent of perspective q,
-+ * whose scale can differ between polygons. Zero means unknown depth. */
++/* One-shot unnormalized GTE camera depth for temporal vertex identity, independent of q. Zero is unknown. */
 +void gr_set_temporal_depth_triangle(int enabled,
 +                                     float z0, float z1, float z2);
-+/* One-shot camera depth of the same corners for the display mirror's own depth: a corner the game pinned has one here,
-+ * where the temporal depth above says 0. Zero means unknown. */
++/* One-shot camera depth of the same corners for the mirror's own depth: a pinned corner has one here, 0 above. Zero is unknown. */
 +void gr_set_surface_depth_triangle(float z0, float z1, float z2);
 +/* One-shot GTE input vertices of the same three corners (zero = unknown). */
 +void gr_set_temporal_identity_triangle(uint64_t id0, uint64_t id1, uint64_t id2);
@@ -43,15 +35,14 @@ index 4953270aaccd4c606f5320f949befcdc544261e6..ab326c2e4fbf9cd5d3353eee4f9c334c
 +void gr_set_flat_sides(float left, float right);
 +/* The next textured triangle has a corner at or behind the viewer's plane: where each corner projects, and its w. */
 +void gr_set_near_triangle(const float a[3], const float b[3], const float c[3]);
-+/* center_y is relative to the active drawing band; a backend which stores
-+ * absolute VRAM positions must combine it with its current draw offset. */
++/* center_y is relative to the drawing band: add the current draw offset when storing absolute VRAM positions. */
 +void gr_set_presentation_yaw(double yaw_units, double full_turn,
 +                             double center_x, double center_y,
 +                             double focal_x);
  
  /* Primitives */
  void gr_fill_rect(int x, int y, int w, int h, uint16_t color);
-@@ -119,6 +161,25 @@
+@@ -119,6 +152,25 @@
      void (*set_mask_bits)(int set_bit, int check_bit);
      void (*set_texture_window)(uint32_t raw);
      void (*set_color_modulation)(int r, int g, int b, int raw_texture);
@@ -77,7 +68,7 @@ index 4953270aaccd4c606f5320f949befcdc544261e6..ab326c2e4fbf9cd5d3353eee4f9c334c
      void (*fill_rect)(int x, int y, int w, int h, uint16_t color);
      void (*copy_rect)(int src_x, int src_y, int dst_x, int dst_y, int w, int h);
      void (*draw_flat_triangle)(int x0, int y0, int x1, int y1, int x2, int y2,
-@@ -176,6 +237,7 @@
+@@ -176,6 +228,7 @@
       * pixel count, writes width/height to ow/oh. NULL if unsupported. */
      int  (*wide_dump_full)(uint32_t *out, int cap_pixels, int *ow, int *oh,
                             int base_x);

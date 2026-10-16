@@ -1,21 +1,16 @@
 diff --git a/runtime/include/ws_aspect_cone_math.h b/runtime/include/ws_aspect_cone_math.h
-index abb3adacf76f3836c11201dc7990ae9a6faba856..8355760ad00a0647b88ac750721cae03bb7c3bd1 100644
+index abb3adacf76f3836c11201dc7990ae9a6faba856..e8ea6fe4f27e28722f7f34bd6fdb2b9d4f8b57f7 100644
 --- a/runtime/include/ws_aspect_cone_math.h
 +++ b/runtime/include/ws_aspect_cone_math.h
-@@ -24,6 +24,18 @@
+@@ -24,6 +24,13 @@
   * when extent_pixels is zero. Results stay below a 90-degree half-angle. */
  uint32_t psx_ws_widen_angle_q12(uint32_t vanilla, int extent_pixels);
  
-+/* Generic signed counterpart for games whose wrapping yaw uses a different
-+ * unit system. `full_turn` is the number of integer units in 360 degrees.
-+ * The sign is preserved and the magnitude is widened by the same 320-wide
-+ * projection geometry. */
++/* Signed counterpart for another yaw unit: `full_turn` integer units in 360 degrees, sign kept, magnitude widened. */
 +int32_t psx_ws_widen_angle_units(int32_t vanilla, uint32_t full_turn,
 +                                 int extent_pixels);
 +
-+/* Scale a signed camera-horizontal coordinate into the original 320-wide
-+ * projection before an unchanged side-plane comparison. Identity at zero
-+ * extent; symmetric nearest-integer rounding for negative values. */
++/* Scales a signed camera-horizontal coordinate into the original 320-wide projection. Identity at zero extent, symmetric rounding. */
 +int32_t psx_ws_scale_horizontal_320(int32_t value, int extent_pixels);
 +
  #ifdef __cplusplus

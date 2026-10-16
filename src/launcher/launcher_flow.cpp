@@ -74,8 +74,7 @@ Step after(const Outcome& outcome, bool cancelled) {
             step.status = describe(*outcome.language) + L"\nThe image is used where it is, so keep it there.";
         }
     } else if (failed) {
-        // A cancellation can leave an already committed installation.
-        // Browsing again or reopening the launcher checks it afresh.
+        // A cancel can leave an installation already committed: browsing again or reopening checks it afresh.
         step.disc = DiscAfter::cleared;
         step.status = outcome.error;
     } else {

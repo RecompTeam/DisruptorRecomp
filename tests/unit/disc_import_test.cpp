@@ -84,8 +84,7 @@ int main() {
         require(read(source) == "abc" && fs::exists(cue), "original files were changed");
         no_staging(package);
 
-        // Extension does not determine the format; identical raw bytes named
-        // ISO are accepted, while actual cooked images fail the production hash.
+        // The extension does not set the format: raw bytes named ISO pass, cooked images fail the hash.
         const auto iso = root / "raw.iso";
         write(iso, "abc");
         { auto verified = verify_disc(iso, cancelled, {}, fixture); }
@@ -152,8 +151,7 @@ int main() {
         for (const auto& entry : fs::directory_iterator(destination.parent_path()))
             if (entry.path().filename().string().starts_with(".previous-")) ++backup_count;
         require(backup_count == 1, "reimporting verified data created an unnecessary backup");
-        // Python's hashlib gave these: lengths around the 64-byte block and its 56-byte padding limit, and past the
-        // 1 MiB a read takes.
+        // Python's hashlib: lengths around the 64-byte block, its 56-byte padding limit and past a 1 MiB read.
         constexpr std::pair<std::uint64_t, const char*> vectors[] = {
             {0, "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"},
             {55, "8aa994584139d128848eeebc4e815639ba5ab6e6e39574195a63ac4f14f7c43b"},

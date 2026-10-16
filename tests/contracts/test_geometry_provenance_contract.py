@@ -126,10 +126,7 @@ def main() -> int:
             "s_geom_cache" not in gte_source,
             "rounded packed-SXY storage must not exist")
 
-    # A syntactically RAM-looking SWC2 address is not proof that memory.c
-    # accepted the write (IsC, lockstep replay, and narrow runtime suppressions
-    # all discard writes).  Provenance therefore consumes a one-write token
-    # which only the completed main-RAM path may arm.
+    # A RAM-looking SWC2 address does not prove memory.c took the write: only the main-RAM path arms the one-write token.
     write_word = function_body(memory_source, "psx_write_word")
     flush_pos = write_word.index("if (g_overlay_flush_pending_cycles)")
     begin_pos = write_word.index("gte_precision_word_write_begin()")
@@ -440,10 +437,7 @@ def main() -> int:
             "pc, 0xACAA0004u, 14u" in route_config,
             "reviewed routes must pin raw MFC2/SW words and SXY2")
 
-    # Pin the retail-derived instruction identities without embedding or
-    # publishing any additional game data.  The six early stores preserve the
-    # MFC2 word; the final store is a bounded unpack/repack whose changed values
-    # are rejected by the runtime packed-word check above.
+    # Six early stores keep the MFC2 word, the last is a bounded unpack/repack whose changed values the packed-word check rejects.
     if GAME_CODE.exists():
         code = GAME_CODE.read_bytes()
         load_address = 0x80011200

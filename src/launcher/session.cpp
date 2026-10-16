@@ -323,7 +323,6 @@ void Session::remove_language(std::size_t index) {
 }
 
 void Session::play() {
-    // Always verify again immediately before Play.
     if (playable()) begin(Task::verify, verified_.cue, true);
 }
 

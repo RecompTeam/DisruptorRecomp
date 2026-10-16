@@ -31,10 +31,9 @@ static inline int32_t psx_ws_hud_thirds_centre(int32_t x, int32_t w, int32_t str
     return w == strip && 3 * centre > 4 * screen_w && 3 * x <= 2 * screen_w ? screen_w : centre;
 }
 
-/* The column a held weapon's sprite [x, x + w) is squashed about. In the middle third of the screen that is the
- * screen's centre, as for any sprite there. In an outer third it slides toward that edge and is on it when the sprite
- * touches it: a picture the screen crops stays cropped by the screen, and nothing jumps as the sprite crosses a third.
- * A sprite too wide to slide inside an outer third, one over five twelfths of the screen, slides from the centre on. */
+/* The column a held weapon's sprite [x, x + w) is squashed about: the centre in the middle third, sliding toward the edge in
+ * an outer third and on it when the sprite touches it, so a cropped picture stays cropped. One over five twelfths wide
+ * slides from the centre on. */
 /* Where a held weapon's sprite at x, w wide, squashed about pivot by numerator/denominator, is drawn: whole edges from
  * both squashed ends, and how far each unrounded end stands off its whole edge. 0 when no width or no squash is left. */
 typedef struct {
@@ -77,14 +76,10 @@ static inline int32_t psx_ws_hud_held_pivot(int32_t x, int32_t w, int32_t screen
     return (int32_t)(mirrored ? screen_w - centre : centre);
 }
 
-/* Shrinks a screen-space widget toward the edge or corner of the screen it
- * sits at: thirds of the width and of the height pick the pivot, as the stock
- * horizontal squash does. A counter whose pieces all centre in one third keeps
- * one pivot. Pieces in different thirds are pulled apart. The
- * horizontal factor includes the squash. The middle column below the top
- * third is left alone: the first-person weapon and its effects are drawn
- * there with the same primitives. Returns 0 when nothing was changed.
- * `strip` is how wide the game's lines of text are where one may be meant, else 0. */
+/* Shrinks a screen-space widget toward the edge or corner it sits at: thirds of width and height pick the pivot, as the
+ * stock horizontal squash does. Pieces in different thirds are pulled apart. The horizontal factor includes the squash.
+ * The middle column below the top third is left alone, the first-person weapon is drawn there. Returns 0 when nothing
+ * changed. `strip` is the game's text line width where one may be meant, else 0. */
 static inline int psx_ws_hud_scale_rect_strip(int32_t *x, int32_t *y,
                                               int32_t *w, int32_t *h,
                                               int32_t screen_w, int32_t screen_h,

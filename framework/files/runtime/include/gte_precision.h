@@ -1,14 +1,7 @@
-/* Exact GTE projection provenance shared by the GTE and GPU paths.
- *
- * SWC2 records the projection associated with a guest RAM word.  Some games
- * instead read SXY through MFC2 and later use an ordinary
- * SW.  Those routes are admitted only through opcode/dataflow-reviewed MFC2
- * and store PCs registered by the game runtime; a separately reviewed route
- * may seed a finite set of scratchpad words for a later exact packet copy.
- * This is a bounded audit of known instruction paths, not a general GPR
- * lineage tracker.  GPU packet decoding itself still queries exact main-RAM
- * addresses; these result codes deliberately distinguish an absent store from
- * an address collision or stale/changed packet data. */
+/* Exact GTE projection provenance shared by the GTE and GPU paths. SWC2 records the projection of a guest RAM word.
+ * Games that read SXY through MFC2 and store with SW are admitted only through reviewed MFC2 and store PCs registered by
+ * the game runtime, a bounded audit of known paths. The result codes tell an absent store from an address collision or
+ * stale packet data. */
 
 #ifndef PSXRECOMP_GTE_PRECISION_H
 #define PSXRECOMP_GTE_PRECISION_H
@@ -39,10 +32,7 @@ GtePrecisionLookupResult gte_precision_load_word_ex(
     uint32_t addr, uint32_t packed,
     int32_t *x16, int32_t *y16, uint16_t *z);
 
-/* Texture interpolation needs an unclamped projective depth in addition to
- * the exact packet-address/SXY identity required by geometry correction.  A
- * projection may remain useful for subpixel geometry while failing this
- * stricter near/far-depth test, so keep the two lookups separate. */
+/* Texture interpolation needs an unclamped projective depth on top of the packet identity, so the two lookups stay separate. */
 GtePrecisionLookupResult gte_precision_load_perspective_word_ex(
     uint32_t addr, uint32_t packed, uint16_t *z);
 
@@ -64,11 +54,8 @@ int gte_precision_load_view_word(uint32_t addr, uint32_t packed, GtePrecisionVie
 int gte_precision_load_word(uint32_t addr, uint32_t packed,
                             int32_t *x16, int32_t *y16, uint16_t *z);
 
-/* memory.c owns the authoritative write result.  Every public 32-bit write
- * attempt clears the transient token, and only a completed main-RAM or
- * scratchpad write arms it with an explicit, non-aliasing address domain.
- * Projection callbacks consume the token exactly once before deciding whether
- * provenance may enter the cache. */
+/* memory.c owns the write result: every 32-bit write attempt clears the token, a completed main-RAM or scratchpad write
+ * arms it, and projection callbacks consume it once before provenance enters the cache. */
 void gte_precision_word_write_begin(void);
 void gte_precision_main_ram_word_committed(uint32_t physical);
 void gte_precision_scratch_word_committed(uint32_t physical);
@@ -77,14 +64,9 @@ void gte_precision_gpu_dma_word_committed(uint32_t physical);
 void gte_precision_store_word(uint32_t addr, uint8_t reg);
 void gte_precision_invalidate_word(uint32_t addr);
 
-/* Register reviewed MFC2 and ordinary-SW instruction identities. The MFC2
- * callback snapshots the precise projection actually read by guest code. The
- * post-write callback is emitted only after the matching guest SW returns, and
- * the independent memory token proves that its RAM word really committed.
- * Both callbacks require the registered raw instruction word; dirty or changed
- * code therefore fails closed. Clipped/repacked values must still equal the
- * captured packed SXY. Registration is idempotent; reset is intended for
- * process/game configuration, not per-frame use. */
+/* Register reviewed MFC2 and ordinary-SW identities. The MFC2 callback snapshots the projection read, the post-write
+ * callback fires after the matching SW and the memory token confirms the commit. Both need the registered raw
+ * instruction word, so changed code fails closed. Registration is idempotent, reset is for configuration, not per frame. */
 void gte_precision_store_pc_routes_reset(void);
 int gte_precision_mfc2_pc_route_add(uint32_t mfc2_pc, uint32_t instruction,
                                     uint8_t gte_reg);
@@ -95,11 +77,8 @@ uint32_t gte_precision_mfc2_pc_read(uint32_t mfc2_pc, uint32_t instruction,
 void gte_precision_store_pc_word(uint32_t store_pc, uint32_t instruction,
                                  uint32_t addr, uint32_t packed);
 
-/* Register a reviewed ordinary-SW route whose destination must be one of a
- * finite set of aligned scratchpad words.  The range is described explicitly
- * by the game configuration; no arbitrary scratchpad store is admitted.  The
- * callback is post-write and therefore also requires memory.c's matching
- * scratchpad commit token. */
+/* Register a reviewed SW route into a finite set of aligned scratchpad words named by the game configuration. Post-write,
+ * so it also needs the scratchpad commit token. */
 int gte_precision_scratch_store_pc_route_add(
     uint32_t store_pc, uint32_t instruction, uint8_t gte_reg,
     uint32_t scratch_first, uint32_t scratch_stride,
@@ -116,11 +95,8 @@ void gte_precision_scratch_store_pc_word(
     uint32_t store_pc, uint32_t instruction,
     uint32_t addr, uint32_t packed);
 
-/* Register a finite set of reviewed projected-word copies into GP0 packets.
- * Each route pairs one exact LW with one exact SW and one unchanged GPR. The
- * read snapshots only an already-proven main-RAM or reviewed-scratch source;
- * the post-write callback publishes that snapshot only after the destination
- * main-RAM word commits. */
+/* Register reviewed projected-word copies into GP0 packets: one exact LW, one exact SW, one unchanged GPR. The destination
+ * main-RAM commit publishes the source snapshot. */
 int gte_precision_copy_pc_route_add(
     uint32_t load_pc, uint32_t load_instruction,
     uint32_t store_pc, uint32_t store_instruction, uint8_t gpr);
@@ -149,8 +125,7 @@ typedef struct GtePrecisionDiagnostics {
 void gte_precision_diagnostics(GtePrecisionDiagnostics *out);
 void gte_precision_diagnostics_reset(void);
 
-/* Bracket diagnostic interpreter replays so they cannot replace authoritative
- * GTE-side provenance or mutate runtime-only projection diagnostics. */
+/* Keeps diagnostic interpreter replays from replacing authoritative provenance. */
 int gte_replay_side_effects_begin(void);
 void gte_replay_side_effects_end(void);
 

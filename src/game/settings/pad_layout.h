@@ -6,7 +6,6 @@
 
 namespace disruptor::settings {
 
-// A gamepad button by input.ini's name for it and by what Xbox and PlayStation pads print on it.
 struct PadSource {
     const char* source;
     const char* xbox;
@@ -51,7 +50,6 @@ inline const char* printed(const PadSource& source, PadFamily family) {
     return source.playstation;
 }
 
-// A PlayStation button Disruptor acts on, by its input.ini field, and the source the runtime gives it by default.
 struct PadAction {
     const char* field;
     const char* action;

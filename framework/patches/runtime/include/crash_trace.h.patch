@@ -1,5 +1,5 @@
 diff --git a/runtime/include/crash_trace.h b/runtime/include/crash_trace.h
-index 2c6b8a87326525e854be6b5a39fca38cb2907572..0930235823144d1887fd87949119e317acfe1cae 100644
+index 2c6b8a87326525e854be6b5a39fca38cb2907572..3c980aeb65a2187f43d05940ab6f63caa9e07f30 100644
 --- a/runtime/include/crash_trace.h
 +++ b/runtime/include/crash_trace.h
 @@ -1,6 +1,7 @@
@@ -10,16 +10,14 @@ index 2c6b8a87326525e854be6b5a39fca38cb2907572..0930235823144d1887fd87949119e317
  #include <stdint.h>
  
  #ifdef __cplusplus
-@@ -9,6 +10,15 @@
+@@ -9,6 +10,13 @@
  
  /* Install signal/SEH/atexit handlers. Call once early in main(). */
  void psx_crash_trace_install_handlers(void);
 +
 +/* The longest path of a note, its folder and name together. */
 +#define PSX_NOTE_PATH_MAX 4096
-+/* The folder, UTF-8, that the run's notes go to: the crash report, the freeze heartbeat and its dumps, psx_crash.txt.
-+ * Until it is set they go to the current folder. 0 when the folder is too long to hold a note's name as well, and
-+ * then nothing changes. */
++/* The UTF-8 folder for the run's notes (crash report, freeze heartbeat and dumps, psx_crash.txt), the current folder until set. 0 when too long. */
 +int psx_set_note_folder(const char *folder);
 +/* `name` in that folder, written to `out` of PSX_NOTE_PATH_MAX bytes. */
 +const char *psx_note_path(const char *name, char *out, size_t size);

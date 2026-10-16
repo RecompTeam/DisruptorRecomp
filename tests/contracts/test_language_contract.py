@@ -11,9 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 LOAD_ADDRESS = 0x80011200
 ROM_TEXT_OFFSET = 0x800
 
-# Each text routine whole: where it ends, its hash, and what it returns in the delay slot of its jr $ra.
-# Two return the width drawn ($a1 less its first value). The third returns the characters read ($a0 less
-# its first value), which a string of another length would break, so it gets no hook.
+# Each text routine whole: end, hash and delay-slot return. Two return the width drawn, the third the characters read, so it has no hook.
 WIDTH = 0x00AB1022  # sub $v0, $a1, $t3
 COUNT = 0x008D1022  # sub $v0, $a0, $t5
 RETAIL_ROUTINES = {
@@ -29,9 +27,7 @@ MENU_DRAW_END = 0x8001A6A8
 MENU_DRAW_HASH = "fff16046098263f730ade1904d023480666e0f9dad1a90373788a2f2f0b286a4"
 MENU_DRAW_TAKES_X = (0x8001A47C, 0x00A09821)  # move $s3, $a1
 JR_RA = 0x03E00008
-# The three routines the hint module hooks, and the US code's calls for a hint that it tells apart by their return
-# addresses: the read of 0x5000 bytes, the LoadImage that stages them at (0x2C0, 0x1E0, 320 by 32), and the two
-# MoveImage calls that put that rectangle at rows 0xA0 and 0x190 of the frame buffers.
+# The hint module's three hooked routines and the US calls for a hint, told apart by return address.
 HINT_ROUTINES = (0x80011888, 0x8004D348, 0x8004D410)
 HINT_INSTRUCTIONS = {
     0x80011888: 0x27BDFFE0,  # addiu $sp, $sp, -0x20: the read's first instruction

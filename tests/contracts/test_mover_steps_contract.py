@@ -10,9 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 TEXT_OFFSET = 0x800
 
-# The tick counter's increment, the test that skips the movers on an odd tick, the step of two ticks, the call of
-# the mover routine, the two calls of the sector renderer with their geometry loads, the routine drawn after a
-# sector, the mover routine's own call of the vertex mover, and the loads of its list and count.
+# Tick increment, odd-tick mover skip, two-tick step, mover and sector renderer calls, the mover's list and count loads.
 RETAIL_INSTRUCTIONS = {
     0x80039B54: 0x8F8205AC,
     0x80039B68: 0x24420001,
@@ -31,10 +29,7 @@ RETAIL_INSTRUCTIONS = {
     0x80039D7C: 0x90847630,
     0x80023D2C: 0x8F82034C,
     0x80023D68: 0x8F8302D8,
-    # A lift: its routine's count and records, its sector's index of it, the camera's height less the lift's as its draw
-    # offset, its geometry, the lift's test of whether it carries the player and its writes of the player's and the camera's
-    # heights, the tick's camera height made of the player's, the world's draw in the frame loop (a call of the load before
-    # the hooked entry), the loop's wait for the last frame's packets, and its last draw with the first wait after it.
+    # A lift: routine, sector index, draw offset, carry test, height writes, the frame loop's draw and waits.
     0x800236A8: 0x8F8202BC,
     0x800236E4: 0x8F8305F0,
     0x8003A40C: 0x9043002E,

@@ -11,12 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 LOAD_ADDRESS = 0x80011200
 ROM_TEXT_OFFSET = 0x800
 
-# What the layout of the language disc takes from the US code: how much of WAD.IN's head is the table, how much
-# of a level and of a menu piece the loaders read, where the movie player and the three text routines keep their
-# tables, the glyph sizes, where the large font's letters start, and which table entry a movie's sound comes from.
-# Then what the signs, the control names and the hints rest on: the large font's routine takes every character from
-# 'a' up as a glyph with no upper bound, the small font's is called twice, once by the menu for strings 10 to 19,
-# and a hint is 0x5000 bytes from head entry 385 + level.
+# US code facts the layout rests on: table sizes, loader reads, font and glyph routines, the hint at head entry 385 + level.
 RETAIL_INSTRUCTIONS = {
     0x80012930: 0x34060654,  # ori $a2, $zero, 0x654: the head table is 405 words
     0x80015400: 0x3C060007,  # lui $a2, 7

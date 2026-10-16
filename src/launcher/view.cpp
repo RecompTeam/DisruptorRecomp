@@ -210,8 +210,7 @@ std::string plain(std::string_view text) {
     return out;
 }
 
-// A card: a bordered panel of the raised colour, as tall as its contents.
-// A height of 0 makes the card as tall as its contents.
+// A bordered panel of the raised colour, as tall as its contents when `height` is 0.
 void card_begin(const char* id, float width, float height = 0.0f) {
     ImGui::PushStyleColor(ImGuiCol_ChildBg, rgb(kSurface));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(ImGui::GetFontSize(), ImGui::GetFontSize() * 0.9f));
@@ -522,8 +521,7 @@ void View::sidebar(const UpdateView& update) {
     draw->AddLine(ImVec2(corner.x + width - 1.0f, corner.y), ImVec2(corner.x + width - 1.0f, corner.y + ImGui::GetWindowHeight()),
                   colour(kBorder));
 
-    // `selected` marks the page shown, `open` a heading whose pages are listed under it.
-    // A short window draws the side bar's rows closer, so that its foot stays in view with every page listed.
+    // A short window draws the rows closer so the foot stays in view.
     const bool tight = ImGui::GetMainViewport()->Size.y < 700.0f * scale_;
     const auto item = [&](const char* glyph, const char* label, bool selected, const char* badge = nullptr, float indent = 0.0f,
                           bool open = false) {

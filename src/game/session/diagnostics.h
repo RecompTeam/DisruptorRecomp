@@ -8,38 +8,33 @@
 #include <string_view>
 #include <vector>
 
-// What the game's log holds for a bug report: a few lines of every session, and more while detailed logging is on.
 namespace disruptor::diagnostics {
 
-/// The frames of a stretch of a session, gathered a frame at a time.
 struct Stretch {
     uint32_t frames = 0;
-    double waited = 0.0;   // seconds, the sum over the frames
-    double longest = 0.0;  // seconds, the longest wait for one frame
+    double waited = 0.0;   // seconds, summed
+    double longest = 0.0;  // seconds, one frame
     void frame(double seconds);
 };
 
-/// What a pulse says beside its stretch.
 struct Moment {
-    uint32_t game_frames = 0, game_vblanks = 0, late = 0;  // the game's own last window, as the frame rate module measures it
+    uint32_t game_frames = 0, game_vblanks = 0, late = 0;  // the game's last window, as the frame rate module measures it
     const char* screen = "world";
     bool focused = true, minimized = false;
     uint32_t repeated = 0, lost = 0;  // driver messages said too often to print, and ones the queue had no room for
 };
 
-/// The log's line for a stretch: frames the frame loop finished, their mean and longest wait, and the moment.
 std::string pulse_line(const Stretch& stretch, const Moment& moment);
 
 /// A line for each name that left `before` and each that came with `now`. A name stands as often as a device has it.
 std::vector<std::string> device_changes(const std::vector<std::string>& before, const std::vector<std::string>& now);
 
-/// The graphics driver's messages, each kind printed a few times and counted from then on.
+/// Each kind of driver message is printed a few times, then counted.
 class DriverMessages {
 public:
     static constexpr uint32_t printed_of_a_kind = 3;
     /// The line to print, or empty for a kind said `printed_of_a_kind` times already.
     std::string line(uint32_t id, int severity, int context, std::string_view text);
-    /// How many were left unprinted since the last call.
     uint32_t take_repeated();
 
 private:

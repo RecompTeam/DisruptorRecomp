@@ -8,18 +8,14 @@
 
 #define PSX_WS_HUD_WIDGET_MAX 4
 
-/* A HUD widget a game draws as several primitives over more than one third
- * of the screen. The thirds rule gives each primitive the pivot of its own
- * centre, which pulls such a widget apart. Whatever lies wholly inside the
- * box [x0, x1) x [y0, y1) takes the widget's pivot instead. */
+/* A HUD widget drawn as several primitives over more than a third of the screen, which the thirds rule would pull apart.
+ * Whatever lies wholly inside [x0, x1) x [y0, y1) takes the widget's pivot. */
 typedef struct {
     int32_t x0, y0, x1, y1;
     int32_t pivot_x, pivot_y;
 } PsxWsHudWidget;
 
-/* The widgets of a game that links its HUD to `layers` nodes just below its
- * ordering table, the last two tables its table word named, and where the
- * drawing of the frame stands. */
+/* The widgets of a game whose HUD hangs `layers` nodes below its ordering table, and where the frame's drawing stands. */
 typedef struct {
     PsxWsHudWidget widgets[PSX_WS_HUD_WIDGET_MAX];
     int count, layers;
@@ -37,18 +33,14 @@ static inline const PsxWsHudWidget *psx_ws_hud_widget_find(const PsxWsHudWidget 
     return NULL;
 }
 
-/* One corner of a widget's primitive: toward the pivot by the squash and the
- * HUD size across, by the HUD size down. Corners that coincided before
- * coincide afterwards. */
+/* One corner toward the pivot by the squash and HUD size across, by the HUD size down. */
 static inline void psx_ws_hud_widget_corner(const PsxWsHudWidget *widget, int32_t *x, int32_t *y,
                                             int32_t squash_num, int32_t squash_den, int percent) {
     *x = psx_ws_hud_scale_edge(*x, widget->pivot_x, (int64_t)squash_num * percent, (int64_t)squash_den * 100);
     *y = psx_ws_hud_scale_edge(*y, widget->pivot_y, percent, 100);
 }
 
-/* A widget's rectangle, both corners through one mapping. It is never thinner
- * or lower than a pixel, so rectangles that shared an edge share it afterwards
- * unless one of them is held at that pixel. */
+/* A widget's rectangle, never thinner than a pixel, so rectangles that shared an edge still share it. */
 static inline void psx_ws_hud_widget_rect(const PsxWsHudWidget *widget, int32_t *x, int32_t *y, int32_t *w, int32_t *h,
                                           int32_t squash_num, int32_t squash_den, int percent) {
     int32_t x1 = *x + *w, y1 = *y + *h;
@@ -58,9 +50,8 @@ static inline void psx_ws_hud_widget_rect(const PsxWsHudWidget *widget, int32_t 
     *h = y1 > *y ? y1 - *y : 1;
 }
 
-/* Whether the empty node at `node` opens a HUD layer, for a game that keeps
- * `layers` such nodes in the words just below its ordering table at `table`.
- * Both must be main RAM, in any segment or mirror. No table, no HUD layer. */
+/* Whether the empty node opens a HUD layer, for a game keeping `layers` such nodes below its table. Both must be main
+ * RAM, in any segment or mirror. */
 static inline int psx_ws_hud_node(uint32_t node, uint32_t table, int layers) {
     const uint32_t node_at = node & 0x1FFFFFFFu, table_at = table & 0x1FFFFFFFu;
     const uint32_t at = node_at & 0x1FFFFCu, base = table_at & 0x1FFFFCu;
@@ -68,19 +59,15 @@ static inline int psx_ws_hud_node(uint32_t node, uint32_t table, int layers) {
            base - at <= 4u * (uint32_t)layers;
 }
 
-/* The game set a new drawing area: the next frame's primitives follow, and
- * what the last frame showed is forgotten. Nothing else forgets it, so a
- * game has to set one every frame to have widgets. */
+/* A new drawing area: the next frame's primitives follow and the last frame's are forgotten, so a game sets one every
+ * frame to have widgets. */
 static inline void psx_ws_hud_widgets_frame(PsxWsHudWidgets *hud) {
     hud->shown = 0u;
     hud->in_hud_layer = 0;
 }
 
-/* A linked list begins. `table` is what the game's table word names now, or
- * 0 when widgets do not apply to this list. A double-buffered game alternates
- * two tables and can move the word on before the list it built is drawn, so
- * the word alone does not say which table a list comes from: the last two
- * tables it named are both the game's. */
+/* A linked list begins. `table` is the table word's, or 0 when widgets do not apply. A double-buffered game can move the
+ * word on before its list is drawn, so the last two tables it named are both the game's. */
 static inline void psx_ws_hud_widgets_list(PsxWsHudWidgets *hud, uint32_t table) {
     hud->in_hud_layer = 0;
     hud->enabled = hud->count > 0 && table != 0u;
@@ -100,10 +87,8 @@ static inline void psx_ws_hud_widgets_list_end(PsxWsHudWidgets *hud) {
     hud->in_hud_layer = 0;
 }
 
-/* The widget a primitive with these bounds belongs to. In a HUD layer that is
- * the widget it lies wholly inside, which is then shown. Outside a HUD layer
- * only a rectangle may join, and only a widget shown since the last new
- * drawing area: a game can print a widget's text as a list of its own. */
+/* The widget a primitive with these bounds belongs to: in a HUD layer the one it lies wholly inside, outside only a
+ * rectangle may join a widget shown since the last drawing area (a game can print a widget's text as its own list). */
 static inline const PsxWsHudWidget *psx_ws_hud_widgets_take(PsxWsHudWidgets *hud, int32_t x0, int32_t y0,
                                                             int32_t x1, int32_t y1, int rectangle) {
     const PsxWsHudWidget *widget;

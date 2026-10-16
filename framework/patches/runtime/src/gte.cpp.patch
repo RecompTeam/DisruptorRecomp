@@ -1,5 +1,5 @@
 diff --git a/runtime/src/gte.cpp b/runtime/src/gte.cpp
-index e7a1083a316b72fc30b9fa34038b773911bced51..0bb2a2a6fc13a96d7a1b03c8faeb4dfd29838e00 100644
+index e7a1083a316b72fc30b9fa34038b773911bced51..043d4dbf51f84ec67b751da32d4a1b5f3d4a83d8 100644
 --- a/runtime/src/gte.cpp
 +++ b/runtime/src/gte.cpp
 @@ -1,5 +1,7 @@
@@ -10,7 +10,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..0bb2a2a6fc13a96d7a1b03c8faeb4dfd
  #include <algorithm>
  #include <cstdlib>
  #include <cstdio>
-@@ -184,35 +186,80 @@
+@@ -184,35 +186,70 @@
  // ---------------------------------------------------------------------------
  static int32_t s_ws_xnum = 1, s_ws_xden = 1;
  extern "C" int gpu_ws_present_native_43(void);  /* gpu.c — suppress on 4:3 frames */
@@ -30,17 +30,11 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..0bb2a2a6fc13a96d7a1b03c8faeb4dfd
 - * a later GP0 polygon and place its vertices between native pixels. */
 -#define GEOM_CACHE_SIZE 8192u
 -struct GeomVertex {
-+/* Geometry presentation is enabled here, but vertex recovery is deliberately
-+ * owned by the exact address-keyed precision store below. Test 11 also kept a
-+ * cache keyed only by rounded SXY; that key is ambiguous and is permanently
-+ * disabled. Keep a generation counter solely for state/test ABI compatibility
-+ * with checkpoints that predate the removal of that cache. */
++/* The rounded-SXY cache is ambiguous and disabled, its generation counter stays for checkpoint and test ABI. */
 +static uint32_t s_geom_generation = 1;
 +static int s_geom_enabled = 0;
 +
-+/* The pinned framework's register test predates Test 12 and explicitly seeds
-+ * the removed cache to verify generation wrap. Preserve that fixture only in
-+ * the test binary; no production build contains or writes this storage. */
++/* Test binary only: the pinned register test seeds the removed cache to verify generation wrap. */
 +#ifdef PSX_GTE_REGISTER_TEST
 +#define GEOM_TEST_CACHE_SIZE 8192u
 +struct GeomTestVertex {
@@ -66,11 +60,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..0bb2a2a6fc13a96d7a1b03c8faeb4dfd
 +}
 +#endif
 +
-+/* Exact GTE projection provenance for perspective texture correction. SWC2
-+ * stores are observed directly; reviewed game-specific MFC2 + ordinary-SW
-+ * routes use the same committed-word gate. GPU DMA later supplies that exact
-+ * RAM address, so depth lookup follows the packet rather than guessing from
-+ * rounded X/Y. */
++/* Exact GTE projection provenance: SWC2 and reviewed MFC2+SW stores, keyed by the RAM address GPU DMA later supplies. */
  struct PreciseProjection {
      uint32_t packed;
      int32_t x16, y16;
@@ -106,7 +96,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..0bb2a2a6fc13a96d7a1b03c8faeb4dfd
  
  #define PRECISION_STORE_SIZE 65536u
  struct PrecisionStoreEntry {
-@@ -223,9 +270,73 @@
+@@ -223,9 +260,73 @@
  static PrecisionStoreEntry s_precision_store[PRECISION_STORE_SIZE];
  static uint32_t s_precision_generation = 1;
  static int s_precision_tracking = 0;
@@ -180,7 +170,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..0bb2a2a6fc13a96d7a1b03c8faeb4dfd
  
  static void gte_precision_generation_advance(void) {
      if (++s_precision_generation == 0) {
-@@ -236,13 +347,20 @@
+@@ -236,13 +337,20 @@
  
  static void gte_geom_generation_advance(void) {
      if (++s_geom_generation == 0) {
@@ -202,7 +192,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..0bb2a2a6fc13a96d7a1b03c8faeb4dfd
      /* Raw machine-state restore is authoritative even if host polling reached
       * it during a speculative validation pass. Defer the generation advance
       * until the outer transaction ends so old provenance cannot be restored. */
-@@ -255,6 +373,8 @@
+@@ -255,6 +363,8 @@
  }
  
  extern "C" void gte_precision_speculative_begin(void) {
@@ -211,7 +201,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..0bb2a2a6fc13a96d7a1b03c8faeb4dfd
      if (s_speculative_depth++ == 0) {
          std::memcpy(s_speculative_saved_sxy, s_precise_sxy,
                      sizeof(s_precise_sxy));
-@@ -273,6 +393,8 @@
+@@ -273,6 +383,8 @@
              std::memcpy(s_precise_sxy, s_speculative_saved_sxy,
                          sizeof(s_precise_sxy));
          }
@@ -220,13 +210,11 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..0bb2a2a6fc13a96d7a1b03c8faeb4dfd
      }
  }
  
-@@ -283,64 +405,696 @@
+@@ -283,64 +395,678 @@
  }
  
  static inline int precision_ram_address(uint32_t addr, uint32_t *physical) {
-+    /* Match memory.c: KSEG2/KSEG3 are not translated through the ordinary
-+     * 0x1fffffff mask. Apart from cache control, those accesses are unmapped
-+     * and must never alias a low-RAM provenance entry. */
++    /* Match memory.c: KSEG2/KSEG3 are unmapped and must not alias low-RAM provenance. */
 +    if (addr >= 0xC0000000u) return 0;
      uint32_t mapped = addr & 0x1FFFFFFFu;
 -    if (mapped >= 0x00800000u) return 0;
@@ -256,8 +244,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..0bb2a2a6fc13a96d7a1b03c8faeb4dfd
 -    if (!precision_ram_address(addr, &physical)) return;
 +static inline int precision_scratch_address(uint32_t addr,
 +                                             uint32_t *physical) {
-+    /* Use the same KUSEG/KSEG0/KSEG1 translation as memory.c, while keeping
-+     * KSEG2/KSEG3 from aliasing a reviewed scratchpad slot. */
++    /* Same translation as memory.c, with KSEG2/KSEG3 kept from aliasing a scratchpad slot. */
 +    if (addr >= 0xC0000000u) return 0;
 +    const uint32_t mapped = addr & 0x1FFFFFFFu;
 +    if (mapped < 0x1F800000u || mapped > 0x1F8003FFu) return 0;
@@ -363,9 +350,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..0bb2a2a6fc13a96d7a1b03c8faeb4dfd
 +}
 +
 +extern "C" void gte_precision_main_ram_word_committed(uint32_t physical) {
-+    /* memory.c passes its already-folded main-RAM address only after all four
-+     * bytes have been written.  Do not turn an unaligned host write into an
-+     * adjacent aligned provenance token. */
++    /* memory.c passes the folded address after all four bytes are written: no unaligned host write may become an aligned token. */
 +    if (physical >= 0x00200000u || (physical & 3u) != 0u) {
 +        s_precision_word_commit.domain = PRECISION_WORD_DOMAIN_NONE;
 +        s_precision_word_commit.pending = 0;
@@ -376,8 +361,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..0bb2a2a6fc13a96d7a1b03c8faeb4dfd
 +    s_precision_word_commit.pending = 1;
 +}
 +
-+/* Only memory.c arms this domain, after an allocated aperture word commits.
-+ * A renderer lookup cannot alias this address with a folded main-RAM word. */
++/* Only memory.c arms this domain, so a renderer lookup cannot alias it with a folded main-RAM word. */
 +extern "C" void gte_precision_gpu_dma_word_committed(uint32_t physical) {
 +    if (physical < PSX_MOD_GPU_DMA_APERTURE_BASE ||
 +        physical > PSX_MOD_GPU_DMA_APERTURE_BASE +
@@ -396,9 +380,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..0bb2a2a6fc13a96d7a1b03c8faeb4dfd
 +}
 +
 +extern "C" void gte_precision_scratch_word_committed(uint32_t physical) {
-+    /* memory.c supplies an already-translated physical address after all four
-+     * scratchpad bytes commit.  Slot eligibility is checked independently by
-+     * the reviewed post-write route. */
++    /* memory.c supplies a translated address after all four scratchpad bytes commit. Slot eligibility is checked by the post-write route. */
 +    if (physical < 0x1F800000u || physical > 0x1F8003FCu ||
 +        (physical & 3u) != 0u) {
 +        s_precision_word_commit.domain = PRECISION_WORD_DOMAIN_NONE;
@@ -494,8 +476,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..0bb2a2a6fc13a96d7a1b03c8faeb4dfd
 +        scratch_first < 0x1F800000u || scratch_first > 0x1F8003FCu)
 +        return 0;
 +
-+    /* Prove the final registered slot without overflow, and keep every slot
-+     * wholly within the physical 1 KiB scratchpad. */
++    /* Prove the final registered slot without overflow and wholly inside the 1 KiB scratchpad. */
 +    const uint64_t scratch_last =
 +        (uint64_t)scratch_first +
 +        (uint64_t)scratch_stride * (uint64_t)(scratch_count - 1u);
@@ -621,8 +602,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..0bb2a2a6fc13a96d7a1b03c8faeb4dfd
 +        return packed;
 +    ++s_precision_diagnostics.copy_load_attempts;
 +
-+    /* Every authoritative execution replaces the prior capture, including a
-+     * source miss. An older equal packed value must never survive this load. */
++    /* Each authoritative execution replaces the prior capture, a source miss included. */
 +    route->capture.valid = 0;
 +    if ((addr & 3u) != 0u) return packed;
 +    uint32_t physical;
@@ -638,9 +618,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..0bb2a2a6fc13a96d7a1b03c8faeb4dfd
 +}
 +
 +extern "C" void gte_precision_store_word(uint32_t addr, uint8_t reg) {
-+    /* Consume before every early return.  Speculative validation, disabled
-+     * tracking and ineligible GTE registers must not leave a real or replayed
-+     * write token available to a later SWC2 callback. */
++    /* Consume before every early return so no write token outlives into a later SWC2 callback. */
 +    const uint32_t committed_physical = s_precision_word_commit.physical;
 +    const uint8_t committed_domain = s_precision_word_commit.domain;
 +    const int committed = s_precision_word_commit.pending != 0;
@@ -654,10 +632,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..0bb2a2a6fc13a96d7a1b03c8faeb4dfd
 +        precision_memory_commit_matches(committed_domain, physical) &&
 +        committed_physical == physical;
 +#ifdef PSX_GTE_REGISTER_TEST
-+    /* The pinned standalone register fixture links gte.cpp without memory.c
-+     * and directly seeds then stores precision entries.  Preserve that
-+     * historical test seam only when no producer token exists; an explicitly
-+     * armed mismatched token still exercises the production rejection. */
++    /* The pinned register fixture links gte.cpp without memory.c: keep its seam only when no producer token exists. */
 +    if (!committed) commit_matches = 1;
 +#endif
 +    if (!commit_matches) {
@@ -673,8 +648,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..0bb2a2a6fc13a96d7a1b03c8faeb4dfd
 +extern "C" void gte_precision_store_pc_word(
 +        uint32_t store_pc, uint32_t instruction, uint32_t addr,
 +        uint32_t packed) {
-+    /* Most ordinary SWs are not reviewed projection stores and must leave the
-+     * token available for an immediately-following SWC2 callback. */
++    /* Most ordinary SWs are not projection stores and must leave the token for the following SWC2. */
 +    const PrecisionStorePcRoute *route =
 +        precision_store_pc_route(store_pc, instruction);
 +    if (!route) return;
@@ -712,8 +686,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..0bb2a2a6fc13a96d7a1b03c8faeb4dfd
 +extern "C" void gte_precision_scratch_store_pc_word(
 +        uint32_t store_pc, uint32_t instruction,
 +        uint32_t addr, uint32_t packed) {
-+    /* An unrelated SW callback must not steal the token from the matching
-+     * reviewed helper that immediately follows it. */
++    /* An unrelated SW must not steal the token from the reviewed helper that follows it. */
 +    const PrecisionScratchStorePcRoute *route =
 +        precision_scratch_store_pc_route(store_pc, instruction);
 +    if (!route) return;
@@ -774,8 +747,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..0bb2a2a6fc13a96d7a1b03c8faeb4dfd
 +    s_precision_word_commit.domain = PRECISION_WORD_DOMAIN_NONE;
 +    s_precision_word_commit.pending = 0;
 +
-+    /* Replay/speculative execution may consume only its transient memory token;
-+     * it must neither replace nor erase an authoritative load capture. */
++    /* Replay/speculative execution may consume only its transient memory token, never an authoritative load capture. */
 +    if (s_speculative_depth != 0 || s_gte_replay_sandbox ||
 +        !s_precision_tracking)
 +        return;
@@ -949,7 +921,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..0bb2a2a6fc13a96d7a1b03c8faeb4dfd
      gte_geom_generation_advance();
  }
  
-@@ -349,50 +1103,59 @@
+@@ -349,50 +1075,50 @@
  }
  
  extern "C" uint32_t gte_geometry_correction_hits(void) {
@@ -963,8 +935,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..0bb2a2a6fc13a96d7a1b03c8faeb4dfd
 +#endif
 +}
 +
-+/* Retained as a hard-disabled ABI stub for older generated/native test code.
-+ * Geometry must never recover provenance from a rounded coordinate alone. */
++/* Hard-disabled ABI stub: geometry must never recover provenance from a rounded coordinate. */
  extern "C" int gte_geometry_correction_lookup(uint32_t packed,
                                                  int32_t *x16, int32_t *y16) {
 +#ifdef PSX_GTE_REGISTER_TEST
@@ -1017,15 +988,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..0bb2a2a6fc13a96d7a1b03c8faeb4dfd
 +#endif
 +}
 +
-+// Per-scope diagnostic suppression of the classic widescreen X squash for
-+// candidate finite far backdrops. The recompiler brackets each reviewed
-+// [widescreen.backdrop].unsquash_funcs driver with
-+// gte_ws_set_suppress(1)/(0). Those drivers may draw a mixture of backdrop and
-+// ordinary room geometry, so the scope remains DEPTH-GATED: only vertices with
-+// SZ >= s_ws_far_threshold retain their authored 4:3 projection before the
-+// final wide stretch. The counter makes nested/recursive tagged renderers safe:
-+// an inner return must not clear its caller's active scope. Live testing has
-+// not linked this path to the skyline plane, so it must remain opt-in.
++// Depth-gated (SZ >= s_ws_far_threshold) squash suppression around unsquash_funcs drivers. Counted for nesting, opt-in.
 +static unsigned s_ws_suppress_depth = 0;
 +static int s_ws_backdrop_repair_enabled = 0;
  static int32_t s_ws_far_threshold = 900;  /* SZ split: near props squashed, far backdrop un-squashed (8C, tunable via ws_far_threshold) */
@@ -1046,7 +1009,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..0bb2a2a6fc13a96d7a1b03c8faeb4dfd
  extern "C" void gte_ws_set_far_threshold(int t) { s_ws_far_threshold = t; }
  extern "C" int  gte_ws_get_far_threshold(void) { return (int)s_ws_far_threshold; }
  /* SZ stats observed while suppress is active (one frame window, reset on read). */
-@@ -814,13 +1577,13 @@
+@@ -814,13 +1540,13 @@
      // this frame is being stretched — never on a 4:3-presented frame (FMV /
      // full-2D screen), so content and present stay locked.
      int64_t xterm = (int64_t)gte->IR1 * h_div_sz;
@@ -1062,7 +1025,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..0bb2a2a6fc13a96d7a1b03c8faeb4dfd
          /* Depth-gated: un-squash only FAR geometry (the backdrop); keep near
           * props squashed so they stay aligned. Record SZ stats for tuning. */
          int32_t sz = gte->SZ[3];
-@@ -829,7 +1592,7 @@
+@@ -829,7 +1555,7 @@
              if (sz > s_ws_sz_max) s_ws_sz_max = sz;
              s_ws_sz_n++;
          }
@@ -1071,7 +1034,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..0bb2a2a6fc13a96d7a1b03c8faeb4dfd
              do_squash = false;
              if (!s_gte_replay_sandbox) s_ws_sz_far++;
          }
-@@ -863,11 +1626,56 @@
+@@ -863,11 +1589,54 @@
          s_precise_sxy[2].x16 = (int32_t)sx16;
          s_precise_sxy[2].y16 = (int32_t)sy16;
          s_precise_sxy[2].z = gte->SZ[3];
@@ -1118,9 +1081,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..0bb2a2a6fc13a96d7a1b03c8faeb4dfd
 +                s_precise_sxy[2].unbounded = nearer >= 1.0 && gte->H != 0 && gte->MAC3 > 0 && gte->MAC3 <= 0xFFFF ? 2 : 1;
 +            }
 +        }
-+        /* Perspective textures need the original camera depth, not a value
-+         * clamped into SZ3, and must reject the GTE's near divide-overflow
-+         * region. Geometry can still use the retained X/Y when this bit is 0. */
++        /* Perspective textures need the original camera depth, not SZ3's clamp, and reject the near divide-overflow region. */
 +        s_precise_sxy[2].perspective_valid =
 +            gte->H != 0 && gte->MAC3 > 0 && gte->MAC3 <= 0xFFFF &&
 +            (uint32_t)gte->SZ[3] * 2u > (uint32_t)gte->H;
@@ -1131,7 +1092,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..0bb2a2a6fc13a96d7a1b03c8faeb4dfd
      // Step 5: Depth cueing (MAC0/IR0) — only for last vertex of RTPT or RTPS
      if (setMac0) {
          int64_t mac0 = (int64_t)gte->DQA * h_div_sz + gte->DQB;
-@@ -1494,6 +2302,7 @@
+@@ -1494,6 +2263,7 @@
  extern "C" int gte_replay_side_effects_begin(void) {
      using namespace PSXRecomp::GTE;
      if (s_gte_replay_sandbox) return 0;
@@ -1139,7 +1100,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..0bb2a2a6fc13a96d7a1b03c8faeb4dfd
      s_gte_replay_saved_caller_ra = s_gte_caller_ra;
      s_gte_replay_sandbox = 1;
      return 1;
-@@ -1503,6 +2312,7 @@
+@@ -1503,6 +2273,7 @@
      if (!s_gte_replay_sandbox) return;
      s_gte_caller_ra = s_gte_replay_saved_caller_ra;
      s_gte_replay_sandbox = 0;
@@ -1147,7 +1108,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..0bb2a2a6fc13a96d7a1b03c8faeb4dfd
  }
  
  static uint32_t gte_cpu_lzcr(uint32_t value);
-@@ -2010,6 +2820,34 @@
+@@ -2010,6 +2781,34 @@
      p.y16 = y16;
      p.z = z;
      p.valid = 1;
@@ -1182,7 +1143,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..0bb2a2a6fc13a96d7a1b03c8faeb4dfd
  }
  
  extern "C" void gte_test_get_precise_projection(uint32_t index,
-@@ -2029,8 +2867,8 @@
+@@ -2029,8 +2828,8 @@
  
  extern "C" void gte_test_seed_geometry(uint32_t packed, int32_t x16,
                                           int32_t y16) {

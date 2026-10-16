@@ -11,8 +11,7 @@ ROOT = Path(__file__).resolve().parents[2]
 LOAD_ADDRESS = 0x80011200
 ROM_TEXT_OFFSET = 0x800
 
-# A logo screen's frame tests, the boot call of movie 0, the movie-number test that sets the
-# 120 frame floor, and the player loop's skip-button test.
+# Logo frame tests, the boot movie call, the 120 frame floor, the skip-button test.
 RETAIL_INSTRUCTIONS = {
     0x80020A80: 0x2A02005E,
     0x80020A84: 0x1040000F,

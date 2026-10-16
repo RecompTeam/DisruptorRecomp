@@ -1,5 +1,5 @@
 diff --git a/recompiler/src/config_loader.cpp b/recompiler/src/config_loader.cpp
-index 246483fe90be378f8baf3e85671b692986823a8e..e612edd0c0f1fb5980298ece3320f825fa31161e 100644
+index 246483fe90be378f8baf3e85671b692986823a8e..594f30cb0ecffafd821f03780263a839027fae4d 100644
 --- a/recompiler/src/config_loader.cpp
 +++ b/recompiler/src/config_loader.cpp
 @@ -3,13 +3,27 @@
@@ -380,7 +380,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..e612edd0c0f1fb5980298ece3320f825
          });
      }
      if (doc.contains("launcher")) {
-@@ -2230,15 +2452,70 @@
+@@ -2230,15 +2452,69 @@
              if (n >= 0 && n <= 32767) { s.deadzone = (int)n; s.has_deadzone = true; }
          });
      }
@@ -411,8 +411,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..e612edd0c0f1fb5980298ece3320f825
 +bool atomic_replace_user_settings(const fs::path& temporary,
 +                                  const fs::path& destination) {
 +#ifdef _WIN32
-+    // A reader or antivirus scanner may briefly deny replacement after a save.
-+    // Keep the old file intact and allow up to 500 ms for that handle to close.
++    // A reader or antivirus scanner may briefly deny replacement: keep the old file and allow up to 500 ms.
 +    for (unsigned attempt = 0; ; ++attempt) {
 +        if (::MoveFileExW(temporary.c_str(), destination.c_str(),
 +                         MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) return true;
@@ -452,7 +451,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..e612edd0c0f1fb5980298ece3320f825
      if (!f.is_open()) return false;
  
      // TOML strings use forward slashes so backslash escaping is never an issue.
-@@ -2247,7 +2524,7 @@
+@@ -2247,7 +2523,7 @@
          return str;
      };
  
@@ -461,7 +460,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..e612edd0c0f1fb5980298ece3320f825
      f << "# Overrides the bundled game.toml; the command line overrides this file.\n\n";
  
      f << "[video]\n";
-@@ -2287,6 +2564,11 @@
+@@ -2287,6 +2563,11 @@
          f << "frame_interpolation = " << (s.frame_interpolation ? "true" : "false") << "\n";
      if (s.has_frame_interpolation_fps)
          f << "frame_interpolation_fps = " << s.frame_interpolation_fps << "\n";
@@ -473,7 +472,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..e612edd0c0f1fb5980298ece3320f825
      if (s.has_aspect_ratio)
          f << "aspect_ratio      = \"" << s.aspect_num << ":" << s.aspect_den << "\"\n";
      if (s.has_adaptive_view)
-@@ -2294,6 +2576,10 @@
+@@ -2294,6 +2575,10 @@
      f << "\n[audio]\n";
      if (s.has_spu_hq)
          f << "spu_hq = " << (s.spu_hq ? "true" : "false") << "\n";
@@ -484,7 +483,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..e612edd0c0f1fb5980298ece3320f825
      if (s.has_skip_launcher)
          f << "\n[launcher]\nskip_launcher = " << (s.skip_launcher ? "true" : "false") << "\n";
      if ((s.has_netplay_player_name && !s.netplay_player_name.empty()) ||
-@@ -2353,7 +2639,28 @@
+@@ -2353,7 +2638,28 @@
              f << "extra_late = " << s.parappa_timing_extra_late << "\n";
      }
  

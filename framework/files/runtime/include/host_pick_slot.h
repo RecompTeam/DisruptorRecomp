@@ -1,11 +1,7 @@
 #ifndef PSX_HOST_PICK_SLOT_H
 #define PSX_HOST_PICK_SLOT_H
 
-/*
- * A file pick handed from the thread that shows the dialog to the thread
- * that asked for it. One pick at a time: a second cannot open before the
- * first has been taken.
- */
+/* A file pick handed from the dialog's thread to the one that asked. One at a time. */
 
 #include <cstddef>
 #include <cstring>

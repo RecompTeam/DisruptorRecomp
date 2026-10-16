@@ -1,5 +1,5 @@
 diff --git a/runtime/src/dirty_ram_interp.c b/runtime/src/dirty_ram_interp.c
-index 0a324bcd9913b32b2bb2bcd7a673fd4aba39e4c4..d503d93efe57bb5e2d23c9cb4f7b224097ef9140 100644
+index 0a324bcd9913b32b2bb2bcd7a673fd4aba39e4c4..8467bce1f99d13aa842fb5d2e0e2eb9a6a7d56fe 100644
 --- a/runtime/src/dirty_ram_interp.c
 +++ b/runtime/src/dirty_ram_interp.c
 @@ -24,6 +24,7 @@
@@ -20,15 +20,12 @@ index 0a324bcd9913b32b2bb2bcd7a673fd4aba39e4c4..d503d93efe57bb5e2d23c9cb4f7b2240
  
  #include <stdint.h>
  #include <stdlib.h>
-@@ -45,6 +49,55 @@
+@@ -45,6 +49,52 @@
  uint64_t g_dirty_ram_aborts     = 0;
  uint64_t g_dirty_ram_guard_yields = 0;
  uint64_t g_dirty_ram_native_handoffs = 0;
 +
-+/* One sample per 256 interpreted instructions identifies stable hot loops
-+ * without turning production diagnostics into another per-insn profiler. The
-+ * physical-PC direct table has no hash collisions and is touched only while
-+ * PSX_RUNTIME_PERF_DIAG is enabled. */
++/* One sample per 256 interpreted instructions. The physical-PC direct table has no hash collisions, touched only under PSX_RUNTIME_PERF_DIAG. */
 +#define DIRTY_RAM_PERF_SAMPLE_SHIFT 8u
 +#define DIRTY_RAM_PERF_SAMPLE_STRIDE (1u << DIRTY_RAM_PERF_SAMPLE_SHIFT)
 +static int s_dirty_ram_perf_hot_enabled = 0;
@@ -76,7 +73,7 @@ index 0a324bcd9913b32b2bb2bcd7a673fd4aba39e4c4..d503d93efe57bb5e2d23c9cb4f7b2240
  /* Scheduling-contract pump telemetry (see dirty_ram_dispatch). Always-on:
   * g_dirty_pump_max_gap_insns is the largest interpreted-insn gap ever seen
   * between two interrupt pumps — must stay bounded (~4096 + one block) once the
-@@ -1449,6 +1502,7 @@
+@@ -1449,6 +1499,7 @@
      uint32_t dummy_next = 0;
      (void)exec_one_fetched(cpu, pc, insn, &dummy_next);
      g_dirty_ram_insns_run++;
@@ -84,7 +81,7 @@ index 0a324bcd9913b32b2bb2bcd7a673fd4aba39e4c4..d503d93efe57bb5e2d23c9cb4f7b2240
      /* CYCLE MODEL: the delay-slot instruction is a real retired R3000A instruction
       * and is charged its own per-instruction interlock INSIDE exec_one (top-of-fn
       * §1+deps+DO_LDS, or psx_cyc_load_* for a load delay slot) — so a branch+slot
-@@ -1516,6 +1570,10 @@
+@@ -1516,6 +1567,10 @@
      const uint32_t ld_before = is_ld ? cpu->gpr[ld_rt] : 0u;
  
      const int rv = exec_one_fetched_inner(cpu, pc, insn, next_pc_out);
@@ -95,7 +92,7 @@ index 0a324bcd9913b32b2bb2bcd7a673fd4aba39e4c4..d503d93efe57bb5e2d23c9cb4f7b2240
  
      if (is_ld) {
          const uint32_t loaded = cpu->gpr[ld_rt];
-@@ -2114,7 +2172,9 @@
+@@ -2114,7 +2169,9 @@
  #ifdef PSX_ENABLE_BLOCK_CYCLES
              psx_gte_read(cpu, rt);
  #endif
@@ -106,7 +103,7 @@ index 0a324bcd9913b32b2bb2bcd7a673fd4aba39e4c4..d503d93efe57bb5e2d23c9cb4f7b2240
              cpu->gpr[0] = 0;
              return 0;
          }
-@@ -2181,6 +2241,8 @@
+@@ -2181,6 +2238,8 @@
              cpu->gpr[rt] = psx_ws_xclip_bound(psx_cyc_load_word(cpu, addr, rt, 1u << rs));
          else
              cpu->gpr[rt] = psx_cyc_load_word(cpu, addr, rt, 1u << rs);
@@ -115,7 +112,7 @@ index 0a324bcd9913b32b2bb2bcd7a673fd4aba39e4c4..d503d93efe57bb5e2d23c9cb4f7b2240
          cpu->gpr[0] = 0;
          return 0;
      }
-@@ -2236,6 +2298,11 @@
+@@ -2236,6 +2295,11 @@
          g_debug_last_store_pc = pc;
          parappa_rhythm_log_store(cpu, pc, addr, cpu->gpr[rt], 4u);
          cpu->write_word(addr, cpu->gpr[rt]);
@@ -127,7 +124,7 @@ index 0a324bcd9913b32b2bb2bcd7a673fd4aba39e4c4..d503d93efe57bb5e2d23c9cb4f7b2240
          return 0;
      }
      case 0x2E: { /* SWR */
-@@ -2509,6 +2576,7 @@
+@@ -2509,6 +2573,7 @@
          cosim_exec_one_begin();
          int transferred = exec_one(cpu, pc, &next_pc);  /* charges its own interlock */
          g_dirty_ram_insns_run++;
@@ -135,7 +132,7 @@ index 0a324bcd9913b32b2bb2bcd7a673fd4aba39e4c4..d503d93efe57bb5e2d23c9cb4f7b2240
  #ifdef PSX_COSIM
          if (!cosim_exec_one_did_hook()) { extern void cosim_instr(uint32_t); cosim_instr(pc); }
  #endif
-@@ -2981,6 +3049,7 @@
+@@ -2981,6 +3046,7 @@
              OV_FPLOG_RET1();
          }
          g_dirty_ram_insns_run++;
@@ -143,7 +140,7 @@ index 0a324bcd9913b32b2bb2bcd7a673fd4aba39e4c4..d503d93efe57bb5e2d23c9cb4f7b2240
          insns_executed++;
          /* COP0 software-interrupt latency: an MTC0 to CAUSE or SR that makes a
           * software interrupt deliverable (CAUSE.IP0/IP1 & SR.IM0/IM1 & IEc)
-@@ -3433,6 +3502,7 @@
+@@ -3433,6 +3499,7 @@
      uint32_t    sav_unsup_pc     = g_unsupported_pc;
      uint32_t    sav_unsup_insn   = g_unsupported_insn;
      const char *sav_unsup_reason = g_unsupported_reason;
@@ -151,7 +148,7 @@ index 0a324bcd9913b32b2bb2bcd7a673fd4aba39e4c4..d503d93efe57bb5e2d23c9cb4f7b2240
      g_ls_replay_active = 1;
      g_ls_mode = 2;
      uint32_t pc = rep.pc;
-@@ -3456,6 +3526,7 @@
+@@ -3456,6 +3523,7 @@
      }
      g_ls_mode = 0;
      g_ls_replay_active = 0;
@@ -159,7 +156,7 @@ index 0a324bcd9913b32b2bb2bcd7a673fd4aba39e4c4..d503d93efe57bb5e2d23c9cb4f7b2240
      g_unsupported_seen   = sav_unsup_seen;     /* undo any replay-side decode-state leak */
      g_unsupported_pc     = sav_unsup_pc;
      g_unsupported_insn   = sav_unsup_insn;
-@@ -3550,6 +3621,7 @@
+@@ -3550,6 +3618,7 @@
      const char *sav_unsup_reason = g_unsupported_reason;
      uint32_t    sav_store_pc     = g_debug_last_store_pc;
      uint32_t    sav_func_addr    = g_debug_current_func_addr;
@@ -167,7 +164,7 @@ index 0a324bcd9913b32b2bb2bcd7a673fd4aba39e4c4..d503d93efe57bb5e2d23c9cb4f7b2240
  
      g_ls_replay_active = 1;
      g_ls_mode = 2;
-@@ -3585,6 +3657,7 @@
+@@ -3585,6 +3654,7 @@
  
      g_ls_mode = 0;
      g_ls_replay_active = 0;

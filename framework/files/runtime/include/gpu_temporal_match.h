@@ -1,13 +1,9 @@
 #ifndef PSXRECOMP_GPU_TEMPORAL_MATCH_H
 #define PSXRECOMP_GPU_TEMPORAL_MATCH_H
 
-/* Conservative correspondence for retained, ordered render triangles. This
- * does not establish guest object identity: a material key must describe the
- * complete ordered UV/material topology, not a transient command address.
- * Ambiguous, discontinuous, or excessively dense geometry stays current.
- * Coordinates are in native display pixels after normalizing buffer offsets.
- * q is the per-polygon normalized reciprocal-depth shader attribute; three
- * zeros mean affine. depth is independent GTE camera depth (zero=unknown). */
+/* Conservative correspondence for retained, ordered render triangles. A material key must describe the complete ordered
+ * UV/material topology. Ambiguous, discontinuous or dense geometry stays current. Coordinates are native display pixels.
+ * q is the per-polygon reciprocal-depth attribute (three zeros: affine), depth is GTE camera depth (zero: unknown). */
 #include <float.h>
 #include <limits.h>
 #include <math.h>
@@ -19,13 +15,11 @@ typedef struct GpuTemporalTriangle {
     float x[3], y[3], q[3];
     int world;
     float depth[3];
-    /* The GTE input vertex of each corner when `modelled`: the same point of
-     * the level gives the same value up to one shift shared by a whole frame. */
+    /* The GTE input vertex of each corner when `modelled`: one point of the level gives one value up to a per-frame shift. */
     int16_t model[3][3];
     int modelled;
     int sprite; /* a CPU-projected billboard: one depth, no model */
-    /* Nonzero: x and y of that corner are numerators over this weight, the
-     * form a projection produces. Zero means a plain screen position. */
+    /* Nonzero: x and y are numerators over this weight. Zero: a plain screen position. */
     float w[3];
 } GpuTemporalTriangle;
 
@@ -76,7 +70,6 @@ static inline int gpu_temporal_valid(const GpuTemporalTriangle *triangle,
                (3.0 * GPU_TEMPORAL_MAX_MOTION));
     cy = floor(((double)triangle->y[0] + triangle->y[1] + triangle->y[2]) /
                (3.0 * GPU_TEMPORAL_MAX_MOTION));
-    /* Leave room for both neighboring cells without an integer overflow. */
     if (cx < (double)INT_MIN + 1.0 || cx > (double)INT_MAX - 1.0 ||
         cy < (double)INT_MIN + 1.0 || cy > (double)INT_MAX - 1.0) return 0;
     if (cell_x) *cell_x = (int)cx;
@@ -117,9 +110,7 @@ static inline int gpu_temporal_compatible(const GpuTemporalTriangle *a,
         }
     }
 
-    /* Equal endpoint winding alone permits a collapsing halfway triangle
-     * (for example a 180-degree rotation). Check the quadratic area minimum
-     * across the entire interval, not just a chosen interpolation sample. */
+    /* Equal winding permits a collapsing halfway triangle (180-degree rotation): check the quadratic area minimum over the interval. */
     ex = (double)a->x[1] - a->x[0];
     ey = (double)a->y[1] - a->y[0];
     fx = (double)a->x[2] - a->x[0];
@@ -158,8 +149,7 @@ static inline void gpu_temporal_index_build(GpuTemporalIndex *index, int count) 
     }
 }
 
-/* Find exactly one candidate. A probe limit fails closed on pathological
- * hash collisions or dense repeated material, bounding frame-time work. */
+/* Find exactly one candidate. A probe limit fails closed on pathological collisions. */
 static inline int gpu_temporal_unique(const GpuTemporalIndex *index,
                                        const GpuTemporalTriangle *triangle) {
     int cell_x, cell_y, match = -1, probes = 0;
@@ -185,10 +175,8 @@ static inline int gpu_temporal_unique(const GpuTemporalIndex *index,
     return match;
 }
 
-/* Every output begins as -1, including allocation failure and invalid sizes.
- * A match must be unique in BOTH directions; draw order never breaks ties.
- * Expected linear work for spatially distributed geometry, with a strict
- * per-query probe cap even when every material and centroid is identical. */
+/* Every output begins as -1. A match must be unique in both directions, draw order never breaks ties. A strict per-query
+ * probe cap bounds the work. */
 static inline void gpu_temporal_match(const GpuTemporalTriangle *prev,
                                        int prev_n,
                                        const GpuTemporalTriangle *curr,
@@ -234,11 +222,8 @@ static inline void gpu_temporal_match(const GpuTemporalTriangle *prev,
     free(storage);
 }
 
-/* Interpolate only a pair already accepted by gpu_temporal_match. XY is
- * projected-space motion; q remains reciprocal depth throughout and is
- * interpolated as the shader's perspective attribute, never as camera Z.
- * This preserves positive depth and the all-zero affine sentinel. It does
- * not claim linear motion in world space. UV/material data stays current. */
+/* Interpolate only a pair accepted by gpu_temporal_match. XY is projected-space motion, q stays reciprocal depth, never
+ * camera Z. UV/material data stays current. */
 static inline void gpu_temporal_lerp(const GpuTemporalTriangle *prev,
                                       const GpuTemporalTriangle *curr,
                                       float alpha,
@@ -247,23 +232,18 @@ static inline void gpu_temporal_lerp(const GpuTemporalTriangle *prev,
     if (!out) return;
     if (!curr) { if (prev) *out = *prev; return; }
     if (!prev || !gpu_temporal_finite(alpha) || alpha >= 1.0f) {
-        /* A weighted end still has to be divided by its weight. */
         if (curr->w[0] == 0.0f && curr->w[1] == 0.0f && curr->w[2] == 0.0f) { *out = *curr; return; }
         if (!prev) prev = curr;
         alpha = 1.0f;
     }
     if (alpha <= 0.0f) {
-        /* A weighted corner still has to be divided by its weight. */
         if (prev->w[0] == 0.0f && prev->w[1] == 0.0f && prev->w[2] == 0.0f) { *out = *prev; return; }
         alpha = 0.0f;
     }
     result = *curr;
     for (int vertex = 0; vertex < 3; ++vertex) {
         if (prev->w[vertex] != 0.0f || curr->w[vertex] != 0.0f) {
-            /* A weighted corner moves along the line its projection moved
-             * it: straight in space, so collinear corners stay collinear
-             * for any turn. The result keeps its weight; at or below zero
-             * the corner is not in front of the viewer yet. */
+            /* Moves along its projection's line, so collinear corners stay collinear. The weight is kept, at or below 0 the corner is not in front yet. */
             const double before = prev->w[vertex] != 0.0f ? prev->w[vertex] : 1.0;
             const double after = curr->w[vertex] != 0.0f ? curr->w[vertex] : 1.0;
             const double weight = before + (after - before) * alpha;

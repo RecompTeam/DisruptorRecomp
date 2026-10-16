@@ -1,5 +1,5 @@
 diff --git a/runtime/src/memory.c b/runtime/src/memory.c
-index d96d6d74422c5b80e3ae283d3a2d872686cab632..383b75c2ee77c7fa910bbdf5e582e1583fd5aaea 100644
+index d96d6d74422c5b80e3ae283d3a2d872686cab632..23a2c0054c758454ab51ddab3d503c59cf6db98d 100644
 --- a/runtime/src/memory.c
 +++ b/runtime/src/memory.c
 @@ -14,6 +14,7 @@
@@ -109,7 +109,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..383b75c2ee77c7fa910bbdf5e582e158
      if (cf) { fprintf(cf, "%s\n", reason); fclose(cf); }
      psx_fatal_halt(reason);
  }
-@@ -1458,10 +1497,13 @@
+@@ -1458,10 +1497,11 @@
  }
  
  static void psx_write_word_raw(uint32_t addr, uint32_t val);
@@ -117,14 +117,12 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..383b75c2ee77c7fa910bbdf5e582e158
  void psx_write_word(uint32_t addr, uint32_t val) {
      extern void (*g_overlay_flush_pending_cycles)(void);
      if (g_overlay_flush_pending_cycles) g_overlay_flush_pending_cycles();
-+    /* The immediately following provenance callback may trust only a commit
-+     * from this write attempt.  Clear after the cycle flush because flushing
-+     * can itself perform guest writes. */
++    /* The following provenance callback may trust only a commit from this attempt: cleared after the cycle flush, which can itself write. */
 +    gte_precision_word_write_begin();
      if (g_ls_mode == 2) { ls_write_hook(addr, 4, val); return; }
      if (g_ds_recording) {
          if (g_dma_exec_depth > 0) ds_note_dma_write();
-@@ -1475,7 +1517,6 @@
+@@ -1475,7 +1515,6 @@
  }
  static void psx_write_word_raw(uint32_t addr, uint32_t val) {
      g_guest_store_count++;
@@ -132,24 +130,21 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..383b75c2ee77c7fa910bbdf5e582e158
      /* KSEG2 cache control — before physical translation. */
      if (addr == 0xFFFE0130u) { cache_ctrl = val; return; }
      /* KSEG2 guard — see psx_read_word_raw. */
-@@ -1540,6 +1581,9 @@
+@@ -1540,6 +1579,8 @@
                  return;
              }
          }
-+        /* All discard/suppression paths are now behind us.  Only a write that
-+         * actually changes main RAM may invalidate prior provenance. */
++        /* Only a write that changes main RAM invalidates prior provenance. */
 +        gte_precision_invalidate_word(addr);
          if (phys == D44_PHYS) d44_note(phys, read_ram_word(phys), val);
          debug_server_trace_write_check(phys, read_ram_word(phys), val, 4);
          parity_trace_note_write(phys, 4, effective_store_pc());
-@@ -1554,12 +1598,18 @@
+@@ -1554,12 +1595,16 @@
          ram[phys + 1] = (uint8_t)(val >> 8);
          ram[phys + 2] = (uint8_t)(val >> 16);
          ram[phys + 3] = (uint8_t)(val >> 24);
 +        gte_precision_main_ram_word_committed(phys);
-+        /* The matching emitted/interpreted guest-store callback consumes this
-+         * token after write_word returns. DMA, HLE and mod writes deliberately
-+         * have no such callback, so a sticky debug PC cannot grant provenance. */
++        /* The guest-store callback consumes this token after write_word. DMA, HLE and mod writes have none, so a sticky debug PC cannot grant provenance. */
          return;
      }
      {
@@ -161,17 +156,16 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..383b75c2ee77c7fa910bbdf5e582e158
              return;
          }
      }
-@@ -1574,6 +1624,9 @@
+@@ -1574,6 +1619,8 @@
      if (phys >= 0x1F000000u && phys <= 0x1F7FFFFFu) return;
      if (phys >= 0x1F800000u && phys <= 0x1F8003FFu) {
          uint32_t off = phys - 0x1F800000u;
-+        /* All discard/suppression paths are behind us.  Invalidate any
-+         * reviewed scratch provenance before the replacement bytes land. */
++        /* Invalidate reviewed scratch provenance before the replacement bytes land. */
 +        gte_precision_invalidate_word(addr);
          debug_server_trace_write_check(phys,
              (uint32_t)scratchpad[off]
            | ((uint32_t)scratchpad[off + 1] << 8)
-@@ -1584,6 +1637,7 @@
+@@ -1584,6 +1631,7 @@
          scratchpad[off + 1] = (uint8_t)(val >> 8);
          scratchpad[off + 2] = (uint8_t)(val >> 16);
          scratchpad[off + 3] = (uint8_t)(val >> 24);
@@ -179,7 +173,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..383b75c2ee77c7fa910bbdf5e582e158
          return;
      }
      if (phys >= 0x1F801000u && phys <= 0x1F803FFFu) {
-@@ -1662,7 +1716,6 @@
+@@ -1662,7 +1710,6 @@
  }
  static void psx_write_half_raw(uint32_t addr, uint16_t val) {
      g_guest_store_count++;
@@ -187,7 +181,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..383b75c2ee77c7fa910bbdf5e582e158
      if (sr_ptr && (*sr_ptr & 0x10000u)) return;
  
          /* KSEG2 guard — see psx_read_word_raw. */
-@@ -1670,6 +1723,7 @@
+@@ -1670,6 +1717,7 @@
      uint32_t phys = psx_phys_addr(addr);
  
      if (phys < RAM_SIZE) {
@@ -195,7 +189,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..383b75c2ee77c7fa910bbdf5e582e158
          debug_server_trace_write_check(phys, (uint32_t)read_ram_half(phys), (uint32_t)val, 2);
          parity_trace_note_write(phys, 2, effective_store_pc());
          card_data_writes_check(phys, (uint32_t)val, 2);
-@@ -1686,6 +1740,7 @@
+@@ -1686,6 +1734,7 @@
      {
          uint32_t off;
          if (mod_gpu_dma_memory_offset(phys, 2u, &off)) {
@@ -203,7 +197,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..383b75c2ee77c7fa910bbdf5e582e158
              mod_gpu_dma_memory[off] = (uint8_t)val;
              mod_gpu_dma_memory[off + 1u] = (uint8_t)(val >> 8);
              return;
-@@ -1702,6 +1757,7 @@
+@@ -1702,6 +1751,7 @@
      if (phys >= 0x1F000000u && phys <= 0x1F7FFFFFu) return;
      if (phys >= 0x1F800000u && phys <= 0x1F8003FFu) {
          uint32_t off = phys - 0x1F800000u;
@@ -211,7 +205,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..383b75c2ee77c7fa910bbdf5e582e158
          debug_server_trace_write_check(phys,
              (uint32_t)scratchpad[off] | ((uint32_t)scratchpad[off + 1] << 8),
              (uint32_t)val, 2);
-@@ -1998,7 +2054,6 @@
+@@ -1998,7 +2048,6 @@
  }
  static void psx_write_byte_raw(uint32_t addr, uint8_t val) {
      g_guest_store_count++;
@@ -219,7 +213,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..383b75c2ee77c7fa910bbdf5e582e158
      if (sr_ptr && (*sr_ptr & 0x10000u)) return;
  
          /* KSEG2 guard — see psx_read_word_raw. */
-@@ -2006,6 +2061,7 @@
+@@ -2006,6 +2055,7 @@
      uint32_t phys = psx_phys_addr(addr);
  
      if (phys < RAM_SIZE) {
@@ -227,7 +221,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..383b75c2ee77c7fa910bbdf5e582e158
          debug_server_trace_write_check(phys, (uint32_t)ram[phys], (uint32_t)val, 1);
          parity_trace_note_write(phys, 1, effective_store_pc());
          card_data_writes_check(phys, (uint32_t)val, 1);
-@@ -2021,6 +2077,7 @@
+@@ -2021,6 +2071,7 @@
      {
          uint32_t off;
          if (mod_gpu_dma_memory_offset(phys, 1u, &off)) {
@@ -235,7 +229,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..383b75c2ee77c7fa910bbdf5e582e158
              mod_gpu_dma_memory[off] = val;
              return;
          }
-@@ -2034,6 +2091,7 @@
+@@ -2034,6 +2085,7 @@
      }
      if (phys >= 0x1F000000u && phys <= 0x1F7FFFFFu) return;
      if (phys >= 0x1F800000u && phys <= 0x1F8003FFu) {

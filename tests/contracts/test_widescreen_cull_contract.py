@@ -10,8 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 LOAD_ADDRESS = 0x80011200
 ROM_TEXT_OFFSET = 0x800
 
-# Per funnel, from its first test: the test of a bound against the step aside, its branch, the step negated, the test
-# against that, its branch. The game keeps what lies within 45 degrees, the picture of 4:3.
+# Per funnel: bound test against the step aside, negated step test, branches. The game keeps 45 degrees, the 4:3 picture.
 FUNNELS = {
     "the first funnel": (0x8003B8EC, (0x0067102A, 0x144000A8, 0x00071023, 0x0062102A, 0x144000A5)),
     "the second funnel": (0x8003BD00, (0x0067102A, 0x144000AD, 0x00071023, 0x0062102A, 0x144000AA)),
@@ -20,8 +19,7 @@ FUNNELS = {
 }
 # The same five instructions test the step up and down right after the step aside in three of the funnels, and stay vanilla.
 VERTICAL = (0x8003B900, 0x8003BD14, 0x8003CDB8)
-# The fourth funnel after projection, for a sprite facing either way: keep it when its left edge is under 300 and its
-# right edge is 21 or more. Address, instruction, and the bound it holds.
+# Fourth funnel after projection, either facing: keep when the left edge is under 300 and the right edge 21 or more.
 SCREEN_BOUNDS = {
     "slti_sites": ((0x8003D0F8, 0x28E2012C, 300), (0x8003D110, 0x2842012C, 300)),
     "slti_lower_sites": ((0x8003D108, 0x28420015, 21), (0x8003D118, 0x28E20015, 21)),

@@ -435,8 +435,7 @@ def main() -> int:
             + format_addresses(missing_static_targets)
         )
 
-    # The projection-and-stretch path deliberately restores the retail
-    # unsigned portal representation. Both halves must therefore remain LHU.
+    # Both halves keep the retail unsigned portal representation, so both stay LHU.
     if not UNSIGNED_PORTAL_LEFT.search(shard_text):
         failures.append(
             "portal left edge is not the retail unsigned load at 0x80041184"

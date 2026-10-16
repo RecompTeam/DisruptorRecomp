@@ -22,8 +22,7 @@ constexpr uint32_t kPiece = 0x63000;  // longer than the pictures and the palett
 constexpr uint32_t kPicturesAt = 0x11000;
 constexpr uint32_t kPaletteAt = 0x621B0;
 
-// A menu piece whose pixel at (x, y) of picture `scene` is (x + y + scene + seed) & 0xFF and whose palette word n is
-// n * 0x81 + seed, so that every entry differs.
+// A menu piece with pixel (x + y + scene + seed) & 0xFF at (x, y) of picture `scene` and palette word n = n * 0x81 + seed.
 Bytes menu_piece(uint8_t seed, uint16_t palette_step = 0x81) {
     Bytes piece(kPiece, 0);
     for (uint32_t scene = 0; scene < 4; ++scene)

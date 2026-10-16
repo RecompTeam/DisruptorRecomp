@@ -68,8 +68,7 @@ require(source.index("maximum_ammo_table_matches()") <
 require("psx_mod_write_byte(kCheatedMarker, 1u)" in source,
         "retail save/endgame cheat consequence must not be bypassed")
 
-# Private retail input is intentionally absent from clean source checkouts.
-# When present, pin the exact instructions that justify the host contract.
+# Private retail input is absent from clean checkouts: its instructions are pinned when present.
 image_path = ROOT / "input" / "SLUS_002.24.code"
 if image_path.exists():
     image = image_path.read_bytes()

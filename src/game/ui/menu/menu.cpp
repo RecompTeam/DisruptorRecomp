@@ -118,7 +118,6 @@ bool initialize_imgui() {
     return true;
 }
 
-// A second after the menu closes, two seconds of what is swapped to the screen go to shown/<unix time>/ beside settings.toml.
 void start_shown_recording() {
     g_menu.record_shown = false;
     const auto now = std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch()).count();
@@ -312,7 +311,6 @@ int on_sdl_event(void *, const SDL_Event *event) {
 }
 
 uint32_t current_flags(void *) {
-    // Wheels read the final mapped pad themselves, then neutralise it before the guest resumes.
     if (disruptor_selection_wheel_open())
         return PSX_HOST_UI_VISIBLE;
     if (!g_menu.open || !g_menu.imgui_ready) return disruptor_capsule_notice() ? PSX_HOST_UI_VISIBLE : 0u;

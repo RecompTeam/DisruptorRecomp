@@ -3,19 +3,10 @@
 
 #include <stdint.h>
 
-/* Which of a double-buffered game's two frames is a full-2D screen.
- *
- * A game that draws its world through the GTE projects vertices for every
- * gameplay frame before it sets that frame's drawing area, and none for a
- * map or a menu. So the count since the last drawing area says what the frame
- * about to be drawn is, without waiting, and the buffer it is drawn into
- * keeps that answer until it has been displayed.
- *
- * Two frames are in hand at once: the game builds one while display lists of
- * the one before are still being drawn. A question asked inside a list is
- * about the buffer drawn last, a question asked outside one is about the
- * frame being built. And a game culls before it projects, so one that knows
- * what it is about to build says so first. */
+/* Which of a double-buffered game's two frames is a full-2D screen. A game that draws its world through the GTE projects
+ * vertices for every gameplay frame before it sets the drawing area and none for a map or menu, so the count since the
+ * last drawing area names the frame about to be drawn. A question inside a list is about the buffer drawn last, outside
+ * one about the frame being built. A game that knows what it builds says so first. */
 typedef struct {
     uint32_t x, y;
     int known, flat;

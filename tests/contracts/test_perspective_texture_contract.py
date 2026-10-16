@@ -100,8 +100,7 @@ def main() -> int:
     render_header = RENDER_HEADER.read_text(encoding="utf-8")
     gte_header = GTE_HEADER.read_text(encoding="utf-8")
 
-    # Deterministic reference math protects the intended interpolation rather
-    # than only checking shader spelling.
+    # Reference math pins the interpolation, not the shader spelling.
     weights = (0.25, 0.25, 0.50)
     uvs = ((0.0, 0.0), (80.0, 0.0), (0.0, 40.0))
     affine = (
@@ -121,8 +120,7 @@ def main() -> int:
     quad_uv = ((0.0, 0.0), (64.0, 0.0),
                (0.0, 64.0), (64.0, 64.0))
     quad_q = (1.0, 0.5, 0.25, 0.125)
-    # First half is 0,1,2; second is 2,1,3. The same point on edge 1-2
-    # must reconstruct identically from both local vertex orderings.
+    # The point on edge 1-2 must reconstruct identically from both vertex orderings.
     first_edge = interpolate_uv(
         (0.0, 0.4, 0.6),
         (quad_uv[0], quad_uv[1], quad_uv[2]),
@@ -134,8 +132,7 @@ def main() -> int:
     require_uv_close(first_edge, second_edge,
                      "quad halves must agree along their shared 1-2 diagonal")
 
-    # Texture correction is independently switchable while geometry remains
-    # enabled, allowing a meaningful same-geometry A/B comparison.
+    # Texture correction switches independently of geometry, for a same-geometry A/B.
     env_pos = main_cpp.find('std::getenv("PSX_TEXTURE_CORRECTION")')
     require(env_pos >= 0,
             "main must expose the independent PSX_TEXTURE_CORRECTION gate")
@@ -151,8 +148,7 @@ def main() -> int:
     require("gpu_geometry_correction_set" in main_cpp,
             "texture correction must not replace the geometry startup gate")
 
-    # The GPU front-end must use renderer dispatch, and exact provenance must
-    # gate q before any per-vertex depth is accepted.
+    # The GPU front-end uses renderer dispatch and gates q on exact provenance before any per-vertex depth.
     require("sw_set_perspective_triangle(" not in gpu,
             "gpu.c must not bypass the active renderer with a SW-only setter")
     texture_sig = function_signature(gpu, "prepare_texture_triangle")
@@ -218,9 +214,7 @@ def main() -> int:
                 first_q.group(1) == second_q.group(1),
                 f"{name} must preserve q order across the shared diagonal")
 
-    # Perspective textures have a stricter depth contract than subpixel X/Y:
-    # reject clamped far depth and the GTE near divide-overflow region without
-    # weakening ordinary geometry lookup.
+    # Stricter than subpixel X/Y: reject clamped far depth and the GTE near divide-overflow region.
     require("GTE_PRECISION_LOOKUP_PERSPECTIVE_INVALID" in gte_header and
             "gte_precision_load_perspective_word_ex" in gte_header,
             "the strict perspective-depth lookup must be public and diagnosable")
@@ -243,8 +237,7 @@ def main() -> int:
         require(token in capture,
                 f"strict perspective capture predicate missing: {token}")
 
-    # Renderer API is optional per backend. The software implementation is
-    # deliberately disconnected because its dormant path modifies native VRAM.
+    # The software backend is deliberately disconnected: its dormant path modifies native VRAM.
     require("void gr_set_perspective_triangle(" in render_header,
             "renderer facade must expose one-shot perspective metadata")
     require("(*set_perspective_triangle)(" in compact(render_header),
@@ -260,8 +253,7 @@ def main() -> int:
     require(dispatch.count("g_b->set_perspective_triangle") >= 2,
             "the optional perspective callback must be null-checked")
 
-    # Shader q keeps its location and offset. The appended temporal camera
-    # depth is CPU metadata, so expanding the record must not shift attributes.
+    # The appended temporal depth is CPU metadata: expanding the record must not shift attributes.
     require("#define TEXV 24" in gl,
             "textured GL vertices must retain independent q and temporal depth")
     tex_vs = source_span(gl, "static const char *TEX_VS", "static const char *TEX_FS")
@@ -282,9 +274,7 @@ def main() -> int:
     require("sw_set_perspective_triangle" not in gl_set,
             "pre-context GL q must not fall through to canonical software VRAM")
 
-    # A polygon-normalized shader q cannot identify equal physical depths on
-    # adjacent polygons. Temporal identity receives the original GTE depth,
-    # including while perspective textures are disabled, and consumes it once.
+    # Polygon-normalized q cannot identify equal depths across polygons: temporal identity takes the original GTE depth once.
     temporal_route = function_body(render, "gr_set_temporal_depth_triangle")
     require(temporal_route.count("g_b->set_temporal_depth_triangle") >= 2 and
             re.search(r"\.set_temporal_depth_triangle\s*=\s*NULL", sw_backend),
@@ -308,8 +298,7 @@ def main() -> int:
     require("layout(location=12)" not in tex_vs,
             "temporal camera depth must not become a shader attribute")
 
-    # Canonical drawing still uses affine v_uv. Only the independent visual
-    # pass, and only an exact polygon with valid q, may select uv*q/q.
+    # Canonical drawing stays affine: only the visual pass, on an exact polygon with valid q, selects uv*q/q.
     require("noperspective out vec2 v_uv" in tex_vs and
             "noperspective in vec2 v_uv" in tex_fs,
             "the original canonical affine varying must remain intact")
@@ -333,8 +322,7 @@ def main() -> int:
     require("floor(v_uv.x)" not in tex_fs and "floor(v_uv.y)" not in tex_fs,
             "no nearest/bilinear sampling may bypass the local corrected UV")
 
-    # Perspective correction is attribute-only: it must not perturb clipping,
-    # coverage, or any canonical geometry by repurposing homogeneous W.
+    # Perspective correction is attribute-only: no change to clipping, coverage or geometry through W.
     require("gl_Position.w" not in tex_vs,
             "texture correction must not mutate gl_Position.w")
     require(re.search(
@@ -349,8 +337,7 @@ def main() -> int:
     require(0 <= canonical < visual,
             "the canonical affine pass must execute before the visual pass")
 
-    # Rectangle and UI decomposition never carry GTE-world metadata. Explicitly
-    # clearing every one-shot prevents rejected or prior polygons leaking q.
+    # Rectangles and UI never carry GTE-world metadata: every one-shot is cleared so no q leaks.
     for name in ("gpu_flat_rect", "gpu_textured_rect"):
         body = function_body(gl, name)
         require("s_next_world = 0" in body and "s_next_precise = 0" in body,

@@ -10,8 +10,7 @@ ROOT = Path(__file__).resolve().parents[2]
 LOAD_ADDRESS = 0x80011200
 ROM_TEXT_OFFSET = 0x800
 
-# The flag test, the step to the second packet, one load, one shift, the first and last position
-# store and the step past the second packet.
+# Flag test, second-packet step, one load and shift, first and last position stores.
 RETAIL_INSTRUCTIONS = {
     0x80046D90: 0x30E20001,
     0x80046D94: 0x1C400003,
@@ -65,15 +64,19 @@ require(
     "        gp0_cmd_source_addr, gp0_cmd_buf, grown_addr, grown_word);\n"
     "#else\n"
     "    const int grown = 0;\n"
-    "#endif\n" in gpu
+    "#endif\n"
+    in gpu
     and "#if defined(PSX_HAS_GAME_HOST) && !defined(PSX_DISABLE_FRAME_INTERPOLATION)\n"
     "    if (grown) {\n"
-    "        grown_corner_depths(precise_x, precise_y, raw_x, raw_y, indices);\n" in gpu
+    "        grown_corner_depths(precise_x, precise_y, raw_x, raw_y, indices);\n"
+    in gpu
     and "#if defined(PSX_HAS_GAME_HOST) && !defined(PSX_DISABLE_FRAME_INTERPOLATION)\n"
-    "/* A grown corner lies off its source corner, on the same plane" in gpu
+    "/* A grown corner lies off its source corner, on the same plane"
+    in gpu
     and "disruptor" not in gpu.lower()
     and "        const uint32_t word = grown ? grown_word[i] : gp0_cmd_buf[indices[i]];\n"
-    "        uint32_t addr = grown_addr[i];\n" in gpu
+    "        uint32_t addr = grown_addr[i];\n"
+    in gpu
     and "        if (!grown && !gp0_source_word_address(indices[i], &addr)) {\n" in gpu,
     "a grown quad must resolve each corner through the address and the word of the first packet's corner",
 )

@@ -104,22 +104,22 @@ struct DevMenuState {
     bool aspect_apply_failed = false;
     bool internal_scale_apply_failed = false;
     bool fullscreen_apply_failed = false;
-    bool record_shown = false;  // armed in the menu, started when it closes
+    bool record_shown = false;
     std::string shown_note;
-    std::vector<disruptor::capsule::Stored> capsules;  // read again once a second while the Debug tab shows them
+    std::vector<disruptor::capsule::Stored> capsules;
     double capsules_read = -1.0;
-    std::string capsule_asked, capsule_note;  // the one whose Delete was pressed once, and what came of the second press
+    std::string capsule_asked, capsule_note;  // Delete pressed once, and the result of the second press
     struct CapsuleThumb {
-        uint32_t pictures = 0;  // how many the capsule had when its last was loaded, and that one's time
+        uint32_t pictures = 0;
         int64_t revised = 0;
         unsigned picture = 0;
         float tall = 0.5625f;
     };
-    std::map<std::string, CapsuleThumb> capsule_thumbs;  // by capsule: its last picture
-    std::string capsule_film_of;         // the capsule under the mouse, as it was when its pictures were loaded
+    std::map<std::string, CapsuleThumb> capsule_thumbs;
+    std::string capsule_film_of;
     uint32_t capsule_film_pictures = 0;
     int64_t capsule_film_revised = 0;
-    std::vector<unsigned> capsule_film;  // its pictures in order, loaded a few a frame
+    std::vector<unsigned> capsule_film;
     int selected_wide_aspect = 0;
     std::string cheat_status;
 };

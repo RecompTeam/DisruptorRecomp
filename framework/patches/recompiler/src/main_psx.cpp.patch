@@ -1,5 +1,5 @@
 diff --git a/recompiler/src/main_psx.cpp b/recompiler/src/main_psx.cpp
-index 9979abe18ed351391f95e5009189c84ce7cbec7e..f79e0dcc50a18d4cdb7e1f5c9c1770ff8b78cde7 100644
+index 9979abe18ed351391f95e5009189c84ce7cbec7e..d378dbf2093e54ec916d5f697479f2821b42f464 100644
 --- a/recompiler/src/main_psx.cpp
 +++ b/recompiler/src/main_psx.cpp
 @@ -169,6 +169,10 @@
@@ -113,14 +113,12 @@ index 9979abe18ed351391f95e5009189c84ce7cbec7e..f79e0dcc50a18d4cdb7e1f5c9c1770ff
      codegen_config.ws_aspect_cone = ws_aspect_cone;
      codegen_config.ws_cull_w_imms      = ws_cull_w_imms;
      codegen_config.ws_cull_h_imms      = ws_cull_h_imms;
-@@ -1584,6 +1625,35 @@
+@@ -1584,6 +1625,33 @@
              ds << "#endif\n";
          }
  
 +        {
-+            // [[recompiler.instruction_hook]]: the calls the RAM interpreter makes
-+            // after an instruction, the ones native code has from the generator.
-+            // Written with no hook too: the interpreter of a host project calls it.
++            // [[recompiler.instruction_hook]] calls for the RAM interpreter. Written with no hook too: a host project's interpreter calls it.
 +            std::map<uint32_t, std::vector<std::pair<uint32_t, std::string>>> hooked;
 +            for (const auto& hook : instruction_hooks)
 +                for (const auto& site : hook.sites)

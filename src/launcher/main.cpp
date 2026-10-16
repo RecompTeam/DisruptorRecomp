@@ -59,9 +59,7 @@ void velopack_log(void* user, const char* level, const char* message) noexcept {
 }
 #endif
 
-// These diagnostic modes use the same production checks as the window. They work
-// with redirected stdout/stderr without opening a console window.
-// --root names one folder for the program and the player's files alike.
+// Diagnostic modes run the window's checks with redirected output and no console. --root is the program and data folder.
 int diagnostic(int count, char** arguments, const fs::path& data) {
     if (count < 2) return -1;
     const std::string_view mode = arguments[1];

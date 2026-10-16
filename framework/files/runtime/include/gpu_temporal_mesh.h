@@ -4,12 +4,7 @@
 #include "gpu_temporal_match.h"
 #include <string.h>
 
-/* Current-frame topology reconciles the histories found by triangle matching.
- * It never finds temporal identity from projected coordinates. Known-depth
- * corners share exact current XY and absolute GTE depth. Without depth, only
- * an unambiguous, oppositely traversed complete shared edge establishes a weld.
- * Texture q is normalized separately by each polygon and is never a weld key.
- */
+/* Welds need exact current XY and GTE depth, or a complete oppositely traversed shared edge. Texture q is never a key. */
 typedef struct GpuTemporalMeshStats {
     int seeded_vertices;
     int shared_vertices;
@@ -35,10 +30,7 @@ typedef struct GpuTemporalMeshNode {
     double nx, ny, weight; /* a camera corner's previous position, homogeneous */
 } GpuTemporalMeshNode;
 
-/* Rigid camera motion maps a current corner (x, y, depth) to its previous
- * screen position as a ratio of linear forms in (x, y, 1, 1/depth). Fitted to
- * the matched corners, it moves the whole static world, matched or not, and
- * coincident corners get the same answer, so nothing has to be pinned. */
+/* Rigid camera motion maps a current corner to its previous screen position by a ratio of linear forms in (x, y, 1, 1/depth). */
 #define GPU_TEMPORAL_CAMERA_TERMS 11
 #define GPU_TEMPORAL_CAMERA_MIN_INLIERS 24
 #define GPU_TEMPORAL_CAMERA_TOLERANCE 0.75 /* px; matched motion this close to the model is static world */
@@ -50,9 +42,7 @@ typedef struct GpuTemporalCamera {
     double scale; /* previous depth / current depth = denominator * scale */
 } GpuTemporalCamera;
 
-/* Screen coordinates as the model sees them: zero is the view axis, where
- * the denominator stays positive for any turn short of a right angle. From
- * the corner it changed sign at 37 degrees and the model fell apart. */
+/* Zero is the view axis, so the denominator stays positive up to a right-angle turn (from the corner it changed sign at 37 degrees). */
 static inline double gpu_temporal_camera_u(float x) { return ((double)x - 160.0) / 320.0; }
 static inline double gpu_temporal_camera_v(float y) { return ((double)y - 120.0) / 240.0; }
 
@@ -69,7 +59,6 @@ static inline int gpu_temporal_camera_project(const GpuTemporalCamera *camera,
     return gpu_temporal_finite((float)*px) && gpu_temporal_finite((float)*py);
 }
 
-/* The same projection without the division, for any corner at all. */
 static inline int gpu_temporal_camera_project_h(const GpuTemporalCamera *camera,
                                                 float x, float y, float depth,
                                                 double *nx, double *ny, double *weight) {
@@ -83,9 +72,7 @@ static inline int gpu_temporal_camera_project_h(const GpuTemporalCamera *camera,
            gpu_temporal_finite((float)*weight);
 }
 
-/* The camera taking previous corners to current ones. It is the exact inverse,
- * not a second fit: a corner sent there and back returns where it started, so
- * faces placed by either camera meet along their shared edges. */
+/* The exact inverse of the fitted camera, so faces placed by either meet along shared edges. */
 static inline int gpu_temporal_camera_invert(const GpuTemporalCamera *camera,
                                              GpuTemporalCamera *inverse) {
     const double *m = camera->m;
@@ -161,7 +148,6 @@ typedef struct GpuTemporalCameraSample {
     double u, v, w, tx, ty;
 } GpuTemporalCameraSample;
 
-/* The same face in two frames, without the matcher's search window. */
 static inline int gpu_temporal_camera_pair_valid(const GpuTemporalTriangle *before,
                                                  const GpuTemporalTriangle *now) {
     double area_before, area_now, ratio;
@@ -209,7 +195,6 @@ static inline void gpu_temporal_camera_accumulate(
         }
 }
 
-/* Least squares over the samples that agree with `reference`, or over all. */
 static inline int gpu_temporal_camera_refit(const double *reference, double limit,
                                             const GpuTemporalCameraSample *samples, int count,
                                             double *out) {
@@ -227,12 +212,7 @@ static inline int gpu_temporal_camera_refit(const double *reference, double limi
 #define GPU_TEMPORAL_CAMERA_DRAWS 64
 #define GPU_TEMPORAL_CAMERA_TRUSTED_CORNERS 36
 
-/* `pairs` gives a candidate previous face per current face. Look-alike pairs
- * and moving objects are common, so the camera is the hypothesis most pairs
- * agree with: the previous interval's camera, a fit of everything, or a fit
- * of three faces drawn at random. A windowed match can pick the next tile of
- * a repeated texture on a fast turn, and a whole wall of those agrees with
- * itself, so the vote belongs to `trusted` pairs when there are enough. */
+/* Repeated textures on a fast turn make a wall of wrong picks agree with itself, so `trusted` pairs vote when there are enough. */
 static inline int gpu_temporal_camera_fit(
         const GpuTemporalTriangle *prev, int prev_n,
         const GpuTemporalTriangle *curr, int curr_n, const int *pairs,
@@ -317,8 +297,7 @@ static inline int gpu_temporal_compare_double(const void *left, const void *righ
     return (a > b) - (a < b);
 }
 
-/* The fitted denominator is the depth ratio up to one factor, and identical
- * faces know both depths: the median of what they say, 0 when too few do. */
+/* Median of the depth ratios identical faces give, 0 when too few. */
 static inline double gpu_temporal_camera_depth_scale(
         const GpuTemporalCamera *camera, const GpuTemporalTriangle *prev, int prev_n,
         const GpuTemporalTriangle *curr, int curr_n, const int *pairs, const int *trusted) {
@@ -352,7 +331,6 @@ typedef struct GpuTemporalCornerEntry {
     int corner;
 } GpuTemporalCornerEntry;
 
-/* A modelled corner's level position in the current frame's coordinates. */
 static inline uint64_t gpu_temporal_corner_key(const int16_t *model, const int *shift) {
     uint64_t key = 1;
     for (int axis = 0; axis < 3; ++axis)
@@ -368,10 +346,7 @@ static inline GpuTemporalCornerEntry *gpu_temporal_corner_find(GpuTemporalCorner
     return &table[slot];
 }
 
-/* The game hands the GTE level coordinates relative to the camera, so a static
- * face keeps its three input vertices from frame to frame up to one integer
- * shift shared by the whole frame. With that shift a face has at most one
- * twin: this is identity, not resemblance, and no search window is involved. */
+/* A static face keeps its three input vertices up to one integer shift per frame, so it has at most one twin. */
 #define GPU_TEMPORAL_TWIN_CANDIDATES 32
 #define GPU_TEMPORAL_TWIN_TRIALS 8
 #define GPU_TEMPORAL_TWIN_MINIMUM 8
@@ -410,10 +385,7 @@ static inline GpuTemporalTwinEntry *gpu_temporal_twin_find(GpuTemporalTwinEntry 
     return &table[slot];
 }
 
-/* Number of current faces with exactly one twin under `shift`; `twins`, when
- * given, receives the previous index of each or -1. Faces with `taken` set
- * already have a twin under another shift and are left alone, and so are
- * previous faces whose entry is `spent`. */
+/* `twins`, when given, gets each current face's previous index or -1. */
 static inline int gpu_temporal_twin_count(GpuTemporalTwinEntry *table, unsigned mask,
                                           const GpuTemporalTriangle *prev,
                                           const GpuTemporalTriangle *curr, int curr_n,
@@ -437,12 +409,8 @@ static inline int gpu_temporal_twin_count(GpuTemporalTwinEntry *table, unsigned 
     return found;
 }
 
-/* A candidate previous face for every current one. `trusted` is 1 for the
- * ones that may vote for the camera (twins, or without them faces whose
- * material is unique in both frames), 2 for twins under a second shift,
- * which is a moving object, and 3 for a rider. Once a frame has twins, a modelled face without
- * one has no previous self: the matcher's pick for it was a look-alike.
- * `shift` carries the previous interval's shift in and this one's out. */
+/* trusted: 1 may vote for the camera, 2 a twin under a second shift (moving object), 3 a rider. With twins, a modelled
+ * face without one has no previous self. `shift` carries the last interval's in and this one's out. */
 static inline int gpu_temporal_mesh_pairs(const GpuTemporalTriangle *prev, int prev_n,
                                           const GpuTemporalTriangle *curr, int curr_n,
                                           const int *matches, int *pairs, int *trusted,
@@ -502,7 +470,6 @@ static inline int gpu_temporal_mesh_pairs(const GpuTemporalTriangle *prev, int p
         entry->index = triangle;
         ++entry->count;
     }
-    /* Every pair so far proposes the shift it would need. */
     for (int triangle = 0; triangle < curr_n; ++triangle) {
         const int previous = pairs[triangle];
         int proposed[3], consistent = 1, known = -1;
@@ -521,8 +488,7 @@ static inline int gpu_temporal_mesh_pairs(const GpuTemporalTriangle *prev, int p
         }
         if (known >= 0) ++candidates[known].votes;
     }
-    /* No pair proposed anything, as on a fast turn with repeated textures:
-     * let a few faces propose the shift to each previous face of their look. */
+    /* No pair proposed a shift (fast turn, repeated textures): ask a few faces against each look-alike. */
     for (int triangle = 0, asked = 0; !candidate_count && triangle < curr_n && asked < 8; ++triangle) {
         if (!curr[triangle].world || !curr[triangle].modelled) continue;
         ++asked;
@@ -569,8 +535,7 @@ static inline int gpu_temporal_mesh_pairs(const GpuTemporalTriangle *prev, int p
                 gpu_temporal_twin_find(faces, mask,
                     gpu_temporal_twin_key(&prev[twins[triangle]], zero))->spent = 1;
             }
-            /* A group of faces that kept its shape but gained a few units on the camera is an object in
-             * motion (a tile's width is not a few), and one that kept its place before it rides with it. */
+            /* A group that kept its shape but gained a few units on the camera is a moving object, one that kept its place rides. */
             for (int index = 0; index <= candidate_count; ++index) {
                 const int *proposed = index < candidate_count ? candidates[index].shift : zero;
                 const int rides = !proposed[0] && !proposed[1] && !proposed[2];
@@ -605,7 +570,7 @@ typedef struct GpuTemporalSpriteBox {
     double left, top, right, bottom;
 } GpuTemporalSpriteBox;
 
-/* The rectangle of the billboard whose upper left half {x, x+w, x},{y, y, y+h} is `first`, when the next face is its lower right half {x+w, x, x+w},{y, y+h, y+h}. A part-step turn scales a corner's row and depth by its column: both are asked for side by side. */
+/* A billboard's rectangle from its upper half {x, x+w, x},{y, y, y+h} and lower half {x+w, x, x+w},{y, y+h, y+h}. */
 static inline int gpu_temporal_sprite_box(const GpuTemporalTriangle *faces, int count, int first,
                                           GpuTemporalSpriteBox *box) {
     const GpuTemporalTriangle *upper = &faces[first], *lower = upper + 1;
@@ -633,14 +598,8 @@ static inline int gpu_temporal_compare_sprite_pair(const void *left, const void 
     return a->now != b->now ? a->now - b->now : a->was - b->was;
 }
 
-/* Billboards are paired by place, not by picture. A picture changes with every
- * animation frame, and look-alikes (shadows, a squad in one pose) stand side by
- * side, so a pick by material loses a billboard's motion at every new picture
- * and can take a neighbour's. A whole rectangle is paired with the previous
- * rectangle nearest to where the camera puts its centre, no farther away than
- * its own size and at a like depth, the nearest pairs first. That rectangle is
- * taken for its previous self: two look-alikes that swap places inside these
- * limits are not told apart. A half without its other half is left to the matcher. */
+/* Billboards are paired by place, not picture: pictures change per animation frame and look-alikes stand side by side.
+ * Nearest pairs first, within its own size of where the camera puts the centre and at a like depth. */
 static inline void gpu_temporal_mesh_pair_sprites(
         const GpuTemporalTriangle *prev, int prev_n,
         const GpuTemporalTriangle *curr, int curr_n,
@@ -693,9 +652,7 @@ static inline void gpu_temporal_mesh_pair_sprites(
     free(candidates);
 }
 
-/* A matched face that disagrees with the camera is either a moving object or
- * a wrong pick among repeated textures. A previous face of the same material
- * lying where the camera puts this one settles it for the static world. */
+/* A previous same-material face where the camera puts this one marks a wrong pick in the static world, not a moving object. */
 static inline int gpu_temporal_camera_rematch(
         const GpuTemporalCamera *camera, const GpuTemporalTriangle *prev,
         int prev_n, const GpuTemporalTriangle *triangle) {
@@ -818,8 +775,7 @@ static inline int gpu_temporal_mesh_group_depth_compatible(
     const int rb = gpu_temporal_mesh_root(nodes, b);
     if (nodes[ra].depth == 0.0f || nodes[rb].depth == 0.0f ||
         nodes[ra].depth == nodes[rb].depth) return 1;
-    /* An unknown corner must not bridge two different known-depth surfaces.
-     * Keep the groups distinct and pin the ambiguous coincident endpoints. */
+    /* An unknown corner must not bridge two known-depth surfaces: keep the groups distinct and pin the endpoints. */
     nodes[ra].held = nodes[rb].held = 1;
     nodes[ra].conflict = nodes[rb].conflict = 1;
     return 0;
@@ -846,11 +802,8 @@ static inline int gpu_temporal_mesh_has_connection(
     return lo < count && edges[lo].a == a && edges[lo].b == b;
 }
 
-/* A-M/M-B plus A-B forms a confirmed current-frame T junction when precise
- * positions are collinear and absolute depth agrees projectively. Pin those
- * three groups locally: independent screen-space lerps of A, M and B need not
- * keep M on the long edge. No position is snapped at the real-frame endpoint.
- * Degree is bounded to 16, and long-edge lookup is logarithmic. */
+/* A-M/M-B plus A-B is a T junction when collinear and depth agrees projectively: pin the three groups, since independent
+ * lerps need not keep M on the long edge. Degree is bounded to 16. */
 static inline void gpu_temporal_mesh_anchor_junctions(
         const GpuTemporalTriangle *curr, int vertex_count,
         GpuTemporalMeshNode *nodes, GpuTemporalMeshEdge *edges, int edge_count,
@@ -908,9 +861,7 @@ static inline void gpu_temporal_mesh_anchor_junctions(
 
 #define GPU_TEMPORAL_MIN_WEIGHT 0.02
 
-/* Camera motion has no search window to respect. Any finite weighted corner
- * is usable: gpu_temporal_mesh_facing skips the face while it is turned
- * away or still behind the viewer. */
+/* Camera motion has no search window: any finite weighted corner is usable, gpu_temporal_mesh_facing skips the rest. */
 static inline int gpu_temporal_mesh_camera_safe(const GpuTemporalTriangle *curr,
                                                 const GpuTemporalTriangle *from) {
     (void)curr;
@@ -920,9 +871,7 @@ static inline int gpu_temporal_mesh_camera_safe(const GpuTemporalTriangle *curr,
     return 1;
 }
 
-/* The game culls back faces before it submits them, so an interpolated face
- * whose winding differs from the real frame's was not visible yet. Neither
- * was one with a corner that had not come in front of the viewer. */
+/* The game culls back faces, so a lerped face with flipped winding or a corner behind the viewer was not visible yet. */
 static inline int gpu_temporal_mesh_facing(const GpuTemporalTriangle *curr,
                                            const GpuTemporalTriangle *lerped) {
     const double now = gpu_temporal_area(curr), then = gpu_temporal_area(lerped);
@@ -948,19 +897,11 @@ static inline void gpu_temporal_mesh_write_triangle(
     }
 }
 
-/* Returns the number of current triangles with retained XY or texture-q
- * motion. `from` has current indexing and is always initialized from current;
- * it is safe to interpolate every output with its corresponding current face.
- * Only a matched face receives its own prior normalized q. The output depth
- * remains current metadata. HUD, invalid inputs and allocation failure hold.
- * Stats except propagated_vertices count unique eligible vertex groups;
- * propagated_vertices counts unmatched face corners receiving shared motion.
- */
-/* `departed`, `departed_from` and `departed_to` have previous indexing and may
- * be NULL. A previous face the game no longer submits still covers part of
- * the screen between the two frames: it is flagged and given the two ends of
- * its path. A corner it shares with a current face takes that face's path.
- * The flag is 2 for a face with a corner that has no depth: it stays where it was drawn. */
+/* Returns the number of current triangles with retained XY or texture-q motion. `from` has current indexing and starts as
+ * current. Only a matched face gets its own prior q. HUD, invalid inputs and allocation failure hold. Stats count unique
+ * eligible vertex groups, except propagated_vertices (unmatched corners receiving shared motion). */
+/* `departed*` have previous indexing and may be NULL: a previous face the game no longer submits is flagged and given its
+ * path's two ends (a shared corner takes the current face's path). The flag is 2 for a corner without depth: it stays put. */
 static inline int gpu_temporal_mesh_prepare_scene(
         const GpuTemporalTriangle *prev, int prev_n,
         const GpuTemporalTriangle *curr, int curr_n,
@@ -1061,9 +1002,7 @@ static inline int gpu_temporal_mesh_prepare_scene(
                 const int compatible_a = gpu_temporal_mesh_group_depth_compatible(nodes, a->a, b->a);
                 const int compatible_b = gpu_temporal_mesh_group_depth_compatible(nodes, a->b, b->b);
                 if (!compatible_a || !compatible_b) {
-                    /* Reject the edge atomically, including motion: pinning
-                     * only its depth-conflicting endpoint would let the other
-                     * endpoint separate while these groups remain unwelded. */
+                    /* Reject the edge atomically: pinning one endpoint would let the other separate. */
                     const int endpoints[4] = {a->a, a->b, b->a, b->b};
                     for (int endpoint = 0; endpoint < 4; ++endpoint) {
                         const int root = gpu_temporal_mesh_root(nodes, endpoints[endpoint]);
@@ -1079,17 +1018,14 @@ static inline int gpu_temporal_mesh_prepare_scene(
         first = end;
     }
 
-    /* Build incidence lists after welding. They also bound safety propagation:
-     * each group can be pinned once and visits each of its corners once. */
+    /* Incidence lists after welding bound propagation: each group is pinned once. */
     for (int corner = 0; corner < vertex_count; ++corner) {
         int root;
         if (!faces[corner / 3].topology) continue;
         root = gpu_temporal_mesh_root(nodes, corner);
         nodes[corner].next = nodes[root].first;
         nodes[root].first = corner;
-        /* A tiny/degenerate or otherwise ineligible WORLD face still shares
-         * topology. It anchors all of its corners so adjacent moving faces
-         * cannot detach from it. HUD faces never participate in this graph. */
+        /* An ineligible WORLD face still shares topology and anchors its corners so adjacent moving faces cannot detach. */
         if (!faces[corner / 3].eligible) nodes[root].held = 1;
     }
     has_camera = gpu_temporal_camera_fit(prev, prev_n, curr, curr_n, pairs, trusted, prior, &camera);
@@ -1145,8 +1081,7 @@ static inline int gpu_temporal_mesh_prepare_scene(
             if (rematched >= 0) { previous = rematched; dynamic = 0; }
         }
         if (dynamic && has_forward && !trusted[triangle]) {
-            /* The matched past face still stands where the camera takes it:
-             * this pair was a look-alike, and the face itself is new. */
+            /* The past face still stands where the camera takes it: a look-alike, and the face itself is new. */
             const int stayed = gpu_temporal_camera_rematch(&forward, curr, curr_n, &prev[previous]);
             if (stayed >= 0 && stayed != triangle) dynamic = 0, aliased = 1;
         }
@@ -1182,8 +1117,7 @@ static inline int gpu_temporal_mesh_prepare_scene(
         consistent = node->votes &&
             spread_x * spread_x + spread_y * spread_y <=
             GPU_TEMPORAL_MESH_VOTE_EPSILON * GPU_TEMPORAL_MESH_VOTE_EPSILON;
-        /* Only a group that every matched face around it moves alike, and
-         * differently from the camera, belongs to a moving object. */
+        /* Only a group every matched face around it moves alike, and unlike the camera, is a moving object. */
         if (has_camera && node->depth > 0.0f && !(consistent && !node->statics)) {
             const float x = curr[corner / 3].x[corner % 3];
             const float y = curr[corner / 3].y[corner % 3];
@@ -1203,8 +1137,7 @@ static inline int gpu_temporal_mesh_prepare_scene(
         if (!consistent) {
             node->conflict = node->held = 1;
         } else if (!node->held) {
-            /* A bounding-box midpoint makes consensus independent of triangle
-             * submission order, unlike an accumulating floating-point mean. */
+            /* A bounding-box midpoint keeps consensus independent of submission order. */
             node->dx = (node->min_dx + node->max_dx) * 0.5;
             node->dy = (node->min_dy + node->max_dy) * 0.5;
         }
@@ -1220,8 +1153,7 @@ static inline int gpu_temporal_mesh_prepare_scene(
     while (queue_count) {
         const int batch_count = queue_count;
         int pending_head = -1;
-        /* Evaluate a whole batch before applying any pins: a face's safety
-         * decision cannot depend on whether its neighbor was submitted first. */
+        /* Evaluate a whole batch before pinning: safety cannot depend on submission order. */
         for (int item = 0; item < batch_count; ++item) {
             const int triangle = queue[queue_head];
             GpuTemporalTriangle candidate = from[triangle];

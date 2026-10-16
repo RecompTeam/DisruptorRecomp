@@ -11,8 +11,7 @@
 
 namespace disruptor::launcher {
 
-// Each future region needs its own verified raw image AND matching runtime
-// configuration/code. Adding a serial alone must never enable another region.
+// A region needs its own verified image and runtime configuration: a serial alone enables nothing.
 struct DiscProfile {
     const char* id;
     const wchar_t* label;
@@ -28,8 +27,7 @@ struct VerifiedDisc {
     const DiscProfile* profile = nullptr;
     std::filesystem::path data;
     std::filesystem::path cue;
-    // Prevent writes/deletion between verification and starting the runtime.
-    // The launcher keeps this lock while the game is running.
+    // Held while the game runs: no writes or deletion between verification and start.
     std::shared_ptr<void> read_lock;
 };
 

@@ -30,8 +30,7 @@ void put(const fs::path& file, const std::string& text) {
     std::ofstream(file, std::ios::binary) << text;
 }
 
-// A ZIP of stored entries read back through its central directory, each entry checked against its local header and
-// its CRC-32 by a table of this test's own. Empty when anything does not hold.
+// A ZIP of stored entries read back, each checked against its local header and a CRC-32 of the test's own. Empty on any mismatch.
 std::map<std::string, std::string> unzipped(const std::string& zip) {
     std::array<std::uint32_t, 256> table{};
     for (std::uint32_t at = 0; at < table.size(); ++at) {

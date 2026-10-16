@@ -50,8 +50,7 @@ def main() -> int:
     mouse = MOUSE.read_text(encoding="utf-8")
     overlay_list = OVERLAY_LIST.read_text(encoding="utf-8")
 
-    # Provenance must validate the original address. Masking 0x1f801810 first
-    # aliases the direct GP0 MMIO register to low RAM at 0x1810.
+    # Masking 0x1f801810 first aliases the GP0 register to RAM 0x1810, so provenance validates the original address.
     source_address = function_body(gpu, "gp0_source_word_address")
     require("*out = gp0_cmd_source_addr + delta" in source_address,
             "GP0 provenance must preserve the full source address")
@@ -91,8 +90,7 @@ def main() -> int:
     require(gpu.count("precise_indices, (!rej_a) + (!rej_b)") == 4,
             "quad triangle totals must reflect the raster halves submitted")
 
-    # The canonical pass must consume a dedicated GP0 attribute. It must never
-    # reconstruct authority by flooring presentation precision.
+    # The canonical pass consumes a dedicated GP0 attribute, never presentation precision floored.
     require("#define GEOV 10" in gl and "#define TEXV 24" in gl,
             "GL vertex records must retain canonical/visual positions and temporal depth")
     require("layout(location=3) in vec2 a_visual_pos" in gl,
@@ -104,8 +102,7 @@ def main() -> int:
     require("floor(a_pos)" not in gl,
             "canonical coordinates must never be inferred from precision")
 
-    # Full yaw is deliberately independent from the X-only control, and the Y
-    # horizon follows each GP0 drawing band rather than a VBlank-time snapshot.
+    # Full yaw is independent of the X-only control, and the Y horizon follows each GP0 drawing band, not a VBlank snapshot.
     require(gl.count("yb = u_camera.w + (yb-u_camera.w)/den") == 2,
             "GEO and TEX shaders must apply the shared yaw denominator to Y")
     require("PSX_GEOMETRY_FULL_YAW" in gl,
@@ -148,8 +145,7 @@ def main() -> int:
             "geometry_camera_presentation_update()" in reset,
             "GPU reset must resynchronize the renderer's Y horizon")
 
-    # Diagnostics must be versioned, presentation-scoped, and sufficiently
-    # detailed to explain coverage rather than reporting one opaque ratio.
+    # Diagnostics are versioned, presentation-scoped and detailed enough to explain coverage.
     require("GPU_GEOMETRY_DIAGNOSTICS_VERSION" in gpu_header,
             "geometry diagnostics must expose a versioned ABI")
     for token in (

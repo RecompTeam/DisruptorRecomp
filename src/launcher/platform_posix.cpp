@@ -32,8 +32,7 @@ void reap(pid_t pid) {
     while (waitpid(pid, nullptr, 0) < 0 && errno == EINTR) {}
 }
 
-// The descriptor moved above standard input, output and error, closed on exec: a launcher started with one of them
-// closed would otherwise hand that number out and lose it to the child's own redirection.
+// Moved above stdin, stdout and stderr, closed on exec: a number from 0 to 2 would be lost to the child's redirection.
 int above_standard(int descriptor) {
     if (descriptor < 0 || descriptor > 2) return descriptor;
     const int moved = fcntl(descriptor, F_DUPFD_CLOEXEC, 3);
