@@ -9,37 +9,44 @@
 <p align="center">
   <a href="https://github.com/RecompTeam/DisruptorRecomp/releases"><img src="https://img.shields.io/github/v/release/RecompTeam/DisruptorRecomp?include_prereleases&label=release" alt="Release"></a>
   <a href="https://github.com/RecompTeam/DisruptorRecomp/releases"><img src="https://img.shields.io/github/downloads/RecompTeam/DisruptorRecomp/total" alt="Downloads"></a>
-  <a href="https://github.com/RecompTeam/DisruptorRecomp/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/RecompTeam/DisruptorRecomp/build.yml?label=build" alt="Build"></a>
   <a href="https://github.com/RecompTeam/DisruptorRecomp/releases"><img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20x64-1a231b" alt="Windows and Linux x64"></a>
-  <a href="https://discord.gg/hWbFatkXpU"><img src="https://img.shields.io/badge/Discord-join-5865F2" alt="Discord"></a>
+  <a href="https://github.com/RecompTeam/DisruptorRecomp/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/RecompTeam/DisruptorRecomp/build.yml?label=build" alt="Build"></a>
   <a href="https://scorecard.dev/viewer/?uri=github.com/RecompTeam/DisruptorRecomp"><img src="https://img.shields.io/ossf-scorecard/github.com/RecompTeam/DisruptorRecomp?label=OpenSSF%20Scorecard" alt="OpenSSF Scorecard"></a>
+  <a href="https://discord.gg/hWbFatkXpU"><img src="https://img.shields.io/badge/Discord-join-5865F2" alt="Discord"></a>
 </p>
 
 <p align="center">
-  <a href="https://github.com/RecompTeam/DisruptorRecomp/releases"><b>Download</b></a>
+  <a href="https://github.com/RecompTeam/DisruptorRecomp/releases/tag/v0.2.0-alpha.1"><b>Download</b></a>
 </p>
 
 ## Quick start
 
 1. Download from [Releases](https://github.com/RecompTeam/DisruptorRecomp/releases):
-    - **Windows:** run **DisruptorRecomp-win-Setup.exe**. To play without installing, unpack **DisruptorRecomp-win-Portable.zip** and run `Disruptor Recompiled.exe`.
-    - **Linux x64:** make **DisruptorRecomp.AppImage** executable with `chmod +x DisruptorRecomp.AppImage` and run it.
+    - **Windows:** run [**DisruptorRecomp-win-Setup.exe**](https://github.com/RecompTeam/DisruptorRecomp/releases/download/v0.2.0-alpha.1/DisruptorRecomp-win-Setup.exe).
+    - **Windows, without installing:** unpack [**DisruptorRecomp-win-Portable.zip**](https://github.com/RecompTeam/DisruptorRecomp/releases/download/v0.2.0-alpha.1/DisruptorRecomp-win-Portable.zip) and run `Disruptor Recompiled.exe`.
+    - **Linux x64:** download [**DisruptorRecomp.AppImage**](https://github.com/RecompTeam/DisruptorRecomp/releases/download/v0.2.0-alpha.1/DisruptorRecomp.AppImage), make it executable and run it:\
+      `chmod +x DisruptorRecomp.AppImage`
 2. Drop your **Disruptor (USA, SLUS-00224)** disc image on the launcher it opens.
 3. Press **Play**.
 
-**No game data is included.** A French, German or Japanese disc of yours can give the game its language.
+**No game data is included.**\
+A French, German or Japanese disc of yours can give the game its language.
 
-It needs Windows 10 or 11 x64, or Linux x64 with glibc 2.35 or newer, and a graphics driver with OpenGL 3.3.\
-The [player's guide](docs/PLAYING.md#install) has the details.
-
-[**Before and after**](docs/COMPARISONS.md): what changed from the PlayStation version, side by side.
+<p align="center">
+  <a href="docs/COMPARISONS.md"><b>Before and after</b></a><br>
+  What changed from the PlayStation version, side by side.
+</p>
 
 ## Launcher
 
 Drop the disc, press Play. The image is checked byte for byte.
 
-The launcher keeps the game up to date.\
-By default it looks for a new release at every start, downloads only what changed when it can and installs it with one click.\
+The launcher keeps the game up to date.
+
+By default it looks for a new release at every start.
+
+It downloads only what changed when it can and installs it with one click.
+
 Saves and settings stay.
 
 <table>
