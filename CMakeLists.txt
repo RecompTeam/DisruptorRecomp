@@ -123,6 +123,13 @@ if(DISRUPTOR_DEV_MENU)
         list(APPEND DISRUPTOR_EXTRA_SOURCES
             "${CMAKE_CURRENT_SOURCE_DIR}/src/game/frame/present_rate.cpp")
     endif()
+    set(DISRUPTOR_WINDOW_ICON "${CMAKE_CURRENT_SOURCE_DIR}/src/launcher/assets/app-64.bmp")
+    add_custom_command(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/window_icon.cpp"
+        COMMAND "${CMAKE_COMMAND}" "-DINPUT=${DISRUPTOR_WINDOW_ICON}" "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/window_icon.cpp"
+            -DNAME=disruptor_window_icon_bmp -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_bytes.cmake"
+        DEPENDS "${DISRUPTOR_WINDOW_ICON}" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_bytes.cmake"
+        VERBATIM)
+    list(APPEND DISRUPTOR_EXTRA_SOURCES "${CMAKE_CURRENT_BINARY_DIR}/window_icon.cpp")
 endif()
 
 file(GLOB GAME_GENERATED_FULL CONFIGURE_DEPENDS
@@ -185,6 +192,7 @@ if(MSVC)
 endif()
 
 if(WIN32)
+    target_sources(psx-runtime PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/game/icon.rc")
     # UTF-8 as the game's code page: a path in settings.toml may hold letters the system's own page lacks.
     if(MINGW)
         target_sources(psx-runtime PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/game/disruptor.rc")

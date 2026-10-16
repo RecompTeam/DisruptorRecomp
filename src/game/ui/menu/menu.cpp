@@ -2,9 +2,30 @@
 
 namespace disruptor::menu {
 
+extern "C" const unsigned char disruptor_window_icon_bmp[];
+extern "C" const std::size_t disruptor_window_icon_bmp_size;
+
 DevMenuState g_menu;
 
 namespace {
+
+// The launcher's icon on the game's window and in the taskbar.
+void set_window_icon(SDL_Window *window) {
+    if (!window) return;
+#if defined(PSX_SDL3)
+    SDL_Surface *icon = SDL_LoadBMP_IO(SDL_IOFromConstMem(disruptor_window_icon_bmp, disruptor_window_icon_bmp_size), true);
+#else
+    SDL_Surface *icon = SDL_LoadBMP_RW(
+        SDL_RWFromConstMem(disruptor_window_icon_bmp, static_cast<int>(disruptor_window_icon_bmp_size)), 1);
+#endif
+    if (!icon) return;
+    SDL_SetWindowIcon(window, icon);
+#if defined(PSX_SDL3)
+    SDL_DestroySurface(icon);
+#else
+    SDL_FreeSurface(icon);
+#endif
+}
 
 bool imgui_sdl_init(SDL_Window *window) {
 #if defined(PSX_SDL3)
@@ -221,6 +242,7 @@ void on_runtime_ready(void *, SDL_Window *window, int backend) {
     gte_ws_set_backdrop_repair_enabled(0);
     g_menu.window = window;
     g_menu.backend = backend;
+    set_window_icon(window);
     load_preferences_for_session();
     if (backend == PSX_HOST_UI_BACKEND_OPENGL) (void)initialize_imgui();
 }
