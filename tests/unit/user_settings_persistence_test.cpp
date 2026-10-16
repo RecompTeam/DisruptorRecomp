@@ -44,6 +44,7 @@ int main() {
         const fs::path path = root / fs::path(u8"settings-unicode-ü.toml");
         UserSettings missing = PSXRecompV4::load_user_settings(path);
         require(!missing.parse_error && !missing.has_mouse_aim &&
+                    !missing.has_selection_wheels && !missing.selection_wheels &&
                     !missing.has_vsync && !missing.has_master_volume &&
                     !missing.has_audio_muted,
                 "missing settings must fall through without overrides");
@@ -72,6 +73,8 @@ int main() {
         written.mouse_aim = true;
         written.has_modern_controls = true;
         written.modern_controls = true;
+        written.has_selection_wheels = true;
+        written.selection_wheels = true;
         written.has_horizontal_sensitivity = true;
         written.horizontal_sensitivity = 0.125;
         written.has_invert_horizontal = true;
@@ -154,6 +157,7 @@ int main() {
                 "host audio controls did not round-trip");
         require(loaded.has_mouse_aim && loaded.mouse_aim &&
                     loaded.has_modern_controls && loaded.modern_controls &&
+                    loaded.has_selection_wheels && loaded.selection_wheels &&
                     loaded.has_horizontal_sensitivity &&
                     loaded.horizontal_sensitivity == 0.125 &&
                     loaded.has_invert_horizontal && loaded.invert_horizontal &&
@@ -189,10 +193,12 @@ int main() {
                 "merge-save dropped an unrelated known setting");
 
         loaded.mouse_aim = false;
+        loaded.selection_wheels = false;
         require(PSXRecompV4::save_user_settings(path, loaded),
                 "atomic replacement of an existing file failed");
         UserSettings replaced = PSXRecompV4::load_user_settings(path);
         require(replaced.has_mouse_aim && !replaced.mouse_aim &&
+                    replaced.has_selection_wheels && !replaced.selection_wheels &&
                     replaced.has_language && replaced.has_aspect_ratio &&
                     replaced.aspect_num == 32 && replaced.aspect_den == 9 &&
                     replaced.has_supersampling &&

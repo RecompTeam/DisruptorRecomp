@@ -138,6 +138,7 @@ void start_shown_recording() {
 void set_menu_open(bool open) {
     if (open == g_menu.open) return;
     if (open) {
+        disruptor_selection_wheel_cancel();
         g_menu.restore_mouse_capture = disruptor_mouse_captured() != 0;
         if (g_menu.restore_mouse_capture)
             (void)disruptor_mouse_set_captured(0);
@@ -245,9 +246,11 @@ void on_runtime_ready(void *, SDL_Window *window, int backend) {
     set_window_icon(window);
     load_preferences_for_session();
     if (backend == PSX_HOST_UI_BACKEND_OPENGL) (void)initialize_imgui();
+    disruptor_selection_wheels_set_available(g_menu.imgui_ready && backend == PSX_HOST_UI_BACKEND_OPENGL);
 }
 
 void on_runtime_shutdown(void *) {
+    disruptor_selection_wheels_set_available(0);
     disruptor_cheats_reset_session();
     disruptor_far_rendering_reset_session();
     disruptor_billboard_aspect_set_site_mask(
@@ -270,11 +273,27 @@ void on_runtime_shutdown(void *) {
 }
 
 int on_sdl_event(void *, const SDL_Event *event) {
+    if (event && event->type == SDL_CONTROLLERAXISMOTION) {
+#if defined(PSX_SDL3)
+        disruptor_selection_wheel_controller_axis(event->gaxis.axis, event->gaxis.value);
+#else
+        disruptor_selection_wheel_controller_axis(event->caxis.axis, event->caxis.value);
+#endif
+    }
+    if (event && event->type == SDL_CONTROLLERDEVICEREMOVED) {
+        disruptor_selection_wheel_cancel();
+        disruptor_selection_wheel_controller_axis(0, 0);
+        disruptor_selection_wheel_controller_axis(1, 0);
+    }
     const bool toggle = scancode_event(event, SDL_SCANCODE_GRAVE);
     const bool close =
         g_menu.open && scancode_event(event, SDL_SCANCODE_ESCAPE);
     if (toggle || close) {
         set_menu_open(toggle ? !g_menu.open : false);
+        return 1;
+    }
+    if (disruptor_selection_wheel_open()) {
+        if (scancode_event(event, SDL_SCANCODE_ESCAPE)) disruptor_selection_wheel_cancel();
         return 1;
     }
     if (!g_menu.open && scancode_event(event, SDL_SCANCODE_ESCAPE))
@@ -293,6 +312,9 @@ int on_sdl_event(void *, const SDL_Event *event) {
 }
 
 uint32_t current_flags(void *) {
+    // Wheels read the final mapped pad themselves, then neutralise it before the guest resumes.
+    if (disruptor_selection_wheel_open())
+        return PSX_HOST_UI_VISIBLE;
     if (!g_menu.open || !g_menu.imgui_ready) return disruptor_capsule_notice() ? PSX_HOST_UI_VISIBLE : 0u;
     return PSX_HOST_UI_CAPTURE_KEYBOARD |
            PSX_HOST_UI_CAPTURE_MOUSE |
@@ -320,6 +342,20 @@ void render_notice(const char *word, int width, int height) {
 }
 
 void render_gl(void *, int width, int height) {
+    if (disruptor_selection_wheel_open()) {
+        if (!initialize_imgui()) return;
+        gl_renderer_set_host_ui_suspended(1);
+        ImGui_ImplOpenGL3_NewFrame();
+        ImGuiIO &io = ImGui::GetIO();
+        io.DisplaySize = ImVec2(static_cast<float>(width), static_cast<float>(height));
+        io.DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
+        io.DeltaTime = 1.0f / 60.0f;
+        ImGui::NewFrame();
+        disruptor::wheel::draw(width, height);
+        ImGui::Render();
+        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+        return;
+    }
     if (const char *word = g_menu.open ? nullptr : disruptor_capsule_notice()) {
         if (initialize_imgui()) render_notice(word, width, height);
         return;

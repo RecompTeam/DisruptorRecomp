@@ -18,6 +18,7 @@ void expect(bool condition, const char *message) {
 
 bool same(const Frame &one, const Frame &other) {
     return one.pad[0] == other.pad[0] && one.pad[1] == other.pad[1] && one.byte_at == other.byte_at && one.byte == other.byte &&
+           one.byte2_at == other.byte2_at && one.byte2 == other.byte2 &&
            std::memcmp(&one.pitch, &other.pitch, sizeof(one.pitch)) == 0 && one.memory == other.memory;
 }
 
@@ -27,23 +28,35 @@ void test_frames_survive_the_file() {
     frames[0].pad[1] = 0x1234;
     frames[0].byte_at = 0x80077624u;
     frames[0].byte = 0xC3;
+    frames[0].byte2_at = 0x80077627u;
+    frames[0].byte2 = 1;
     frames[0].pitch = -17.25f;
     frames[0].memory = 0x0123456789ABCDEFull;
     frames[2].pitch = 3.5f;
     frames[2].memory = 0xFFFFFFFFFFFFFFFFull;
     uint64_t first = 0;
     const std::string bytes = disruptor::capsule::encode(frames, 0x0000000867A1B2C3ull);
-    expect(bytes.size() == 20 + 3 * 21 && bytes.compare(0, 8, "DCAPSUL1") == 0 && static_cast<uint8_t>(bytes[8]) == 3 &&
+    expect(bytes.size() == 20 + 3 * 26 && bytes.compare(0, 8, "DCAPSUL2") == 0 && static_cast<uint8_t>(bytes[8]) == 3 &&
                static_cast<uint8_t>(bytes[12]) == 0xC3 && static_cast<uint8_t>(bytes[16]) == 0x08,
-           "the file is a name, a count, the first VBlank's cycle and 21 bytes a frame");
+           "the file is a name, a count, the first VBlank's cycle and 26 bytes a frame");
     expect(static_cast<uint8_t>(bytes[20]) == 0xFE && static_cast<uint8_t>(bytes[21]) == 0xBF && static_cast<uint8_t>(bytes[24]) == 0x24 &&
                static_cast<uint8_t>(bytes[27]) == 0x80 && static_cast<uint8_t>(bytes[28]) == 0xC3 && static_cast<uint8_t>(bytes[33]) == 0xEF &&
-               static_cast<uint8_t>(bytes[40]) == 0x01,
+               static_cast<uint8_t>(bytes[40]) == 0x01 && static_cast<uint8_t>(bytes[41]) == 0x27 &&
+               static_cast<uint8_t>(bytes[45]) == 1,
            "every number is written low byte first, wherever the file was made");
     expect(disruptor::capsule::decode(bytes, back, first) && back.size() == 3 && same(back[0], frames[0]) && same(back[1], frames[1]) && same(back[2], frames[2]) &&
                first == 0x0000000867A1B2C3ull,
            "what was written is what is read");
     expect(same(back[1], Frame{}) && back[1].pad[0] == 0xFFFF, "a frame with nothing pressed has both pads released");
+
+    std::string legacy = bytes.substr(0, 20);
+    legacy[7] = '1';
+    for (size_t i = 0; i < frames.size(); ++i) legacy.append(bytes, 20 + i * 26, 21);
+    expect(disruptor::capsule::decode(legacy, back, first) && back.size() == frames.size() &&
+               back[0].byte_at == frames[0].byte_at && back[0].byte == frames[0].byte &&
+               back[0].byte2_at == 0u && back[0].pitch == frames[0].pitch &&
+               back[0].memory == frames[0].memory && first == 0x0000000867A1B2C3ull,
+           "older capsules still read with no second byte write");
 
     std::vector<Frame> none;
     expect(disruptor::capsule::decode(disruptor::capsule::encode({}, 7), none, first) && none.empty() && first == 7, "an empty recording is a file too");
@@ -60,6 +73,17 @@ void test_frames_survive_the_file() {
     std::string more = bytes;
     more[8] = 4;
     expect(!disruptor::capsule::decode(more, back, first), "a count the file does not hold is refused");
+}
+
+void test_simultaneous_mouse_and_weapon_writes() {
+    Frame frame;
+    frame.note_byte(0x80077627u, 1u);
+    frame.note_byte(0x80077624u, 90u);
+    frame.note_byte(0x80077624u, 89u);
+    frame.note_byte(0x80077627u, 2u);
+    expect(frame.byte_at == 0x80077627u && frame.byte == 2u &&
+               frame.byte2_at == 0x80077624u && frame.byte2 == 89u,
+           "weapon selection and mouse yaw retain their latest value independently");
 }
 
 void test_the_digest_sees_every_byte() {
@@ -274,6 +298,7 @@ int main() {
     test_a_recording_keeps_pictures_for_the_list();
     test_a_folder_is_a_url_for_the_host();
     test_frames_survive_the_file();
+    test_simultaneous_mouse_and_weapon_writes();
     test_the_digest_sees_every_byte();
     test_a_picture_is_a_bitmap();
     if (g_failures) return 1;

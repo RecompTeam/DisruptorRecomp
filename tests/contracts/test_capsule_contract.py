@@ -41,7 +41,7 @@ require(
     in host
     and host.count("psx_game_before_input();") == host.count("psx_game_after_input();") == 1
     and "void psx_game_before_input(void) { disruptor_capsule_before_input(); }\n" in game_side
-    and "void psx_game_after_input(void) { disruptor_capsule_after_input(); }\n" in game_side
+    and "void psx_game_after_input(void) {\n    disruptor_capsule_after_input();\n    disruptor_selection_wheel_guard_input();\n}\n" in game_side
     and game_side.count("disruptor_capsule_before_input();") == game_side.count("disruptor_capsule_after_input();") == 1
     and game_side.count("disruptor_capsule_state_loaded();") == 1
     and "disruptor_capsule_" not in host,
@@ -103,6 +103,11 @@ require(
     and "    disruptor_mouse_set_vertical_pitch(static_cast<double>(frame.pitch));\n" in replay,
     "a replay compares the memory before it puts a frame's input in, puts in all a frame holds, "
     "and notes the byte it writes for a capsule recorded inside it",
+)
+require(
+    "        psx_write_byte(frame.byte2_at, frame.byte2);\n        disruptor_capsule_note_byte(frame.byte2_at, frame.byte2);"
+    in replay,
+    "a replay must also restore weapon selection when the same frame holds a mouse yaw write",
 )
 require(
     "    const bool in_step = capsule.same != 0 && capsule.last_same + kInStep >= capsule.replayed.size();\n" in capsule

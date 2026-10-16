@@ -263,7 +263,8 @@ differ from the recording in a few bytes of the game's memory, from one in ten
 to seven in ten in the runs measured. A replay counts as in step when it has the
 recording's memory at some frame of its last 60.
 
-A capsule holds the pad buttons, the heading the mouse wrote and the pitch of
+A capsule holds the pad buttons, the heading the mouse wrote, direct weapon
+selections and the pitch of
 the vertical look. It does not hold analog sticks, cheats or anything changed
 in the settings menu while it was recorded. It plays in the build that made
 it and with the settings it was made with, and it is not recorded in a network

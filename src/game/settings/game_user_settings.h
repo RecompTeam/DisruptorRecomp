@@ -10,6 +10,7 @@ namespace PSXRecompV4 {
 struct GameUserSettings {
     bool has_mouse_aim = false; bool mouse_aim = false;
     bool has_modern_controls = false; bool modern_controls = false;
+    bool has_selection_wheels = false; bool selection_wheels = false;
     bool has_horizontal_sensitivity = false; double horizontal_sensitivity = 0.1;
     bool has_invert_horizontal = false; bool invert_horizontal = false;
     bool has_vertical_look = false; bool vertical_look = false;

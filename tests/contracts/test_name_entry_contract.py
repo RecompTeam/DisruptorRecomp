@@ -180,7 +180,8 @@ require(
     and "constexpr unsigned kLetGo = 120u;" in module
     and 'extern "C" void disruptor_name_entry_state_loaded(void) {\n'
     "    g_on = g_letters = g_entered_once = false;\n    forget();\n}\n" in module
-    and "    disruptor_capsule_state_loaded();\n    disruptor_name_entry_state_loaded();\n" in game_side,
+    and "    disruptor_capsule_state_loaded();\n    disruptor_selection_wheel_cancel();\n"
+    "    disruptor_name_entry_state_loaded();\n" in game_side,
     "the screen counts as left, and a held key as let go, by the game's own clock in the framework's VBlanks, "
     "and a loaded save state, whose clock may lie anywhere, resets it all",
 )

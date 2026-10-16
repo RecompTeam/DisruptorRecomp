@@ -236,9 +236,15 @@ constexpr Option option_list[] = {
         "In the game a middle-click captures the mouse. A middle-click or Escape releases it."),
     choice("disruptor.modern_controls", "Control scheme", 1,
            "Modern: WASD, left click fires, right click uses psionics, side buttons choose.\n"
+           "Modern: number keys 1 to 9 and 0 pick a weapon, on the keypad too.\n"
            "Classic: the original keys. The mouse only turns.\n"
            "Keys you set yourself stay either way.",
            schemes, saved<&Settings::has_modern_controls>, scheme, set_scheme),
+    toggle<&Settings::has_selection_wheels, &Settings::selection_wheels>(
+        "disruptor.selection_wheels", "Weapon and psionic wheels", 0,
+        "Replaces both selection lists with wheels.\n"
+        "Hold the choose key, Q or R in Modern, point with the mouse or the left stick, let go to equip.\n"
+        "Escape or a right click cancels. The game keeps running."),
     slider("disruptor.horizontal_sensitivity", "Horizontal sensitivity", 80,
            "How far the view turns for a movement of the mouse.", 5, 2000, Unit::thousandths,
            saved<&Settings::has_horizontal_sensitivity>, thousandths<&Settings::horizontal_sensitivity>,

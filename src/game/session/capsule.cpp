@@ -39,8 +39,9 @@ extern "C" int gl_renderer_snap_taken(unsigned char *rgb, int room, int *width, 
 namespace disruptor::capsule {
 namespace {
 
-constexpr char kMagic[8] = {'D', 'C', 'A', 'P', 'S', 'U', 'L', '1'};
-constexpr size_t kFrameBytes = 21, kHeadBytes = sizeof(kMagic) + 4 + 8;
+constexpr char kMagic[8] = {'D', 'C', 'A', 'P', 'S', 'U', 'L', '2'};
+constexpr char kLegacyMagic[8] = {'D', 'C', 'A', 'P', 'S', 'U', 'L', '1'};
+constexpr size_t kFrameBytes = 26, kLegacyFrameBytes = 21, kHeadBytes = sizeof(kMagic) + 4 + 8;
 
 void put(std::string &out, uint64_t value, int bytes) {
     for (int at = 0; at < bytes; ++at) out.push_back(static_cast<char>(value >> (8 * at)));
@@ -67,6 +68,8 @@ std::string encode(const std::vector<Frame> &frames, uint64_t first_cycle) {
         put(out, frame.byte, 1);
         put(out, pitch, 4);
         put(out, frame.memory, 8);
+        put(out, frame.byte2_at, 4);
+        put(out, frame.byte2, 1);
     }
     return out;
 }
@@ -74,13 +77,16 @@ std::string encode(const std::vector<Frame> &frames, uint64_t first_cycle) {
 bool decode(std::string_view bytes, std::vector<Frame> &frames, uint64_t &first_cycle) {
     frames.clear();
     first_cycle = 0;
-    if (bytes.size() < kHeadBytes || std::memcmp(bytes.data(), kMagic, sizeof(kMagic)) != 0) return false;
+    if (bytes.size() < kHeadBytes) return false;
+    const bool legacy = std::memcmp(bytes.data(), kLegacyMagic, sizeof(kLegacyMagic)) == 0;
+    if (!legacy && std::memcmp(bytes.data(), kMagic, sizeof(kMagic)) != 0) return false;
+    const size_t frame_bytes = legacy ? kLegacyFrameBytes : kFrameBytes;
     const uint64_t count = take(bytes, sizeof(kMagic), 4);
-    if (bytes.size() != kHeadBytes + count * kFrameBytes) return false;
+    if (bytes.size() != kHeadBytes + count * frame_bytes) return false;
     first_cycle = take(bytes, sizeof(kMagic) + 4, 8);
     frames.resize(static_cast<size_t>(count));
     for (size_t index = 0; index < frames.size(); ++index) {
-        const size_t at = kHeadBytes + index * kFrameBytes;
+        const size_t at = kHeadBytes + index * frame_bytes;
         Frame &frame = frames[index];
         const auto pitch = static_cast<uint32_t>(take(bytes, at + 9, 4));
         frame.pad[0] = static_cast<uint16_t>(take(bytes, at, 2));
@@ -89,6 +95,10 @@ bool decode(std::string_view bytes, std::vector<Frame> &frames, uint64_t &first_
         frame.byte = static_cast<uint8_t>(take(bytes, at + 8, 1));
         std::memcpy(&frame.pitch, &pitch, sizeof(pitch));
         frame.memory = take(bytes, at + 13, 8);
+        if (!legacy) {
+            frame.byte2_at = static_cast<uint32_t>(take(bytes, at + 21, 4));
+            frame.byte2 = static_cast<uint8_t>(take(bytes, at + 25, 1));
+        }
     }
     return true;
 }
@@ -314,8 +324,7 @@ struct Capsule {
     Frame open;  /* the VBlank being recorded: its memory is known, its input is not yet */
     size_t at = 0, same = 0, last_same = 0, unwritten = 0;
     uint64_t first_cycle = 0, played_first_cycle = 0;
-    uint32_t noted_at = 0;
-    uint8_t noted = 0;
+    Frame notes;
     size_t scripted = 0, waited = 0;
     const char *notice = nullptr;
     std::chrono::steady_clock::time_point notice_until{};
@@ -377,17 +386,19 @@ void close_frame() {
     Capsule &capsule = g_capsule;
     capsule.open.pad[0] = sio_get_pad_buttons_slot(0);
     capsule.open.pad[1] = sio_get_pad_buttons_slot(1);
-    capsule.open.byte_at = capsule.noted_at;
-    capsule.open.byte = capsule.noted;
+    capsule.open.byte_at = capsule.notes.byte_at;
+    capsule.open.byte = capsule.notes.byte;
+    capsule.open.byte2_at = capsule.notes.byte2_at;
+    capsule.open.byte2 = capsule.notes.byte2;
     capsule.open.pitch = static_cast<float>(disruptor_mouse_vertical_pitch());
     capsule.recorded.push_back(capsule.open);
-    capsule.noted_at = 0;
+    capsule.notes = Frame{};
 }
 
 void open_frame() {
     g_capsule.open = Frame{};
     g_capsule.open.memory = memory_now();
-    g_capsule.noted_at = 0;
+    g_capsule.notes = Frame{};
 }
 
 void say(const char *word) {
@@ -505,6 +516,10 @@ void replay_frame() {
         psx_write_byte(frame.byte_at, frame.byte);
         disruptor_capsule_note_byte(frame.byte_at, frame.byte);  /* a recording made inside a replay holds the byte too */
     }
+    if (frame.byte2_at != 0u) {
+        psx_write_byte(frame.byte2_at, frame.byte2);
+        disruptor_capsule_note_byte(frame.byte2_at, frame.byte2);
+    }
     disruptor_mouse_set_vertical_pitch(static_cast<double>(frame.pitch));
 }
 
@@ -549,8 +564,7 @@ extern "C" const char *disruptor_capsule_notice(void) {
 }
 
 extern "C" void disruptor_capsule_note_byte(uint32_t address, uint8_t value) {
-    g_capsule.noted_at = address;
-    g_capsule.noted = value;
+    g_capsule.notes.note_byte(address, value);
 }
 
 extern "C" void disruptor_capsule_state_loaded(void) {

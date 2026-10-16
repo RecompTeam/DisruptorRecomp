@@ -18,6 +18,7 @@
 #include "game/session/diagnostics.h"
 #include "game/session/intro_skip.h"
 #include "game/input/mouse_aim.h"
+#include "game/input/selection_wheel.h"
 #include "game/frame/present_rate.h"
 #include "game/session/restart.h"
 #include "game/settings/key_layouts.h"
@@ -57,6 +58,7 @@
 extern "C" void gte_ws_set_far_threshold(int threshold);
 extern "C" void gte_ws_set_backdrop_repair_enabled(int enabled);
 extern "C" void gl_renderer_set_world_depth(int enabled);
+extern "C" void gl_renderer_set_host_ui_suspended(int suspended);
 extern "C" int gl_renderer_world_depth(void);
 extern "C" void gl_renderer_set_full_yaw(int enabled);
 extern "C" void gl_renderer_set_mesh_view(int enabled);
