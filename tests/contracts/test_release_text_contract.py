@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Test of the packager's GitHub release text: the written page when there is one, else the changelog section."""
+"""Test of the packager's GitHub release: its text, the written page or the changelog section, and its files."""
 
 import importlib
 import sys
@@ -68,4 +68,17 @@ with tempfile.TemporaryDirectory() as folder:
     (root / "CHANGELOG.md").write_text("# Changelog\n", encoding="utf-8")
     require(refused(lambda: package_release.release_text(newest, root)), "no page and no section is refused")
 
-print("Disruptor release text: PASS")
+players = ["DisruptorRecomp.AppImage"]
+packed = ("DisruptorRecomp-0.2.0-alpha.1-linux-full.nupkg", "DisruptorRecomp-0.2.0-alpha.1-linux-delta.nupkg")
+signed = ["DisruptorRecomp.AppImage.sigstore.json", "DisruptorRecomp-linux.intoto.jsonl"]
+names = package_release.published_names("linux", players, packed, signed)
+require(
+    names == {*players, "DisruptorRecomp.AppImage.sha256", "releases.linux.json", *packed, *signed},
+    "a release carries the players' files with their digests, the update feed, its packages and the signatures",
+)
+require(
+    not names & {"assets.linux.json", "RELEASES-linux", "releases.win.json"},
+    "Velopack's assets list, its legacy RELEASES file and another channel's feed stay out",
+)
+
+print("Disruptor release text and files: PASS")

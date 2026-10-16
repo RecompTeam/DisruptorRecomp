@@ -98,6 +98,12 @@ def release_text(version: str, root: Path = ROOT) -> str:
     return text + "\n"
 
 
+def published_names(channel: str, players: list[str], packed: tuple[str, ...], signed: list[str]) -> set[str]:
+    """The files a release carries: the players' files with their digests, the update feed, its packages and the
+    signatures. Velopack's assets list and its legacy RELEASES file stay out: no updater reads them."""
+    return {*players, *(f"{name}.sha256" for name in players), f"releases.{channel}.json", *packed, *signed}
+
+
 def now() -> str:
     """The time of now as RFC 3339 in UTC."""
     return datetime.datetime.now(datetime.UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
@@ -450,14 +456,8 @@ def main() -> None:
         print(f"Signed {len(published)} files as {SIGNER}")
 
     if args.publish:
-        ours = (
-            *digests,
-            *(f"{name}.sha256" for name in digests),
-            "RELEASES" if platform.channel == "win" else f"RELEASES-{platform.channel}",
-            *packed_names,
-            *(item.name for item in signed),
-        )
-        uploads = [str(item) for item in sorted(packages.iterdir()) if item.name in ours or item.suffix == ".json"]
+        ours = published_names(platform.channel, list(digests), packed_names, [item.name for item in signed])
+        uploads = [str(item) for item in sorted(packages.iterdir()) if item.name in ours]
         repository = REPOSITORY.removeprefix("https://github.com/")
         if platform.name == "linux":
             add_to_release(work, repository, args.version, commit, platform, uploads)
