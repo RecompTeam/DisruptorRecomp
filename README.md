@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  A native PC recompilation of <b>Disruptor</b> (PlayStation, 1996). It plays from your own disc.
+  A native PC recompilation of <b>Disruptor</b> (PlayStation, 1996).
 </p>
 
 <p align="center">
@@ -16,15 +16,15 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/RecompTeam/DisruptorRecomp/releases/tag/v0.2.0-alpha.1"><b>Download</b></a>
+  <a href="https://github.com/RecompTeam/DisruptorRecomp/releases/tag/v0.3.0-alpha.1"><b>Download</b></a>
 </p>
 
 ## Quick start
 
 1. Download from [Releases](https://github.com/RecompTeam/DisruptorRecomp/releases):
-    - **Windows:** run [**DisruptorRecomp-win-Setup.exe**](https://github.com/RecompTeam/DisruptorRecomp/releases/download/v0.2.0-alpha.1/DisruptorRecomp-win-Setup.exe).
-    - **Windows, without installing:** unpack [**DisruptorRecomp-win-Portable.zip**](https://github.com/RecompTeam/DisruptorRecomp/releases/download/v0.2.0-alpha.1/DisruptorRecomp-win-Portable.zip) and run `Disruptor Recompiled.exe`.
-    - **Linux x64:** download [**DisruptorRecomp.AppImage**](https://github.com/RecompTeam/DisruptorRecomp/releases/download/v0.2.0-alpha.1/DisruptorRecomp.AppImage), make it executable and run it:\
+    - **Windows:** run [**DisruptorRecomp-win-Setup.exe**](https://github.com/RecompTeam/DisruptorRecomp/releases/download/v0.3.0-alpha.1/DisruptorRecomp-win-Setup.exe).
+    - **Windows, without installing:** unpack [**DisruptorRecomp-win-Portable.zip**](https://github.com/RecompTeam/DisruptorRecomp/releases/download/v0.3.0-alpha.1/DisruptorRecomp-win-Portable.zip) and run `Disruptor Recompiled.exe`.
+    - **Linux x64:** download [**DisruptorRecomp.AppImage**](https://github.com/RecompTeam/DisruptorRecomp/releases/download/v0.3.0-alpha.1/DisruptorRecomp.AppImage), make it executable and run it:\
       `chmod +x DisruptorRecomp.AppImage`
 2. Drop your **Disruptor (USA, SLUS-00224)** disc image on the launcher it opens.
 3. Press **Play**.
@@ -71,22 +71,24 @@ Updates install with one click. Saves and settings stay.
 
 ## Settings
 
-| Setting | Default | What it changes |
-| --- | --- | --- |
-| Internal resolution scale | 4x | Up to 8x the original resolution |
-| Aspect ratio | 4:3 | 16:9, 21:9, 32:9 or the window's shape |
-| Exact-provenance geometry | On | Steadies the polygon edges that wobble on the PlayStation |
-| Perspective-correct world textures | On | Textures keep their shape near the viewer |
-| Gap filling | On | Closes hairline gaps between polygons |
-| Depth-sorted world | On | Draws a near polygon over a far one where the game's own order gets it wrong |
-| Smooth distance fade | On | Walls fade evenly instead of in twelve steps |
-| Ambient occlusion | Off | Shaded corners and floors under things |
-| 60 FPS gameplay | On | The game runs at up to 60 FPS instead of 30 |
-| In-between frames | Off | Adds frames for smoother motion, up to 320 FPS |
-| Smooth mouse turning | On | The view turns between the game's 256 heading steps |
-| Control scheme | Modern | WASD and the mouse, or the original keys |
-| Weapon and psionic wheels | Off | Choose a weapon or a psionic on a wheel instead of the game's list |
-| Anti-aliasing (MSAA / SSAA) | Off | Smoother edges, experimental |
+| | Setting | Default | What it changes |
+| --- | --- | --- | --- |
+| **Picture** | Internal resolution scale | 4x | Up to 8x the original resolution |
+| | Aspect ratio | 4:3 | 16:9, 21:9, 32:9 or the window's shape |
+| | Anti-aliasing (MSAA / SSAA) | Off | Smoother edges, experimental |
+| **World** | Exact-provenance geometry | On | Steadies the polygon edges that wobble on the PlayStation |
+| | Perspective-correct world textures | On | Textures keep their shape near the viewer |
+| | Gap filling | On | Closes hairline gaps between polygons |
+| | Depth-sorted world | On | Draws a near polygon over a far one where the game's own order gets it wrong |
+| | Smooth distance fade | On | Walls fade evenly instead of in twelve steps |
+| | Ambient occlusion | Off | Shaded corners and floors under things |
+| **Motion** | 60 FPS gameplay | On | The game runs at up to 60 FPS instead of 30 |
+| | In-between frames | Off | Adds frames for smoother motion, up to 320 FPS |
+| | Smooth mouse turning | On | The view turns between the game's 256 heading steps |
+| **Controls** | Control scheme | Modern | WASD and the mouse, or the original keys |
+| | Number keys pick weapons | Off | 1 to 9 and 0 pick a weapon you own, experimental |
+| | Weapon and psionic wheels | Off | Choose a weapon or a psionic on a wheel instead of the game's list, experimental |
+| **And more** | | | HUD size, VSync, mouse sensitivity, vertical look, gamepad buttons, a skip of the intro and others, all in the [player's guide](docs/PLAYING.md#settings) |
 
 <details>
 <summary><b>Build from source</b></summary>

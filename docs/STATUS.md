@@ -36,7 +36,8 @@ validation is incomplete.
   things the game updates at that rate, still step at 30.
 - Enemies and bodies sort a little nearer than the game sorts them, together
   with the items lying over them, so the floor under them does not cut them.
-  A wall standing in front of one keeps it behind, as the game does.
+  A wall or a shut door standing in front of one keeps it behind, also where
+  the game itself drew a pickup lying under a shut door over the door.
 - The widescreen sky and skyline backdrop draws extra tile columns to keep its
   proportions. Checked at 16:9, 21:9, and 32:9 in the first mission only.
 - Vertical aim needs broader actor, room-edge, and level-transition testing.

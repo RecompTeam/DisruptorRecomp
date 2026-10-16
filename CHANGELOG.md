@@ -2,6 +2,26 @@
 
 What changed in each release. The launcher shows the section of its own version on its home page.
 
+## v0.3.0-alpha.1
+
+Released on 2026-10-17.
+
+### Changes
+
+- Pick weapons with the number keys only when Number keys pick weapons is on, off at first, in either scheme
+- Keep a baton picked by a number key or on the wheel in hand, where the game would take a gun with ammunition
+- Mark the number keys and the weapon and psionic wheels experimental
+
+### Bug fixes
+
+- Keep the psionic wheel shut until the first psionic is found
+- Stop the mouse turning the view while the game is paused or one of its lists is open
+- Pick the weapon of a number key pressed during a weapon change once the change ends, instead of opening the one before again
+- Keep a pickup or a body under a shut door behind the door
+- Keep a drone under the stairs behind the floor in front of it
+- Keep the sky in a window while the view turns with in-between frames
+- Stop a dark rim hanging in the air beside a column in in-between frames
+
 ## v0.2.0-alpha.1
 
 Released on 2026-10-16.

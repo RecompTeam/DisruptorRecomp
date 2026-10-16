@@ -64,4 +64,4 @@ By contributing you agree that your contribution is licensed under the
 [MIT License](LICENSE).
 
 See [docs/BUILD.md](docs/BUILD.md) for setup and test commands, and
-[THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for dependency licenses.
+[licenses/README.md](licenses/README.md) for dependency licenses.
