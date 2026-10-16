@@ -243,8 +243,9 @@ constexpr Option option_list[] = {
     toggle<&Settings::has_selection_wheels, &Settings::selection_wheels>(
         "disruptor.selection_wheels", "Weapon and psionic wheels", 0,
         "Replaces both selection lists with wheels.\n"
-        "Hold the choose key, Q or R in Modern, point with the mouse or the left stick, let go to equip.\n"
-        "Escape or a right click cancels. The game keeps running."),
+        "Hold Choose weapon or Choose psionic, point with the mouse or the left stick, let go to equip.\n"
+        "Escape or a right click cancels.\n"
+        "The game keeps running while a wheel is open."),
     slider("disruptor.horizontal_sensitivity", "Horizontal sensitivity", 80,
            "How far the view turns for a movement of the mouse.", 5, 2000, Unit::thousandths,
            saved<&Settings::has_horizontal_sensitivity>, thousandths<&Settings::horizontal_sensitivity>,

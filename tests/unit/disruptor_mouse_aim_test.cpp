@@ -716,6 +716,15 @@ void test_weapon_selection_guards() {
     g_keys[SDL_SCANCODE_1] = 1;
     mouse_aim_frame();
     expect(g_notes == 0, "selecting the equipped weapon is a no-op");
+
+    prepare_weapon_input();
+    g_bound[SDL_SCANCODE_3] = true;
+    g_keys[SDL_SCANCODE_3] = 1;
+    mouse_aim_frame();
+    expect(g_notes == 0, "a number key bound to an action keeps only that action");
+    g_keys[SDL_SCANCODE_KP_3] = 1;
+    mouse_aim_frame();
+    expect(psx_read_byte(kCurrentWeaponAddress) == 2u, "the keypad's free 3 still picks the 18mm Auto");
 }
 
 void test_weapon_key_edges_through_menus() {

@@ -370,7 +370,7 @@ int sample_weapon_keys(const Uint8 *keys, const Uint8 *pad_keys) {
         const int key = kWeaponKeys[i];
         const bool down = key_down(keys, key);
         if (requested < 0 && down && !g_mouse.weapon_was_down[i] &&
-            key_down(pad_keys, key))
+            key_down(pad_keys, key) && !key_bound(key))
             requested = static_cast<int>(i % 10);
         g_mouse.weapon_was_down[i] = down;
     }

@@ -105,17 +105,20 @@ Delete it once the repaired copy works.
 The table shows the Modern scheme, which a new installation has.
 
 **Weapon and psionic wheels**, on the Controls page and off at first, replace
-both selection lists. Hold the selection key, **Q** or **R** in the Modern
-scheme or the mapped gamepad button, point with the mouse or the left stick and
-let go to equip. The arrows and the D-pad step through what you own. A left
-click or Enter confirms, Escape, a right click or the gamepad's cancel button
-cancels. The game keeps running while a wheel is open.
+both selection lists. Hold the key or gamepad button of Choose weapon or Choose
+psionic, **Q** or **R** in the Modern scheme until you move them, point with the
+mouse or the left stick and let go to equip. The arrows and the D-pad step
+through what you own. An arrow you bind to an action other than moving or
+turning does not step. A left click or Enter confirms. Escape, a right click or
+the gamepad's cancel button cancels. The game keeps running while a wheel is
+open.
 
 In the Modern scheme the number keys pick a weapon you own: **1** baton, **2**
 18mm Semi, **3** 18mm Auto, **4** Phase Rifle, **5** Phase Repeater, **6**
 Lockon Cannon, **7** AM Blaster, **8** AM Cyclone, **9** Zodiac, **0** Plasma
 Lance. The keypad works too. Each press picks once. Menus and the save-name
-screen keep the number keys for their own input.
+screen keep the number keys for their own input. A number key you bind to an
+action does only that action.
 
 ### Scheme and keys
 

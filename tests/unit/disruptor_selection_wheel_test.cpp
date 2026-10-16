@@ -11,6 +11,7 @@ SDL_Window g_window;
 std::array<uint8_t, 0x200000> g_ram{};
 std::array<uint8_t, 512> g_keys{};
 std::array<bool, 512> g_typing{};
+std::array<bool, 512> g_bound{};
 std::array<uint8_t, 4> g_sticks{128, 128, 128, 128};
 uint16_t g_pad = 0xFFFF;
 uint32_t g_mouse_buttons = 0;
@@ -45,6 +46,7 @@ void disruptor_name_entry_keys_for_pad(const uint8_t *keys, uint8_t *kept, int c
     for (int i = 0; i < count; ++i) kept[i] = g_typing[static_cast<size_t>(i)] ? 0 : keys[i];
 }
 SDL_Scancode psx_keybinds_get_button(int, int button) { return button == PSX_KB_L1 ? g_weapon_key : g_psionic_key; }
+int disruptor_key_bound(int scancode) { return g_bound[static_cast<size_t>(scancode)] ? 1 : 0; }
 }
 
 const Uint8 *SDL_GetKeyboardState(int *) { return g_keys.data(); }
@@ -71,7 +73,7 @@ int frame(uint16_t pressed = 0) {
 }
 void reset(bool enabled = true) {
     g_wheel = State{};
-    g_ram.fill(0); g_keys.fill(0); g_typing.fill(false);
+    g_ram.fill(0); g_keys.fill(0); g_typing.fill(false); g_bound.fill(false);
     g_sticks = {128, 128, 128, 128}; g_mouse_buttons = 0; g_dx = g_dy = 0;
     g_modern = g_captured = g_ready = 1; g_netplay = g_ui = 0;
     g_flags = SDL_WINDOW_INPUT_FOCUS;
@@ -115,6 +117,10 @@ void test_bindings_and_input_capture() {
     }
     reset(); g_keys[SDL_SCANCODE_R] = 1; frame();
     expect(view().kind == Kind::psionics && view().count == 5, "the same toggle enables the psionic wheel on its binding");
+    reset(); g_weapon_key = SDL_SCANCODE_E; g_keys[SDL_SCANCODE_Q] = 1; frame();
+    expect(!disruptor_selection_wheel_open(), "Q opens no wheel once the weapon choice is bound to another key");
+    reset(); g_psionic_key = SDL_SCANCODE_F; g_keys[SDL_SCANCODE_R] = 1; frame();
+    expect(!disruptor_selection_wheel_open(), "R opens no wheel once the psionic choice is bound to another key");
 }
 
 void test_equip_and_record() {
@@ -165,6 +171,15 @@ void test_locked_items_and_navigation() {
     expect(view().highlighted == 3, "keyboard and D-pad navigation skip unowned weapons");
     frame(kWeapon); frame(kWeapon | kLeft);
     expect(view().highlighted == 1, "reverse navigation also skips unowned weapons");
+    reset(); word(0x800770FCu, 0); frame(kWeapon); g_keys[SDL_SCANCODE_DOWN] = 1; frame(kWeapon);
+    expect(view().highlighted == 3, "the Modern scheme's free Down arrow steps through the wheel");
+    reset(); word(0x800770FCu, 0); frame(kWeapon); frame(kWeapon | kRight); frame(kWeapon);
+    g_keys[SDL_SCANCODE_UP] = 1; frame(kWeapon);
+    expect(view().highlighted == 1, "and its free Up arrow steps back");
+    reset(); g_bound[SDL_SCANCODE_DOWN] = true; frame(kWeapon); g_keys[SDL_SCANCODE_DOWN] = 1; frame(kWeapon);
+    expect(view().highlighted == 1, "a Down arrow bound to an action steps only through that action's button");
+    reset(); g_modern = 0; frame(kWeapon); g_keys[SDL_SCANCODE_DOWN] = 1; frame(kWeapon);
+    expect(view().highlighted == 1, "the Classic scheme steps only through the arrows its key layout binds");
     reset(); word(0x80077100u, 0); frame(kWeapon); g_dx = 100; frame(kWeapon); frame();
     expect(psx_read_byte(0x80077627u) == 1 && g_writes == 0, "pointing at a locked slice cannot equip it");
     reset(); frame(kPsionic); g_dx = 100; frame(kPsionic); word(0x80077B60u, 0); frame();

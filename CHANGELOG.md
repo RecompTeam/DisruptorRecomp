@@ -45,6 +45,9 @@ What changed in each release. The launcher shows the section of its own version 
 - Keep sprites drawn to the edges of a wide picture
 - Let gap filling fill only empty space
 - Keep a state loaded mid-run from freezing the game
+- Keep a number key bound to an action from also picking a weapon
+- Open a wheel only on the key its choice is bound to
+- Step through a wheel with the Up and Down arrows in the Modern scheme while they are bound to no action
 
 ## v0.1.0-alpha.5
 

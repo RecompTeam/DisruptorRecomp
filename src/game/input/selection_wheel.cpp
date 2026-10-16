@@ -20,6 +20,7 @@ extern "C" int psx_netplay_active(void);
 extern "C" int psx_host_ui_game_input_captured(void);
 extern "C" SDL_Window *sdl_window;
 extern "C" void disruptor_name_entry_keys_for_pad(const uint8_t *, uint8_t *, int);
+extern "C" int disruptor_key_bound(int scancode);
 
 namespace disruptor::wheel {
 namespace {
@@ -226,8 +227,8 @@ extern "C" int disruptor_selection_wheel_frame(void) {
     if (key_down(keys.data(), psx_keybinds_get_button(1, PSX_KB_R1))) pressed |= kPsionic;
     const uint32_t mouse = mouse_buttons();
     if (disruptor_modern_controls_enabled()) {
-        if (key_down(keys.data(), SDL_SCANCODE_Q)) pressed |= kWeapon;
-        if (key_down(keys.data(), SDL_SCANCODE_R)) pressed |= kPsionic;
+        if (key_down(keys.data(), SDL_SCANCODE_UP) && !disruptor_key_bound(SDL_SCANCODE_UP)) pressed |= kUp;
+        if (key_down(keys.data(), SDL_SCANCODE_DOWN) && !disruptor_key_bound(SDL_SCANCODE_DOWN)) pressed |= kDown;
         if (disruptor_mouse_captured()) {
             if (mouse & SDL_BUTTON_X1MASK) pressed |= kWeapon;
             if (mouse & SDL_BUTTON_X2MASK) pressed |= kPsionic;

@@ -2,6 +2,7 @@
 """Check wheel routing, defaults and the retail inventory identity."""
 
 import struct
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -42,6 +43,9 @@ require("disruptor_capsule_note_byte(address" in wheel,
 require("    disruptor_capsule_after_input();\n    disruptor_selection_wheel_guard_input();" in read("src/game/host.cpp"),
         "open wheels must also neutralise input on fast-forward frames with no presentation hook")
 
+retail = (ROOT / "input/SLUS_002.24.code", ROOT / "input/SLUS_002.24")
+require("--require-artifacts" not in sys.argv[1:] or all(artifact.exists() for artifact in retail),
+        "the build gate must check the retail image and executable: one is absent")
 path = ROOT / "input/SLUS_002.24.code"
 if path.exists():
     image = path.read_bytes()

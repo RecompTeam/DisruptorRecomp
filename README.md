@@ -81,6 +81,7 @@ The launcher keeps the game up to date. By default it looks for a new release at
 | In-between frames | Off | Adds frames for smoother motion, up to 320 FPS |
 | Smooth mouse turning | On | The view turns between the game's 256 heading steps |
 | Control scheme | Modern | WASD and the mouse, or the original keys |
+| Weapon and psionic wheels | Off | Choose a weapon or a psionic on a wheel instead of the game's list |
 | Anti-aliasing (MSAA / SSAA) | Off | Smoother edges, experimental |
 
 <details>
