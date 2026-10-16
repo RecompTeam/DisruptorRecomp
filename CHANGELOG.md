@@ -4,6 +4,8 @@ What changed in each release. The launcher shows the section of its own version 
 
 ## v0.2.0-alpha.1
 
+Released on 2026-10-16.
+
 ### Changes
 
 - Move fast-forward from ] to B, which does nothing on the save-name screen

@@ -10,8 +10,9 @@
   <a href="https://github.com/RecompTeam/DisruptorRecomp/releases"><img src="https://img.shields.io/github/v/release/RecompTeam/DisruptorRecomp?include_prereleases&label=release" alt="Release"></a>
   <a href="https://github.com/RecompTeam/DisruptorRecomp/releases"><img src="https://img.shields.io/github/downloads/RecompTeam/DisruptorRecomp/total" alt="Downloads"></a>
   <a href="https://github.com/RecompTeam/DisruptorRecomp/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/RecompTeam/DisruptorRecomp/build.yml?label=build" alt="Build"></a>
-  <img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20x64-1a231b" alt="Windows and Linux x64">
+  <a href="https://github.com/RecompTeam/DisruptorRecomp/releases"><img src="https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20x64-1a231b" alt="Windows and Linux x64"></a>
   <a href="https://discord.gg/hWbFatkXpU"><img src="https://img.shields.io/badge/Discord-join-5865F2" alt="Discord"></a>
+  <a href="https://scorecard.dev/viewer/?uri=github.com/RecompTeam/DisruptorRecomp"><img src="https://img.shields.io/ossf-scorecard/github.com/RecompTeam/DisruptorRecomp?label=OpenSSF%20Scorecard" alt="OpenSSF Scorecard"></a>
 </p>
 
 <p align="center">
@@ -28,7 +29,8 @@
 
 **No game data is included.** A French, German or Japanese disc of yours can give the game its language.
 
-It needs Windows 10 or 11 x64, or Linux x64 with glibc 2.35 or newer, and a graphics driver with OpenGL 3.3. The [player's guide](docs/PLAYING.md#install) has the details.
+It needs Windows 10 or 11 x64, or Linux x64 with glibc 2.35 or newer, and a graphics driver with OpenGL 3.3.\
+The [player's guide](docs/PLAYING.md#install) has the details.
 
 [**Before and after**](docs/COMPARISONS.md): what changed from the PlayStation version, side by side.
 
@@ -36,7 +38,9 @@ It needs Windows 10 or 11 x64, or Linux x64 with glibc 2.35 or newer, and a grap
 
 Drop the disc, press Play. The image is checked byte for byte.
 
-The launcher keeps the game up to date. By default it looks for a new release at every start, downloads only what changed when it can and installs it with one click. Saves and settings stay.
+The launcher keeps the game up to date.\
+By default it looks for a new release at every start, downloads only what changed when it can and installs it with one click.\
+Saves and settings stay.
 
 <table>
   <tr>
@@ -55,7 +59,7 @@ The launcher keeps the game up to date. By default it looks for a new release at
     <td valign="top">
       <img src="docs/images/controls.png" alt="The Controls page" width="100%"><br>
       <b>Controls</b><br>
-      Modern or Classic, mouse aim and a gamepad beside the keyboard.
+      Modern or Classic, weapon and psionic wheels, mouse aim and a gamepad beside the keyboard.
     </td>
     <td valign="top">
       <img src="docs/images/keys.png" alt="The key and gamepad tables" width="100%"><br>
