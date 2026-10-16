@@ -635,14 +635,12 @@ bool View::home(const UpdateView& update) {
     ImGui::Dummy(ImVec2(0.0f, 4.0f * scale_));
     if (!known) {
         first_run(dialog_open);
-        last_activity();
         // Before a disc the drop zone needs the room: only an update that waits for the player is shown.
         const bool waiting = update.state == UpdateState::available || update.state == UpdateState::downloading ||
                              update.state == UpdateState::ready;
         return waiting && update_strip(update);
     }
     cards(dialog_open);
-    last_activity();
     // The update card stays while there is something to do about an update. Otherwise the notes take its place.
     const bool acting = update.state == UpdateState::available || update.state == UpdateState::downloading ||
                         update.state == UpdateState::ready || update.state == UpdateState::failed ||
@@ -739,6 +737,7 @@ void View::banner(float height, bool dialog_open) {
     draw->PushClipRect(pill, pill + ImVec2(said_size.x + 40.0f * scale_, pill_height), true);
     draw->AddText(pill_font, pill_size, pill + ImVec2(30.0f * scale_, (pill_height - pill_size) * 0.5f), colour(kText), said.c_str());
     draw->PopClipRect();
+    float taken = pill.x + said_size.x + 40.0f * scale_;
     if (sub) {
         const LanguageList languages = session_.languages();
         std::string line = text_of(session_.verified().profile->label);
@@ -746,6 +745,7 @@ void View::banner(float height, bool dialog_open) {
             line += "  \xc2\xb7  " + text_of(languages.labels[static_cast<std::size_t>(languages.selected)]);
         else line += "  \xc2\xb7  English";
         draw->AddText(body_, ImGui::GetFontSize() * 0.9f, ImVec2(pill.x, pill.y + pill_height + 8.0f * scale_), colour(kMuted), line.c_str());
+        taken = std::max(taken, pill.x + body_->CalcTextSizeA(ImGui::GetFontSize() * 0.9f, FLT_MAX, 0.0f, line.c_str()).x);
     }
 
     const ImVec2 play_size(210.0f * scale_, 56.0f * scale_);
@@ -780,6 +780,7 @@ void View::banner(float height, bool dialog_open) {
             x += heavy_->CalcTextSizeA(letters, FLT_MAX, 0.0f, &letter, &letter + 1).x + spacing;
         }
         if (pressed && playable) session_.play();
+        if (!busy) last_activity(taken + pad, play_at.x - 18.0f * scale_, play_at.y + play_size.y * 0.5f);
     }
     if (busy) {
         const float done = std::clamp(static_cast<float>(session_.progress()) / 100.0f, 0.0f, 1.0f);
@@ -909,19 +910,33 @@ void View::cards(bool dialog_open) {
     ImGui::Dummy(ImVec2(0.0f, 2.0f * scale_));
 }
 
-void View::last_activity() {
+// The launcher's last message and its Details link in the banner, ending at `right` on the line through `middle`,
+// cut so that it starts no farther left than `left`.
+void View::last_activity(float left, float right, float middle) {
     std::string status = first_line(text_of(session_.status()));
     if (status.empty()) return;
-    ImGui::PushStyleColor(ImGuiCol_Text, rgb(kMuted));
-    ImGui::AlignTextToFramePadding();
-    ImGui::TextUnformatted(icon::history);
-    ImGui::SameLine();
-    const float room = ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize("Details").x - ImGui::GetStyle().ItemSpacing.x * 2.0f;
-    // Cut to the room left, so that Details always sits on the line.
-    status = fitted(std::move(status), room, [](const std::string& text) { return ImGui::CalcTextSize(text.c_str()).x; });
-    if (!status.empty()) ImGui::TextUnformatted(status.c_str());
-    ImGui::PopStyleColor();
-    ImGui::SameLine();
+    const float gap = ImGui::GetStyle().ItemSpacing.x;
+    const float link_width = bold_->CalcTextSizeA(ImGui::GetFontSize(), FLT_MAX, 0.0f, "Details").x;
+    const float icon_width = ImGui::CalcTextSize(icon::history).x;
+    const float room = right - left - link_width - icon_width - 3.0f * gap;
+    if (room <= 0.0f) return;
+    ImFont* font = ImGui::GetFont();
+    const float size = ImGui::GetFontSize(), line = ImGui::GetTextLineHeight();
+    // Two lines at most, the words that do not fit cut off at the end.
+    const auto block = [&](const std::string& text) { return font->CalcTextSizeA(size, FLT_MAX, room, text.c_str()); };
+    for (std::size_t cut = status.size(); block(status).y > 2.0f * line + 1.0f && cut > 0;) {
+        cut = status.rfind(' ', cut - 1);
+        if (cut == std::string::npos) cut = 0;
+        status = status.substr(0, cut) + "...";
+    }
+    const ImVec2 shown = block(status);
+    const float y = middle - shown.y * 0.5f;
+    float x = right - link_width - gap - shown.x - gap - icon_width;
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    draw->AddText(ImVec2(x, middle - line * 0.5f), colour(kMuted), icon::history);
+    x += icon_width + gap;
+    draw->AddText(font, size, ImVec2(x, y), colour(kMuted), status.c_str(), nullptr, room);
+    ImGui::SetCursorScreenPos(ImVec2(right - link_width, middle - line * 0.5f));
     if (link("Details")) details_ = true;
 }
 
@@ -1176,7 +1191,11 @@ void View::settings() {
     }
     const Page page = static_cast<Page>(page_);
     bool reset_asked = false;
-    if (page != Page::troubleshooting) {
+    if (page == Page::troubleshooting) {
+        if (button(icon::bug, "Report a problem")) session_.make_problem_report();
+        hand_when_hovered();
+        tooltip("Saves the game's logs, your settings and a note of the system for a bug report.");
+    } else {
         ImGui::Dummy(ImVec2(0.0f, 10.0f * scale_));
         ImGui::BeginDisabled(!editable);
         ImGui::PushStyleColor(ImGuiCol_TextLink, rgb(kMuted));

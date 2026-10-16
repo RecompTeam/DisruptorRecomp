@@ -2,6 +2,27 @@
 
 What changed in each release. The launcher shows the section of its own version on its home page.
 
+## v0.3.1
+
+Released on 2026-10-17.
+
+### Changes
+
+- Show the launcher's last message in the banner beside Play
+- Drop Play Disruptor.cmd from the portable ZIP, DisruptorLauncher.exe starts the game
+- Drop the -alpha label from version numbers
+
+### Enhancements
+
+- Add a Report a problem button to the launcher's Troubleshooting page
+
+### Bug fixes
+
+- Keep the Linux AppImage's memory cards in ~/.local/share/DisruptorRecompData/saves, so the game can save
+- Draw the textures of mission 1 right with a French or German disc, and of every level that disc has pictures of its own for
+- Draw the drones' shadows right with a French or German disc
+- Put the pause menu's quit question and its answers where the French or German version puts them
+
 ## v0.3.0-alpha.1
 
 Released on 2026-10-17.

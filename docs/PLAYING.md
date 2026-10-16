@@ -1,9 +1,11 @@
 # Getting started
 
-This alpha for Windows x64 and Linux x64 runs from your own **Disruptor (USA,
-SLUS-00224)** disc image. Game assets are not included. You do not need to
-build the project, extract its executable or supply a PlayStation BIOS:
-OpenBIOS is included.
+Disruptor Recompiled runs on Windows x64 and Linux x64 from your own **Disruptor (USA,
+SLUS-00224)** disc image.
+
+- Game assets are not included.
+- You do not need to build the project or extract its executable.
+- No PlayStation BIOS is needed: OpenBIOS is included.
 
 Join the [community Discord](https://discord.gg/hWbFatkXpU) to talk about the
 project and share feedback.
@@ -20,19 +22,25 @@ project and share feedback.
    and in the Start menu, and opens the launcher. It installs the Microsoft
    Visual C++ x64 Redistributable too when it is missing.
 
-To play without installing, download **DisruptorRecomp-win-Portable.zip**
-instead, unpack it into a folder of its own and run
-`Disruptor Recompiled.exe`. Your saves and settings stay in its `data` folder.
-It needs the
-[Microsoft Visual C++ x64 Redistributable](https://aka.ms/vc14/vc_redist.x64.exe).
+To play without installing:
+
+- Download **DisruptorRecomp-win-Portable.zip** instead.
+- Unpack it into a folder of its own and run `Disruptor Recompiled.exe`.
+- Your saves and settings stay in its `data` folder.
+- It needs the
+  [Microsoft Visual C++ x64 Redistributable](https://aka.ms/vc14/vc_redist.x64.exe).
 
 Windows 10 or 11 x64 and a graphics driver with OpenGL 3.3 are needed.
 
-On Linux x64, download **DisruptorRecomp.AppImage**, make it executable with
-`chmod +x DisruptorRecomp.AppImage` and run it. It needs glibc 2.35 or newer
-(Ubuntu 22.04, Debian 12, Fedora 36 and later) and OpenGL 3.3. Your saves and
-settings are kept in `~/.local/share/DisruptorRecompData`. The launcher updates
-the AppImage in place.
+On Linux x64:
+
+- Download **DisruptorRecomp.AppImage**.
+- Make it executable: `chmod +x DisruptorRecomp.AppImage`
+- Run it.
+- It needs glibc 2.35 or newer (Ubuntu 22.04, Debian 12, Fedora 36 and later)
+  and OpenGL 3.3.
+- Your saves and settings are kept in `~/.local/share/DisruptorRecompData`.
+- The launcher updates the AppImage in place.
 
 ### Add your disc
 
@@ -58,23 +66,22 @@ An import needs about 610 MiB of free space.
 ### Play
 
 Press **Play** on the launcher's home page. The disc is checked before every
-start. In the game's menu, use the arrow keys and **Enter** to pick
-**New Game**, or **Practice Mode** for a training mission.
+start.
 
-If the game stops with an error, the launcher says so under its banner.
-**Details** shows the end of `startup.log` and everything the launcher did.
-**Help** in the side bar shows this guide, and F1 opens it.
+In the game's menu, pick **New Game** with the arrow keys and **Enter**, or
+**Practice Mode** for a training mission.
+
+- If the game stops with an error, the launcher says so in its banner, beside
+  **Play**.
+- **Details** there shows the end of `startup.log` and everything the launcher
+  did.
+- **Help** in the side bar shows this guide. F1 opens it too.
 
 ### Older releases
 
 Releases up to alpha.5 came as a ZIP. Install the new release with its
 Setup.exe, then press **Bring saves...** in the side bar and choose the old
 folder: saves, settings, keys and the imported disc come over.
-
-Releases without `DisruptorLauncher.exe` are set up by hand: copy the BIN and
-CUE into `input/`, name the CUE `Disruptor (USA).cue` and run
-`Play Disruptor.cmd`. The launcher finds such a folder and imports it by
-itself.
 
 A repair keeps the files it replaced in an `input/discs/.previous-*` folder.
 Delete it once the repaired copy works.
@@ -91,12 +98,12 @@ Delete it once the repaired copy works.
 | Jump / menu cancel | Space |
 | Use | E |
 | Choose weapon / psionic | Q / R |
-| Select weapon directly | 1–9 / 0, or the same keys on the keypad |
+| Select weapon directly | 1–9 / 0 or the keypad, when Number keys pick weapons is on |
 | Map / pause | Tab / P |
 | Settings | Backquote (`` ` ``). Escape closes |
 | Fullscreen | Alt+Enter |
 | Skip a logo or movie | Escape |
-| Fast-forward | Hold ] |
+| Fast-forward | Hold B |
 | Save / load state | Shift+F1–F11 / F1–F11 |
 | Name a save | Type it: letters, digits, Space, Backspace and Delete. Enter moves to DONE |
 | Start / end a replay capsule | Ctrl+F12 |
@@ -104,22 +111,40 @@ Delete it once the repaired copy works.
 
 The table shows the Modern scheme, which a new installation has.
 
-**Weapon and psionic wheels**, on the Controls page, experimental and off at
-first, replace both selection lists. Hold the key or gamepad button of Choose
-weapon or Choose psionic, **Q** or **R** in the Modern scheme until you move
-them, point with the mouse or the left stick and let go to equip. The psionic
-wheel opens once you have a psionic. The arrows and the D-pad step through what
-you own. An arrow you bind to an action other than moving or turning does not
-step. A left click or Enter confirms. Escape, a right click or the gamepad's
-cancel button cancels. The game keeps running while a wheel is open.
+**Weapon and psionic wheels** replace both selection lists. The setting is on
+the Controls page, experimental and off at first.
 
-**Number keys pick weapons**, on the Controls page, experimental and off at
-first, in either scheme: **1** baton, **2** 18mm Semi, **3** 18mm Auto, **4**
-Phase Rifle, **5** Phase Repeater, **6** Lockon Cannon, **7** AM Blaster, **8**
-AM Cyclone, **9** Zodiac, **0** Plasma Lance. The keypad works too. Each press
-picks once. A baton you pick stays in hand: the game on its own takes a gun with
-ammunition instead. Menus and the save-name screen keep the number keys for
-their own input. A number key you bind to an action does only that action.
+- Hold the key or gamepad button of Choose weapon or Choose psionic. In the
+  Modern scheme these are **Q** and **R** until you move them.
+- Point with the mouse or the left stick and let go to equip.
+- The arrows and the D-pad step through what you own. An arrow you bind to an
+  action other than moving or turning does not step.
+- A left click or Enter confirms.
+- Escape, a right click or the gamepad's cancel button cancels.
+- The psionic wheel opens once you have a psionic.
+- The game keeps running while a wheel is open.
+
+**Number keys pick weapons** is on the Controls page too, experimental and off
+at first, in either scheme.
+
+| Key | Weapon |
+| --- | --- |
+| 1 | Baton |
+| 2 | 18mm Semi |
+| 3 | 18mm Auto |
+| 4 | Phase Rifle |
+| 5 | Phase Repeater |
+| 6 | Lockon Cannon |
+| 7 | AM Blaster |
+| 8 | AM Cyclone |
+| 9 | Zodiac |
+| 0 | Plasma Lance |
+
+- The keypad works too. Each press picks once.
+- A baton you pick stays in hand. On its own the game takes a gun with
+  ammunition instead.
+- Menus and the save-name screen keep the number keys for their own input.
+- A number key you bind to an action does only that action.
 
 ### Scheme and keys
 
@@ -326,13 +351,17 @@ This also saves a second import after unzipping a new release.
 ### Updates
 
 The launcher's home page says whether a newer release is out and offers to
-download and install it. **What's new** beside it, or **Update options**, and
-the version at the foot of the side bar open the **Updates** window: the
-release notes, this copy's version and **Check at start**, which looks for a
-newer release each time the launcher opens. A portable copy is updated the same
-way, in its own folder, and only when you press the button. A copy unzipped
-from a ZIP of alpha.5 or older is updated by installing the new release with
-its Setup.exe.
+download and install it.
+
+- **What's new** beside it, **Update options** and the version at the foot of
+  the side bar open the **Updates** window.
+- That window shows the release notes and this copy's version.
+- **Check at start** there looks for a newer release each time the launcher
+  opens. Switch it off to stop that.
+- A portable copy is updated the same way, in its own folder, and only when
+  you press the button.
+- A copy unzipped from a ZIP of alpha.5 or older is updated by installing the
+  new release with its Setup.exe.
 
 Below them the home page shows what is new: in this version, or in the next one
 once it is out. The notes come from [CHANGELOG.md](../CHANGELOG.md).
@@ -369,7 +398,8 @@ game as cheated, the saves made after it included.
 
 ### Make a report
 
-Press **Report a problem** in the launcher. It gathers into one ZIP:
+Press **Report a problem** in the launcher, at the foot of its side bar or on
+its **Troubleshooting** page. It gathers into one ZIP:
 
 - the game's log of the last two runs and the mouse log,
 - your settings,
@@ -391,7 +421,7 @@ a replay capsule or a screen recording, see
 
 1. Switch on **Detailed logging** on the launcher's **Troubleshooting** page.
 2. Play until the problem shows, then close the game.
-3. Make the report.
+3. Press **Report a problem** on the same page.
 
 The log then also says every ten seconds how the frames ran, and records
 each setting changed in the game's menu, controllers connected and removed,
@@ -464,6 +494,6 @@ describe the replay tool and its limits.
 - **Other problems:** see [Reporting a problem](#reporting-a-problem). Do not
   attach your game image, game assets or BIOS files.
 
-This is an early alpha. The first mission and the training-level path have
+This is an early version. The first mission and the training-level path have
 been tested, the 8x / 32:9 corruption fix included. The whole campaign is not
 covered yet, and small geometry or texture faults can remain.

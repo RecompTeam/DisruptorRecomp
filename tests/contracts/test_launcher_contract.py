@@ -287,7 +287,8 @@ require(
     and "void Session::make_problem_report() {\n    try {\n"
     "        const Report report = make_report(data_, system_note(), report_stamp());\n"
     in window
-    and window.count("make_problem_report()") == 3
+    and window.count("make_problem_report()") == 4
+    and '        if (button(icon::bug, "Report a problem")) session_.make_problem_report();\n' in window
     and "editable"
     not in window[window.index("void Session::make_problem_report() {") : window.index("void Session::open_saves(")]
     and "BeginDisabled"
@@ -315,7 +316,7 @@ require(
     and 'set_property(SOURCE report.cpp APPEND PROPERTY COMPILE_DEFINITIONS\n    "DISRUPTOR_BUILD_VERSION=\\"${DISRUPTOR_BUILD_VERSION}\\"")\n'
     in launcher_cmake
     and "    add_test(NAME disruptor_launcher_report COMMAND disruptor-launcher-report-test)\n" in launcher_cmake
-    and "Press **Report a problem** in the launcher." in playing
+    and "Press **Report a problem** in the launcher, at the foot of its side bar or on its **Troubleshooting** page." in playing
     and "your disc image, BIOS and saves are never included" in playing,
     "the report is built into the launcher with the build's version, its test is registered, and the guide tells a player "
     "of the button and of what it leaves out",

@@ -53,14 +53,14 @@ with tempfile.TemporaryDirectory() as folder:
         package_release.release_text("v0.1.0-alpha.5", root) == "Released on 2026-10-13.\n\n- Two\n",
         "a version without a page of its own still takes its section",
     )
-    for heading in ("## Install", "## Verify", "## Verify  ", "## Verify ##", "   ## Install", "# install"):
+    for heading in ("## Install", "## Install  ", "## Install ##", "   ## Install", "# install"):
         page.write_text(f"Banner\n\n{heading}\n\nMine\n", encoding="utf-8")
         require(refused(lambda: package_release.release_text(newest, root)), f"a page with '{heading}' is refused")
-    kept = "See the Verify section below.\n\n### Install notes\n\n### Verify\n\n    ## Install\n"
+    kept = "See the Install section below.\n\n### Install notes\n\n## Verify\n\n    ## Install\n"
     page.write_text(kept, encoding="utf-8")
     require(
         package_release.release_text(newest, root) == kept,
-        "a mention of Verify, a smaller heading and an indented code line are no section of the packager's",
+        "a mention of Install, a smaller heading, a Verify heading and an indented code line are no section of the packager's",
     )
     page.write_text(" \n\n", encoding="utf-8")
     require(refused(lambda: package_release.release_text(newest, root)), "an empty page is refused")
@@ -79,6 +79,39 @@ require(
 require(
     not names & {"assets.linux.json", "RELEASES-linux", "releases.win.json"},
     "Velopack's assets list, its legacy RELEASES file and another channel's feed stay out",
+)
+
+body = Path("body.md")
+created = package_release.create_command("v0.3.0-alpha.1", "RecompTeam/DisruptorRecomp", "abc123", body, ["a.exe"])
+require(
+    "--latest" in created
+    and "--draft" not in created
+    and "--prerelease" not in created
+    and created[created.index("--target") + 1] == "abc123"
+    and created[created.index("--title") + 1] == "0.3.0-alpha.1"
+    and created[-1] == "a.exe",
+    "Windows makes a regular latest release at once, not a draft or a pre-release, at the build's commit, titled by the "
+    "version alone, with its files",
+)
+body = package_release.release_body("Banner\n")
+windows, linux = package_release.PLATFORMS["windows"], package_release.PLATFORMS["linux"]
+require(
+    body.startswith("Banner\n\n## Install\n") and body.endswith(windows.install) and "Verify" not in body,
+    "Windows publishes the release's text, then the Install section with its own lines, and no Verify section",
+)
+both = package_release.with_install(body, linux)
+require(
+    both == body + "\n" + linux.install and package_release.with_install(both, linux) == both,
+    "Linux adds its lines once, at the end of the Install section",
+)
+require(
+    refused(lambda: package_release.with_install("Banner\n", linux)), "a text without an Install section is refused"
+)
+require(
+    refused(lambda: package_release.with_install(body + "\n## Verify\n\nSigned.\n", linux))
+    and refused(lambda: package_release.with_install("## Install\n\nOne\n\n## Notes\n", linux))
+    and refused(lambda: package_release.with_install("Banner\n## Install\n## Notes\n", linux)),
+    "so is one with a section after Install, where Linux's lines would land in the wrong section",
 )
 
 print("Disruptor release text and files: PASS")

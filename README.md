@@ -15,16 +15,12 @@
   <a href="https://discord.gg/hWbFatkXpU"><img src="https://img.shields.io/badge/Discord-join-5865F2" alt="Discord"></a>
 </p>
 
-<p align="center">
-  <a href="https://github.com/RecompTeam/DisruptorRecomp/releases/tag/v0.3.0-alpha.1"><b>Download</b></a>
-</p>
-
 ## Quick start
 
 1. Download from [Releases](https://github.com/RecompTeam/DisruptorRecomp/releases):
-    - **Windows:** run [**DisruptorRecomp-win-Setup.exe**](https://github.com/RecompTeam/DisruptorRecomp/releases/download/v0.3.0-alpha.1/DisruptorRecomp-win-Setup.exe).
-    - **Windows, without installing:** unpack [**DisruptorRecomp-win-Portable.zip**](https://github.com/RecompTeam/DisruptorRecomp/releases/download/v0.3.0-alpha.1/DisruptorRecomp-win-Portable.zip) and run `Disruptor Recompiled.exe`.
-    - **Linux x64:** download [**DisruptorRecomp.AppImage**](https://github.com/RecompTeam/DisruptorRecomp/releases/download/v0.3.0-alpha.1/DisruptorRecomp.AppImage), make it executable and run it:\
+    - **Windows:** run [**DisruptorRecomp-win-Setup.exe**](https://github.com/RecompTeam/DisruptorRecomp/releases/latest/download/DisruptorRecomp-win-Setup.exe).
+    - **Windows, without installing:** unpack [**DisruptorRecomp-win-Portable.zip**](https://github.com/RecompTeam/DisruptorRecomp/releases/latest/download/DisruptorRecomp-win-Portable.zip) and run `Disruptor Recompiled.exe`.
+    - **Linux x64:** download [**DisruptorRecomp.AppImage**](https://github.com/RecompTeam/DisruptorRecomp/releases/latest/download/DisruptorRecomp.AppImage), make it executable and run it:\
       `chmod +x DisruptorRecomp.AppImage`
 2. Drop your **Disruptor (USA, SLUS-00224)** disc image on the launcher it opens.
 3. Press **Play**.

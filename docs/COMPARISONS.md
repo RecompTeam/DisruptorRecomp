@@ -208,6 +208,41 @@ https://github.com/user-attachments/assets/5b7de9cb-1ca9-4cf8-9808-21bcbbc1483c
 
 https://github.com/user-attachments/assets/3a7d133b-687e-4b74-8165-fc24210892e6
 
+### Doors
+
+A pickup or a body under a shut door stays behind the door, close up and from
+afar. From afar the PlayStation version drew it over the door too.
+
+https://github.com/user-attachments/assets/cd1264ca-88bd-4d3b-973d-a3bb28c76b2d
+
+https://github.com/user-attachments/assets/cfac940d-ce53-4aaa-96cc-377de77081bb
+
+### Stairs
+
+A drone under the stairs stays behind the floor in front of it.
+
+https://github.com/user-attachments/assets/36332a65-3204-4031-809d-11068ea16ac1
+
+### Windows and columns
+
+The sky stays in a window while the view turns with in-between frames, here at
+half speed. No dark rim hangs beside a column.
+
+https://github.com/user-attachments/assets/e50ffa37-8ae4-4e23-a2a2-cfd0e9a9ad28
+
+https://github.com/user-attachments/assets/9017f18a-6e99-40a9-8802-a60f28e754ea
+
+### French and German discs
+
+Mission 1's floor and stairs have their textures, the drones' shadows are
+round, and the pause menu's quit question stands where the PAL version puts it.
+
+![Mission 1 with the French disc before and after](images/compare/french-textures.jpg)
+
+![Drone shadows with the French disc before and after](images/compare/french-shadows.jpg)
+
+![The pause menu's quit question in French before and after](images/compare/french-pause.jpg)
+
 ## Additions
 
 ### Languages

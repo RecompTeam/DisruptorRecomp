@@ -271,6 +271,8 @@ void test_the_language_box() {
 
 void test_the_shown_version() {
     require(shown_version("v0.1.0-alpha.5") == "v0.1.0-alpha.5", "a release shows its tag alone");
+    require(shown_version("v0.3.1") == "v0.3.1" && shown_version("v0.3.1-4-g43bcf0e") == "v0.3.1 (dev)",
+            "a tag without a label too");
     require(shown_version("v0.1.0-alpha.4-76-g43bcf0e") == "v0.1.0-alpha.4 (dev)" &&
                 shown_version("v0.1.0-alpha.4-76-g43bcf0e-dirty") == "v0.1.0-alpha.4 (dev)" &&
                 shown_version("v0.1.0-alpha.5-dirty") == "v0.1.0-alpha.5 (dev)",

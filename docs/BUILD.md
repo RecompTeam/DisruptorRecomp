@@ -32,6 +32,9 @@ repository instead. `build.sh` and `run.sh` read it too. Set
 `DISRUPTOR_COMPILER_LAUNCHER` to a compiler cache such as `ccache` and `build.sh`
 compiles through it.
 
+After a first build, `tools/regen.ps1` regenerates only the translated code, and
+`tools/regen.sh` does the same on Linux.
+
 Windows builds also produce `DisruptorLauncher.exe` beside the runtime and
 stage its configuration, help, and initial settings there. The launcher draws
 with Dear ImGui through SDL3's renderer, Direct3D 11 or SDL's software renderer.
@@ -50,14 +53,14 @@ A release is a Velopack `Setup.exe` and a portable ZIP, packed from a Release
 configuration whose `PSX_GAME_VERSION` is the release's version:
 
 ```powershell
-python tools/package_release.py --version v0.2.0-alpha.1 --build build --zstd-license <zstd LICENSE>
+python tools/package_release.py --version v0.3.1 --build build --zstd-license <zstd LICENSE>
 ```
 
-- `CHANGELOG.md` needs the release's `## v0.2.0-alpha.1` section first. It
+- `CHANGELOG.md` needs the release's `## v0.3.1` section first. It
   becomes the package's notes, which the launcher shows.
-- The GitHub release's text is `release/notes/v0.2.0-alpha.1.md` when it is
-  written, else that section. The packager adds the Install and Verify
-  sections below it.
+- The GitHub release's text is `release/notes/v0.3.1.md` when it is
+  written, else that section. The packager adds the Install section below
+  it.
 - The .NET SDK runs the pinned Velopack packer, the version of the C library
   the launcher links.
 - The previous release's package is fetched from GitHub when there is one,
@@ -68,7 +71,7 @@ python tools/package_release.py --version v0.2.0-alpha.1 --build build --zstd-li
   players, each with its SHA-256, and the packages the launcher updates from.
   Setup installs the Visual C++ x64 Redistributable when it is missing, the ZIP
   does not. `--publish` creates the
-  GitHub pre-release with them.
+  GitHub release with them, a regular release and the latest one.
 - `--publish`, or `--sign` alone, signs those files with Sigstore first. A
   browser opens: sign in with the organisation's Google account,
   `recomp.team@gmail.com`. Each file gets a `.sigstore.json` bundle and a line
@@ -84,7 +87,7 @@ newer than the ones 22.04 ships. The C++ runtime is linked statically and OpenGL
 From Windows, with that build reachable through WSL:
 
 ```powershell
-python tools/package_release.py --platform linux --version v0.2.0-alpha.1 `
+python tools/package_release.py --platform linux --version v0.3.1 `
     --build \\wsl.localhost\<distro>\<checkout>\build --zstd-license <zstd LICENSE>
 ```
 
@@ -92,7 +95,7 @@ The Linux build folder must hold a `SOURCE_COMMIT` file with the commit it was
 built from, and the script stops unless that is the checkout's. It makes
 `DisruptorRecomp.AppImage` and the packages the launcher updates from in
 `build/releases/<version>/linux/packages`. With `--publish` they go to the release the Windows run made, which must
-come first and from the same commit, and the release text gets the Linux
+come first and from the same commit, the release text gets the Linux
 install lines.
 
 The launcher and the game find the player's files by one rule,
@@ -171,11 +174,11 @@ until enabled in **Settings → Enhancements**. Configure with
 
 The build scripts generate the translated resident game code locally from your
 verified executable. That retail-derived code is excluded from this source
-repository. The Windows alpha reads game assets and runtime-loaded code from
+repository. A release reads game assets and runtime-loaded code from
 the player's disc; it does not require loose game executables or captured files.
 
 If a private regeneration produces `generated/overlays_static.c`, CMake can
-also link that optional static overlay. The current alpha does not use it.
+also link that optional static overlay. Releases do not use it.
 Keep generated game translations, disc files, captures, and binaries outside
 Git; publish runtime binaries as release assets rather than source commits.
 

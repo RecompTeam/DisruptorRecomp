@@ -82,7 +82,7 @@ private:
     void banner(float height, bool dialog_open);
     void first_run(bool dialog_open);
     void cards(bool dialog_open);
-    void last_activity();
+    void last_activity(float left, float right, float middle);
     bool update_strip(const UpdateView& update);
     std::string update_action_label(const UpdateView& update) const;
     // The one button a state of the updater offers. True when the launcher must close for the update to be applied.

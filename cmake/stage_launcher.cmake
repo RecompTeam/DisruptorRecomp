@@ -2,7 +2,6 @@
 # Studio generators. Never overwrite a player's bindings or saved preferences.
 foreach(pair IN ITEMS "game.toml|game.toml" "mouse-aim.ini|mouse-aim.ini"
                       "docs/PLAYING.md|GETTING_STARTED.md"
-                      "release/windows/Play Disruptor.cmd|Play Disruptor.cmd"
                       "config/keybinds-modern.ini|keybinds.ini"
                       "release/windows/settings.toml|settings.toml")
     string(REPLACE "|" ";" paths "${pair}")

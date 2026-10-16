@@ -29,22 +29,21 @@ unrelated framework changes.
 ## Versions
 
 A release is tagged `vMAJOR.MINOR.PATCH` in the [Semantic
-Versioning](https://semver.org) form, with a pre-release label until the game is
-done.
+Versioning](https://semver.org) form, with no label: a major version of 0
+already says that anything may still change.
 
 - `0.MINOR.0` brings new features or changed behavior: the launcher, a platform,
   a default, save states that stop loading.
 - `0.MINOR.PATCH` brings fixes only.
-- `-alpha.N` while the full campaign has not been played through or features
-  still change.
-- `-beta.N` once the campaign has been played through with no known blocker.
-- `-rc.N` for a candidate before 1.0.0.
 - `1.0.0` when the whole campaign is verified and save states carry over between
   versions.
 
-A release's section in [CHANGELOG.md](CHANGELOG.md) is headed `##
-v0.2.0-alpha.1` and so on: the launcher and the packager find it by that
-heading.
+Releases up to v0.3.0-alpha.1 had an `-alpha.N` label. On GitHub each release
+is a regular release, not marked as a pre-release, and the launcher reads both
+kinds.
+
+A release's section in [CHANGELOG.md](CHANGELOG.md) is headed `## v0.3.1` and
+so on: the launcher and the packager find it by that heading.
 
 ## Reporting a problem
 

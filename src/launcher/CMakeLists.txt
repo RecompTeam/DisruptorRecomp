@@ -216,7 +216,6 @@ set_property(TARGET disruptor-launcher APPEND PROPERTY LINK_DEPENDS
     "${PROJECT_SOURCE_DIR}/game.toml"
     "${PROJECT_SOURCE_DIR}/mouse-aim.ini"
     "${PROJECT_SOURCE_DIR}/docs/PLAYING.md"
-    "${PROJECT_SOURCE_DIR}/release/windows/Play Disruptor.cmd"
     "${PROJECT_SOURCE_DIR}/config/keybinds-modern.ini"
     "${PROJECT_SOURCE_DIR}/release/windows/settings.toml")
 

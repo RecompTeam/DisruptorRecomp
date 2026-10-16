@@ -46,18 +46,26 @@ PLATFORMS = {
         "win",
         ".exe",
         (f"{PACKAGE_ID}-win-Setup.exe", f"{PACKAGE_ID}-win-Portable.zip"),
-        f"Download **{PACKAGE_ID}-win-Setup.exe** and run it.\n\n"
-        f"Without installing: unpack **{PACKAGE_ID}-win-Portable.zip** into a folder of its own and run "
-        "Disruptor Recompiled.exe. Your files stay in its data folder. "
-        "It needs the Microsoft Visual C++ x64 Redistributable.\n",
+        "**Windows 10 or 11 x64**\n\n"
+        f"- Download **{PACKAGE_ID}-win-Setup.exe** and run it.\n"
+        "- It installs the game into `%LocalAppData%\\DisruptorRecomp`, with shortcuts on the desktop and in the Start "
+        "menu.\n"
+        "- Your files are kept in `%LocalAppData%\\DisruptorRecompData`.\n"
+        f"- Or, without installing, unpack **{PACKAGE_ID}-win-Portable.zip** into a folder of its own and run "
+        "`Disruptor Recompiled.exe`.\n"
+        "- The portable copy needs the Microsoft Visual C++ x64 Redistributable.\n"
+        "- The portable copy keeps your files in its `data` folder.\n",
     ),
     "linux": Platform(
         "linux",
         "linux",
         "",
         (f"{PACKAGE_ID}.AppImage",),
-        f"Linux x64: download **{PACKAGE_ID}.AppImage**, make it executable (`chmod +x {PACKAGE_ID}.AppImage`) and "
-        "run it. glibc 2.35 or newer is needed. Your files are kept in ~/.local/share/DisruptorRecompData.\n",
+        "**Linux x64, glibc 2.35 or newer**\n\n"
+        f"- Download **{PACKAGE_ID}.AppImage**.\n"
+        f"- Make it executable: `chmod +x {PACKAGE_ID}.AppImage`\n"
+        "- Run it.\n"
+        "- Your files are kept in `~/.local/share/DisruptorRecompData`.\n",
     ),
 }
 SIGSTORE = "sigstore@4.5.0"
@@ -84,7 +92,7 @@ def release_notes(version: str, root: Path = ROOT) -> str:
 
 
 def release_text(version: str, root: Path = ROOT) -> str:
-    """The GitHub release's text above Install and Verify: release/notes/<version>.md when it is written, else the
+    """The GitHub release's text above Install: release/notes/<version>.md when it is written, else the
     version's section of CHANGELOG.md."""
     page = root / "release" / "notes" / f"{version}.md"
     if not page.is_file():
@@ -92,9 +100,8 @@ def release_text(version: str, root: Path = ROOT) -> str:
     text = page.read_text(encoding="utf-8").replace("\r\n", "\n").strip()
     if not text:
         raise SystemExit(f"{page.name} is empty: write the release's text or remove the file")
-    for section in ("Install", "Verify"):
-        if re.search(rf"^ {{0,3}}#{{1,2}}[ \t]+{section}(?:[ \t]+#*)?[ \t]*$", text, re.MULTILINE | re.IGNORECASE):
-            raise SystemExit(f"{page.name} has a {section} heading of its own: the packager writes that section")
+    if re.search(r"^ {0,3}#{1,2}[ \t]+Install(?:[ \t]+#*)?[ \t]*$", text, re.MULTILINE | re.IGNORECASE):
+        raise SystemExit(f"{page.name} has an Install heading of its own: the packager writes that section")
     return text + "\n"
 
 
@@ -102,6 +109,44 @@ def published_names(channel: str, players: list[str], packed: tuple[str, ...], s
     """The files a release carries: the players' files with their digests, the update feed, its packages and the
     signatures. Velopack's assets list and its legacy RELEASES file stay out: no updater reads them."""
     return {*players, *(f"{name}.sha256" for name in players), f"releases.{channel}.json", *packed, *signed}
+
+
+INSTALL = "## Install\n\nYour own Disruptor (USA, SLUS-00224) disc image is needed.\n"
+
+
+def release_body(text: str) -> str:
+    """What Windows publishes: the release's text, then how to install it on Windows."""
+    return text + "\n" + INSTALL + "\n" + PLATFORMS["windows"].install
+
+
+def with_install(body: str, platform: Platform) -> str:
+    """`body` with `platform`'s install lines at the end of its Install section, the last one, and only once."""
+    heading = "\n## Install\n"
+    if heading not in body:
+        raise SystemExit(f"The release text has no Install section for the {platform.name} lines")
+    if any(line.startswith("## ") for line in body[body.index(heading) + len(heading) :].splitlines()):
+        raise SystemExit(f"The release text has a section after Install, where the {platform.name} lines would land")
+    return body if platform.install in body else body.rstrip("\n") + "\n\n" + platform.install
+
+
+def create_command(version: str, repository: str, commit: str, body: Path, uploads: list[str]) -> list[str]:
+    """The release Windows makes at `commit`: a regular one, not a pre-release, and the latest."""
+    return [
+        "gh",
+        "release",
+        "create",
+        version,
+        "--repo",
+        repository,
+        "--target",
+        commit,
+        "--latest",
+        "--title",
+        version.removeprefix("v"),
+        "--notes-file",
+        str(body),
+        *uploads,
+    ]
 
 
 def now() -> str:
@@ -300,11 +345,7 @@ def add_to_release(
     release = json.loads(shown.stdout)
     if release["targetCommitish"] != commit:
         raise SystemExit(f"{version} was made from {release['targetCommitish']}, this build from {commit}")
-    body = release["body"].replace("\r\n", "\n")
-    if "\n## Verify\n" not in body:
-        raise SystemExit(f"The text of {version} has no Verify section to put the {platform.name} lines before")
-    if platform.install not in body:
-        body = body.replace("\n## Verify\n", "\n" + platform.install + "\n## Verify\n", 1)
+    body = with_install(release["body"].replace("\r\n", "\n"), platform)
     (work / "body.md").write_text(body, encoding="utf-8")
     # A publish run again after a failure replaces what it uploaded and finishes the text.
     subprocess.run(["gh", "release", "upload", version, "--repo", repository, "--clobber", *uploads], check=True)
@@ -339,11 +380,11 @@ def main() -> None:
     parser.add_argument(
         "--no-delta", action="store_true", help="do not fetch the previous release to build a delta package"
     )
-    parser.add_argument("--publish", action="store_true", help="create the GitHub pre-release and upload the packages")
+    parser.add_argument("--publish", action="store_true", help="create the GitHub release and upload the packages")
     parser.add_argument("--sign", action="store_true", help="sign the packages without publishing them")
     args = parser.parse_args()
     if not re.fullmatch(r"v\d+\.\d+\.\d+(?:-[A-Za-z0-9.]+)?", args.version):
-        parser.error("version must be a release tag such as v0.1.0-alpha.1")
+        parser.error("version must be a release tag such as v0.3.1")
 
     build = args.build.resolve()
     cache = (build / "CMakeCache.txt").read_text()
@@ -462,17 +503,7 @@ def main() -> None:
         if platform.name == "linux":
             add_to_release(work, repository, args.version, commit, platform, uploads)
             return
-        first = platform.player_files[0]
-        body = (
-            text
-            + "\n## Install\n\nYour own Disruptor (USA, SLUS-00224) disc image is needed.\n\n"
-            + platform.install
-            + "\n## Verify\n\n"
-            + f"Each file has a Sigstore bundle signed by {SIGNER}, and SLSA provenance is in the .intoto.jsonl files:\n\n"
-            + f"```\nuvx sigstore verify identity --cert-identity {SIGNER} --cert-oidc-issuer {SIGNER_ISSUER} "
-            + f"--bundle {first}.sigstore.json {first}\n```\n"
-        )
-        (work / "body.md").write_text(body, encoding="utf-8")
+        (work / "body.md").write_text(release_body(text), encoding="utf-8")
         tagged = subprocess.run(
             ["git", "ls-remote", "--tags", REPOSITORY, f"refs/tags/{args.version}"],
             capture_output=True,
@@ -483,25 +514,7 @@ def main() -> None:
             raise SystemExit(
                 f"{args.version} is tagged on GitHub already: the release would not be this build's commit"
             )
-        subprocess.run(
-            [
-                "gh",
-                "release",
-                "create",
-                args.version,
-                "--repo",
-                repository,
-                "--target",
-                commit,
-                "--prerelease",
-                "--title",
-                f"Disruptor Recompiled {args.version}",
-                "--notes-file",
-                str(work / "body.md"),
-                *uploads,
-            ],
-            check=True,
-        )
+        subprocess.run(create_command(args.version, repository, commit, work / "body.md", uploads), check=True)
 
 
 if __name__ == "__main__":

@@ -22,6 +22,8 @@ constexpr const char* changelog = "# Changelog\r\n\r\nWhat changed.\r\n\r\n## v0
 void tags() {
     require(release_tag("v0.1.0-alpha.4") == "v0.1.0-alpha.4", "a tag is its own tag");
     require(release_tag("v0.1.0-alpha.4-12-g1a2b3c4") == "v0.1.0-alpha.4", "a build past a tag is that tag's");
+    require(release_tag("v0.3.1-12-g1a2b3c4-dirty") == "v0.3.1" && release_tag("v0.3.1") == "v0.3.1",
+            "so is one past a tag without a label");
     require(release_tag("v0.1.0-alpha.4-12-g1a2b3c4-dirty") == "v0.1.0-alpha.4", "a build with changes too");
     require(release_tag(" v0.1.0-alpha.4-dirty ") == "v0.1.0-alpha.4", "a tag with changes is the tag");
     require(release_tag("v1.0-gold") == "v1.0-gold" && release_tag("v1.0-rc-gamma") == "v1.0-rc-gamma" &&
