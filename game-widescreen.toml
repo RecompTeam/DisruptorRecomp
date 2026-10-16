@@ -185,6 +185,8 @@ renderer = "opengl"
 supersampling = 4
 antialiasing = true
 texture_filtering = "nearest"
+# The movies fill all 320 columns, the framework's default blanks the last 8.
+depth24_trailing_margin = 0
 
 [controller]
 default_mode = "digital"

@@ -102,7 +102,7 @@ require(
     < cmake.index("add_compile_definitions(PSX_HAS_GAME_USER_SETTINGS=1)\n")
     < cmake.index("psxrecomp_add_runtime_target(psx-runtime")
     < cmake.index("    add_subdirectory(src/launcher)")
-    and cmake.count('"${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings/saved.cpp"\n') == 2
+    and cmake.count('"${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings/saved.cpp"\n') == 3
     and '    "${PROJECT_SOURCE_DIR}/src/game/settings/saved.cpp")\n' in launcher_cmake
     and "PSX_HAS_GAME_USER_SETTINGS" not in launcher_cmake,
     "every target of the build sees the same settings struct, and each that builds the reader builds the game's section",

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Source contract for the CPU copy of VRAM a 24-bit scanout reads."""
+"""Source contract for a 24-bit scanout: the CPU copy of VRAM it reads and the columns it blanks."""
 
 from pathlib import Path
 
@@ -37,6 +37,7 @@ def enclosing(source: str, block: str) -> list[str]:
 cmake = read("CMakeLists.txt")
 gpu = read("psxrecomp/runtime/src/gpu.c")
 renderer = read("psxrecomp/runtime/src/gpu_gl_renderer.c")
+main = read("psxrecomp/runtime/src/main.cpp")
 
 REGISTRATION = "    disruptor_contract(depth24_sync)\n"
 require(
@@ -69,6 +70,19 @@ policy = body(renderer, "static void depth24_upload_policy(void)")
 require(
     "    int d24 = gpu_display_is_depth24();\n    if (d24 && !s_depth24_skip_up) {\n        s_up_nrects = 0;" in policy,
     "the GL backend drops pending uploads only once the display is 24-bit, which is after the sync above",
+)
+
+margin = body(main, "static void depth24_fix_trailing_margin(uint32_t *buf, uint32_t w, uint32_t h,")
+require(
+    "    const uint32_t margin = (uint32_t)g_video_depth24_trailing_margin;\n"
+    "    if (margin == 0u || margin >= w) return;\n    uint32_t start = w - margin;\n" in margin
+    and "8u;" not in margin,
+    "a 24-bit frame must keep every column when the title sets no trailing margin, and blank only the margin it sets",
+)
+require(
+    main.count("g_video_depth24_trailing_margin =\n                gc.runtime.video_depth24_trailing_margin;\n") == 1
+    and main.count("static int           g_video_depth24_trailing_margin = 8;\n") == 1,
+    "the trailing margin must come from the game's config, with the framework's 8 columns until it is read",
 )
 
 print("Disruptor 24-bit scanout source contract: PASS")

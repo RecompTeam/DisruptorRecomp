@@ -275,6 +275,23 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
             "$<$<CXX_COMPILER_ID:MSVC>:NOMINMAX>"
             "$<$<CXX_COMPILER_ID:MSVC>:WIN32_LEAN_AND_MEAN>")
 
+    disruptor_unit_test(disruptor_game_config tests/unit/game_config_test.cpp
+        TARGET disruptor-game-config-test
+        SOURCES
+            "${PSXRECOMP_ROOT}/recompiler/src/config_loader.cpp"
+            "${PSXRECOMP_ROOT}/recompiler/src/ps1_exe_parser.cpp"
+            "${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings/saved.cpp"
+        INCLUDES
+            "${PSXRECOMP_ROOT}/recompiler/src"
+            "${PSXRECOMP_ROOT}/recompiler/include"
+            "${PSXRECOMP_ROOT}/recompiler/lib/fmt/include"
+            "${PSXRECOMP_ROOT}/recompiler/lib/toml11"
+        DEFINITIONS
+            FMT_HEADER_ONLY=1
+            "$<$<CXX_COMPILER_ID:MSVC>:NOMINMAX>"
+            "$<$<CXX_COMPILER_ID:MSVC>:WIN32_LEAN_AND_MEAN>")
+    target_compile_definitions(disruptor-game-config-test PRIVATE "DISRUPTOR_SOURCE_DIR=R\"(${PROJECT_SOURCE_DIR})\"")
+
     disruptor_unit_test(disruptor_user_folder tests/unit/user_folder_test.cpp RUNTIME_HEADERS
         SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings/user_folder.cpp")
 
