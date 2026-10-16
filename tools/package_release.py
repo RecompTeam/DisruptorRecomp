@@ -1,8 +1,9 @@
 """Package a release with Velopack: on Windows Setup.exe and a portable ZIP, on Linux an AppImage, each with the
 packages the launcher updates from.
 
-The program's files come from an explicit list and exclude game data. The release's notes are its section of
-CHANGELOG.md. The previous release on GitHub, when there is one, gives the update a delta package. Nothing is
+The program's files come from an explicit list and exclude game data. The packages carry the release's section of
+CHANGELOG.md as their notes. The GitHub release's text is release/notes/<version>.md when it is written, else that
+section. The previous release on GitHub, when there is one, gives the update a delta package. Nothing is
 published unless --publish is given. What is published is signed with Sigstore first: a browser opens to sign in as
 the organisation's account, and every file gets a bundle and a line of SLSA provenance. Windows publishes first and
 makes the release, Linux adds its files to it.
@@ -73,13 +74,28 @@ NUGET_CONFIG = """<?xml version="1.0" encoding="utf-8"?>
 """
 
 
-def release_notes(version: str) -> str:
+def release_notes(version: str, root: Path = ROOT) -> str:
     """The `## <version>` section of CHANGELOG.md, without its heading."""
-    text = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8").replace("\r\n", "\n")
+    text = (root / "CHANGELOG.md").read_text(encoding="utf-8").replace("\r\n", "\n")
     match = re.search(rf"^## {re.escape(version)}\n(.*?)(?=^## |\Z)", text, re.MULTILINE | re.DOTALL)
     if not match or not match.group(1).strip():
         raise SystemExit(f"CHANGELOG.md has no section for {version}: add `## {version}` with its changes first")
     return match.group(1).strip() + "\n"
+
+
+def release_text(version: str, root: Path = ROOT) -> str:
+    """The GitHub release's text above Install and Verify: release/notes/<version>.md when it is written, else the
+    version's section of CHANGELOG.md."""
+    page = root / "release" / "notes" / f"{version}.md"
+    if not page.is_file():
+        return release_notes(version, root)
+    text = page.read_text(encoding="utf-8").replace("\r\n", "\n").strip()
+    if not text:
+        raise SystemExit(f"{page.name} is empty: write the release's text or remove the file")
+    for section in ("Install", "Verify"):
+        if re.search(rf"^ {{0,3}}#{{1,2}}[ \t]+{section}(?:[ \t]+#*)?[ \t]*$", text, re.MULTILINE | re.IGNORECASE):
+            raise SystemExit(f"{page.name} has a {section} heading of its own: the packager writes that section")
+    return text + "\n"
 
 
 def now() -> str:
@@ -338,6 +354,7 @@ def main() -> None:
         if cache_entries.get(name) != value:
             raise SystemExit(f"Release build setting missing: {name}={value}")
     notes = release_notes(args.version)
+    text = release_text(args.version)
     if shutil.which("dotnet") is None:
         raise SystemExit("Velopack packs with the .NET SDK: install it, then run again")
     platform = PLATFORMS[args.platform]
@@ -447,7 +464,7 @@ def main() -> None:
             return
         first = platform.player_files[0]
         body = (
-            notes
+            text
             + "\n## Install\n\nYour own Disruptor (USA, SLUS-00224) disc image is needed.\n\n"
             + platform.install
             + "\n## Verify\n\n"

@@ -54,8 +54,10 @@ python tools/package_release.py --version v0.2.0-alpha.1 --build build --zstd-li
 ```
 
 - `CHANGELOG.md` needs the release's `## v0.2.0-alpha.1` section first. It
-  becomes the package's notes, which the launcher shows, and the GitHub
-  release's text.
+  becomes the package's notes, which the launcher shows.
+- The GitHub release's text is `release/notes/v0.2.0-alpha.1.md` when it is
+  written, else that section. The packager adds the Install and Verify
+  sections below it.
 - The .NET SDK runs the pinned Velopack packer, the version of the C library
   the launcher links.
 - The previous release's package is fetched from GitHub when there is one,
