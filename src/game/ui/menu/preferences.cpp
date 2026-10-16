@@ -292,9 +292,8 @@ void apply_saved_preferences(const PSXRecompV4::UserSettings &settings) {
     if (settings.has_audio_muted)
         (void)psx_host_audio_set_muted(settings.audio_muted ? 1 : 0);
     if (settings.has_hud_scale) gpu_ws_set_hud_scale(settings.hud_scale);
-    if (settings.has_frame_unlock &&
-        !env_override_present("PSX_DISRUPTOR_FRAME_UNLOCK"))
-        disruptor_frame_rate_set_unlocked(settings.frame_unlock ? 1 : 0);
+    if (!env_override_present("PSX_DISRUPTOR_FRAME_UNLOCK"))
+        disruptor_frame_rate_set_unlocked(stored(settings, *find_option("disruptor.frame_unlock")));
     if (settings.has_skip_intro &&
         !env_override_present("PSX_DISRUPTOR_SKIP_INTRO"))
         disruptor_intro_skip_set_enabled(settings.skip_intro ? 1 : 0);
@@ -323,8 +322,8 @@ void apply_saved_preferences(const PSXRecompV4::UserSettings &settings) {
     // The session's start switched it off after the mouse module read its variable, so the variable is applied here too.
     if (const char *forced = std::getenv("PSX_DISRUPTOR_HIGH_PRECISION_CAMERA"))
         apply_smooth_turn(forced[0] != '\0' && forced[0] != '0');
-    else if (settings.has_high_precision_camera)
-        apply_smooth_turn(settings.high_precision_camera);
+    else
+        apply_smooth_turn(stored(settings, *find_option("disruptor.high_precision_camera")) != 0);
 }
 
 void apply_pending_preferences() {

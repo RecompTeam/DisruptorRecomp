@@ -136,7 +136,7 @@ for token in (
 require(
     "disruptor_frame_rate_set_unlocked(unlocked ? 1 : 0);\n        mark_frame_unlock(unlocked);" in menu
     and '    if (option_toggle("disruptor.frame_unlock", &unlocked)) {\n' in menu
-    and '"disruptor.frame_unlock", "60 FPS gameplay", 0,' in options,
+    and '"disruptor.frame_unlock", "60 FPS gameplay", 1,' in options,
     "the settings menu must apply the switch live and stage it for saving",
 )
 require(
@@ -147,10 +147,9 @@ require(
     "a changed switch must reach settings.toml",
 )
 require(
-    "if (settings.has_frame_unlock &&\n"
-    '        !env_override_present("PSX_DISRUPTOR_FRAME_UNLOCK"))\n'
-    "        disruptor_frame_rate_set_unlocked(settings.frame_unlock ? 1 : 0);" in menu,
-    "a saved switch must be applied at start unless the environment overrides it",
+    '    if (!env_override_present("PSX_DISRUPTOR_FRAME_UNLOCK"))\n'
+    '        disruptor_frame_rate_set_unlocked(stored(settings, *find_option("disruptor.frame_unlock")));' in menu,
+    "the saved switch, or the shipped default where the file names none, must be applied at start unless the environment overrides it",
 )
 settings_loader = read("src/game/settings/saved.cpp")
 require(

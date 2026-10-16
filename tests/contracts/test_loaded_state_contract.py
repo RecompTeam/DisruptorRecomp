@@ -72,7 +72,7 @@ require(
     and host.count("    host_ui_runtime_ready(") == 2
     and "    load_preferences_for_session();\n    if (backend == PSX_HOST_UI_BACKEND_OPENGL) (void)initialize_imgui();"
     in menu
-    and "disruptor_frame_rate_set_unlocked(settings.frame_unlock ? 1 : 0);" in menu,
+    and 'disruptor_frame_rate_set_unlocked(stored(settings, *find_option("disruptor.frame_unlock")));' in menu,
     "a run without a window tells the game module the runtime is ready: its saved settings, frame unlock among them, apply there",
 )
 require(

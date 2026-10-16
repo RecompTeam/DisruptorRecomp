@@ -214,7 +214,7 @@ constexpr Option option_list[] = {
            saved<&Settings::has_occlusion_strength>, read<&Settings::occlusion_strength>,
            write<&Settings::has_occlusion_strength, &Settings::occlusion_strength>, needs_occlusion),
     toggle<&Settings::has_frame_unlock, &Settings::frame_unlock>(
-        "disruptor.frame_unlock", "60 FPS gameplay", 0,
+        "disruptor.frame_unlock", "60 FPS gameplay", 1,
         "Lets the game run at up to 60 frames a second in place of its original rate."),
     toggle<&Settings::has_frame_interpolation, &Settings::frame_interpolation>(
         "video.frame_interpolation", "In-between frames", 0,
@@ -247,7 +247,7 @@ constexpr Option option_list[] = {
         "disruptor.invert_horizontal", "Invert horizontal mouse", 0,
         "Turns the view left when the mouse moves right."),
     toggle<&Settings::has_high_precision_camera, &Settings::high_precision_camera>(
-        "disruptor.high_precision_camera", "Smooth mouse turning", 0,
+        "disruptor.high_precision_camera", "Smooth mouse turning", 1,
         "The game turns in 256 steps of a circle.\n"
         "This also turns the picture by the part of a step in between.\n"
         "Needs mouse aim and exact geometry.", needs_aim_and_geometry),

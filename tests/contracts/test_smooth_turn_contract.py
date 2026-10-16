@@ -192,8 +192,8 @@ require(
     and '    toggle<&Settings::has_high_precision_camera, &Settings::high_precision_camera>(\n        "disruptor.high_precision_camera",' in options
     and """    if (const char *forced = std::getenv("PSX_DISRUPTOR_HIGH_PRECISION_CAMERA"))
         apply_smooth_turn(forced[0] != '\\0' && forced[0] != '0');
-    else if (settings.has_high_precision_camera)
-        apply_smooth_turn(settings.high_precision_camera);
+    else
+        apply_smooth_turn(stored(settings, *find_option("disruptor.high_precision_camera")) != 0);
 """ in menu
     and """    if (changed("disruptor.high_precision_camera"))
         apply_smooth_turn(pending.high_precision_camera);
@@ -202,12 +202,13 @@ require(
     "into the file's settings, applied at the next start with the environment first, and applied when another run saved it",
 )
 
-row = between(options, '"disruptor.high_precision_camera", "Smooth mouse turning", 0,', "),\n")
+row = between(options, '"disruptor.high_precision_camera", "Smooth mouse turning", 1,', "),\n")
 require(
     row.endswith("needs_aim_and_geometry")
     and "constexpr const char* needs_aim_and_geometry[] = {aim_key, geometry_key};\n" in options
     and 'constexpr const char* aim_key = "disruptor.mouse_aim";\n' in options
-    and options.count('"disruptor.high_precision_camera"') == launcher.count('"disruptor.high_precision_camera"') == 1
+    and options.count('"disruptor.high_precision_camera"') == 1
+    and launcher.count('"disruptor.high_precision_camera"') == 2
     and '    {"disruptor.high_precision_camera", Page::controls, nullptr, true},\n' in launcher,
     "the launcher offers it on the Controls page, off at first and only with mouse aim and geometry correction",
 )

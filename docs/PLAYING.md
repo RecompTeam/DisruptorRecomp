@@ -135,8 +135,8 @@ own: keys you set yourself stay.
   Controls page. It tilts at the horizontal speed unless **Separate vertical
   speed** is on.
 - Speeds are shown as a multiple of the default speed, 1.0x.
-- **Smooth mouse turning** turns the picture between the game's 256 heading
-  steps. It needs captured mouse aim and exact geometry.
+- **Smooth mouse turning** is on at first. It turns the picture between the
+  game's 256 heading steps and needs captured mouse aim and exact geometry.
 
 ### Gamepad
 
@@ -204,7 +204,8 @@ The page is in four groups, in the launcher and in the game alike.
 
 | Group | Settings | At first |
 | --- | --- | --- |
-| Frame rate | **60 FPS gameplay**, **In-between frames** and their rate | Off |
+| Frame rate | **60 FPS gameplay** | On |
+| Frame rate | **In-between frames** and their rate | Off |
 | Picture | **Exact-provenance geometry**, **Perspective-correct world textures**, **Gap filling**, **Smooth distance fade**, **Depth-sorted world** | On |
 | Shading | **Ambient occlusion**, its reach and strength | Off |
 | Startup | **Skip the logos and the title movie** | Off |

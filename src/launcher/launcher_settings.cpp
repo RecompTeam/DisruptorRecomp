@@ -55,7 +55,7 @@ constexpr Placement placed[] = {
 constexpr const char* shipped_keys[] = {
     "disruptor.mouse_aim", "disruptor.modern_controls", "disruptor.vertical_look", "disruptor.geometry_correction",
     "disruptor.perspective_textures", "disruptor.smooth_fade", "disruptor.depth_sorted_world", "disruptor.frame_unlock",
-    "video.frame_interpolation"};
+    "disruptor.high_precision_camera", "video.frame_interpolation"};
 
 bool listed(const std::vector<std::string>& discs, const std::string& path) {
     return std::find(discs.begin(), discs.end(), path) != discs.end();

@@ -7,8 +7,8 @@ geometry_correction = true
 perspective_textures = true
 smooth_fade = true
 depth_sorted_world = true
-# Experimental options stay off until enabled in Settings.
-frame_unlock = false
+frame_unlock = true
+high_precision_camera = true
 
 [video]
 frame_interpolation = false

@@ -633,7 +633,8 @@ void completed(const fs::path& folder) {
             "the window shows the completed file");
 
     write(file, "[disruptor]\nmouse_aim = true\nmodern_controls = true\nvertical_look = false\ngeometry_correction = false\n"
-                "perspective_textures = true\nsmooth_fade = true\ndepth_sorted_world = true\nframe_unlock = false\n\n"
+                "perspective_textures = true\nsmooth_fade = true\ndepth_sorted_world = true\nframe_unlock = false\n"
+                "high_precision_camera = false\n\n"
                 "[video]\nframe_interpolation = false\n");
     const std::string chosen = read(file);
     SettingsFile theirs(file);
@@ -672,7 +673,7 @@ void shipped_values() {
         ++named;
         require(one.get(file) == one.initial, "a row starts from another value than the shipped settings.toml gives it");
     }
-    require(named == 9, "the shipped settings.toml names nine rows");
+    require(named == 10, "the shipped settings.toml names ten rows");
     const auto game = PSXRecompV4::load_game_config(source / "game.toml");
     Settings as_game;
     as_game.has_supersampling = as_game.has_aspect_ratio = true;
