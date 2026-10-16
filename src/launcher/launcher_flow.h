@@ -64,6 +64,8 @@ struct Step {
 Step after(const Outcome& outcome, bool cancelled);
 // The status while the game runs. unwritten: settings.toml lacks rows and could not be completed.
 std::wstring running_text(const std::wstring& overriding, bool unwritten);
+// What the status line shows: what was said, then a settings problem under it. Empty shows no line.
+std::wstring shown_status(std::wstring_view said, std::wstring_view problem);
 
 // The language box: English first, then the listed discs in their order.
 struct LanguageList {

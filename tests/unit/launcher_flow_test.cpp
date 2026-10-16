@@ -239,6 +239,15 @@ void test_the_running_status() {
             "the variables that replace settings are named, and only when there are some");
 }
 
+void test_the_status_line() {
+    const std::wstring problem = L"Cannot read settings.toml.";
+    require(shown_status(L"", L"").empty(), "a game closed as usual leaves no status line");
+    require(shown_status(L"", problem) == problem, "an unreadable settings file still shows when nothing else is said");
+    require(shown_status(L"Verified.", problem) == L"Verified.\n" + problem, "a settings problem goes under what was said");
+    require(shown_status(problem, problem) == problem, "the settings problem is not said twice");
+    require(shown_status(L"Verified.", L"") == L"Verified.", "readable settings add nothing");
+}
+
 void test_the_language_box() {
     const std::string french = utf8(kImage), missing = kGone;
     LanguageList list = language_list({}, {}, "");
@@ -416,6 +425,7 @@ int main() {
         test_an_image_is_taken_for_what_it_is();
         test_the_window_acts_on_an_outcome();
         test_the_running_status();
+        test_the_status_line();
         test_the_language_box();
         test_the_command_line();
         test_the_shown_version();

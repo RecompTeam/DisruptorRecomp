@@ -174,6 +174,12 @@ require(
     "the window must do each thing a step names, and say when the settings file could not be completed",
 )
 require(
+    '    if (code == 0) {\n        show({});\n        activity_.add("Game closed.");\n    } else {\n' in window
+    and "    status_ = shown_status(text, settings_.readable() ? L\"\" : settings_error());\n" in window
+    and "Press Play to start again" not in window,
+    "a game closed as usual clears the status line and leaves its line in the activity only",
+)
+require(
     window.count("region_disc(") == worker.count("region_disc(") == 2 and window.count("check_region_disc(") == 1
     and worker.count("import_disc(") == 1 and window.count("import_disc(") == 2
     and worker.count("verify_disc(") == 1 and window.count("verify_disc(") == 3,

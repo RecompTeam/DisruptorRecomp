@@ -273,7 +273,8 @@ void Session::game_ended(unsigned long code) {
     game_.reset();
     settings_.load(); // the in-game menu writes the same file
     if (code == 0) {
-        say(L"Game closed. Press Play to start again.");
+        show({});
+        activity_.add("Game closed.");
     } else {
         wchar_t heading[160];
         swprintf(heading, 160, L"The game exited with an error (code 0x%08lX).\n"
@@ -401,8 +402,7 @@ void Session::say(const std::wstring& text) {
 }
 
 void Session::show(const std::wstring& text) {
-    status_ = text;
-    if (!settings_.readable() && text != settings_error()) status_ += std::wstring(L"\n") + settings_error();
+    status_ = shown_status(text, settings_.readable() ? L"" : settings_error());
 }
 
 void Session::saved(bool written, const std::wstring& done) {

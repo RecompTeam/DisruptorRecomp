@@ -90,6 +90,12 @@ Step after(const Outcome& outcome, bool cancelled) {
     return step;
 }
 
+std::wstring shown_status(std::wstring_view said, std::wstring_view problem) {
+    std::wstring text(said);
+    if (!problem.empty() && said != problem) text += (text.empty() ? L"" : L"\n") + std::wstring(problem);
+    return text;
+}
+
 std::wstring running_text(const std::wstring& overriding, bool unwritten) {
     std::wstring text = L"Disruptor is running. You can close this launcher and keep playing.";
     if (unwritten)
