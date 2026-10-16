@@ -44,7 +44,7 @@ bool same_key(std::string_view one, std::string_view other) {
 constexpr FixedKey fixed[] = {
     {"Escape", "frees the mouse, closes the settings, skips logos and movies"},
     {"Backquote (`)", "opens the settings"},
-    {"]", "fast-forwards while held"},
+    {"B", "fast-forwards while held"},
     {"F1 to F11", "load a save state. With Shift they save one"},
     {"F12", "loads the newest replay capsule. Ctrl+F12 records one"},
     {"Alt+Enter", "switches between a window and fullscreen"},
@@ -56,7 +56,7 @@ std::span<const FixedKey> fixed_keys() { return fixed; }
 
 bool reserved_key(std::string_view name) {
     const std::string folded = settings::folded_key(name);
-    if (folded == "escape" || folded == "`" || folded == "]") return true;
+    if (folded == "escape" || folded == "`" || folded == "b") return true;
     for (int number = 1; number <= 12; ++number)
         if (folded == "f" + std::to_string(number)) return true;
     return false;

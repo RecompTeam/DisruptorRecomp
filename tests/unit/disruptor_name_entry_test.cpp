@@ -400,6 +400,37 @@ void test_a_typing_key_stays_off_the_pad() {
     let_go();
 }
 
+void test_a_typed_key_stays_the_names() {
+    fresh(5, 0);
+    expect(disruptor_name_entry_taking_text() == 1, "the name rows take letters");
+    expect(disruptor_name_entry_key(5, 'b', 1, 1) == 1, "B is a letter there");
+    screen(0, 0);
+    expect(disruptor_name_entry_taking_text() == 0, "the rows close before the pad is read again");
+    expect(disruptor_name_entry_withholds(5) == 1, "B typed on the rows stays the name's while it is held, so it cannot fast-forward");
+    std::array<std::uint8_t, 512> keys{}, kept{};
+    keys[5] = 1;
+    disruptor_name_entry_keys_for_pad(keys.data(), kept.data(), 512);
+    expect(disruptor_name_entry_withholds(5) == 1 && kept[5] == 0, "the pad does not see it either");
+    keys[5] = 0;
+    disruptor_name_entry_keys_for_pad(keys.data(), kept.data(), 512);
+    disruptor_name_entry_key(5, 'b', 0, 1);
+    expect(disruptor_name_entry_withholds(5) == 0, "released, B is free again");
+    expect(disruptor_name_entry_withholds(-1) == 0 && disruptor_name_entry_withholds(512) == 0,
+           "a scancode outside the board is never withheld");
+
+    for (const int key : {5, 42, 76}) {
+        fresh(5, 0);
+        disruptor_name_entry_key(key, key == 5 ? 'b' : 0u, 1, 1);
+        screen(0, 0);
+        frame();
+        disruptor_name_entry_key(key, key == 5 ? 'b' : 0u, 0, 1);
+        expect(disruptor_name_entry_withholds(key) == 0, "a key let go after the rows close is free at once, before the pad is read");
+        disruptor_name_entry_key(key, key == 5 ? 'b' : 0u, 1, 1);
+        expect(disruptor_name_entry_withholds(key) == 0, "and pressed again it reaches the game, B, Backspace and Delete alike");
+        disruptor_name_entry_key(key, key == 5 ? 'b' : 0u, 0, 1);
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -409,6 +440,7 @@ int main() {
     test_only_on_the_name_rows();
     test_a_letter_key_is_no_button_that_frame();
     test_a_typing_key_stays_off_the_pad();
+    test_a_typed_key_stays_the_names();
     expect(g_strays == 0, "nothing but the row, the cursor and the name's eight codes may be read or written");
     if (g_failures) return 1;
     std::cout << "Disruptor name entry tests passed\n";

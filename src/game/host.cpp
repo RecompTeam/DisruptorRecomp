@@ -16,6 +16,8 @@
 #include <exception>
 
 extern "C" int disruptor_name_entry_key(int scancode, uint32_t keycode, int down, int plain);
+extern "C" int disruptor_name_entry_taking_text(void);
+extern "C" int disruptor_name_entry_withholds(int scancode);
 extern "C" void disruptor_name_entry_keys_for_pad(const uint8_t *keys, uint8_t *kept, int count);
 extern "C" void disruptor_name_entry_state_loaded(void);
 extern "C" void disruptor_mover_motion_state_loaded(void);
@@ -75,6 +77,11 @@ int psx_game_key(int scancode, uint32_t keycode, int down, int plain) {
 int psx_game_grown_quad_sources(uint32_t command_address, const uint32_t *packet, uint32_t source_address[4],
                                 uint32_t source_word[4]) {
     return disruptor_grown_quad_sources(command_address, packet, source_address, source_word);
+}
+
+int psx_game_fast_forward_key(void) {
+    if (disruptor_name_entry_taking_text() || disruptor_name_entry_withholds(SDL_SCANCODE_B)) return -1;
+    return SDL_SCANCODE_B;
 }
 
 void psx_game_keys_for_pad(const uint8_t *keys, uint8_t *kept, int count) {

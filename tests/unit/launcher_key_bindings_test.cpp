@@ -59,9 +59,9 @@ void schemes() {
 }
 
 void reserved() {
-    for (const char* name : {"Escape", "esc", "`", "]", "F1", "f12"})
+    for (const char* name : {"Escape", "esc", "`", "B", "b", "F1", "f12"})
         require(reserved_key(name), "the game's own keys cannot be bound");
-    for (const char* name : {"W", "F", "F13", "Return", "Space", "Right Shift"})
+    for (const char* name : {"W", "F", "]", "F13", "Return", "Space", "Right Shift"})
         require(!reserved_key(name), "other keys can");
 }
 

@@ -33,6 +33,8 @@ void psx_game_state_loaded(void);
 void psx_game_state_saving(void);
 /* A key went down or up. `plain` is set for a press without Ctrl, Alt or the system key and for every release. Nonzero when the game took a press. */
 int psx_game_key(int scancode, uint32_t keycode, int down, int plain);
+/* The scancode of the key that fast-forwards while held, or -1 while it must not, as when the game types with it. */
+int psx_game_fast_forward_key(void);
 /* The keyboard's state as a pad may read it: `count` keys, nonzero for down, copied from `keys` to `kept` with the keys
  * the game is typing with shown as up. Called at every reading, which can be several a frame. */
 void psx_game_keys_for_pad(const uint8_t *keys, uint8_t *kept, int count);

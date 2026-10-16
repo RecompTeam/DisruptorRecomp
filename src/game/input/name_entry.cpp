@@ -165,6 +165,15 @@ extern "C" void disruptor_name_entry_keys_for_pad(const uint8_t *keys, uint8_t *
     }
 }
 
+// Whether the name rows are up and take letters, so a letter key belongs to the name.
+extern "C" int disruptor_name_entry_taking_text(void) { return taking_text() ? 1 : 0; }
+
+// Whether a key went down on the name rows and is still held, so it stays the name's after the rows close.
+extern "C" int disruptor_name_entry_withholds(int scancode) {
+    const auto key = static_cast<std::size_t>(scancode);
+    return scancode >= 0 && key < g_withheld.size() && g_withheld.test(key) ? 1 : 0;
+}
+
 /* A save state was loaded: what was typed, and where the screen stood, belong to the time before it. The clock
  * cannot tell: a state's clock may lie anywhere beside the one it replaces. */
 extern "C" void disruptor_name_entry_state_loaded(void) {
@@ -187,12 +196,14 @@ extern "C" int disruptor_name_entry_key(int scancode, uint32_t keycode, int down
     g_keyed = psx_get_cycle_count();
     if (!down) {
         g_held.reset(static_cast<std::size_t>(scancode));
+        g_withheld.reset(static_cast<std::size_t>(scancode));
         return 0;
     }
     /* By the rows as the routine last found them, not as they are: the pad shows a key before its event comes, and a
      * key that confirmed the row before can have brought these rows up by now. */
     if (!g_on || !plain) return 0;
     g_held.set(static_cast<std::size_t>(scancode));
+    g_withheld.set(static_cast<std::size_t>(scancode));  /* the rows may close before the pad is next read */
     if (g_count < g_typed.size()) {
         g_typed[g_count++] = *typed;
         ++g_text;

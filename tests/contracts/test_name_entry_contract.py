@@ -224,7 +224,9 @@ require(
     and "        if (keys[scancode] == 0) g_withheld.reset(key);\n"
     "        else if (taking && in_typing_block(scancode)) g_withheld.set(key);\n"
     "        kept[scancode] = g_withheld.test(key) ? uint8_t{0} : keys[scancode];\n" in module
-    and module.count("g_withheld.reset(") == 2
+    and module.count("g_withheld.reset(") == 3
+    and "    g_held.set(static_cast<std::size_t>(scancode));\n    g_withheld.set(static_cast<std::size_t>(scancode));" in module
+    and "        g_held.reset(static_cast<std::size_t>(scancode));\n        g_withheld.reset(static_cast<std::size_t>(scancode));\n        return 0;" in module
     and "    return (scancode >= kKeyA && scancode <= kKey0) || (scancode >= kSpace && scancode <= kSlash) || "
     "scancode == kSecondBackslash ||\n"
     "           (scancode >= kPad1 && scancode <= kPad0) || scancode == kBackspace || scancode == kDelete;\n" in module

@@ -120,7 +120,7 @@ These keys do the same in both schemes and cannot be changed:
 
 - **Escape** frees the mouse, closes the settings, skips logos and movies.
 - **Backquote** (`` ` ``) opens the settings.
-- **]** fast-forwards while held.
+- **B** fast-forwards while held, except on the save-name screen.
 - **F1 to F11** load a save state. With Shift they save one.
 - **F12** loads the newest replay capsule. Ctrl+F12 records one.
 - **Alt+Enter** switches between a window and fullscreen.

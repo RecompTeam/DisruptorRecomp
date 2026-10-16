@@ -990,4 +990,13 @@ require("if (changed(\"controller.deadzone\")) psx_input_set_deadzone(pending.de
         and "psx_input_pad_name(0)" in menu,
         "the game's Controls tab names the pad it reads and moves the dead zone live, as the launcher saves it")
 
+require("    set_window_icon(window);\n" in function_body(menu, "on_runtime_ready")
+        and "SDL_LoadBMP_IO(SDL_IOFromConstMem(disruptor_window_icon_bmp, disruptor_window_icon_bmp_size), true)" in menu
+        and "    SDL_SetWindowIcon(window, icon);\n" in menu
+        and 'set(DISRUPTOR_WINDOW_ICON "${CMAKE_CURRENT_SOURCE_DIR}/src/launcher/assets/app-64.bmp")' in cmake
+        and 'list(APPEND DISRUPTOR_EXTRA_SOURCES "${CMAKE_CURRENT_BINARY_DIR}/window_icon.cpp")' in cmake
+        and 'target_sources(psx-runtime PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/game/icon.rc")' in cmake
+        and read("src/game/icon.rc") == '1 ICON "../launcher/assets/app.ico"\n',
+        "the game's window and executable carry the launcher's icon")
+
 print("developer menu contract: PASS")
