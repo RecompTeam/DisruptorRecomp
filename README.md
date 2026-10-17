@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  A native PC recompilation of <b>Disruptor</b> (PlayStation, 1996).
+  A native PC recompilation of <b>Disruptor</b> (PlayStation, 1996)
 </p>
 
 <p align="center">
@@ -18,19 +18,19 @@
 ## Quick start
 
 1. Download from [Releases](https://github.com/RecompTeam/DisruptorRecomp/releases):
-    - **Windows:** run [**DisruptorRecomp-win-Setup.exe**](https://github.com/RecompTeam/DisruptorRecomp/releases/latest/download/DisruptorRecomp-win-Setup.exe).
-    - **Windows, without installing:** unpack [**DisruptorRecomp-win-Portable.zip**](https://github.com/RecompTeam/DisruptorRecomp/releases/latest/download/DisruptorRecomp-win-Portable.zip) and run `Disruptor Recompiled.exe`.
+    - **Windows:** run [**DisruptorRecomp-win-Setup.exe**](https://github.com/RecompTeam/DisruptorRecomp/releases/latest/download/DisruptorRecomp-win-Setup.exe)
+    - **Windows, without installing:** unpack [**DisruptorRecomp-win-Portable.zip**](https://github.com/RecompTeam/DisruptorRecomp/releases/latest/download/DisruptorRecomp-win-Portable.zip) and run `Disruptor Recompiled.exe`
     - **Linux x64:** download [**DisruptorRecomp.AppImage**](https://github.com/RecompTeam/DisruptorRecomp/releases/latest/download/DisruptorRecomp.AppImage), make it executable and run it:\
       `chmod +x DisruptorRecomp.AppImage`
-2. Drop your **Disruptor (USA, SLUS-00224)** disc image on the launcher it opens.
-3. Press **Play**.
+2. Drop your **Disruptor (USA, SLUS-00224)** disc image on the launcher it opens
+3. Press **Play**
 
-**No game data is included.**\
-A French, German or Japanese disc of yours can give the game its language.
+**No game data is included**\
+A French, German or Japanese disc of yours can give the game its language
 
 <p align="center">
   <a href="docs/COMPARISONS.md"><b>Before and after</b></a><br>
-  What changed from the PlayStation version, side by side.
+  What changed from the PlayStation version, side by side
 </p>
 
 ## Launcher
@@ -43,24 +43,24 @@ Updates install with one click. Saves and settings stay.
     <td width="50%" valign="top">
       <img src="docs/images/display.png" alt="The Display page" width="100%"><br>
       <b>Display</b><br>
-      Window or fullscreen, aspect ratio, resolution scale and VSync.
+      Window or fullscreen, aspect ratio, resolution scale and VSync
     </td>
     <td width="50%" valign="top">
       <img src="docs/images/enhancements.png" alt="The Enhancements page" width="100%"><br>
       <b>Enhancements</b><br>
-      60 FPS gameplay, in-between frames, exact geometry and perspective-correct textures.
+      60 FPS gameplay, in-between frames, exact geometry and perspective-correct textures
     </td>
   </tr>
   <tr>
     <td valign="top">
       <img src="docs/images/controls.png" alt="The Controls page" width="100%"><br>
       <b>Controls</b><br>
-      Modern or Classic, weapon and psionic wheels, mouse aim and a gamepad beside the keyboard.
+      Modern or Classic, weapon and psionic wheels, mouse aim and a gamepad beside the keyboard
     </td>
     <td valign="top">
       <img src="docs/images/keys.png" alt="The key and gamepad tables" width="100%"><br>
       <b>Keys and buttons</b><br>
-      Each game action can be moved to another key or gamepad button, apart from the game's fixed keys. Click it, press the new one.
+      Each game action can be moved to another key or gamepad button, apart from the game's fixed keys. Click it, press the new one
     </td>
   </tr>
 </table>
@@ -97,7 +97,7 @@ powershell -ExecutionPolicy Bypass -File .\build.ps1
 .\run.ps1
 ```
 
-[BUILD.md](docs/BUILD.md) has Linux, the generated code and the tests.
+[BUILD.md](docs/BUILD.md) has Linux, the generated code and the tests
 </details>
 
 <p align="center">
