@@ -179,6 +179,10 @@ bios_hle = false
 overlay_cache = true
 overlay_backend = "auto"
 
+# The default 180 ms put the sound 0.2 s behind the movies, the deepest drop measured in a whole session was 26 ms.
+[audio]
+buffer_ms = 90
+
 [video]
 aspect_ratio = "16:9"
 renderer = "opengl"

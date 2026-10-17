@@ -88,6 +88,10 @@ for name in ("game.toml", "game-widescreen.toml"):
         config,
     )
     require(patch is not None, f"{name} must carry the guarded frame-floor patch")
+    require(
+        re.search(r"^\[audio\]\nbuffer_ms = 90\n", config, re.MULTILINE) is not None,
+        f"{name} must hold the sound 90 ms ahead of the device, the default 180 put it 0.2 s behind the movies",
+    )
 
 for token in (
     "0x8004B3D4u",
