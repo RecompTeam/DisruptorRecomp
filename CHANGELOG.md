@@ -2,6 +2,25 @@
 
 What changed in each release. The launcher shows the section of its own version on its home page.
 
+## v0.4.0
+
+### Changes
+
+- Move Fog shape and Draw distance to the Enhancements page and offer only Even and Original for now
+- Keep about 45 ms of sound before the system instead of 180
+- Drop the comparisons page, each release's notes carry its before and after pairs
+
+### Enhancements
+
+- Fade distant walls and floors in instead of drawing them in blocks, under Smooth distance fade
+- Write the sound output and the movies' timing to the detailed log
+
+### Bug fixes
+
+- Slow down less when many enemies are on screen
+- Start a movie's sound on the frame the French or German version starts it, with such a disc
+- Let briefings play to the end with a French, German or Japanese disc
+- Draw no dark lines along the held weapon with multisampling
 ## v0.3.1
 
 Released on 2026-10-17.

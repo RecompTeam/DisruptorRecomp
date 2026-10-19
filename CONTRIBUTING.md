@@ -20,8 +20,8 @@ unrelated framework changes.
 - Keep experimental visual features optional.
 - Show a change the player can see with a before and after pair: two pictures
   of the same moment, or a short video when it only shows in motion. A replay
-  capsule (Ctrl+F12 in the game) keeps the moment. Add the pair to
-  [COMPARISONS.md](docs/COMPARISONS.md).
+  capsule (Ctrl+F12 in the game) keeps the moment. Put the pair in the pull
+  request and in the release notes.
 - Update [STATUS.md](docs/STATUS.md) when behavior, verified coverage, or a known
   limitation changes. Keep it focused on the current build. Update the README
   and [PLAYING.md](docs/PLAYING.md) when a setting or its default changes.

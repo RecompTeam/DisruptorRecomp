@@ -251,14 +251,19 @@ The page is in four groups, in the launcher and in the game alike.
 | Frame rate | **60 FPS gameplay** | On |
 | Frame rate | **In-between frames** and their rate | Off |
 | Picture | **Exact-provenance geometry**, **Perspective-correct world textures**, **Gap filling**, **Smooth distance fade**, **Depth-sorted world** | On |
+| Picture | **Fog shape** and **Draw distance** | Even, Original |
 | Shading | **Ambient occlusion**, its reach and strength | Off |
 | Startup | **Skip the logos and the title movie** | Off |
 
-- In-between frames, the last three of Picture and Ambient occlusion need
-  exact geometry.
+- In-between frames, Ambient occlusion and the other Picture settings but
+  Draw distance need exact geometry. Fog shape needs Smooth distance fade too.
 - **Gap filling** closes small gaps between polygons.
 - **Smooth distance fade** fades walls and floors evenly into the distance,
-  where the game steps through twelve shades.
+  where the game steps through twelve shades. Distant walls and floors fade in
+  instead of appearing in blocks.
+- **Fog shape** under it and **Draw distance** offer only the game's own Even
+  fog and Original distance in this release. The other shapes and longer
+  distances come in a later release.
 - **Depth-sorted world** draws world polygons by their depth where the game's
   own order puts a far one over a near one.
 - **Ambient occlusion** shades corners and the floor under things.
@@ -423,9 +428,11 @@ a replay capsule or a screen recording, see
 2. Play until the problem shows, then close the game.
 3. Press **Report a problem** on the same page.
 
-The log then also says every ten seconds how the frames ran, and records
-each setting changed in the game's menu, controllers connected and removed,
-and what the graphics driver complains of. The switch is in the game's menu
+The log then also says every ten seconds how the frames ran and how the
+sound queue stood, and records each setting changed in the game's menu,
+controllers connected and removed, and what the graphics driver complains of.
+It names the sound driver and device, and during a movie it writes once a
+second where the sound and the picture are and how late the sound leaves. The switch is in the game's menu
 too, under **Settings → Debug**. There the driver's part starts with the
 next launch.
 
