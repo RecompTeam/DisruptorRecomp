@@ -4,8 +4,8 @@ packages the launcher updates from.
 The program's files come from an explicit list and exclude game data. The packages carry the release's section of
 CHANGELOG.md as their notes. The GitHub release's text is release/notes/<version>.md when it is written, else that
 section. The previous release on GitHub, when there is one, gives the update a delta package. Nothing is
-published unless --publish is given. What is published is signed with Sigstore first: a browser opens to sign in as
-the organisation's account, and every file gets a bundle and a line of SLSA provenance. Windows publishes first and
+published unless --publish is given. The players' files are signed with Sigstore first: a browser opens to sign in as
+the organisation's account, and each gets a bundle and a line of SLSA provenance. Windows publishes first and
 makes the release, Linux adds its files to it.
 """
 
@@ -47,14 +47,14 @@ PLATFORMS = {
         ".exe",
         (f"{PACKAGE_ID}-win-Setup.exe", f"{PACKAGE_ID}-win-Portable.zip"),
         "**Windows 10 or 11 x64**\n\n"
-        f"- Download **{PACKAGE_ID}-win-Setup.exe** and run it.\n"
+        f"- Download **{PACKAGE_ID}-win-Setup.exe** and run it\n"
         "- It installs the game into `%LocalAppData%\\DisruptorRecomp`, with shortcuts on the desktop and in the Start "
-        "menu.\n"
-        "- Your files are kept in `%LocalAppData%\\DisruptorRecompData`.\n"
+        "menu\n"
+        "- Your files are kept in `%LocalAppData%\\DisruptorRecompData`\n"
         f"- Or, without installing, unpack **{PACKAGE_ID}-win-Portable.zip** into a folder of its own and run "
-        "`Disruptor Recompiled.exe`.\n"
-        "- The portable copy needs the Microsoft Visual C++ x64 Redistributable.\n"
-        "- The portable copy keeps your files in its `data` folder.\n",
+        "`Disruptor Recompiled.exe`\n"
+        "- The portable copy needs the Microsoft Visual C++ x64 Redistributable\n"
+        "- The portable copy keeps your files in its `data` folder\n",
     ),
     "linux": Platform(
         "linux",
@@ -62,10 +62,10 @@ PLATFORMS = {
         "",
         (f"{PACKAGE_ID}.AppImage",),
         "**Linux x64, glibc 2.35 or newer**\n\n"
-        f"- Download **{PACKAGE_ID}.AppImage**.\n"
+        f"- Download **{PACKAGE_ID}.AppImage**\n"
         f"- Make it executable: `chmod +x {PACKAGE_ID}.AppImage`\n"
-        "- Run it.\n"
-        "- Your files are kept in `~/.local/share/DisruptorRecompData`.\n",
+        "- Run it\n"
+        "- Your files are kept in `~/.local/share/DisruptorRecompData`\n",
     ),
 }
 SIGSTORE = "sigstore@4.5.0"
@@ -106,12 +106,13 @@ def release_text(version: str, root: Path = ROOT) -> str:
 
 
 def published_names(channel: str, players: list[str], packed: tuple[str, ...], signed: list[str]) -> set[str]:
-    """The files a release carries: the players' files with their digests, the update feed, its packages and the
-    signatures. Velopack's assets list and its legacy RELEASES file stay out: no updater reads them."""
-    return {*players, *(f"{name}.sha256" for name in players), f"releases.{channel}.json", *packed, *signed}
+    """The files a release carries: the players' files, the update feed, its packages and the players' signatures.
+    GitHub shows each file's SHA-256 itself, so no digest files. Velopack's assets list and its legacy RELEASES file stay
+    out: no updater reads them."""
+    return {*players, f"releases.{channel}.json", *packed, *signed}
 
 
-INSTALL = "## Install\n\nYour own Disruptor (USA, SLUS-00224) disc image is needed.\n"
+INSTALL = "## Install\n\nYour own Disruptor (USA, SLUS-00224) disc image is needed\n"
 
 
 def release_body(text: str) -> str:
@@ -478,9 +479,6 @@ def main() -> None:
         if not player_file.is_file():
             raise SystemExit(f"vpk pack left no {player_file.name}")
         digests[player_file.name] = hashlib.sha256(player_file.read_bytes()).hexdigest()
-        (packages / f"{player_file.name}.sha256").write_text(
-            f"{digests[player_file.name]}  {player_file.name}\n", encoding="ascii"
-        )
     print(f"Packaged {len(payload)} files into {packages}")
     for item in sorted(packages.iterdir()):
         print(f"{item.stat().st_size:>12,}  {item.name}")
@@ -492,9 +490,8 @@ def main() -> None:
     commit = json.loads(payload["MANIFEST.json"])["source_commit"]
     signed: list[Path] = []
     if args.publish or args.sign:
-        published = [*players, *(packages / name for name in packed_names if (packages / name).is_file())]
-        signed = sign(work, published, args.version, commit, started, platform.channel)
-        print(f"Signed {len(published)} files as {SIGNER}")
+        signed = sign(work, players, args.version, commit, started, platform.channel)
+        print(f"Signed {len(players)} files as {SIGNER}")
 
     if args.publish:
         ours = published_names(platform.channel, list(digests), packed_names, [item.name for item in signed])

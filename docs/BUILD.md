@@ -59,8 +59,8 @@ python tools/package_release.py --version v0.3.1 --build build --zstd-license <z
 - `CHANGELOG.md` needs the release's `## v0.3.1` section first. It
   becomes the package's notes, which the launcher shows.
 - The GitHub release's text is `release/notes/v0.3.1.md` when it is
-  written, else that section. The packager adds the Install section below
-  it.
+  written, else that section. The folder is kept out of git. The packager
+  adds the Install section below it.
 - The .NET SDK runs the pinned Velopack packer, the version of the C library
   the launcher links.
 - The previous release's package is fetched from GitHub when there is one,
@@ -68,14 +68,14 @@ python tools/package_release.py --version v0.3.1 --build build --zstd-license <z
   `--no-delta`, an update downloads the full package.
 - `build/releases/<version>/windows/packages` holds
   `DisruptorRecomp-win-Setup.exe` and `DisruptorRecomp-win-Portable.zip` for
-  players, each with its SHA-256, and the packages the launcher updates from.
+  players and the packages the launcher updates from.
   Setup installs the Visual C++ x64 Redistributable when it is missing, the ZIP
   does not. `--publish` creates the
   GitHub release with them, a regular release and the latest one.
-- `--publish`, or `--sign` alone, signs those files with Sigstore first. A
-  browser opens: sign in with the organisation's Google account,
-  `recomp.team@gmail.com`. Each file gets a `.sigstore.json` bundle and a line
-  of SLSA provenance in `DisruptorRecomp-<channel>.intoto.jsonl`, and the
+- `--publish`, or `--sign` alone, signs the players' files with Sigstore
+  first. A browser opens: sign in with the organisation's Google account,
+  `recomp.team@gmail.com`. Each gets a `.sigstore.json` bundle and a line of
+  SLSA provenance in `DisruptorRecomp-<channel>.intoto.jsonl`, and the
   script stops when a bundle names another account. It signs only a checkout
   without uncommitted changes.
 

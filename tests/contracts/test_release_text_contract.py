@@ -73,8 +73,8 @@ packed = ("DisruptorRecomp-0.2.0-alpha.1-linux-full.nupkg", "DisruptorRecomp-0.2
 signed = ["DisruptorRecomp.AppImage.sigstore.json", "DisruptorRecomp-linux.intoto.jsonl"]
 names = package_release.published_names("linux", players, packed, signed)
 require(
-    names == {*players, "DisruptorRecomp.AppImage.sha256", "releases.linux.json", *packed, *signed},
-    "a release carries the players' files with their digests, the update feed, its packages and the signatures",
+    names == {*players, "releases.linux.json", *packed, *signed},
+    "a release carries the players' files, the update feed, its packages and the players' signatures, no digest files",
 )
 require(
     not names & {"assets.linux.json", "RELEASES-linux", "releases.win.json"},

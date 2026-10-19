@@ -11,8 +11,9 @@ The launcher updates itself to the newest release, so a fix ships as a new relea
 
 ## Verifying a Download
 
-Each file of a release has a Sigstore bundle signed by recomp.team@gmail.com. The `.intoto.jsonl` files hold its SLSA
-provenance. To check a file, here the installer:
+The installer, the portable ZIP and the AppImage each have a Sigstore bundle signed by recomp.team@gmail.com. The
+`.intoto.jsonl` files hold their SLSA provenance. GitHub shows each file's SHA-256 beside it. To check a file, here the
+installer:
 
 ```
 uvx sigstore verify identity --cert-identity recomp.team@gmail.com --cert-oidc-issuer https://accounts.google.com --bundle DisruptorRecomp-win-Setup.exe.sigstore.json DisruptorRecomp-win-Setup.exe

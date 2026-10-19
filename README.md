@@ -43,7 +43,7 @@
     <td width="50%" valign="top">
       <img src="docs/images/enhancements.png" alt="The Enhancements page" width="100%"><br>
       <b>Enhancements</b><br>
-      Smoother motion and a steadier picture than on the PlayStation
+      Smoother motion and a steadier picture
     </td>
   </tr>
   <tr>
