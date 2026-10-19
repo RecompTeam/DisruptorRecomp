@@ -4,6 +4,8 @@ What changed in each release. The launcher shows the section of its own version 
 
 ## v0.4.0
 
+Released on 2026-10-19.
+
 ### Changes
 
 - Move Fog shape and Draw distance to the Enhancements page and offer only Even and Original for now
