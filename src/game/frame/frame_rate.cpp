@@ -117,13 +117,20 @@ bool simulation_follows_elapsed_vblanks() {
            psx_mod_read_byte(kPlayerState) != kSingleStepPlayerState;
 }
 
+/* The carry counts in units of the divisor that left it, so another divisor starts from none. */
+void set_cpu_shift(uint32_t shift) {
+    if (shift == g_psx_cyc_overclock_shift) return;
+    g_psx_cyc_overclock_shift = shift;
+    g_psx_cyc_overclock_carry = 0u;
+}
+
 void vsync_entry(CPUState *cpu, uint32_t address) {
     if (!cpu || address != kVSyncFunction) return;
     const uint32_t return_address = cpu->gpr[31];
     /* Library code polls VSync(-1) mid-frame, so only a real wait ends the
      * fast section and only the frame loop's own poll starts it. */
     const bool waits = static_cast<int32_t>(cpu->gpr[4]) >= 0;
-    if (waits) g_psx_cyc_overclock_shift = 0u;
+    if (waits) set_cpu_shift(0u);
     const bool frame_gate =
         return_address == kGameplayGateReturn && cpu->gpr[4] == 0u;
     const bool frame_loop_poll = !waits && return_address >= kFrameLoopBegin &&
@@ -133,10 +140,7 @@ void vsync_entry(CPUState *cpu, uint32_t address) {
     const bool unlocked = g_unlocked.load(std::memory_order_relaxed) &&
                           simulation_follows_elapsed_vblanks();
     if (frame_loop_poll) {
-        if (unlocked) {
-            g_psx_cyc_overclock_shift =
-                g_cpu_shift.load(std::memory_order_relaxed);
-        }
+        if (unlocked) set_cpu_shift(g_cpu_shift.load(std::memory_order_relaxed));
         return;
     }
     record_frame(cpu);

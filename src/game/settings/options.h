@@ -28,6 +28,7 @@ struct Option {
     std::span<const char* const> needs;
     Unit unit;
     const char* hint;
+    const char* notice = nullptr;  // why choices past `highest` are not offered, shown apart from the hint
 };
 
 std::span<const Option> options();

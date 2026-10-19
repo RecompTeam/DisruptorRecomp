@@ -1,8 +1,16 @@
 diff --git a/runtime/src/psx_cycles.c b/runtime/src/psx_cycles.c
-index 72cbe9b496991cbb84b10afb8813c5282c7dd0cf..dfd3b33f2d8383089645c67847200a7559cd784b 100644
+index 72cbe9b496991cbb84b10afb8813c5282c7dd0cf..49ec3f7e36baf158fbf8b5116862252561a5af8f 100644
 --- a/runtime/src/psx_cycles.c
 +++ b/runtime/src/psx_cycles.c
-@@ -20,6 +20,8 @@
+@@ -1,6 +1,7 @@
+ /* psx_cycles.c — PSX guest CPU cycle clock. */
+ 
+ #include "psx_cycles.h"
++#include "psx_cyc_overclock.h"
+ #include "cpu_state.h"
+ #include <stdlib.h>
+ #if defined(_MSC_VER)
+@@ -20,6 +21,8 @@
  uint32_t g_psx_cyc_batch = 0;
  uint32_t g_psx_cyc_batch_limit = 0;
  int      g_psx_cyc_bb_defer = 0;
@@ -11,3 +19,21 @@ index 72cbe9b496991cbb84b10afb8813c5282c7dd0cf..dfd3b33f2d8383089645c67847200a75
  static int      s_cycle_replay_active = 0;
  static uint64_t s_cycle_replay_live = 0;
  
+@@ -582,7 +585,7 @@
+ /* DIV/DIVU latency is the fixed constant 37 — emitted directly at the op site. */
+ 
+ void psx_muldiv_set(CPUState* cpu, uint32_t latency) {
+-    cpu->muldiv_ts_done = psx_cycle_count + (uint64_t)latency;
++    cpu->muldiv_ts_done = psx_cycle_count + (uint64_t)psx_cyc_overclocked_latency(latency);
+ }
+ 
+ void psx_muldiv_stall(CPUState* cpu) {
+@@ -672,7 +675,7 @@
+     if (cpu->gte_ts_done > psx_cycle_count) {
+         psx_advance_cycles((uint32_t)(cpu->gte_ts_done - psx_cycle_count));
+     }
+-    cpu->gte_ts_done = psx_cycle_count + (uint64_t)latency;
++    cpu->gte_ts_done = psx_cycle_count + (uint64_t)psx_cyc_overclocked_latency(latency);
+ }
+ 
+ void psx_gte_stall(CPUState* cpu) {

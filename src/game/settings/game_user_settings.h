@@ -35,12 +35,17 @@ struct GameUserSettings {
     bool has_gap_filling = false; bool gap_filling = true;
     bool has_depth_sorted_world = false; bool depth_sorted_world = false;
     bool has_detailed_logging = false; bool detailed_logging = false;
+    bool has_draw_distance = false; int draw_distance = 100;  // percent of the game's own, one of kDisruptorDrawDistances
+    bool has_fog_shape = false; int fog_shape = 0;  // an index into kDisruptorFogShapes
     // An index into kDisruptorDiagnosticViews. A session's own: at start only a capsule's replay takes it from the file.
     bool has_diagnostic_view = false; int diagnostic_view = 0;
 };
 inline constexpr const char* kDisruptorDiagnosticViews[] = {"off", "shading", "depth", "normals", "fade", "mesh", "uv"};
 inline constexpr int kDisruptorDiagnosticViewCount = 7;
 inline constexpr int kDisruptorSampleCounts[] = {0, 2, 4, 8, 16};
+inline constexpr int kDisruptorDrawDistances[] = {100, 125, 150, 200};
+inline constexpr const char* kDisruptorFogShapes[] = {"even", "soft", "late"};
+inline constexpr int kDisruptorFogShapeCount = 3;
 
 }  // namespace PSXRecompV4
 

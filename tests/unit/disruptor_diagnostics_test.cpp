@@ -3,6 +3,8 @@
 #include "game/frame/frame_rate.h"
 #include "psx_sdl.h"
 
+#include <cstdint>
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 #include <deque>
@@ -96,6 +98,25 @@ int disruptor_frame_rate_last_window(DisruptorFrameRateWindow *out) {
     *out = DisruptorFrameRateWindow{30, 60, 2, 0, 0};
     return 1;
 }
+int g_sound = 0, g_sound_frames = 0;
+double g_sound_queued = 0.0;
+uint64_t g_sound_underruns = 0, g_sound_drops = 0;
+int psx_audio_out_stats(double *fill_ms, double *target_ms, uint64_t *underruns, uint64_t *overflow_drops, double *correction, int *legacy,
+                        int *host_rate) {
+    *fill_ms = g_sound_queued;
+    *target_ms = 45.0;
+    *underruns = g_sound_underruns;
+    *overflow_drops = g_sound_drops;
+    *correction = 0.0;
+    *legacy = 0;
+    *host_rate = 48000;
+    return g_sound;
+}
+int psx_audio_device_frames(void) { return g_sound_frames; }
+double g_sdl_queued = -1.0;
+double psx_audio_sdl_queued_ms(void) { return g_sdl_queued; }
+const char *psx_sdl_audio_driver(void) { return "pipewire"; }
+const char *psx_sdl_audio_device_name(void) { return "Built-in Audio"; }
 
 }  // extern "C"
 
@@ -120,6 +141,56 @@ void test_the_lines() {
                "pulse: 0 frames in 0.0 s, 0.0 ms a frame, longest 0.0 ms, game 0 frames in 0 vblanks with 3 late, menu, not focused, "
                "minimized, driver messages repeated 4, driver messages lost 2",
            "and a window out of focus or minimized, and driver messages left out, a stretch of no frames dividing by nothing");
+
+    Moment sounding{30, 60, 0, "world", true, false, 0, 0};
+    sounding.sound_queued_ms = 44.6;
+    sounding.sound_underruns = 2;
+    sounding.sound_target_ms = 45.0;
+    sounding.sound_trim = -0.0012;
+    sounding.sound_drops = 3;
+    expect(pulse_line(Stretch{600, 10.0, 0.0182}, sounding) ==
+               "pulse: 600 frames in 10.0 s, 16.7 ms a frame, longest 18.2 ms, game 30 frames in 60 vblanks with 0 late, world, focused, "
+               "sound queued 45 ms of 45, rate trim -0.12%, 2 underruns, 3 overflow drops",
+           "with a sound device the pulse says how much sound waits against its aim, the rate trim, how often it ran dry and overflowed");
+    sounding.sound_sdl_ms = 11.6;
+    expect(pulse_line(Stretch{600, 10.0, 0.0182}, sounding).find("sound queued 45 ms of 45, SDL holds 12 ms, rate trim") != std::string::npos,
+           "and what SDL holds after the queue when it tells");
+
+    SoundSetup setup;
+    setup.driver = "pipewire";
+    setup.device = "Built-in Audio";
+    setup.device_rate = 48000;
+    expect(sound_setup_line(setup) ==
+               "sound: SDL driver pipewire, device 'Built-in Audio', the game's 44100 Hz resampled to 48000, none of SDL_AUDIO_DRIVER, "
+               "SDL_AUDIO_DEVICE_SAMPLE_FRAMES, SDL_AUDIO_FREQUENCY, PIPEWIRE_LATENCY, PULSE_LATENCY_MSEC set",
+           "the setup line names the driver, the device and a resampling, and that none of SDL's sound variables is set");
+    setup.device_rate = 44100;
+    setup.legacy = true;
+    setup.environment = {"SDL_AUDIO_DEVICE_SAMPLE_FRAMES=256", "PIPEWIRE_LATENCY=256/48000"};
+    setup.driver.clear();
+    expect(sound_setup_line(setup) ==
+               "sound: SDL driver unknown, device 'Built-in Audio', queued without the resampler, set: SDL_AUDIO_DEVICE_SAMPLE_FRAMES=256 "
+               "PIPEWIRE_LATENCY=256/48000",
+           "and the variables that are set, the queue without the resampler, a driver it was not told");
+
+    MovieMoment movie;
+    movie.movie = 3;
+    movie.frame = 503;
+    movie.sound_seconds = 20.017;
+    movie.picture_seconds = 20.0;
+    movie.pictures_a_second = 25;
+    movie.pitch = 0x7FA;
+    movie.leaving_ms = 69.6;
+    expect(movie_line(movie) ==
+               "movie 3 frame 503: sound 20.02 s into its data (pitch 0x7FA), picture 20.00 s at 25 a second, sound minus picture +17 ms "
+               "in the game, sound leaves the game 70 ms later",
+           "a movie line says where its sound and its picture are and how late sound leaves");
+    movie.leaving_ms = -1.0;
+    expect(movie_line(movie).find("in the game") + 11 == movie_line(movie).size(), "without a sound device the leaving is left out");
+    expect(sound_line(48000, 480, 45.0) == "sound: device 48000 Hz with a buffer of 480 frames (10.0 ms), queue held at 45 ms",
+           "the sound line names the device's rate, its buffer and the queue before it");
+    expect(sound_line(44100, 0, 90.0) == "sound: device 44100 Hz, its buffer not told, queue held at 90 ms",
+           "a device that does not tell its buffer is said so");
 
     const auto changes = device_changes({"A", "B", "B"}, {"B", "C"});
     expect(changes == std::vector<std::string>{"controller removed: A", "controller removed: B", "controller connected: C"},
@@ -250,6 +321,51 @@ void test_a_session() {
     g_endless = false;
     g_messages.clear();
     expect(g_takes == 16 && printed().size() == 3, "a driver that never stops is asked sixteen times a frame and no more");
+
+    g_sound = 1;
+    g_sound_frames = 480;
+    g_sound_underruns = 5;
+    disruptor_diagnostics_set_detailed(0);
+    frame_at(70.0);
+    disruptor_diagnostics_set_detailed(1);
+    frame_at(70.1);
+    expect(said(printed(), {"disruptor: +70.1s detailed logging on, driver messages from the next launch",
+                            "disruptor: +70.1s sound: device 48000 Hz with a buffer of 480 frames (10.0 ms), queue held at 45 ms",
+                            "disruptor: +70.1s sound: SDL driver pipewire, device 'Built-in Audio', the game's 44100 Hz resampled to 48000, "
+                            "none of SDL_AUDIO_DRIVER, SDL_AUDIO_DEVICE_SAMPLE_FRAMES, SDL_AUDIO_FREQUENCY, PIPEWIRE_LATENCY, PULSE_LATENCY_MSEC set",
+                            "disruptor: +70.1s controller connected: unnamed device"}),
+           "a log that opens with a sound device says its way out");
+    g_sound_queued = 38.2;
+    g_sound_underruns = 7;
+    frame_at(80.1);
+    const std::vector<std::string> sounded = printed();
+    expect(sounded.size() == 1 && sounded[0].starts_with("disruptor: +80.1s pulse: 1 frames in 10.0 s") &&
+               sounded[0].ends_with(", sound queued 38 ms of 45, rate trim +0.00%, 2 underruns, 0 overflow drops"),
+           "and its pulse counts the underruns since the log opened");
+    frame_at(90.1);
+    const std::vector<std::string> quiet = printed();
+    expect(quiet.size() == 1 && quiet[0].ends_with("sound queued 38 ms of 45, rate trim +0.00%, 0 underruns, 0 overflow drops"), "and the next pulse those since the one before");
+    g_sound_underruns = 2;
+    frame_at(100.1);
+    const std::vector<std::string> restarted = printed();
+    expect(restarted.size() == 1 && restarted[0].ends_with(", 2 underruns, 0 overflow drops"), "a count that went back restarted: its value is the underruns since");
+    g_sound_underruns = 3;
+    frame_at(110.1);
+    const std::vector<std::string> after = printed();
+    expect(after.size() == 1 && after[0].ends_with(", 1 underruns, 0 overflow drops"), "and counting goes on from there");
+    g_sound_drops = 4;
+    frame_at(120.1);
+    const std::vector<std::string> dropped = printed();
+    expect(dropped.size() == 1 && dropped[0].ends_with(", 0 underruns, 4 overflow drops"), "overflow drops are counted since the pulse before");
+    frame_at(130.1);
+    const std::vector<std::string> undropped = printed();
+    expect(undropped.size() == 1 && undropped[0].ends_with(", 0 underruns, 0 overflow drops"), "and none new is none");
+    g_sdl_queued = 11.6;
+    expect(std::abs(disruptor_diagnostics_sound_leaving_ms() - (38.2 + 11.6 + 10.0)) < 1e-9,
+           "sound leaves after the queue, what SDL holds and the device's buffer");
+    g_sdl_queued = -1.0;
+    expect(sound_line(48000, 65536, 45.0) == "sound: device 48000 Hz with a buffer of 65536 frames (1365.3 ms), queue held at 45 ms",
+           "a buffer past sixteen bits is said whole");
 }
 
 }  // namespace

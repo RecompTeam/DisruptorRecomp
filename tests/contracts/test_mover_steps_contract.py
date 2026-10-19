@@ -215,7 +215,7 @@ require(
     "            psx_frontend_before_savestate_save();\n            CPUState snap = *cpu;\n" in saving
     and 'extern "C" void psx_frontend_before_savestate_save(void) {\n#ifdef PSX_HAS_GAME_HOST\n    psx_game_state_saving();\n#endif\n}\n' in frontend
     and "void psx_game_state_saving(void);\n" in read("psxrecomp/runtime/include/game_host.h")
-    and "void psx_game_state_saving(void) { disruptor_mover_motion_state_saving(); }\n" in host
+    and "void psx_game_state_saving(void) {\n    disruptor_mover_motion_state_saving();\n" in host
     and 'extern "C" void disruptor_mover_motion_state_saving(void) {\n    Guest guest;\n    take_back(guest, g_shifts);\n    catch_up(guest, g_lifts);\n}\n' in motion,
     "a half step and a lag are taken out of memory before a state is written, so that no saved state holds one",
 )

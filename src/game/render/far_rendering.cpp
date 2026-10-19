@@ -1,17 +1,20 @@
 /*
- * Session-only far-rendering experiment for Disruptor (SLUS-00224).
+ * Far rendering for Disruptor (SLUS-00224), the saved draw distance.
  *
  * The game keeps its far plane and the beginning of its depth fade in two
- * resident globals.  The extension changes their loaded values only in the
- * verified main-renderer paths and their downstream world-billboard flush.
- * Exact post-load hooks substitute only the destination GPR consumed by those
- * paths; guest RAM is never changed.  The experiment is therefore safe across
- * scripts, transitions, and savestates.
+ * resident globals.  For one main-renderer call the extension writes the
+ * preset's values into them, so every reader inside the renderer gets them,
+ * the hand-written mesh renderer at 0x80046134 too, which reads both by
+ * absolute address.  The screen effects between the traversal and the visible
+ * loop store the globals themselves, so they run on the game's values and the
+ * preset's are written again after them.  The game's values go back at the renderer's epilogue,
+ * before a save state is taken and at the next entry after a missed epilogue,
+ * so play, memory cards and save states keep them.
  *
  * Both seams are pinned by address (and, at the exit, opcode).  The renderer
  * context, gameplay state, globals, and primitive pointer are validated before
- * any substitution is enabled.  An unbalanced/nested entry is cleaned up and
- * the new invocation is rejected, so a missed seam fails closed.
+ * the globals are written.  An unbalanced/nested entry is cleaned up and the
+ * new invocation is rejected, so a missed seam fails closed.
  */
 
 #include "game/render/far_rendering.h"
@@ -31,6 +34,11 @@
 #include <cstdio>
 #include <cstring>
 #include <mutex>
+#include <unordered_map>
+
+/* render_arena.cpp: the renderer's two fades take the distances drawn with. */
+extern "C" void disruptor_render_arena_publish_fades(void);
+extern "C" int gl_renderer_smooth_fade(void);
 
 namespace {
 
@@ -76,7 +84,12 @@ constexpr uint32_t kRamFirst = 0x80000000u;
 constexpr uint32_t kRamLast = 0x801FFFFFu;
 constexpr uint32_t kMinimumPlausibleFar = 64u;
 constexpr uint32_t kMaximumPlausibleSourceFar = 8192u;
-constexpr uint32_t kMaximumSafeEffectiveFar = 32767u;
+/* The mesh emitter at 0x80046D64 indexes its 512-entry ordering table by (depth + up to 240) / 8, depth up to far + 160. */
+constexpr uint32_t kMaximumSafeEffectiveFar = 3688u;
+/* Far units of mesh kept past the fog's end: the deepest polygon of six levels, 345, less the game's own 160, with room to spare. */
+constexpr uint32_t kEdgeMargin = 256u;
+constexpr uint32_t kPortalFarLoad = 0x8003A914u;
+constexpr int64_t kMaximumSafeFade = 32767;
 constexpr size_t kTimingHistory = 256u;
 
 using Clock = std::chrono::steady_clock;
@@ -100,6 +113,9 @@ struct ActiveFrame {
     uint32_t primitive_after_traversal = 0u;
     uint32_t primitive_before_visible_loop = 0u;
     uint32_t primitive_after_visible_loop = 0u;
+
+    bool rewrite_after_effects = false;
+    bool extended = false;  /* written at some point of this frame: a save waits for its end */
 };
 
 enum class PendingDecisionKind : uint8_t {
@@ -130,11 +146,10 @@ struct DistanceLoadSite {
 };
 
 /*
- * These are all and only the reviewed draw-distance/fade loads in the live
- * main-renderer paths and their downstream world-billboard flush.  Several
- * underlying helpers are callable elsewhere, so each load additionally
- * validates the helper's saved $ra at its exact frame offset before
- * substituting the destination GPR.
+ * These are the reviewed draw-distance/fade loads in the live main-renderer
+ * paths and their downstream world-billboard flush, observed for the
+ * diagnostics.  Several underlying helpers are callable elsewhere, so each
+ * load additionally validates the helper's saved $ra at its exact frame offset.
  */
 constexpr auto kDistanceLoadSites = std::array<DistanceLoadSite, 13>{{
     {0x8003A914u, 0x8F8C04A0u, DistanceKind::Far, 164u,
@@ -164,6 +179,35 @@ constexpr auto kDistanceLoadSites = std::array<DistanceLoadSite, 13>{{
     {0x80043184u, 0x8F820494u, DistanceKind::Fade, 68u,
      {0x80043FE0u, 0u, 0u}, 1u},
 }};
+
+/* Every fade load and how its code finds the range it fades by. Each subtracts the fade start from that range and
+ * works in the game's 768 units: twelve palette rows, or a shade that goes out and the thing with it. */
+enum class RangeFrom : uint8_t {
+    Register,
+    HalfRegister,  /* the backdrop halves a sum after the load */
+    WeaponDepth,   /* (30 - v0) * 30 + 128, worked out after the load */
+};
+struct FogSite {
+    uint32_t pc;
+    RangeFrom from;
+    uint8_t range_register;
+    bool rows;                /* one sprite a packet, its row (range - start) / 64: the renderer blends its fraction */
+    bool packet_in_register;  /* drawn after the renderer from a list, its packet in s5 */
+};
+constexpr auto kFogSites = std::array<FogSite, 8>{{
+    {0x8003B2CCu, RangeFrom::HalfRegister, 3u, false, false},
+    {0x8003BA30u, RangeFrom::Register, 18u, true, false},
+    {0x8003BE40u, RangeFrom::Register, 19u, true, false},
+    {0x8003C628u, RangeFrom::Register, 23u, true, false},
+    {0x8003C878u, RangeFrom::Register, 23u, false, false},
+    {0x8003D28Cu, RangeFrom::Register, 23u, false, false},
+    {0x8003FB0Cu, RangeFrom::WeaponDepth, 2u, false, false},
+    {0x80043184u, RangeFrom::Register, 20u, true, true},
+}};
+constexpr uint32_t kListPacketRegister = 21u;
+constexpr int32_t kFadeRows = 12;
+constexpr int32_t kFadeRowDepth = 64;
+constexpr int32_t kFadeDepth = kFadeRows * kFadeRowDepth;
 
 struct ObjectDecisionSite {
     uint32_t load_pc;
@@ -241,6 +285,37 @@ int g_depth_fade_mode = DISRUPTOR_FAR_RENDERING_DEPTH_FADE_RETAIL;
 ActiveFrame g_frame;
 PendingFarDecision g_pending_decision;
 SessionDiagnostics g_diagnostics;
+
+/* Active only inside an active frame: every way a frame ends gives the values back. */
+struct WrittenDistances {
+    bool active = false;
+    uint32_t source_far = 0u;
+    int32_t source_fade = 0;
+    uint32_t effective_far = 0u;
+    int32_t effective_fade = 0;
+    uint32_t visual_far = 0u;  /* where the fog ends: the written far less the edge margin */
+};
+WrittenDistances g_written;
+
+/* The fog of the last frame the renderer drew in play, kept to the next entry: the list of enemies is drawn after it. */
+struct FrameFog {
+    bool active = false;
+    bool smooth = false;     /* the renderer's smooth fade draws it: the ramp is stretched and shaped, sprites blend rows */
+    int32_t start = 0;       /* where the fog begins */
+    int32_t length = 768;    /* how deep it is, the game's twelve rows spread over it */
+    int exponent = 1;        /* the fog grows with this power of the depth into it */
+};
+FrameFog g_fog;
+int g_fog_exponent = 1;
+uint32_t g_fog_serial = 0u;
+struct PacketFraction {
+    uint32_t serial;
+    uint8_t fraction;
+    bool drawn = false;       /* the packet's words hash to `signature` since its first draw */
+    uint32_t signature = 0u;
+};
+std::unordered_map<uint32_t, PacketFraction> g_packet_fractions;
+uint32_t g_list_shaped = 0u;  /* the list body whose fade load took the frame's fog, by its packet */
 
 bool comparator_active() {
     /* The comparator invokes compiled RECORD and interpreted REPLAY halves.
@@ -349,15 +424,10 @@ bool renderer_ancestry_matches(const CPUState *cpu,
 }
 
 void preset_ratio(int preset, uint32_t *numerator, uint32_t *denominator) {
-    *numerator = 1u;
-    *denominator = 1u;
-    if (preset == DISRUPTOR_FAR_RENDERING_EXTENDED) {
-        *numerator = 5u;
-        *denominator = 4u;
-    } else if (preset == DISRUPTOR_FAR_RENDERING_FAR) {
-        *numerator = 3u;
-        *denominator = 2u;
-    }
+    /* Quarters of the game's own far plane, by preset. */
+    constexpr uint32_t kQuarters[DISRUPTOR_FAR_RENDERING_PRESET_COUNT] = {4u, 5u, 6u, 8u};
+    *numerator = preset >= 0 && preset < DISRUPTOR_FAR_RENDERING_PRESET_COUNT ? kQuarters[preset] : 4u;
+    *denominator = 4u;
 }
 
 bool effective_distances(int preset, int depth_fade_mode,
@@ -375,19 +445,17 @@ bool effective_distances(int preset, int depth_fade_mode,
     uint32_t denominator = 1u;
     preset_ratio(preset, &numerator, &denominator);
 
-    /* Integer nearest rounding is deterministic across hosts.  The clamp is
-     * below signed-16 geometry limits even if a script supplies a non-retail
-     * but still plausible source value. */
+    /* Integer nearest rounding is deterministic across hosts.  A script's far
+     * plane at or beyond the ordering table's limit is not extended. */
     uint64_t scaled =
         (static_cast<uint64_t>(source_far) * numerator + denominator / 2u) /
         denominator;
     scaled = std::clamp<uint64_t>(scaled, source_far,
-                                  kMaximumSafeEffectiveFar);
+                                  std::max<uint64_t>(source_far, kMaximumSafeEffectiveFar));
     const uint64_t delta = scaled - source_far;
     const int64_t shifted_fade = static_cast<int64_t>(source_fade) +
                                  static_cast<int64_t>(delta);
-    if (shifted_fade < -static_cast<int64_t>(kMaximumSafeEffectiveFar) ||
-        shifted_fade > static_cast<int64_t>(kMaximumSafeEffectiveFar)) {
+    if (shifted_fade < -kMaximumSafeFade || shifted_fade > kMaximumSafeFade) {
         return false;
     }
 
@@ -396,12 +464,59 @@ bool effective_distances(int preset, int depth_fade_mode,
      * audited consumers subtract the start, clamp, and use fixed shifts; none
      * divides by (far - fade).  Equal endpoints are therefore safe and remove
      * the visible ramp while preserving the selected clip distance.  The far
-     * value is already capped to signed-16 range. */
+     * value is already capped. */
     *effective_fade =
         depth_fade_mode == DISRUPTOR_FAR_RENDERING_DEPTH_FADE_DISABLED
             ? static_cast<int32_t>(scaled)
             : static_cast<int32_t>(shifted_fade);
     return true;
+}
+
+/* Caller owns g_mutex.  A global the game rewrote meanwhile keeps its new value. */
+void restore_distances() {
+    if (!g_written.active) return;
+    if (psx_mod_read_word(kFarDistance) == g_written.effective_far)
+        psx_mod_write_word(kFarDistance, g_written.source_far);
+    if (psx_mod_read_word(kFadeStart) == static_cast<uint32_t>(g_written.effective_fade))
+        psx_mod_write_word(kFadeStart, static_cast<uint32_t>(g_written.source_fade));
+    g_written = WrittenDistances{};
+}
+
+/* Caller owns g_mutex.  The renderer dissolves the world's edge only under its smooth fade, so only then are the meshes kept past it.
+ * The margin is guest memory, so a peer or the comparator, whose renderer settings may differ, never gets it. */
+bool edge_margin_active() {
+    return gl_renderer_smooth_fade() != 0 && g_depth_fade_mode == DISRUPTOR_FAR_RENDERING_DEPTH_FADE_RETAIL &&
+           !comparator_active() && !psx_netplay_active();
+}
+
+/* Caller owns g_mutex.  Near the ordering table's limit a far plane the preset lengthened gives the margin its room, the game's own never shrinks. */
+void make_room_for_margin(uint32_t source_far, uint32_t *effective_far, int32_t *effective_fade) {
+    constexpr uint32_t kRoom = kMaximumSafeEffectiveFar - kEdgeMargin;
+    if (!edge_margin_active() || *effective_far <= kRoom) return;
+    const uint32_t visual = std::max(source_far, kRoom);
+    *effective_fade -= static_cast<int32_t>(*effective_far - visual);
+    *effective_far = visual;
+}
+
+void write_distances(uint32_t source_far, int32_t source_fade, uint32_t effective_far, int32_t effective_fade) {
+    const uint32_t written_far = edge_margin_active() && effective_far < kMaximumSafeEffectiveFar
+        ? std::min(effective_far + kEdgeMargin, kMaximumSafeEffectiveFar) : effective_far;
+    if (written_far == source_far && effective_fade == source_fade) return;
+    psx_mod_write_word(kFarDistance, written_far);
+    psx_mod_write_word(kFadeStart, static_cast<uint32_t>(effective_fade));
+    g_written = WrittenDistances{true, source_far, source_fade, written_far, effective_fade, effective_far};
+}
+
+/* Caller owns g_mutex.  Under the renderer's smooth fade the fog begins at the game's own start and spreads to the far
+ * plane drawn with, shaped by the chosen power; else it is the game's own ramp from the start drawn with. */
+void set_frame_fog(int32_t game_start, uint32_t far_drawn, int32_t start_drawn) {
+    const bool smooth = gl_renderer_smooth_fade() != 0 && g_depth_fade_mode == DISRUPTOR_FAR_RENDERING_DEPTH_FADE_RETAIL;
+    const int64_t stretched = static_cast<int64_t>(far_drawn) - game_start;
+    g_fog.active = true;
+    g_fog.smooth = smooth && stretched >= kFadeDepth;
+    g_fog.start = g_fog.smooth ? game_start : start_drawn;
+    g_fog.length = g_fog.smooth ? static_cast<int32_t>(stretched) : kFadeDepth;
+    g_fog.exponent = g_fog.smooth ? g_fog_exponent : 1;
 }
 
 void reset_comparison_metrics() {
@@ -582,6 +697,25 @@ void packet_sequence_error() {
 void observe_renderer_boundary(const CPUState *cpu, uint32_t pc) {
     if (!cpu) return;
 
+    /* The screen effects called between these two seams (0x8003FE6C) read the fade start and store it back changed. */
+    if (pc == kAfterTraversal && (g_preset != DISRUPTOR_FAR_RENDERING_RETAIL ||
+                                  g_depth_fade_mode == DISRUPTOR_FAR_RENDERING_DEPTH_FADE_DISABLED || edge_margin_active())) {
+        restore_distances();
+        g_frame.rewrite_after_effects = true;
+    } else if (pc == kBeforeVisibleLoop && g_frame.rewrite_after_effects) {
+        g_frame.rewrite_after_effects = false;
+        const uint32_t source_far = psx_mod_read_word(kFarDistance);
+        const int32_t source_fade = static_cast<int32_t>(psx_mod_read_word(kFadeStart));
+        uint32_t effective_far = 0u;
+        int32_t effective_fade = 0;
+        if (effective_distances(g_preset, g_depth_fade_mode, source_far, source_fade, &effective_far, &effective_fade)) {
+            make_room_for_margin(source_far, &effective_far, &effective_fade);
+            write_distances(source_far, source_fade, effective_far, effective_fade);
+            set_frame_fog(source_fade, effective_far, effective_fade);
+        }
+        g_frame.extended = g_frame.extended || g_written.active;
+    }
+
     if (pc == kAfterTraversal) {
         if (g_frame.saw_after_traversal ||
             g_frame.saw_before_visible_loop ||
@@ -720,6 +854,8 @@ void publish_observer_frame(uint32_t primitive_end,
 /* Caller owns g_mutex.  Only the exact epilogue makes a valid timing/primitive
  * sample.  Every other transition abandons the partial wall-clock span. */
 void abandon_active_frame(bool missed_epilogue) {
+    restore_distances();
+    g_fog.active = false;
     clear_pending_decision(false);
     if (!g_frame.active) return;
     if (missed_epilogue) ++g_diagnostics.missed_epilogues;
@@ -727,6 +863,7 @@ void abandon_active_frame(bool missed_epilogue) {
 }
 
 void finish_active_frame() {
+    restore_distances();
     if (!g_frame.active) {
         clear_pending_decision(false);
         return;
@@ -756,70 +893,84 @@ void force_retail_for_netplay() {
     }
 }
 
-void substitute_distance_load(CPUState *cpu,
-                              const DistanceLoadSite& site) {
-    if (!cpu || comparator_active()) return;
+/* Caller owns g_mutex.  Netplay or the comparator began inside a written frame. */
+bool retire_for_transition() {
+    if (!g_frame.active || (!comparator_active() && !psx_netplay_active())) return false;
+    if (psx_netplay_active())
+        force_retail_for_netplay();
+    else
+        abandon_active_frame(true);
+    return true;
+}
+
+/* Caller owns g_mutex.  The depth `into` the fog, pressed into the game's 768 units by the frame's ramp and power. */
+int64_t pressed_into_fog(int64_t into) {
+    if (into <= 0) return into;
+    if (into >= g_fog.length) return kFadeDepth;
+    int64_t numerator = kFadeDepth, denominator = 1;
+    for (int power = 0; power < g_fog.exponent; ++power) {
+        numerator *= into;
+        denominator *= g_fog.length;
+    }
+    return numerator / denominator;
+}
+
+int fog_row(int64_t pressed) { return static_cast<int>(std::clamp<int64_t>(pressed, 0, kFadeDepth - 1) / kFadeRowDepth); }
+
+uint8_t next_row_share(int64_t pressed) {
+    const int64_t within = std::clamp<int64_t>(pressed, 0, kFadeDepth - 1);
+    return fog_row(pressed) >= kFadeRows - 1 ? 0u : static_cast<uint8_t>(within % kFadeRowDepth * 4);
+}
+
+/* The fade start a fade load hands its code: the one that makes the game's own arithmetic land on the frame's fog. */
+void shape_fade_load(CPUState *cpu, const DistanceLoadSite& site) {
+    const auto fog = std::find_if(kFogSites.begin(), kFogSites.end(), [&](const FogSite& one) { return one.pc == site.pc; });
+    if (fog == kFogSites.end()) return;
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (fog->packet_in_register) g_list_shaped = 0u;
+    if (!g_fog.active || comparator_active() || psx_netplay_active() || !renderer_ancestry_matches(cpu, site)) return;
+    const uint32_t loaded = (site.opcode >> 16u) & 31u;
+    if (loaded == 0u || cpu->gpr[loaded] != psx_mod_read_word(kFadeStart)) return;
+    const int64_t held = static_cast<int32_t>(cpu->gpr[fog->range_register]);
+    const int64_t range = fog->from == RangeFrom::HalfRegister ? held >> 1
+                          : fog->from == RangeFrom::WeaponDepth ? (30 - held) * 30 + 128
+                                                                : held;
+    const int64_t pressed = pressed_into_fog(range - g_fog.start);
+    cpu->gpr[loaded] = static_cast<uint32_t>(range - pressed);
+    const uint32_t packet = fog->packet_in_register ? cpu->gpr[kListPacketRegister] : psx_mod_read_word(kPrimitivePointer);
+    if (fog->packet_in_register) g_list_shaped = packet;
+    if (!fog->rows || !g_fog.smooth) return;
+    if (const uint32_t key = psx_mod_gpu_dma_resolve_address(packet))
+        g_packet_fractions[key] = PacketFraction{g_fog_serial, next_row_share(pressed)};
+}
+
+void observe_distance_load(CPUState *cpu, const DistanceLoadSite& site) {
+    if (!cpu) return;
 
     std::lock_guard<std::mutex> lock(g_mutex);
-    const bool needs_far_substitution =
-        g_preset != DISRUPTOR_FAR_RENDERING_RETAIL;
-    const bool needs_fade_substitution =
-        needs_far_substitution ||
-        g_depth_fade_mode ==
-            DISRUPTOR_FAR_RENDERING_DEPTH_FADE_DISABLED;
-    if ((site.kind == DistanceKind::Far && !needs_far_substitution) ||
-        (site.kind == DistanceKind::Fade && !needs_fade_substitution)) {
+    if (!g_written.active) return;
+    const bool far_load = site.kind == DistanceKind::Far;
+    const uint32_t loaded = (site.opcode >> 16u) & 31u;
+    const uint32_t written_value = far_load ? g_written.effective_far : static_cast<uint32_t>(g_written.effective_fade);
+    const uint32_t game_value = far_load ? g_written.source_far : static_cast<uint32_t>(g_written.source_fade);
+    if (retire_for_transition()) {
+        if (loaded != 0u && cpu->gpr[loaded] == written_value) cpu->gpr[loaded] = game_value;
         return;
     }
-    if (psx_netplay_active()) {
-        force_retail_for_netplay();
-        return;
-    }
-    if (!renderer_ancestry_matches(cpu, site) ||
-        !plausible_live_gameplay()) {
-        return;
-    }
-
-    /* Re-read both retail globals at each exact load.  This deliberately does
-     * not depend on the entry metrics window: after a savestate resumes inside
-     * a helper, the next audited load still receives the correct value. */
-    const uint32_t source_far = psx_mod_read_word(kFarDistance);
-    const int32_t source_fade =
-        static_cast<int32_t>(psx_mod_read_word(kFadeStart));
-    uint32_t effective_far = 0u;
-    int32_t effective_fade = 0;
-    if (!effective_distances(g_preset, g_depth_fade_mode,
-                             source_far, source_fade,
-                             &effective_far, &effective_fade)) {
+    if (written_value == game_value || loaded == 0u || !renderer_ancestry_matches(cpu, site)) return;
+    if (cpu->gpr[loaded] != written_value) {
+        /* $gp did not address the canonical global, or the game rewrote it inside the renderer. */
         ++g_diagnostics.invalid_globals;
         return;
     }
 
-    const uint32_t destination = (site.opcode >> 16u) & 31u;
-    if (destination == 0u) return;
-    const uint32_t expected_source =
-        site.kind == DistanceKind::Far
-            ? source_far
-            : static_cast<uint32_t>(source_fade);
-    if (cpu->gpr[destination] != expected_source) {
-        /* This also fails closed if $gp did not address the canonical global
-         * or self-modified code changed the effective load source. */
-        ++g_diagnostics.invalid_globals;
-        return;
-    }
-    cpu->gpr[destination] =
-        site.kind == DistanceKind::Far
-            ? effective_far
-            : static_cast<uint32_t>(effective_fade);
-
-    g_diagnostics.source_far = source_far;
-    g_diagnostics.source_fade = source_fade;
-    g_diagnostics.effective_far = effective_far;
-    g_diagnostics.effective_fade = effective_fade;
     ++g_diagnostics.substituted_loads;
-    if (site.kind == DistanceKind::Far) {
+    if (far_load) {
         ++g_diagnostics.far_load_substitutions;
-        arm_pending_decision(site.pc, source_far, effective_far);
+        /* Rooms are walked to the margin, objects stop where the fog ends. */
+        const bool object = site.pc != kPortalFarLoad;
+        if (object) cpu->gpr[loaded] = g_written.visual_far;
+        arm_pending_decision(site.pc, g_written.source_far, object ? g_written.visual_far : g_written.effective_far);
     } else {
         ++g_diagnostics.fade_load_substitutions;
     }
@@ -847,12 +998,13 @@ bool observer_site(uint32_t pc, uint32_t opcode) {
 }
 
 void observe_instruction(CPUState *cpu, uint32_t pc, uint32_t opcode) {
-    if (!cpu || !observer_site(pc, opcode) || comparator_active() ||
-        psx_netplay_active()) {
-        return;
-    }
+    if (!cpu || !observer_site(pc, opcode)) return;
 
     std::lock_guard<std::mutex> lock(g_mutex);
+    if (comparator_active() || psx_netplay_active()) {
+        retire_for_transition();
+        return;
+    }
     if (!g_frame.active) return;
 
     if (pc == kTraversalDepthLoad) {
@@ -990,6 +1142,13 @@ extern "C" int disruptor_far_rendering_netplay_blocked(void) {
     return 1;
 }
 
+extern "C" void disruptor_far_rendering_drawn_distances(uint32_t *far_distance, int32_t *fade_start) {
+    if (!far_distance || !fade_start) return;
+    *far_distance = psx_mod_read_word(kFarDistance);
+    if (g_written.active && *far_distance == g_written.effective_far) *far_distance = g_written.visual_far;
+    *fade_start = static_cast<int32_t>(psx_mod_read_word(kFadeStart));
+}
+
 extern "C" int disruptor_far_rendering_get_diagnostics(
         DisruptorFarRenderingDiagnostics *out, uint32_t capacity) {
     /* The version and full structure size occupy the first eight bytes.  A
@@ -1099,6 +1258,9 @@ extern "C" int disruptor_far_rendering_get_diagnostics(
 extern "C" void disruptor_far_rendering_reset_session(void) {
     std::lock_guard<std::mutex> lock(g_mutex);
     abandon_active_frame(false);
+    g_fog = FrameFog{};
+    g_fog_exponent = 1;
+    g_packet_fractions.clear();
     g_preset = DISRUPTOR_FAR_RENDERING_RETAIL;
     g_depth_fade_mode = DISRUPTOR_FAR_RENDERING_DEPTH_FADE_RETAIL;
     g_frame = ActiveFrame{};
@@ -1108,24 +1270,103 @@ extern "C" void disruptor_far_rendering_reset_session(void) {
 
 extern "C" void disruptor_far_rendering_abandon_metrics(void) {
     std::lock_guard<std::mutex> lock(g_mutex);
+    g_written = WrittenDistances{};
     g_frame = ActiveFrame{};
     g_pending_decision = PendingFarDecision{};
+    g_fog.active = false;
+    g_packet_fractions.clear();
 }
+
+extern "C" void disruptor_far_rendering_state_saving(void) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    restore_distances();
+}
+
+extern "C" int disruptor_far_rendering_edge_margin(void) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    return edge_margin_active() ? 1 : 0;
+}
+
+extern "C" void disruptor_far_rendering_fog_ramp(int32_t *start, int32_t *length, int *exponent) {
+    if (!start || !length || !exponent) return;
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (g_fog.active && g_fog.smooth) {
+        *start = g_fog.start;
+        *length = g_fog.length;
+        *exponent = g_fog.exponent;
+        return;
+    }
+    *start = static_cast<int32_t>(psx_mod_read_word(kFadeStart));
+    *length = kFadeDepth;
+    *exponent = 1;
+}
+
+extern "C" void disruptor_far_rendering_set_fog_exponent(int exponent) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    g_fog_exponent = std::clamp(exponent, 1, 3);
+}
+
+extern "C" int disruptor_far_rendering_get_fog_exponent(void) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    return g_fog_exponent;
+}
+
+extern "C" int disruptor_far_rendering_packet_fraction(uint32_t resolved_packet, uint32_t signature) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    const auto found = g_packet_fractions.find(resolved_packet);
+    if (found == g_packet_fractions.end()) return -1;
+    PacketFraction& share = found->second;
+    if (!share.drawn) {
+        share.drawn = true;
+        share.signature = signature;
+    } else if (share.signature != signature) {
+        g_packet_fractions.erase(found);
+        return -1;
+    }
+    return share.fraction;
+}
+
+extern "C" int disruptor_far_rendering_list_fade_rows(uint32_t packet, int32_t from, int32_t to, int32_t *rows) {
+    if (!rows) return 0;
+    std::lock_guard<std::mutex> lock(g_mutex);
+    if (packet == 0u || packet != g_list_shaped || !g_fog.active) return 0;
+    const int64_t pressed = pressed_into_fog(int64_t{to} - g_fog.start);
+    *rows = fog_row(pressed) - fog_row(pressed_into_fog(int64_t{from} - g_fog.start));
+    const auto found = g_fog.smooth ? g_packet_fractions.find(psx_mod_gpu_dma_resolve_address(packet)) : g_packet_fractions.end();
+    if (found != g_packet_fractions.end()) found->second.fraction = next_row_share(pressed);
+    return 1;
+}
+
+extern "C" int disruptor_far_rendering_save_deferred(void) {
+    std::lock_guard<std::mutex> lock(g_mutex);
+    return g_frame.active && g_frame.extended ? 1 : 0;
+}
+
+static void begin_renderer_frame(CPUState *cpu);
 
 extern "C" void disruptor_far_rendering_renderer_entry(
         CPUState *cpu, uint32_t address) {
     if (!cpu || address != kRendererEntry) return;
+    begin_renderer_frame(cpu);
+    if (!comparator_active()) disruptor_render_arena_publish_fades();
+}
 
+static void begin_renderer_frame(CPUState *cpu) {
     if (comparator_active()) {
         /* A comparator transition cannot create a new sample, but it must
          * still retire a pre-existing override if its epilogue was missed. */
         std::lock_guard<std::mutex> lock(g_mutex);
         if (g_frame.active) abandon_active_frame(true);
+        g_fog.active = false;
+        g_packet_fractions.clear();
         return;
     }
 
     std::lock_guard<std::mutex> lock(g_mutex);
     ++g_diagnostics.renderer_entries;
+    g_fog.active = false;
+    ++g_fog_serial;
+    std::erase_if(g_packet_fractions, [](const auto& entry) { return entry.second.serial + 1u < g_fog_serial; });
 
     if (psx_netplay_active()) {
         if (g_frame.active) {
@@ -1186,6 +1427,7 @@ extern "C" void disruptor_far_rendering_renderer_entry(
         return;
     }
 
+    make_room_for_margin(source_far, &effective_far, &effective_fade);
     g_diagnostics.source_far = source_far;
     g_diagnostics.source_fade = source_fade;
     g_diagnostics.effective_far = effective_far;
@@ -1197,6 +1439,9 @@ extern "C" void disruptor_far_rendering_renderer_entry(
     g_frame.active = true;
     g_frame.primitive_start = primitive_start;
     g_frame.started = Clock::now();
+    write_distances(source_far, source_fade, effective_far, effective_fade);
+    g_frame.extended = g_written.active;
+    set_frame_fog(source_fade, effective_far, effective_fade);
 }
 
 extern "C" void disruptor_far_rendering_instruction_hook(
@@ -1219,9 +1464,12 @@ extern "C" void disruptor_far_rendering_instruction_hook(
 
     if (const DistanceLoadSite *site =
             find_distance_load_site(pc, instruction)) {
-        substitute_distance_load(cpu, *site);
+        observe_distance_load(cpu, *site);
+        if (site->kind == DistanceKind::Fade) shape_fade_load(cpu, *site);
         return;
     }
 
     observe_instruction(cpu, pc, instruction);
+    if (pc == kBeforeVisibleLoop && instruction == kBeforeVisibleLoopOpcode && !comparator_active())
+        disruptor_render_arena_publish_fades();
 }

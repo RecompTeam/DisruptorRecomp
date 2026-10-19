@@ -1,5 +1,5 @@
 diff --git a/recompiler/src/config_loader.h b/recompiler/src/config_loader.h
-index 4761b920f677e251b60550fdaf44427bdcd1659b..2f8f108716229c5d4f2adf04a01e4508181103b7 100644
+index 4761b920f677e251b60550fdaf44427bdcd1659b..ff8ff856b327a8d30aca7d889565cb272551621d 100644
 --- a/recompiler/src/config_loader.h
 +++ b/recompiler/src/config_loader.h
 @@ -26,6 +26,9 @@
@@ -42,7 +42,16 @@ index 4761b920f677e251b60550fdaf44427bdcd1659b..2f8f108716229c5d4f2adf04a01e4508
  };
  
  // Aspect-aware horizontal participation cone. The exact compare sites are
-@@ -309,10 +335,13 @@
+@@ -125,6 +151,8 @@
+     // APPLY (capture still runs). From [localization].language or [runtime].
+     // language; env PSX_LANG overrides at runtime. Also the launcher default.
+     std::string           language = "en";
++    // [localization].capture = false stops the per-dispatch inventory scan for a title with no text to capture.
++    bool                  text_capture = true;
+ 
+     // Optional launcher-facing language menu. When a game declares
+     // [localization].languages, the launcher shows a "Localization" dropdown of
+@@ -309,10 +337,13 @@
  
      // ---- [video] block — visual enhancement options ----
      // supersampling: internal-resolution SSAA factor (per axis). 1 = native
@@ -57,7 +66,7 @@ index 4761b920f677e251b60550fdaf44427bdcd1659b..2f8f108716229c5d4f2adf04a01e4508
  
      // antialiasing: when true the present path uses linear filtering when
      // scaling the framebuffer to the window (smooths the supersample
-@@ -460,6 +489,10 @@
+@@ -460,6 +491,10 @@
      // choice is pointless. Distinct from lock_mode (which only hides the pad-mode
      // segment but keeps the device dropdown). Default false.
      bool                  controller_lock_device = false;
@@ -68,7 +77,7 @@ index 4761b920f677e251b60550fdaf44427bdcd1659b..2f8f108716229c5d4f2adf04a01e4508
  
      // deadzone: default analog-stick deadzone in raw SDL axis units (0..32767).
      // Applied both to the stick->d-pad press threshold and the analog-axis centre
-@@ -646,6 +679,9 @@
+@@ -646,6 +681,9 @@
      // default, so projects that do not opt in emit no callback overhead.
      std::vector<uint32_t> mod_function_entry_funcs;
  
@@ -78,7 +87,7 @@ index 4761b920f677e251b60550fdaf44427bdcd1659b..2f8f108716229c5d4f2adf04a01e4508
      // [recompiler] hot_funcs: guest addresses that get __attribute__((hot))
      // on their generated C bodies (profile/host locality; no guest semantics).
      std::vector<uint32_t> hot_funcs;
-@@ -695,6 +731,12 @@
+@@ -695,6 +733,12 @@
      // Explicit signed lower-bound sites (`slti rt, sx, -W`). The threshold is
      // moved left by the live reveal margin. Empty by default; regen required.
      std::vector<uint32_t> ws_cull_slti_lower_sites;
@@ -91,7 +100,7 @@ index 4761b920f677e251b60550fdaf44427bdcd1659b..2f8f108716229c5d4f2adf04a01e4508
      // [widescreen.cull] bltz_sites — explicit signed LEFT-edge widen sites
      // (`bltz rs, reject` -> psx_ws_cull_bltz), the counterpart to slti_sites.
      // detect_cull_bltz_sites only classifies left-edge bltz for functions
-@@ -730,6 +772,10 @@
+@@ -730,6 +774,10 @@
      std::vector<WidescreenCullKeepSite> ws_cull_keep_sites;
      // Exact 12-bit angular half-extents used by terrain-cell frusta.
      std::vector<WidescreenAngleSite> ws_cull_angle_sites;
@@ -102,7 +111,7 @@ index 4761b920f677e251b60550fdaf44427bdcd1659b..2f8f108716229c5d4f2adf04a01e4508
      // Full-word-guarded model-participation cosine compares widened only in
      // the camera-horizontal plane. Empty/default is completely inert.
      WidescreenAspectConeConfig ws_aspect_cone;
-@@ -944,17 +990,21 @@
+@@ -944,17 +992,21 @@
      uint32_t ws_bg2d_packet_cap       = 1000;
  };
  
@@ -126,7 +135,7 @@ index 4761b920f677e251b60550fdaf44427bdcd1659b..2f8f108716229c5d4f2adf04a01e4508
      // Set when the file existed but failed to parse as TOML: every field below
      // is defaults and the caller must warn loudly — silently dropping a user's
      // hand-edited settings looks like the settings "don't work", and a later
-@@ -963,7 +1013,7 @@
+@@ -963,7 +1015,7 @@
  
      // [video]
      bool has_renderer       = false; int  renderer       = 0; // 0=software,1=opengl
@@ -135,7 +144,7 @@ index 4761b920f677e251b60550fdaf44427bdcd1659b..2f8f108716229c5d4f2adf04a01e4508
      // Window size: width in px; height is always width*3/4 (PSX 4:3). Applies to
      // both the launcher and the emulator window so they boot at the same size.
      bool has_window_width   = false; int  window_width   = 1280; // -> 1280x960
-@@ -995,6 +1045,8 @@
+@@ -995,6 +1047,8 @@
      bool has_vsync             = false; int  vsync             = 1;
      bool has_frame_interpolation = false; bool frame_interpolation = false;
      bool has_frame_interpolation_fps = false; int frame_interpolation_fps = 0;
@@ -144,7 +153,7 @@ index 4761b920f677e251b60550fdaf44427bdcd1659b..2f8f108716229c5d4f2adf04a01e4508
      // [launcher] — when true, boot straight into the game and skip the GUI
      // launcher window (mirrors snesrecomp's SkipLauncher). Overridable per-run:
      // `--launcher` forces the GUI back on; `PSX_NO_LAUNCHER=1` forces it off.
-@@ -1008,6 +1060,9 @@
+@@ -1008,6 +1062,9 @@
      bool has_adaptive_view  = false; bool adaptive_view  = false;
      // [audio]
      bool has_spu_hq         = false; bool spu_hq         = false;
@@ -154,7 +163,7 @@ index 4761b920f677e251b60550fdaf44427bdcd1659b..2f8f108716229c5d4f2adf04a01e4508
      // [bios] / [disc] / [memcard]
      bool has_bios_path      = false; std::filesystem::path bios_path;
      bool has_disc_path      = false; std::filesystem::path disc_path;
-@@ -1043,6 +1098,10 @@
+@@ -1043,6 +1100,10 @@
      bool has_parappa_timing_mode = false; std::string parappa_timing_mode = "stock";
      bool has_parappa_timing_extra_early = false; int parappa_timing_extra_early = 0;
      bool has_parappa_timing_extra_late = false; int parappa_timing_extra_late = 0;
@@ -165,7 +174,7 @@ index 4761b920f677e251b60550fdaf44427bdcd1659b..2f8f108716229c5d4f2adf04a01e4508
  };
  
  // GameOptions — the game's OWN native OPTION-screen settings, declared in a
-@@ -1084,7 +1143,7 @@
+@@ -1084,7 +1145,7 @@
  // never throws.
  UserSettings load_user_settings(const std::filesystem::path& path);
  

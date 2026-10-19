@@ -11,6 +11,8 @@ runtime/CMakeLists.txt
 runtime/include/crash_trace.h
 runtime/include/dirty_ram_interp.h
 +runtime/include/game_host.h
+runtime/include/psx_sdl_audio.h
+runtime/include/text_xlate.h
 +runtime/include/user_dir.h
 +runtime/include/gte_precision.h
 runtime/include/gpu.h
@@ -38,11 +40,13 @@ runtime/include/interrupts.h
 +runtime/include/iso_overlay.h
 runtime/include/mod_memory.h
 runtime/include/psx_cyc.h
++runtime/include/psx_cyc_overclock.h
 runtime/include/savestate.h
 +runtime/include/save_point.h
 runtime/include/overlay_dispatch_preamble.c.inc
 runtime/include/ws_aspect_cone_math.h
 runtime/src/boot_state.c
+runtime/src/psx_sdl_audio.cpp
 runtime/src/savestate.c
 runtime/src/crash_trace.c
 runtime/src/dirty_ram_interp.c
@@ -58,6 +62,8 @@ runtime/src/main.cpp
 runtime/src/memory.c
 runtime/src/overlay_loader.c
 runtime/src/psx_cycles.c
+runtime/src/psx_icache.c
+runtime/src/text_xlate.cpp
 runtime/src/traps.c
 runtime/src/ws_aspect_cone_math.c
 runtime/tests/test_ws_aspect_cone_math.c

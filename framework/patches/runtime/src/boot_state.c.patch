@@ -1,5 +1,5 @@
 diff --git a/runtime/src/boot_state.c b/runtime/src/boot_state.c
-index b4acb4175df98cced308fbcc84e64d56a9b98c0c..df1dcc273b2c16aff2485ada8fb66dc5e9b9ae37 100644
+index b4acb4175df98cced308fbcc84e64d56a9b98c0c..6bdb7c85a69661a9b740e54879485d9bb29b088d 100644
 --- a/runtime/src/boot_state.c
 +++ b/runtime/src/boot_state.c
 @@ -1,6 +1,13 @@
@@ -53,7 +53,7 @@ index b4acb4175df98cced308fbcc84e64d56a9b98c0c..df1dcc273b2c16aff2485ada8fb66dc5
      fclose(f);
      if (!ok)
          remove(path);
-@@ -271,6 +292,19 @@
+@@ -271,6 +292,20 @@
              if (!pst_r_u32(&r, &cpu->gte_ctrl[i])) return 0;
          return 1;
      }
@@ -64,8 +64,9 @@ index b4acb4175df98cced308fbcc84e64d56a9b98c0c..df1dcc273b2c16aff2485ada8fb66dc5
 +        uint32_t shift, carry;
 +        if (len != 8) return 0;
 +        pst_r_init(&r, p, len);
-+        /* A wait drops the divider and leaves the carry for the next frame, so the carry is not held to the divider. */
-+        if (!pst_r_u32(&r, &shift) || !pst_r_u32(&r, &carry) || shift > 31u || (carry >> 31) != 0u) return 0;
++        /* A carry stays under its divider. With none any carry loads: older builds left one there. */
++        if (!pst_r_u32(&r, &shift) || !pst_r_u32(&r, &carry) || shift > 31u || (carry >> 31) != 0u ||
++            (shift != 0u && carry >= (1u << shift))) return 0;
 +        g_psx_cyc_overclock_shift = shift;
 +        g_psx_cyc_overclock_carry = carry;
 +        return 1;
@@ -73,7 +74,7 @@ index b4acb4175df98cced308fbcc84e64d56a9b98c0c..df1dcc273b2c16aff2485ada8fb66dc5
      case BS_SEC_RAM:
          if (len != RAM_SIZE) return 0;
          memcpy(memory_get_ram_ptr(), p, RAM_SIZE);
-@@ -424,6 +458,10 @@
+@@ -424,6 +459,10 @@
  
      if (!ok || (seen & required) != required)
          return 0;

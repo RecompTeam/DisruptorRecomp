@@ -1,0 +1,14 @@
+diff --git a/runtime/include/text_xlate.h b/runtime/include/text_xlate.h
+index 7cc4290060ebfa345d300ff3f3d5e34058fc92c3..702b9a3501fa0d6a5a34d7c390a07a8f12bb232d 100644
+--- a/runtime/include/text_xlate.h
++++ b/runtime/include/text_xlate.h
+@@ -63,6 +63,9 @@
+  * it needs. */
+ void text_xlate_init(const char* project_root, const char* language);
+ 
++/* The game's [localization].capture: 0 stops the capture inventory. PSX_XLATE_CAPTURE, when set, wins. */
++void text_xlate_set_capture(int enabled);
++
+ /* Switch the active language and reload the translation tables. For the launcher:
+  * text_xlate_init runs at config-load (before the launcher), so the launcher's
+  * chosen language is re-applied through this after it returns. "jp"/"off"/""

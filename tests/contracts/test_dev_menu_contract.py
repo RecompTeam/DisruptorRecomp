@@ -348,7 +348,6 @@ for forbidden in (
     "draw_far_rendering_controls",
     "gte_ws_get_sz_stats",
     "disruptor_far_rendering_get_diagnostics",
-    "disruptor_far_rendering_set_preset",
     "disruptor_far_rendering_set_depth_fade_mode",
     "PREF_PRECISE_CAMERA",
     "mark_precise_camera",
@@ -438,23 +437,11 @@ require("disruptor_far_rendering_reset_session();" in
         "disruptor_far_rendering_reset_session();" in
         function_body(menu, "on_runtime_shutdown"),
         "far-rendering presets must reset at both session boundaries")
-for forbidden in (
-    "has_draw_distance",
-    "has_far_rendering",
-    "has_depth_fade",
-    "draw_distance_preset",
-    "far_rendering_preset",
-    "depth_fade_mode",
-):
+for forbidden in ("has_depth_fade", "depth_fade_mode"):
     require(forbidden not in config_h and forbidden not in config_cpp,
-            f"experimental draw distance must remain outside persistence: {forbidden}")
-require("mark_draw_distance" not in menu and
-        "mark_far_rendering" not in menu and
-        "mark_depth_fade" not in menu and
-        "PREF_DRAW_DISTANCE" not in menu and
-        "PREF_FAR_RENDERING" not in menu and
-        "PREF_DEPTH_FADE" not in menu,
-        "experimental draw distance must not enter the menu preference layer")
+            f"the depth fade switch must remain outside persistence: {forbidden}")
+require("mark_depth_fade" not in menu and "PREF_DEPTH_FADE" not in menu,
+        "the depth fade switch must not enter the menu preference layer")
 
 for token in (
     "has_frame_interpolation_blend",
@@ -769,7 +756,7 @@ shared_keys = set(re.findall(r'\b(?:toggle|choice|slider)(?:<[^>]*>)?\(\s*"([\w.
 staged_keys = set(re.findall(r'\bmark\("([\w.]+)"', menu)) | set(
     re.findall(r'g_preferences\.changed\.insert\(\s*find_option\("([\w.]+)"\)\)', menu))
 applied_keys = set(re.findall(r'\bchanged\("([\w.]+)"\)', function_body(menu, "apply_pending_preferences")))
-require(len(shared_keys) == 33 and staged_keys == shared_keys and applied_keys == shared_keys and
+require(len(shared_keys) == 35 and staged_keys == shared_keys and applied_keys == shared_keys and
         set(re.findall(r'\bfind_option\("([\w.]+)"', menu)) <= shared_keys,
         "the menu must stage every shared option, apply every one it staged and name no key the table lacks")
 require('void mark_vsync(int value) { mark("video.vsync", value + 1); }\n' in menu and
@@ -835,10 +822,12 @@ HELPERS = (
     "\n"
     "bool option_list(const char *key, int *index, size_t skipped) {\n"
     "    const Option &option = *find_option(key);\n"
-    "    const auto shown = option.choices.subspan(skipped);\n"
+    "    const auto offered = option.choices.first(std::min(option.choices.size(), static_cast<size_t>(option.highest + 1)));\n"
+    "    const auto shown = offered.subspan(std::min(skipped, offered.size()));\n"
     "    const bool moved = ImGui::Combo(option.label, index, shown.data(),\n"
     "                                    static_cast<int>(shown.size()));\n"
     "    disruptor::ui::hint(option.hint);\n"
+    "    if (option.notice) ImGui::TextColored(ImVec4(0.878f, 0.643f, 0.227f, 1.0f), \"%s\", option.notice);\n"
     "    return moved;\n"
     "}\n"
 )
@@ -848,7 +837,7 @@ drawn_keys = set(re.findall(r'\boption_(?:toggle|slider|list)\("([\w.]+)"', menu
     re.findall(r'find_option\("([\w.]+)"\)->label', menu))
 present = read("src/game/frame/present_rate.cpp")
 require(HELPERS in menu and "bool option_list(const char *key, int *index, size_t skipped = 0);\n" in menu and
-        len(shared_labels) == 33 and drawn_keys == shared_keys and
+        len(shared_labels) == 35 and drawn_keys == shared_keys and
         not [text for text in [*shared_labels, *shared_choices] if f'"{text}"' in menu + present] and
         "    static constexpr int kScaleCount = 8;\n" in menu and
         '"1x (native)", "2x", "3x", "4x", "5x", "6x", "7x", "8x"' in options and
@@ -875,6 +864,7 @@ LIVE = (
     "        return gpu_geometry_correction_enabled() != 0;\n"
     '    if (key == "disruptor.mouse_aim") return disruptor_mouse_aim_enabled() != 0;\n'
     '    if (key == "disruptor.ambient_occlusion") return gl_renderer_ssao() != 0;\n'
+    '    if (key == "disruptor.smooth_fade") return gl_renderer_smooth_fade() != 0;\n'
     '    if (key == "disruptor.vertical_look") return disruptor_mouse_vertical_look_enabled() != 0;\n'
     '    if (key == "disruptor.separate_vertical_speed")\n'
     "        return disruptor_mouse_vertical_follows_horizontal() == 0;\n"
@@ -896,12 +886,12 @@ table_rows = re.split(r"\n    (?=toggle[<(]|choice\(|slider\()", options[options
 needing = {}
 for row in table_rows:
     row = row.split("\n};")[0]
-    ending = re.search(r"\b(needs_\w+)\),?\s*$", row)
+    ending = re.search(r"\b(needs_\w+)(?:, offered_now,\s*\"[^\"]*\")?\),?\s*$", row)
     if ending:
         needing[re.search(r'"([\w.]+)"', row)[1]] = needs_lists[ending[1]]
 asked = set(re.findall(r'\bapplies\("([\w.]+)"\)', menu))
 told = set(re.findall(r'key == "([\w.]+)"', function_body(menu, "prerequisite_on")))
-require(RULE in options and LIVE in menu and len(needing) == 14 and
+require(RULE in options and LIVE in menu and len(needing) == 15 and
         needing["disruptor.high_precision_camera"] == ["disruptor.mouse_aim", "disruptor.geometry_correction"] and
         asked == set(needing) - {"video.frame_interpolation_fps"} and
         told == {key for keys in needing.values() for key in keys} - {"video.frame_interpolation"} and
@@ -926,7 +916,7 @@ def greyed_by_own_rule(source: str, key: str) -> bool:
 
 
 greyed = asked - {"video.frame_interpolation"}
-require(len(greyed) == 12 and all(greyed_by_own_rule(menu, key) for key in greyed) and
+require(len(greyed) == 13 and all(greyed_by_own_rule(menu, key) for key in greyed) and
         not greyed_by_own_rule(menu.replace("    if (!textures_apply) ImGui::BeginDisabled();\n",
                                             "    if (false) ImGui::BeginDisabled();\n"), "disruptor.perspective_textures") and
         not greyed_by_own_rule(menu.replace('applies("disruptor.gap_filling")', 'applies("disruptor.vsync")'),
@@ -963,7 +953,7 @@ shared_hints = [
         r'\b(?:toggle(?:<[^>]*>)?|choice|slider)\(\s*"[\w.]+",\s*"[^"]+",\s*-?\d+,\s*((?:"(?:[^"\\]|\\.)*"\s*)+)', options)
 ]
 written = "".join(re.findall(LITERAL, menu + present))
-require(HINT in read("src/game/ui/hint.h") and len(shared_hints) == 33 and
+require(HINT in read("src/game/ui/hint.h") and len(shared_hints) == 35 and
         all(20 <= len(text) <= 240 for text in shared_hints) and
         not [text for text in shared_hints if text[:32] in written] and
         "Needs mouse aim and exact geometry." in shared_hints[

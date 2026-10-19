@@ -118,18 +118,20 @@ require(
     "             pst_w_u32(&w, g_psx_cyc_overclock_carry) &&\n"
     "             write_section(f, BS_SEC_CPU_COST, cost, sizeof cost);\n"
     in state
-    and "        if (!pst_r_u32(&r, &shift) || !pst_r_u32(&r, &carry) || shift > 31u || (carry >> 31) != 0u) return 0;\n"
+    and "        if (!pst_r_u32(&r, &shift) || !pst_r_u32(&r, &carry) || shift > 31u || (carry >> 31) != 0u ||\n"
+    "            (shift != 0u && carry >= (1u << shift))) return 0;\n"
     "        g_psx_cyc_overclock_shift = shift;\n"
     "        g_psx_cyc_overclock_carry = carry;\n"
     in state
     and "BS_SEC_CPU_COST" not in state.split("const uint32_t required =")[1].split(";")[0]
     and "        const uint32_t total = g_psx_cyc_overclock_carry + cycles;\n" in cycles
     and "        cycles = total >> g_psx_cyc_overclock_shift;\n" in cycles
-    and "            g_psx_cyc_overclock_shift =\n                g_cpu_shift.load(std::memory_order_relaxed);" in rate
-    and "    if (waits) g_psx_cyc_overclock_shift = 0u;\n" in rate
-    and "g_psx_cyc_overclock_carry" not in rate,
-    "a state holds the instruction cost divider frame unlock sets and its carry, a carry a wait left without a divider "
-    "loads, and a state without the two still loads",
+    and "        if (unlocked) set_cpu_shift(g_cpu_shift.load(std::memory_order_relaxed));\n" in rate
+    and "    if (waits) set_cpu_shift(0u);\n" in rate
+    and rate.count("g_psx_cyc_overclock_carry") == 1
+    and "    if (shift == g_psx_cyc_overclock_shift) return;\n    g_psx_cyc_overclock_shift = shift;\n    g_psx_cyc_overclock_carry = 0u;\n}\n" in rate,
+    "a state holds the instruction cost divider frame unlock sets and its carry, a carry over its divider is refused, frame "
+    "unlock drops the carry only where the divider changes, and a state without the two still loads",
 )
 
 print("Disruptor loaded state source contract: PASS")

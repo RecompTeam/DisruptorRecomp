@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <iterator>
 #include <stdexcept>
 #include <string>
 #include <thread>
@@ -111,6 +112,10 @@ int main() {
         written.occlusion_strength = 130;
         written.has_smooth_fade = true;
         written.smooth_fade = true;
+        written.has_draw_distance = true;
+        written.draw_distance = 125;
+        written.has_fog_shape = true;
+        written.fog_shape = 2;
         written.has_multisampling = true;
         written.multisampling = 8;
         written.has_sample_shading = true;
@@ -180,6 +185,8 @@ int main() {
                     loaded.has_occlusion_reach && loaded.occlusion_reach == 240 &&
                     loaded.has_occlusion_strength && loaded.occlusion_strength == 130 &&
                     loaded.has_smooth_fade && loaded.smooth_fade &&
+                    loaded.has_draw_distance && loaded.draw_distance == 125 &&
+                    loaded.has_fog_shape && loaded.fog_shape == 2 &&
                     loaded.has_multisampling && loaded.multisampling == 8 &&
                     loaded.has_sample_shading && loaded.sample_shading &&
                     loaded.has_downscale_averaging && loaded.downscale_averaging &&
@@ -265,6 +272,39 @@ int main() {
                 PSXRecompV4::load_user_settings(scale_path);
             require(!rejected.parse_error && !rejected.has_supersampling,
                     "out-of-range internal scale was accepted on load");
+        }
+        UserSettings alone;
+        alone.has_draw_distance = true;
+        alone.draw_distance = 150;
+        const bool alone_saved = PSXRecompV4::save_user_settings(scale_path, alone);
+        const UserSettings alone_loaded = PSXRecompV4::load_user_settings(scale_path);
+        require(alone_saved && alone_loaded.has_draw_distance && alone_loaded.draw_distance == 150,
+                "a draw distance saved alone did not round-trip");
+        for (int dropped : {250, 300}) {
+            {
+                std::ofstream out(scale_path, std::ios::trunc);
+                out << "[disruptor]\ndraw_distance = " << dropped << "\n";
+            }
+            const UserSettings kept = PSXRecompV4::load_user_settings(scale_path);
+            require(!kept.parse_error && kept.has_draw_distance && kept.draw_distance == 200,
+                    "a draw distance of a dropped choice did not load as the longest kept");
+        }
+        for (int invalid_distance : {0, 110, 350}) {
+            {
+                std::ofstream out(scale_path, std::ios::trunc);
+                out << "[disruptor]\ndraw_distance = " << invalid_distance << "\n";
+            }
+            const UserSettings rejected = PSXRecompV4::load_user_settings(scale_path);
+            require(!rejected.parse_error && !rejected.has_draw_distance,
+                    "a draw distance not in the list was accepted on load");
+            UserSettings odd;
+            odd.has_draw_distance = true;
+            odd.draw_distance = invalid_distance;
+            const bool odd_saved = PSXRecompV4::save_user_settings(scale_path, odd);
+            std::ifstream written_back(scale_path);
+            const std::string text((std::istreambuf_iterator<char>(written_back)), std::istreambuf_iterator<char>());
+            require(odd_saved && text.find("draw_distance") == std::string::npos,
+                    "a draw distance not in the list was written");
         }
 
         replaced.has_aspect_ratio = true;

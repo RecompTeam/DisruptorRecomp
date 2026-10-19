@@ -110,6 +110,16 @@ extern "C" void disruptor_language_settle(void) {
 
 extern "C" int disruptor_language_disc_tall_hints(void) { return g_state == State::kOn && g_disc.tall_hints() ? 1 : 0; }
 
+extern "C" int disruptor_language_disc_sound_start(uint32_t movie) {
+    if (g_state != State::kOn || movie >= disruptor::kMovies) return 0;
+    return g_disc.sound_starts()[movie];
+}
+
+extern "C" int disruptor_language_disc_briefing_wait(uint32_t mission) {
+    if (g_state != State::kOn || mission >= disruptor::kMissions) return -1;
+    return g_disc.briefing_waits()[mission];
+}
+
 extern "C" int disruptor_language_disc_pack(const uint8_t **data, uint32_t *size) {
     if (g_state != State::kOn || g_disc.pack().empty()) return 0;
     *data = g_disc.pack().data();

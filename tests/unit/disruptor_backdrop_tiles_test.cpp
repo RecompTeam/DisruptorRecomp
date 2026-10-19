@@ -538,7 +538,26 @@ void test_the_panorama_is_placed_between_pixels() {
 
 }  // namespace
 
+void test_sky_behind_the_world() {
+    constexpr std::uint32_t kVBlanks = 0x8005B920u;
+    CPUState cpu = make_cpu();
+    seed_word(kVBlanks, 1000u);
+    expect(disruptor_backdrop_tiles_sky_behind(read_word(kVBlanks)) == 0, "no sky is behind the world before a tile");
+    run_seam(cpu, kQueuedSeam, kQueuedWord + 1u);
+    expect(disruptor_backdrop_tiles_sky_behind(read_word(kVBlanks)) == 0, "a seam with another word says nothing of the sky");
+    seed_packet(kPacket, tile_words(1));
+    cpu.gpr[17] = kPacket;
+    run_seam(cpu, kQueuedSeam, kQueuedWord);
+    expect(disruptor_backdrop_tiles_sky_behind(read_word(kVBlanks)) == 1, "a sky tile puts the sky behind the world");
+    seed_word(kVBlanks, 1300u);
+    expect(disruptor_backdrop_tiles_sky_behind(read_word(kVBlanks)) == 1, "for five seconds after it");
+    seed_word(kVBlanks, 1301u);
+    expect(disruptor_backdrop_tiles_sky_behind(read_word(kVBlanks)) == 0, "and no longer");
+    *g_marks = PsxWsScreenTiles{};
+}
+
 int main() {
+    test_sky_behind_the_world();
     test_widening_rounds_outward();
     test_measured_row_at_16_9();
     test_seams_for_every_edge_and_heading();

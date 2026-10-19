@@ -154,6 +154,23 @@ int main() {
     (void)vsync(0u, kElsewhere);
     expect(g_psx_cyc_overclock_shift == 0u,
            "any waiting VSync ends the fast section");
+    expect(poll(kLoopBegin) == 2u, "a section at four times");
+    g_psx_cyc_overclock_carry = 3u;
+    (void)vsync(kPoll, kElsewhere);
+    (void)vsync(kPoll, kLoopBegin);
+    expect(g_psx_cyc_overclock_carry == 3u, "keeps its carry through library and frame loop polls");
+    (void)vsync(0u, kElsewhere);
+    expect(g_psx_cyc_overclock_shift == 0u && g_psx_cyc_overclock_carry == 0u,
+           "and the wait that ends it ends its carry");
+    disruptor_frame_rate_set_cpu_multiplier(8);
+    expect(poll(kLoopBegin) == 3u && g_psx_cyc_overclock_carry == 0u,
+           "so a section at another divisor starts from none");
+    g_psx_cyc_overclock_carry = 7u;
+    disruptor_frame_rate_set_cpu_multiplier(4);
+    (void)vsync(kPoll, kLoopBegin);
+    expect(g_psx_cyc_overclock_shift == 2u && g_psx_cyc_overclock_carry == 0u,
+           "and a divisor changed between two polls of one section drops the carry too");
+    (void)vsync(0u, kElsewhere);
 
     seed_word(kFixedStepWord, 1u);
     expect(held_at_retail_cadence(),

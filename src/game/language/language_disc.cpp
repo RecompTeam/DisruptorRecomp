@@ -76,6 +76,9 @@ constexpr uint32_t kMovieTables = 0x8005701Cu, kMovieTable = 0x28u;  /* sound se
 constexpr std::array<uint32_t, 3> kWidths = {0x80056E40u, 0x80056E80u, 0x80056EC4u};
 constexpr uint32_t kWidthsA = 0x40u, kWidthsB = 0x44u;
 constexpr int kPalBottom = 252;  /* a PAL movie's top row plus its height */
+constexpr uint32_t kBriefingWaitsBefore = 0x20u;  /* each other executable keeps a halfword a mission right before its movie tables */
+constexpr int kMostBriefingWait = 1200;  /* VBlanks of the other console: the longest of the three discs is 694 */
+constexpr uint32_t kPalMilliHertz = 49761u, kNtscMilliHertz = 59826u, kHereMilliHertz = 60000u;  /* psx-spx's non-interlaced rates, this build's VBlank */
 constexpr char kHomeBoot[] = "SLUS_002.24";
 constexpr uint32_t kMenuDraw = 0x8001A46Cu;  /* (string, x, y, colour): 0 centres, a negative x is the right edge */
 constexpr uint32_t kStripDraw = 0x800429DCu;  /* (list, string, x, y, ...): the pause menu's lines, its question and answers at a constant x */
@@ -873,6 +876,32 @@ bool patch_executable(Bytes &home, const Bytes &other, const Language &language)
     return true;
 }
 
+/* A PAL player keys a movie's sound on once the stream's frame number reaches the movie's entry of a fifth table. */
+bool movie_sound_starts(const Bytes &other, const Language &language, std::array<int16_t, kMovies> &starts) {
+    static_assert(kMovieTable == 2 * kMovies, "a movie table holds a halfword for each movie");
+    starts.fill(0);
+    if (!language.pal) return true;
+    const size_t at = static_cast<size_t>(language.movie_tables + 4 * kMovieTable - kLoad + kExeHeader);
+    if (at + kMovieTable > other.size()) return false;
+    for (size_t movie = 0; movie < kMovies; ++movie)
+        starts[movie] = static_cast<int16_t>(other[at + 2 * movie] | other[at + 2 * movie + 1] << 8);
+    return true;
+}
+
+/* The US player starts a mission 540 VBlanks after its briefing begins, the others after the mission's entry of their own table. */
+bool read_briefing_waits(const Bytes &other, const Language &language, std::array<int16_t, kMissions> &waits) {
+    waits.fill(0);
+    const size_t at = static_cast<size_t>(language.movie_tables - kBriefingWaitsBefore - kLoad + kExeHeader);
+    if (at + 2 * kMissions > other.size()) return false;
+    const uint32_t rate = language.pal ? kPalMilliHertz : kNtscMilliHertz;
+    for (size_t mission = 0; mission < kMissions; ++mission) {
+        const int wait = static_cast<int16_t>(other[at + 2 * mission] | other[at + 2 * mission + 1] << 8);
+        if (wait < 0 || wait > kMostBriefingWait) return false;
+        waits[mission] = static_cast<int16_t>((static_cast<uint32_t>(wait) * kHereMilliHertz + rate - 1) / rate);
+    }
+    return true;
+}
+
 /* How wide func_80044AE8 draws a string in the small menu font with this executable's widths, or -1 for one it has no glyph or no room for. */
 int small_font_width(const Bytes &exe, std::string_view text) {
     const size_t widths = kWidths[1] - kLoad + kExeHeader;
@@ -992,6 +1021,8 @@ bool LanguageDisc::build(DiscImage &home, DiscImage &other, std::string &why) {
     sectors_ = 0;
     tall_hints_ = false;
     language_ = "";
+    sound_starts_.fill(0);
+    briefing_waits_.fill(0);
 
     Volume mine, theirs;
     if (!open_volume(home, mine) || !mine.files.count(kHomeBoot) || !open_volume(other, theirs)) {
@@ -1037,6 +1068,16 @@ bool LanguageDisc::build(DiscImage &home, DiscImage &other, std::string &why) {
     Bytes patched_exe = home_exe;
     if (!patch_executable(patched_exe, other_exe, *language) || (language->text && !build_pack(home_exe, other_exe, *language, pack_, why, &patched_exe))) {
         if (why.empty()) why = "the executables do not have the tables this build expects";
+        return false;
+    }
+    std::array<int16_t, kMovies> starts{};
+    if (!movie_sound_starts(other_exe, *language, starts)) {
+        why = "the other executable ends inside its movie tables";
+        return false;
+    }
+    std::array<int16_t, kMissions> waits{};
+    if (!read_briefing_waits(other_exe, *language, waits)) {
+        why = "the other executable has no table of briefing waits this build can read";
         return false;
     }
 
@@ -1186,6 +1227,8 @@ bool LanguageDisc::build(DiscImage &home, DiscImage &other, std::string &why) {
         const uint8_t *data = patched_exe.data() + sector * kSectorData;
         if (std::memcmp(data, home_exe.data() + sector * kSectorData, kSectorData) != 0) set_data(home_boot.lba + sector, data);
     }
+    sound_starts_ = starts;
+    briefing_waits_ = waits;
     language_ = language->name;
     tall_hints_ = language->hints == Hints::kTall && hints != 0;
     return true;

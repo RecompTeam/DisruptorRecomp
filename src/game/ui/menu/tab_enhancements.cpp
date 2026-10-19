@@ -95,6 +95,30 @@ void draw_enhancements_tab() {
     if (!fade_applies) ImGui::EndDisabled();
     draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
 
+    ImGui::Indent();
+    int shape = disruptor_far_rendering_get_fog_exponent() - 1;
+    const bool fog_applies = applies("disruptor.fog_shape");
+    if (!fog_applies) ImGui::BeginDisabled();
+    ImGui::SetNextItemWidth(260.0f);
+    if (option_list("disruptor.fog_shape", &shape)) {
+        disruptor_far_rendering_set_fog_exponent(shape + 1);
+        mark_fog_shape(shape);
+    }
+    if (!fog_applies) ImGui::EndDisabled();
+    draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
+    ImGui::Unindent();
+
+    int distance = disruptor_far_rendering_get_preset();
+    const bool netplay = disruptor_far_rendering_netplay_blocked() != 0;
+    if (netplay) ImGui::BeginDisabled();
+    ImGui::SetNextItemWidth(260.0f);
+    if (option_list("disruptor.draw_distance", &distance) &&
+        disruptor_far_rendering_set_preset(distance) == DISRUPTOR_FAR_RENDERING_OK)
+        mark_draw_distance(distance);
+    if (netplay) ImGui::EndDisabled();
+    draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
+    if (netplay) ImGui::TextDisabled("Netplay keeps the original draw distance.");
+
     bool by_depth = gl_renderer_world_depth() != 0;
     const bool depth_applies = applies("disruptor.depth_sorted_world");
     if (!depth_applies) ImGui::BeginDisabled();

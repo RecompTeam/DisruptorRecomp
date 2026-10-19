@@ -76,6 +76,49 @@ HINT_INSTRUCTIONS = {
     0x80043514: 0x34060190,  # ori $a2, $zero, 0x190: its row in the second
 }
 LOAD_CHARACTER = 0x90820000  # lbu $v0, 0($a0)
+# The US movie player's code the movie sound module relies on: $s5 cleared as a movie begins, the wait, the key-on test, the two words read.
+MOVIE_SOUND_INSTRUCTIONS = {
+    0x800483B8: 0x0000A821,  # move $s5, $zero: the sound is not keyed on when a movie begins
+    0x800485BC: 0x0C012CF5,  # jal VSync
+    0x800485C0: 0x00002021,  # move $a0, $zero: the wait after a frame's fetch, returning to 0x800485C4
+    0x80048648: 0x32A200FF,  # andi $v0, $s5, 0xff
+    0x8004864C: 0x14400004,  # bnez $v0: keyed on already, no key-on
+    0x80048654: 0x0C012862,  # jal SpuSetKey
+    0x8004865C: 0x34150001,  # li $s5, 1
+    0x80048B10: 0x3C018007,  # lui $at, 0x8007
+    0x80048B14: 0xAC2215B8,  # sw $v0, 0x15b8($at): the fetched frame's number
+    0x800147D8: 0xAF9405A8,  # sw $s4, 0x5a8($gp): the movie playing, at 0x800716F4
+    0x8004B414: 0x3C028006,  # lui $v0, 0x8006: VSync(-1) returns the VBlank count
+    0x8004B418: 0x8C42B920,  # lw $v0, -0x46e0($v0): kept at 0x8005B920
+}
+# The briefing's wait: voice 21 keyed on, the count zeroed, raised by the loading screen's VSync callback, waited on for 540.
+BRIEFING_INSTRUCTIONS = {
+    0x80043518: 0x938305A4,  # lbu $v1, 0x5a4($gp): the loop mode, 3 in the attract demo
+    0x8004351C: 0x34020003,  # li $v0, 3
+    0x80043520: 0x1062003B,  # beq $v1, $v0, 0x80043610: the demo keys no briefing on and zeroes no count
+    0x800437AC: 0x938305A4,  # lbu $v1, 0x5a4($gp)
+    0x800437B0: 0x34020003,  # li $v0, 3
+    0x800437B4: 0x10620006,  # beq $v1, $v0, 0x800437D0: and skips the wait only then
+    0x80043528: 0x938203CC,  # lbu $v0, 0x3cc($gp): the mission picks its briefing, at 0x80071518
+    0x80043600: 0x34040001,  # li $a0, 1
+    0x80043604: 0x0C012862,  # jal SpuSetKey
+    0x80043608: 0x3C050020,  # lui $a1, 0x20: voice 21
+    0x8004360C: 0xAF8005B4,  # sw $zero, 0x5b4($gp): the count, at 0x80071700
+    0x80043448: 0x3C048001,  # lui $a0, 0x8001
+    0x8004344C: 0x24842238,  # addiu $a0, $a0, 0x2238: the loading screen's callback
+    0x80043450: 0x0C012D96,  # jal VSyncCallback
+    0x800122E0: 0x0C013504,  # jal MoveImage, returning to 0x800122E8
+    0x80012310: 0x8F8205B4,  # lw $v0, 0x5b4($gp)
+    0x80012318: 0x24420001,  # addiu $v0, $v0, 1
+    0x8001231C: 0xAF8205B4,  # sw $v0, 0x5b4($gp)
+    0x800437BC: 0x8F8205B4,  # lw $v0, 0x5b4($gp)
+    0x800437C4: 0x2842021C,  # slti $v0, $v0, 540: signed, so a count below zero waits
+    0x800437C8: 0x1440FFFC,  # bnez $v0, 0x800437BC
+    0x800437E0: 0x0C012A21,  # jal SpuWrite: the music over the voice once the wait is over
+    0x800437E8: 0x938303CC,  # lbu $v1, 0x3cc($gp)
+}
+BRIEFING_COUNT_STORES = (0x8001231C, 0x8004360C)
+GP = 0x8007114C
 
 
 def read(path: str) -> str:
@@ -85,6 +128,24 @@ def read(path: str) -> str:
 def require(condition: bool, message: str) -> None:
     if not condition:
         raise AssertionError(message)
+
+
+def writes_register(word: int, register: int) -> bool:
+    """Whether an R3000 instruction can write a general register, by the opcode table: rd of SPECIAL, rt of the
+    immediates (ADDI..LUI) and of the loads (LB..LWR), rt of MFC/CFC from a coprocessor, $ra of JAL and the link of
+    REGIMM's BLTZAL and BGEZAL."""
+    opcode, rs, rt, rd = word >> 26, (word >> 21) & 31, (word >> 16) & 31, (word >> 11) & 31
+    if opcode == 0x00:
+        return rd == register
+    if opcode == 0x01:
+        return rt in (0x10, 0x11) and register == 31
+    if opcode == 0x03:
+        return register == 31
+    if 0x08 <= opcode <= 0x0F or 0x20 <= opcode <= 0x26:
+        return rt == register
+    if opcode in (0x10, 0x11, 0x12, 0x13):
+        return rs in (0x00, 0x02) and rt == register
+    return False
 
 
 cmake = read("CMakeLists.txt")
@@ -239,6 +300,60 @@ require(
 for token in ("disruptor_language_load_pack", "disruptor_language_active"):
     require(token in header and token in source, f"language API is missing {token}")
 
+movie_sound = read("src/game/language/language_movie_sound.cpp")
+require(
+    '/src/game/language/language_movie_sound.cpp"' in cmake
+    and "    disruptor_unit_test(disruptor_language_movie_sound " in cmake
+    and "constexpr uint32_t kFrameShown = 0x800485C4u;" in movie_sound
+    and "constexpr uint32_t kFrameNumber = 0x800715B8u;" in movie_sound
+    and "constexpr uint32_t kMovie = 0x800716F4u;" in movie_sound
+    and "constexpr int kStarted = 21;" in movie_sound
+    and '"disruptor.language.movie_sound", kVSync, vsync_entry' in movie_sound
+    and "psx_mod_game_started() && !psx_netplay_active() && g_ls_mode == 0 && g_ls_replay_active == 0" in movie_sound
+    and "constexpr uint32_t kHeld = 2u;" in movie_sound
+    and "    if (!active()) {\n        if (started == kHeld) started = 0u;\n    } else {\n" in movie_sound
+    and "constexpr uint32_t kVBlanks = 0x8005B920u;" in movie_sound
+    and "    if (g_holding && psx_mod_read_word(kVBlanks) - g_held_at > kMostVBlanks) g_holding = false;\n" in movie_sound
+    and "    g_holding = started == kHeld;\n    g_held_at = psx_mod_read_word(kVBlanks);\n}\n" in movie_sound
+    and "    disruptor_language_movie_sound_state_loaded();\n" in read("src/game/host.cpp")
+    and "disruptor_language_movie_sound_save_deferred();\n}\n" in read("src/game/host.cpp")
+    and "int disruptor_language_disc_sound_start(uint32_t movie);" in header
+    and "    if (g_state != State::kOn || movie >= disruptor::kMovies) return 0;\n    return g_disc.sound_starts()[movie];"
+    in read("src/game/language/language_source.cpp"),
+    "a PAL disc's movie sound waits for its start at the player's wait after each frame's fetch, by a value of $s5 the player "
+    "never sets, a save waits until no hold of this run is left so a build without the module never loads one, never under "
+    "netplay or lockstep, where a hold found is let go",
+)
+
+briefing = read("src/game/language/language_briefing.cpp")
+require(
+    '/src/game/language/language_briefing.cpp"' in cmake
+    and "    disruptor_unit_test(disruptor_language_briefing " in cmake
+    and "constexpr uint32_t kMoveImage = 0x8004D410u;" in briefing
+    and "constexpr uint32_t kBeforeCount = 0x800122E8u;" in briefing
+    and "constexpr uint32_t kCount = 0x80071700u;" in briefing
+    and "constexpr uint32_t kMission = 0x80071518u;" in briefing
+    and "constexpr int32_t kUsWait = 540;" in briefing
+    and "constexpr int kBriefingVoice = 21;" in briefing
+    and '"disruptor.language.briefing", kMoveImage, move_entry' in briefing
+    and "psx_mod_game_started() && !psx_netplay_active() && g_ls_mode == 0 && g_ls_replay_active == 0" in briefing
+    and "    if (!cpu || cpu->gpr[kReturn] != kBeforeCount || !active()) return;\n" in briefing
+    and "    if (wait < 0) return;\n" in briefing
+    and "    if (count >= kUsWait) return count;\n"
+    "    if (count < 0) return count == -1 ? kUsWait - 1 : count;\n"
+    "    if (count + 1 >= wait) return kUsWait - 1;\n"
+    "    return count == kUsWait - 1 ? kUsWait - 1 - wait : count;\n" in briefing
+    and briefing.count("psx_mod_write_") == 1
+    and "    if (left != count) psx_mod_write_word(kCount, static_cast<uint32_t>(left));\n" in briefing
+    and "int disruptor_language_disc_briefing_wait(uint32_t mission);" in header
+    and "    if (g_state != State::kOn || mission >= disruptor::kMissions) return -1;\n    return g_disc.briefing_waits()[mission];"
+    in read("src/game/language/language_source.cpp")
+    and GP + 0x5B4 == 0x80071700
+    and GP + 0x3CC == 0x80071518,
+    "a language disc's briefing plays as long as its own player waits, by the count the US loop waits on, set only right before "
+    "the loading screen's callback raises it, never once the wait is over, never under netplay or lockstep",
+)
+
 for name in ("game.toml", "game-widescreen.toml"):
     entries = re.search(r"mod_function_entry_funcs\s*=\s*\[([^\]]*)\]", read(name))
     require(
@@ -271,6 +386,63 @@ if image_path.exists():
             struct.unpack_from("<I", image, ROM_TEXT_OFFSET + address - LOAD_ADDRESS)[0] == instruction,
             f"the retail code the hint module relies on changed at 0x{address:08X}",
         )
+    for address, instruction in MOVIE_SOUND_INSTRUCTIONS.items():
+        require(
+            struct.unpack_from("<I", image, ROM_TEXT_OFFSET + address - LOAD_ADDRESS)[0] == instruction,
+            f"the retail code the movie sound module relies on changed at 0x{address:08X}",
+        )
+    for address, instruction in BRIEFING_INSTRUCTIONS.items():
+        require(
+            struct.unpack_from("<I", image, ROM_TEXT_OFFSET + address - LOAD_ADDRESS)[0] == instruction,
+            f"the retail code the briefing module relies on changed at 0x{address:08X}",
+        )
+    text = struct.unpack_from(f"<{(len(image) - ROM_TEXT_OFFSET) // 4}I", image, ROM_TEXT_OFFSET)
+    stores = [
+        LOAD_ADDRESS + 4 * index
+        for index, word in enumerate(text)
+        if word >> 26 in (0x28, 0x29, 0x2A, 0x2B, 0x2E) and (word >> 21) & 31 == 28 and word & 0xFFFF in range(0x5B4 - 3, 0x5B4 + 4)
+    ]
+    absolute = [
+        LOAD_ADDRESS + 4 * index
+        for index, word in enumerate(text)
+        if word >> 26 in (0x28, 0x29, 0x2A, 0x2B, 0x2E) and word & 0xFFFF in range(0x1700 - 3, 0x1700 + 4)
+    ]
+    pointers = [
+        LOAD_ADDRESS + 4 * index
+        for index, word in enumerate(text)
+        if word >> 26 in (0x08, 0x09, 0x0D)
+        and (((word >> 21) & 31 == 28 and word & 0xFFFF in range(0x5B4 - 3, 0x5B4 + 4)) or word & 0xFFFF in range(0x1700 - 3, 0x1700 + 4))
+    ]
+    require(
+        tuple(stores) == BRIEFING_COUNT_STORES and not absolute and not pointers,
+        "no store by $gp or with the count's low half but the key-on's and the callback's may reach the briefing's count, and no "
+        "register may be made from $gp near it or with that low half (a write through another base shows only in a write trace)",
+    )
+    raise_words = struct.unpack_from("<14I", image, ROM_TEXT_OFFSET + 0x800122E8 - LOAD_ADDRESS)
+
+    def leaves_before_raise(at: int, word: int) -> bool:
+        opcode = word >> 26
+        if opcode in (2, 3) or (opcode == 0 and word & 0x3F in (8, 9)):
+            return True
+        if opcode == 1 or 4 <= opcode <= 7:
+            target = at + 4 + (struct.unpack("<h", struct.pack("<H", word & 0xFFFF))[0] << 2)
+            return not 0x800122E8 <= target <= 0x80012310
+        return False
+
+    require(
+        not any(word >> 26 in (0x28, 0x29, 0x2A, 0x2B, 0x2E) and word & 0xFFFF in range(0x5B4 - 3, 0x5B4 + 4) for word in raise_words[:-1])
+        and not any(leaves_before_raise(0x800122E8 + 4 * index, word) for index, word in enumerate(raise_words[:-1]))
+        and raise_words[-1] == 0xAF8205B4,
+        "between the callback's last MoveImage and its raise of the count nothing may store to the count, and no branch or jump may "
+        "leave or pass the load the raise starts from",
+    )
+    gp_setups = [index for index in range(len(text) - 1) if text[index] == 0x3C1C8007 and text[index + 1] == 0x279C114C]
+    require(len(gp_setups) == 1, "the executable must set $gp to 0x8007114C, which the briefing's count and mission are read by")
+    between = struct.unpack_from("<33I", image, ROM_TEXT_OFFSET + 0x800485C4 - LOAD_ADDRESS)
+    require(
+        not any(writes_register(word, 21) for word in between),
+        "nothing between the wait and the key-on test may write $s5 itself",
+    )
     menu = image[ROM_TEXT_OFFSET + MENU_DRAW - LOAD_ADDRESS:ROM_TEXT_OFFSET + MENU_DRAW_END - LOAD_ADDRESS]
     takes_x = struct.unpack_from("<I", image, ROM_TEXT_OFFSET + MENU_DRAW_TAKES_X[0] - LOAD_ADDRESS)[0]
     require(

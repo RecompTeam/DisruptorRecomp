@@ -173,6 +173,8 @@ void make_discs(Discs &discs, bool with_movie = true, const char *other_boot = "
     for (const auto &[mine, theirs] : pairs) put_string(home_exe, mine, "US" + std::to_string(mine & 0xFFFF));
     for (const disruptor::Pair &pair : language.strings) put_string(other_exe, pair.other, "FR" + std::to_string(pair.other & 0xFFFF));
     std::fill_n(other_exe.begin() + static_cast<std::ptrdiff_t>(language.movie_tables - 0x80010000u + 0x800u), 0xA0, uint8_t{0x2C});
+    for (size_t movie = 0; language.pal && movie < disruptor::kMovies; ++movie)
+        other_exe[language.movie_tables - 0x80010000u + 0x800u + 0xA0 + 2 * movie] = static_cast<uint8_t>(movie == 1 ? 0 : 3);
     /* The second control's name stands right of the pad, and the other disc's is too wide to start where the US one does. */
     disruptor::put_le32(home_exe.data() + (disruptor::kNamePlaces - 0x80010000u + 0x800u) + 8, 228);
     if (language.text) other_exe[language.widths[1] - 0x80010000u + 0x800u + 26 + ('F' - 'A')] = 100;

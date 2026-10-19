@@ -58,6 +58,16 @@ void set_antialiasing(Settings& settings, int index) {
     settings.sample_shading = index > sample_levels;
     settings.multisampling = PSXRecompV4::kDisruptorSampleCounts[settings.sample_shading ? index - sample_levels : index];
 }
+int draw_distance(const Settings& settings) {
+    const auto found = std::ranges::find(PSXRecompV4::kDisruptorDrawDistances, settings.draw_distance);
+    return found == std::end(PSXRecompV4::kDisruptorDrawDistances) ? -1
+        : static_cast<int>(found - std::begin(PSXRecompV4::kDisruptorDrawDistances));
+}
+void set_draw_distance(Settings& settings, int index) {
+    settings.has_draw_distance = true;
+    settings.draw_distance = PSXRecompV4::kDisruptorDrawDistances[std::clamp(
+        index, 0, static_cast<int>(std::size(PSXRecompV4::kDisruptorDrawDistances)) - 1)];
+}
 int vsync(const Settings& settings) { return std::clamp(settings.vsync + 1, 0, 2); }
 void set_vsync(Settings& settings, int index) { settings.has_vsync = true; settings.vsync = index - 1; }
 // settings.toml keeps the dead zone in the stick's raw units, 0 to 32767: shown as a share of the stick's travel.
@@ -91,6 +101,9 @@ constexpr const char* vsyncs[] = {"Adaptive", "Immediate", "Synchronised"};
 constexpr const char* schemes[] = {"Classic", "Modern"};
 constexpr const char* antialiasing_levels[] = {"Off",     "2x MSAA", "4x MSAA", "8x MSAA", "16x MSAA",
                                                "2x SSAA", "4x SSAA", "8x SSAA", "16x SSAA"};
+constexpr const char* draw_distances[] = {"Original", "1.25x", "1.5x", "2x"};
+constexpr const char* fog_shapes[] = {"Even", "Soft", "Late"};
+constexpr int offered_now = 1;  /* for now only the game's own distance and fog are offered */
 
 constexpr const char* geometry_key = "disruptor.geometry_correction";
 constexpr const char* frames_key = "video.frame_interpolation";
@@ -99,12 +112,14 @@ constexpr const char* occlusion_key = "disruptor.ambient_occlusion";
 constexpr const char* aim_key = "disruptor.mouse_aim";
 constexpr const char* vertical_key = "disruptor.vertical_look";
 constexpr const char* separate_key = "disruptor.separate_vertical_speed";
+constexpr const char* smooth_fade_key = "disruptor.smooth_fade";
 constexpr const char* needs_geometry[] = {geometry_key};
 constexpr const char* needs_frames[] = {frames_key};
 constexpr const char* needs_occlusion[] = {occlusion_key};
 constexpr const char* needs_aim_and_geometry[] = {aim_key, geometry_key};
 constexpr const char* needs_vertical[] = {vertical_key};
 constexpr const char* needs_separate[] = {separate_key};
+constexpr const char* needs_smooth_fade[] = {smooth_fade_key};
 constexpr int default_sensitivity = 80;
 
 // A file from before the switch keeps the vertical speed it set where that differs from the horizontal one.
@@ -140,9 +155,9 @@ constexpr Option toggle(const char* key, const char* label, int initial, const c
 
 constexpr Option choice(const char* key, const char* label, int initial, const char* hint,
                         std::span<const char* const> choices, Saved saved, Get get, Set set,
-                        std::span<const char* const> needs = {}) {
-    return {key, Kind::choice, label, saved, get, set, initial, 0, static_cast<int>(choices.size()) - 1,
-            choices, needs, Unit::none, hint};
+                        std::span<const char* const> needs = {}, int offered = 0, const char* notice = nullptr) {
+    return {key, Kind::choice, label, saved, get, set, initial, 0,
+            (offered > 0 ? offered : static_cast<int>(choices.size())) - 1, choices, needs, Unit::none, hint, notice};
 }
 
 constexpr Option slider(const char* key, const char* label, int initial, const char* hint,
@@ -200,7 +215,8 @@ constexpr Option option_list[] = {
     toggle<&Settings::has_smooth_fade, &Settings::smooth_fade>(
         "disruptor.smooth_fade", "Smooth distance fade", 1,
         "Fades walls and floors evenly into the distance.\n"
-        "The game itself steps through twelve shades.", needs_geometry),
+        "The game itself steps through twelve shades.\n"
+        "The world's far edge dissolves instead of appearing in squares.", needs_geometry),
     toggle<&Settings::has_ambient_occlusion, &Settings::ambient_occlusion>(
         "disruptor.ambient_occlusion", "Ambient occlusion", 0,
         "Shades corners and the floor under things.", needs_geometry),
@@ -291,6 +307,7 @@ constexpr Option option_list[] = {
         "disruptor.detailed_logging", "Detailed logging", 0,
         "Writes more into the game's log for a bug report.\n"
         "Frame timing, menu changes, controllers and the graphics driver's complaints.\n"
+        "Sound output and movie timing.\n"
         "The driver's part starts with the next launch."),
 
     choice("disruptor.multisampling", "Anti-aliasing (MSAA / SSAA)", 0,
@@ -299,6 +316,17 @@ constexpr Option option_list[] = {
            "Video memory grows with the number.",
            antialiasing_levels,
            antialiasing_saved, antialiasing, set_antialiasing, needs_geometry),
+    choice("disruptor.draw_distance", "Draw distance", 0,
+           "How far off walls, enemies and pickups are drawn.\n"
+           "Original: as on the PlayStation.",
+           draw_distances, saved<&Settings::has_draw_distance>, draw_distance, set_draw_distance, {}, offered_now,
+           "Longer distances come in a later release."),
+    choice("disruptor.fog_shape", "Fog shape", 0,
+           "How the smooth distance fade thickens.\n"
+           "Even: at one pace, as the game's own.",
+           fog_shapes, saved<&Settings::has_fog_shape>, read<&Settings::fog_shape>,
+           write<&Settings::has_fog_shape, &Settings::fog_shape>, needs_smooth_fade, offered_now,
+           "Other shapes come in a later release."),
 };
 } // namespace
 
@@ -318,7 +346,9 @@ bool applies(const Option& option, const std::function<bool(const Option&)>& on)
 }
 
 int stored(const Settings& settings, const Option& option) {
-    return option.saved(settings) ? option.get(settings) : option.initial;
+    if (!option.saved(settings)) return option.initial;
+    const int value = option.get(settings);
+    return option.kind == Kind::choice && value > option.highest ? option.initial : value;
 }
 
 std::string describe(const Settings& settings) {

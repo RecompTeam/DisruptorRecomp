@@ -8,16 +8,13 @@ extern "C" {
 
 struct CPUState;
 
-/*
- * Session-only draw-distance presets.  They are intentionally not part of the
- * persisted user-settings ABI while the primitive pressure and scene coverage
- * of the extended modes are still being measured.
- */
+/* Draw-distance presets, saved as [disruptor] draw_distance. */
 enum DisruptorFarRenderingPreset {
     DISRUPTOR_FAR_RENDERING_RETAIL = 0,
     DISRUPTOR_FAR_RENDERING_EXTENDED = 1, /* 1.25x */
     DISRUPTOR_FAR_RENDERING_FAR = 2,      /* 1.50x */
-    DISRUPTOR_FAR_RENDERING_PRESET_COUNT = 3,
+    DISRUPTOR_FAR_RENDERING_DOUBLE = 3,   /* 2x */
+    DISRUPTOR_FAR_RENDERING_PRESET_COUNT = 4,
 };
 
 /* Independent, session-only control for the game's depth-fade ramp.  The
@@ -125,6 +122,8 @@ int disruptor_far_rendering_set_depth_fade_mode(int mode);
 int disruptor_far_rendering_get_depth_fade_mode(void);
 int disruptor_far_rendering_gameplay_ready(void);
 int disruptor_far_rendering_netplay_blocked(void);
+/* The far plane and fade start the renderer draws with now: the globals, which hold the preset's inside a written frame. */
+void disruptor_far_rendering_drawn_distances(uint32_t *far_distance, int32_t *fade_start);
 
 /* Writes only the caller-provided capacity and returns one on success.
  * Timing/primitive comparison fields are scoped to the current distance/fade
@@ -136,10 +135,29 @@ int disruptor_far_rendering_get_diagnostics(
 /* Clears an in-flight diagnostics window before resetting all session state. */
 void disruptor_far_rendering_reset_session(void);
 
-/* Abandons only an in-flight entry-to-epilogue timing window.  Savestate load
- * calls this because wall-span/primitive deltas cannot cross a restored guest
- * timeline.  Exact load substitution is stateless and remains available. */
+/* Abandons an in-flight entry-to-epilogue window after a savestate load: the
+ * restored RAM holds the game's own distances, so nothing is written back. */
 void disruptor_far_rendering_abandon_metrics(void);
+
+/* Puts the game's own distances back before a savestate is taken. */
+void disruptor_far_rendering_state_saving(void);
+
+/* Where the fog of the twelve palette rows begins, how deep it is and the power it grows with: under the smooth fade from
+ * the game's own start to the far plane drawn with, else the game's own 768 units from the start drawn with. */
+void disruptor_far_rendering_fog_ramp(int32_t *start, int32_t *length, int *exponent);
+/* Nonzero while the meshes are drawn past the fog's end, for the renderer to dissolve them: the arena must hold them. */
+int disruptor_far_rendering_edge_margin(void);
+/* 1 grows the fog evenly, 2 and 3 keep it thinner near the viewer. Applies under the smooth fade. */
+void disruptor_far_rendering_set_fog_exponent(int exponent);
+int disruptor_far_rendering_get_fog_exponent(void);
+/* The share of the next palette row, in 256ths, that the sprite whose packet sits at `resolved_packet` blends in; -1 for none.
+ * The words first drawn there own the share: other words at that address later are another primitive. */
+int disruptor_far_rendering_packet_fraction(uint32_t resolved_packet, uint32_t signature);
+/* Nonzero when the frame's fog shaped the fade of the list body in `packet`: `rows` from range `from` to `to` by that fog. */
+int disruptor_far_rendering_list_fade_rows(uint32_t packet, int32_t from, int32_t to, int32_t *rows);
+
+/* Nonzero inside a frame drawn at the preset's distances: a savestate waits for its epilogue. */
+int disruptor_far_rendering_save_deferred(void);
 
 /* Version-pinned runtime seams for SLUS-00224. */
 void disruptor_far_rendering_renderer_entry(struct CPUState *cpu,

@@ -46,6 +46,10 @@ public:
         section_ = page;
     }
     void open_updates() { updates_open_ = true; }
+    void for_picture(float pixels) {
+        rows_scroll_ = pixels;
+        version_hidden_ = true;
+    }
     void attach(SDL_Window* window, SDL_Renderer* renderer);
     void dropped(const std::filesystem::path& file) { session_.take_image(file); }
     // While a file is dragged over the window the drop zone says it will take it.
@@ -131,6 +135,8 @@ private:
     Screen screen_ = Screen::home;
     int page_ = 0;
     int held_page_ = -1;
+    float rows_scroll_ = 0.0f;
+    bool version_hidden_ = false;
     bool dragging_ = false;
     bool details_ = false;
     bool updates_open_ = false;

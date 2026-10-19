@@ -21,6 +21,8 @@
  * it on screen moves along to stay over it, and its fade is the game's own.
  */
 
+#include "game/render/far_rendering.h"
+
 #include "cpu_state.h"
 #include "gpu.h"
 #include "gte_precision.h"
@@ -699,13 +701,16 @@ void lead_shadow(CPUState& cpu, const Sprite& body, uint32_t packet) {
 }
 
 /* The pass faded the body by its led key (0x80043190..0x8004331C): its CLUT goes back to the row of the game's key. */
-void restore_fade(CPUState& cpu, const Sprite& record) {
+void restore_fade(CPUState& cpu, const Sprite& record, uint32_t packet) {
     if (record.led == record.key || static_cast<int32_t>(cpu.gpr[kRecordKey]) != record.led || !cpu.read_word || !cpu.read_half ||
         !cpu.write_half) {
         return;
     }
-    const auto start = static_cast<int32_t>(cpu.read_word(cpu.gpr[kGlobals] + kFadeStart));
-    const int32_t rows = fade_row(record.key, start) - fade_row(record.led, start);
+    int32_t rows = 0;
+    if (!disruptor_far_rendering_list_fade_rows(packet, record.led, record.key, &rows)) {
+        const auto start = static_cast<int32_t>(cpu.read_word(cpu.gpr[kGlobals] + kFadeStart));
+        rows = fade_row(record.key, start) - fade_row(record.led, start);
+    }
     if (rows == 0) return;
     const uint32_t at = cpu.gpr[kRecordClut] + kClutStore;
     cpu.write_half(at, static_cast<uint16_t>(cpu.read_half(at) + (rows << kClutRow)));
@@ -757,7 +762,7 @@ extern "C" void disruptor_sprite_depth_packet(
             sprite = g_record[index];
             g_record[index] = Sprite{};
         }
-        if (!comparator_active()) restore_fade(*cpu, sprite);
+        if (!comparator_active()) restore_fade(*cpu, sprite, packet);
     } else {
         for (const Funnel& funnel : kFunnels) {
             if (funnel.packets[0] == packet_site || funnel.packets[1] == packet_site) {

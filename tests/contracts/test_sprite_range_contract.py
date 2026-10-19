@@ -442,7 +442,7 @@ require(
 require(
     "[[nodiscard]] bool comparator_active() { return g_ls_mode != 0 || g_ls_replay_active != 0; }" in source
     and "        if (!comparator_active()) lead_record(*cpu, index, g_record[index]);\n" in source
-    and "        if (!comparator_active()) restore_fade(*cpu, sprite);\n" in source
+    and "        if (!comparator_active()) restore_fade(*cpu, sprite, packet);\n" in source
     and "    if (packet_site == kShadowPacketSite && !comparator_active()) lead_shadow(*cpu, sprite, packet);\n"
     in source
     and source.count("lead_record(") == 2

@@ -181,6 +181,8 @@ void mark_frame_unlock(bool value);
 void mark_occlusion(bool value);
 void mark_smooth_fade(bool value);
 void mark_antialiasing(int level);
+void mark_draw_distance(int preset);
+void mark_fog_shape(int shape);
 void mark_detailed_logging(bool value);
 void mark_occlusion_shape(int reach, int strength);
 void mark_gap_filling(bool value);

@@ -113,7 +113,7 @@ require(
     and "ImGui::Checkbox(" not in experimental
     and '            if (ImGui::BeginTabItem("Enhancements")) {\n                draw_enhancements_tab();\n' in menu,
     "the Enhancements tab holds the occlusion: a switch greyed without geometry correction and two bounded sliders greyed without the switch, "
-    "and the Experimental tab keeps its list alone",
+    "and the Experimental tab keeps its anti-aliasing list alone",
 )
 
 require(

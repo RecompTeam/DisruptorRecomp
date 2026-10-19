@@ -5,7 +5,9 @@
 #include <cmath>
 #include <cstdint>
 #include <iostream>
+#include <cstring>
 #include <limits>
+#include <random>
 #include <vector>
 
 namespace {
@@ -1061,9 +1063,68 @@ void facing_and_camera_bounds() {
            "only a non-finite corner makes camera motion unsafe");
 }
 
+/* The index answers what the scan of every face answers: the lowest face that coincides, also at cell edges and with faces it leaves out. */
+void the_face_index_answers_as_the_scan() {
+    std::mt19937 random(48);
+    std::uniform_real_distribution<float> spot(-40.0f, 360.0f), jitter(-1.0f, 1.0f);
+    std::uniform_int_distribution<int> material(1, 6), chance(0, 99);
+    std::vector<GpuTemporalTriangle> faces;
+    for (int face = 0; face < 4000; ++face) {
+        GpuTemporalTriangle t = first_triangle();
+        const float x = chance(random) < 20 ? 4.0f * std::round(spot(random) / 4.0f) : spot(random);
+        const float y = chance(random) < 20 ? 4.0f * std::round(spot(random) / 4.0f) : spot(random);
+        t.material = static_cast<uint64_t>(material(random));
+        t.world = chance(random) < 90;
+        t.x[0] = x; t.x[1] = x + 8; t.x[2] = x;
+        t.y[0] = y; t.y[1] = y; t.y[2] = y + 8;
+        if (face % 500 == 7) t.x[0] = std::numeric_limits<float>::quiet_NaN();
+        if (face % 500 == 9) t.x[0] = 1.0e12f;
+        faces.push_back(t);
+        if (chance(random) < 10) faces.push_back(t);
+    }
+    GpuTemporalCamera camera{};
+    camera.m[0] = 320.0; camera.m[2] = 160.0; camera.m[5] = 240.0; camera.m[6] = 120.0;
+    camera.scale = 1.0;
+    GpuTemporalFaceIndex index;
+    std::memset(&index, 0, sizeof(index));
+    const int count = static_cast<int>(faces.size());
+    int found = 0, same = 0, asked = 0;
+    for (int query = 0; query < 3000; ++query) {
+        GpuTemporalTriangle t = faces[static_cast<size_t>(chance(random)) * faces.size() / 100];
+        if (chance(random) < 50) t.material = static_cast<uint64_t>(material(random));
+        const float dx = jitter(random) * (chance(random) < 50 ? 0.7f : 2.0f), dy = jitter(random) * 0.7f;
+        for (int vertex = 0; vertex < 3; ++vertex) { t.x[vertex] += dx; t.y[vertex] += dy; }
+        camera.m[2] = 160.0 + (query % 7) * 0.375;
+        if (query % 997 == 5) camera.m[2] = 2.0e9;
+        const int scanned = gpu_temporal_camera_rematch(&camera, faces.data(), count, &t);
+        const int indexed = gpu_temporal_camera_rematch_in(&index, faces.data(), count, &camera, &t);
+        ++asked;
+        same += scanned == indexed;
+        found += scanned >= 0;
+    }
+    expect(same == asked && found > 300 && found < asked, "the index finds the face the scan finds, or none where it finds none");
+
+    std::vector<GpuTemporalTriangle> edge_faces(2, first_triangle());
+    for (int vertex = 0; vertex < 3; ++vertex) edge_faces[0].x[vertex] = 1.0e12f;
+    edge_faces[1].x[1] = std::numeric_limits<float>::quiet_NaN();
+    camera.m[2] = 160.0;
+    GpuTemporalFaceIndex edges;
+    std::memset(&edges, 0, sizeof(edges));
+    GpuTemporalTriangle far_query = edge_faces[0], near_query = first_triangle();
+    expect(gpu_temporal_camera_rematch_in(&edges, edge_faces.data(), 2, &camera, &far_query) == 0,
+           "a face too far out for the index is still found where the camera puts it");
+    expect(gpu_temporal_camera_rematch(&camera, edge_faces.data(), 2, &near_query) == -1 &&
+               gpu_temporal_camera_rematch_in(&edges, edge_faces.data(), 2, &camera, &near_query) == -1,
+           "a face with a corner that is not a number coincides with nothing");
+    gpu_temporal_face_index_free(&edges);
+    gpu_temporal_face_index_free(&index);
+    expect(index.head == nullptr && index.faces == nullptr, "a freed index holds nothing");
+}
+
 } // namespace
 
 int main() {
+    the_face_index_answers_as_the_scan();
     twins_move_the_static_world();
     look_alikes_and_moving_objects();
     fast_turn_keeps_lines_straight();

@@ -30,6 +30,8 @@ constexpr Placement placed[] = {
     {"disruptor.perspective_textures", Page::enhancements},
     {"disruptor.gap_filling", Page::enhancements},
     {"disruptor.smooth_fade", Page::enhancements},
+    {"disruptor.fog_shape", Page::enhancements, nullptr, true},
+    {"disruptor.draw_distance", Page::enhancements},
     {"disruptor.depth_sorted_world", Page::enhancements},
     {"disruptor.ambient_occlusion", Page::enhancements, "Shading"},
     {"disruptor.occlusion_reach", Page::enhancements, nullptr, true},

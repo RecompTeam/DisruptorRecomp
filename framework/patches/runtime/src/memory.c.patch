@@ -1,5 +1,5 @@
 diff --git a/runtime/src/memory.c b/runtime/src/memory.c
-index d96d6d74422c5b80e3ae283d3a2d872686cab632..23a2c0054c758454ab51ddab3d503c59cf6db98d 100644
+index d96d6d74422c5b80e3ae283d3a2d872686cab632..ad4f271a2d58845d407c499f15b30e6190b00b18 100644
 --- a/runtime/src/memory.c
 +++ b/runtime/src/memory.c
 @@ -14,6 +14,7 @@
@@ -10,7 +10,15 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..23a2c0054c758454ab51ddab3d503c59
  #include "mdec.h"
  #include "mod_memory.h"
  #include "sio.h"
-@@ -82,6 +83,16 @@
+@@ -23,6 +24,7 @@
+ #include "data_shards.h"
+ #include "dirty_ram_interp.h"
+ #include "psx_cycles.h"
++#include "psx_cyc_overclock.h"
+ #include "starvation_ring.h"
+ #include <stdint.h>
+ #include <stdio.h>
+@@ -82,6 +84,16 @@
      return PSX_MOD_GPU_DMA_GUEST_BASE + start;
  }
  
@@ -27,7 +35,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..23a2c0054c758454ab51ddab3d503c59
  static int mod_gpu_dma_memory_offset(uint32_t phys, uint32_t width,
                                       uint32_t *offset) {
      return psx_mod_gpu_dma_aperture_offset_for(
-@@ -115,7 +126,11 @@
+@@ -115,7 +127,11 @@
  uint8_t *memory_get_ram_ptr(void) { return ram; }
  uint8_t *memory_get_scratchpad_ptr(void) { return scratchpad; }
  
@@ -39,7 +47,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..23a2c0054c758454ab51ddab3d503c59
      memset(ram, 0, 0x10u);
  }
  
-@@ -207,6 +222,7 @@
+@@ -207,6 +223,7 @@
  static uint64_t kbless_verifies      = 0;
  static uint64_t kbless_mismatches    = 0;
  static uint64_t kbless_invalidations = 0;
@@ -47,7 +55,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..23a2c0054c758454ab51ddab3d503c59
  
  static int kbless_on(void) {
      if (kbless_enabled < 0) {
-@@ -264,6 +280,20 @@
+@@ -264,6 +281,20 @@
      }
      kbless_state[i] = KBLESS_MISMATCH;
      kbless_mismatches++;
@@ -68,7 +76,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..23a2c0054c758454ab51ddab3d503c59
      return 0;
  }
  
-@@ -322,6 +352,11 @@
+@@ -322,6 +353,11 @@
      out[3] = kbless_native_hits;
      out[4] = kbless_verifies;
      out[5] = kbless_invalidations;
@@ -80,7 +88,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..23a2c0054c758454ab51ddab3d503c59
  }
  
  static inline void dirty_ram_mark_kernel_write(uint32_t phys) {
-@@ -881,6 +916,8 @@
+@@ -881,6 +917,8 @@
  uint32_t memory_get_bios_checksum(void) { return s_bios_checksum; }
  
  void memory_init(const char* bios_path) {
@@ -89,7 +97,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..23a2c0054c758454ab51ddab3d503c59
      memset(ram, 0, sizeof(ram));
      memset(scratchpad, 0, sizeof(scratchpad));
      /* Rematch re-enters without process exit — wipe sticky I/O regs that
-@@ -923,7 +960,8 @@
+@@ -923,7 +961,8 @@
      snprintf(reason, sizeof(reason), "MMIO %s @ 0x%08X (phys 0x%08X)", op, vaddr, phys);
      fprintf(stderr, "%s\n", reason);
      fflush(stderr);
@@ -99,7 +107,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..23a2c0054c758454ab51ddab3d503c59
      if (cf) { fprintf(cf, "%s\n", reason); fclose(cf); }
      psx_fatal_halt(reason);
  }
-@@ -934,7 +972,8 @@
+@@ -934,7 +973,8 @@
      fprintf(stderr, "%s\n", reason);
      fflush(stderr);
      /* Also write to a crash file for capture when stderr is lost. */
@@ -109,7 +117,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..23a2c0054c758454ab51ddab3d503c59
      if (cf) { fprintf(cf, "%s\n", reason); fclose(cf); }
      psx_fatal_halt(reason);
  }
-@@ -1458,10 +1497,11 @@
+@@ -1458,10 +1498,11 @@
  }
  
  static void psx_write_word_raw(uint32_t addr, uint32_t val);
@@ -122,7 +130,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..23a2c0054c758454ab51ddab3d503c59
      if (g_ls_mode == 2) { ls_write_hook(addr, 4, val); return; }
      if (g_ds_recording) {
          if (g_dma_exec_depth > 0) ds_note_dma_write();
-@@ -1475,7 +1515,6 @@
+@@ -1475,7 +1516,6 @@
  }
  static void psx_write_word_raw(uint32_t addr, uint32_t val) {
      g_guest_store_count++;
@@ -130,7 +138,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..23a2c0054c758454ab51ddab3d503c59
      /* KSEG2 cache control — before physical translation. */
      if (addr == 0xFFFE0130u) { cache_ctrl = val; return; }
      /* KSEG2 guard — see psx_read_word_raw. */
-@@ -1540,6 +1579,8 @@
+@@ -1540,6 +1580,8 @@
                  return;
              }
          }
@@ -139,7 +147,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..23a2c0054c758454ab51ddab3d503c59
          if (phys == D44_PHYS) d44_note(phys, read_ram_word(phys), val);
          debug_server_trace_write_check(phys, read_ram_word(phys), val, 4);
          parity_trace_note_write(phys, 4, effective_store_pc());
-@@ -1554,12 +1595,16 @@
+@@ -1554,12 +1596,16 @@
          ram[phys + 1] = (uint8_t)(val >> 8);
          ram[phys + 2] = (uint8_t)(val >> 16);
          ram[phys + 3] = (uint8_t)(val >> 24);
@@ -156,7 +164,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..23a2c0054c758454ab51ddab3d503c59
              return;
          }
      }
-@@ -1574,6 +1619,8 @@
+@@ -1574,6 +1620,8 @@
      if (phys >= 0x1F000000u && phys <= 0x1F7FFFFFu) return;
      if (phys >= 0x1F800000u && phys <= 0x1F8003FFu) {
          uint32_t off = phys - 0x1F800000u;
@@ -165,7 +173,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..23a2c0054c758454ab51ddab3d503c59
          debug_server_trace_write_check(phys,
              (uint32_t)scratchpad[off]
            | ((uint32_t)scratchpad[off + 1] << 8)
-@@ -1584,6 +1631,7 @@
+@@ -1584,6 +1632,7 @@
          scratchpad[off + 1] = (uint8_t)(val >> 8);
          scratchpad[off + 2] = (uint8_t)(val >> 16);
          scratchpad[off + 3] = (uint8_t)(val >> 24);
@@ -173,7 +181,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..23a2c0054c758454ab51ddab3d503c59
          return;
      }
      if (phys >= 0x1F801000u && phys <= 0x1F803FFFu) {
-@@ -1662,7 +1710,6 @@
+@@ -1662,7 +1711,6 @@
  }
  static void psx_write_half_raw(uint32_t addr, uint16_t val) {
      g_guest_store_count++;
@@ -181,7 +189,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..23a2c0054c758454ab51ddab3d503c59
      if (sr_ptr && (*sr_ptr & 0x10000u)) return;
  
          /* KSEG2 guard — see psx_read_word_raw. */
-@@ -1670,6 +1717,7 @@
+@@ -1670,6 +1718,7 @@
      uint32_t phys = psx_phys_addr(addr);
  
      if (phys < RAM_SIZE) {
@@ -189,7 +197,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..23a2c0054c758454ab51ddab3d503c59
          debug_server_trace_write_check(phys, (uint32_t)read_ram_half(phys), (uint32_t)val, 2);
          parity_trace_note_write(phys, 2, effective_store_pc());
          card_data_writes_check(phys, (uint32_t)val, 2);
-@@ -1686,6 +1734,7 @@
+@@ -1686,6 +1735,7 @@
      {
          uint32_t off;
          if (mod_gpu_dma_memory_offset(phys, 2u, &off)) {
@@ -197,7 +205,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..23a2c0054c758454ab51ddab3d503c59
              mod_gpu_dma_memory[off] = (uint8_t)val;
              mod_gpu_dma_memory[off + 1u] = (uint8_t)(val >> 8);
              return;
-@@ -1702,6 +1751,7 @@
+@@ -1702,6 +1752,7 @@
      if (phys >= 0x1F000000u && phys <= 0x1F7FFFFFu) return;
      if (phys >= 0x1F800000u && phys <= 0x1F8003FFu) {
          uint32_t off = phys - 0x1F800000u;
@@ -205,7 +213,16 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..23a2c0054c758454ab51ddab3d503c59
          debug_server_trace_write_check(phys,
              (uint32_t)scratchpad[off] | ((uint32_t)scratchpad[off + 1] << 8),
              (uint32_t)val, 2);
-@@ -1998,7 +2048,6 @@
+@@ -1861,7 +1912,7 @@
+     uint32_t cost = region + compl_cost;               /* LDAbsorb = region + completion */
+     uint32_t fudge = (uint32_t)((cpu->read_fudge >> 4) & 2u);
+     cpu->ld_absorb = cost;
+-    psx_advance_cycles(fudge + cost);
++    psx_advance_cycles(phys < 0x00800000u ? psx_cyc_overclocked_wait(fudge + cost) : fudge + cost);
+     cpu->ld_which_t = (uint8_t)arm_rt;
+     /* PROOF GATE (PSX_POLL_PROOF=N, default 0/off): a FLAT, non-absorbed extra N
+      * cycles per main-RAM data read — replicates the historical "+6 cyc/main-RAM
+@@ -1998,7 +2049,6 @@
  }
  static void psx_write_byte_raw(uint32_t addr, uint8_t val) {
      g_guest_store_count++;
@@ -213,7 +230,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..23a2c0054c758454ab51ddab3d503c59
      if (sr_ptr && (*sr_ptr & 0x10000u)) return;
  
          /* KSEG2 guard — see psx_read_word_raw. */
-@@ -2006,6 +2055,7 @@
+@@ -2006,6 +2056,7 @@
      uint32_t phys = psx_phys_addr(addr);
  
      if (phys < RAM_SIZE) {
@@ -221,7 +238,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..23a2c0054c758454ab51ddab3d503c59
          debug_server_trace_write_check(phys, (uint32_t)ram[phys], (uint32_t)val, 1);
          parity_trace_note_write(phys, 1, effective_store_pc());
          card_data_writes_check(phys, (uint32_t)val, 1);
-@@ -2021,6 +2071,7 @@
+@@ -2021,6 +2072,7 @@
      {
          uint32_t off;
          if (mod_gpu_dma_memory_offset(phys, 1u, &off)) {
@@ -229,7 +246,7 @@ index d96d6d74422c5b80e3ae283d3a2d872686cab632..23a2c0054c758454ab51ddab3d503c59
              mod_gpu_dma_memory[off] = val;
              return;
          }
-@@ -2034,6 +2085,7 @@
+@@ -2034,6 +2086,7 @@
      }
      if (phys >= 0x1F000000u && phys <= 0x1F7FFFFFu) return;
      if (phys >= 0x1F800000u && phys <= 0x1F8003FFu) {

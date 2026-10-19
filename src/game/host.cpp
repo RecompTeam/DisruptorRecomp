@@ -64,10 +64,22 @@ void psx_game_state_loaded(void) {
     disruptor_weapon_choice_state_loaded();
     disruptor_weapon_keys_state_loaded();
     disruptor_mover_motion_state_loaded();
+    disruptor_language_movie_sound_state_loaded();
     disruptor_far_rendering_abandon_metrics();
 }
 
-void psx_game_state_saving(void) { disruptor_mover_motion_state_saving(); }
+void psx_game_state_saving(void) {
+    disruptor_mover_motion_state_saving();
+    disruptor_far_rendering_state_saving();
+}
+
+int psx_game_state_save_deferred(void) {
+    return disruptor_far_rendering_save_deferred() || disruptor_language_movie_sound_save_deferred();
+}
+
+int psx_game_packet_fade(uint32_t resolved_packet, uint32_t signature) {
+    return disruptor_far_rendering_packet_fraction(resolved_packet, signature);
+}
 
 // Whether player 1's keybinds.ini puts the key on a button.
 int disruptor_key_bound(int scancode) {

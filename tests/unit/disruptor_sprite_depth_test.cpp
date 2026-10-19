@@ -9,6 +9,8 @@
 #include <cstdlib>
 #include <iostream>
 #include <map>
+#include <optional>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -147,6 +149,15 @@ GtePrecisionLookupResult gte_precision_load_word_ex(std::uint32_t addr, std::uin
     *y16 = found->second.y16;
     *z = found->second.z;
     return GTE_PRECISION_LOOKUP_ACCEPTED;
+}
+
+std::optional<std::int32_t> g_list_fog_rows;
+std::tuple<std::uint32_t, std::int32_t, std::int32_t> g_list_fog_asked;
+int disruptor_far_rendering_list_fade_rows(std::uint32_t packet, std::int32_t from, std::int32_t to, std::int32_t *rows) {
+    g_list_fog_asked = {packet, from, to};
+    if (!g_list_fog_rows) return 0;
+    *rows = *g_list_fog_rows;
+    return 1;
 }
 
 /* The retail DMAC folds a node address into 2 MiB of RAM; the render arena sits past it from 0xF00000. */
@@ -1001,6 +1012,13 @@ void test_the_body_keeps_its_fade() {
     g_ls_replay_active = 1;
     expect(clut_after(cpu, 5u, 200u, 536u) == 5u, "the comparator's halves keep the pass's palette");
     g_ls_replay_active = 0;
+
+    cpu = body_before_its_record(5u, 600u);
+    record(cpu);
+    g_list_fog_rows = 3;
+    expect(clut_after(cpu, 5u, 200u, 536u) == 8u && g_list_fog_asked == std::tuple{kPacket, 536, 600},
+           "under the frame's fog the body moves by that fog's rows between its two keys");
+    g_list_fog_rows.reset();
 }
 
 

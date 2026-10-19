@@ -849,6 +849,73 @@ void test_the_two_discs_become_one() {
     const std::vector<PackEntry> pack = unpack(disc.pack());
     expect(pack.size() == disruptor::languages().front().strings.size() && pack[0].words.rfind("FR", 0) == 0, "the pack pairs the two executables' strings");
     expect(g_unpacked_signs.size() == 1 && g_unpacked_signs[0].written == 'k', "and names the apostrophe's sign");
+    expect(disc.sound_starts()[0] == 3 && disc.sound_starts()[1] == 0 && disc.sound_starts()[19] == 3,
+           "a PAL disc's movies start their sound on the frames of its fifth movie table");
+}
+
+void test_the_sound_starts_come_from_the_fifth_table() {
+    const disruptor::Language french = disruptor::languages().front();
+    const auto at = [](uint32_t address) { return static_cast<size_t>(address - 0x80010000u + 0x800u); };
+    Bytes other(0x62800, 0x2C);
+    other[at(french.movie_tables) + 0xA0 + 2 * 19] = 0x03;
+    other[at(french.movie_tables) + 0xA0 + 2 * 19 + 1] = 0x01;
+    std::array<int16_t, disruptor::kMovies> starts{};
+    expect(disruptor::movie_sound_starts(other, french, starts) && starts[0] == 0x2C2C && starts[19] == 0x0103,
+           "each movie's start is the halfword of the table after the four the US player has");
+    disruptor::Language ntsc = french;
+    ntsc.pal = false;
+    starts.fill(7);
+    expect(disruptor::movie_sound_starts(other, ntsc, starts) && std::all_of(starts.begin(), starts.end(), [](int16_t start) { return start == 0; }),
+           "an NTSC disc's player starts the sound on the first frame, as the US one");
+    const Bytes cut(at(french.movie_tables) + 0xA0 + 0x27, 0);
+    expect(!disruptor::movie_sound_starts(cut, french, starts), "an executable that ends inside the fifth table refuses");
+}
+
+void test_the_briefing_waits_come_from_the_table_before_the_movies() {
+    const disruptor::Language french = disruptor::languages().front();
+    const disruptor::Language japanese = disruptor::languages().back();
+    const auto at = [](uint32_t address) { return static_cast<size_t>(address - 0x80010000u + 0x800u); };
+    const auto put = [&](Bytes &exe, const disruptor::Language &language, size_t mission, uint16_t wait) {
+        exe[at(language.movie_tables) - 0x20 + 2 * mission] = static_cast<uint8_t>(wait);
+        exe[at(language.movie_tables) - 0x20 + 2 * mission + 1] = static_cast<uint8_t>(wait >> 8);
+    };
+    Bytes other(0x62800, 0);
+    put(other, french, 4, 487);
+    put(other, french, 15, 1200);
+    put(other, french, 1, 1);
+    std::array<int16_t, disruptor::kMissions> waits{};
+    waits.fill(9);
+    expect(disruptor::read_briefing_waits(other, french, waits) && waits[4] == 588 && waits[15] == 1447 && waits[1] == 2 && waits[0] == 0,
+           "a PAL wait is the table's halfword turned from 49.761 VBlanks a second to this build's 60, rounded up");
+    Bytes ntsc(0x62800, 0);
+    put(ntsc, japanese, 4, 643);
+    expect(disruptor::read_briefing_waits(ntsc, japanese, waits) && waits[4] == 645 && waits[3] == 0, "an NTSC wait is turned from 59.826 a second");
+    put(other, french, 7, 1201);
+    expect(!disruptor::read_briefing_waits(other, french, waits), "a wait past twenty seconds of the other console refuses");
+    put(other, french, 7, 0xFFFF);
+    expect(!disruptor::read_briefing_waits(other, french, waits), "a wait below zero refuses");
+    const Bytes cut(at(french.movie_tables) - 0x20 + 2 * disruptor::kMissions - 1, 0);
+    expect(!disruptor::read_briefing_waits(cut, french, waits), "an executable that ends inside the table refuses");
+    expect(at(japanese.movie_tables) - 0x20 == at(0x800543BCu) && at(french.movie_tables) - 0x20 == at(0x80057A48u) &&
+               at(disruptor::languages()[1].movie_tables) - 0x20 == at(0x80057528u),
+           "the tables are the ones the three players' waits read");
+}
+
+void test_a_layout_carries_its_briefing_waits() {
+    const disruptor::Language french = disruptor::languages().front();
+    const size_t table = (french.movie_tables - 0x20u - 0x80010000u + 0x800u) + 30u * kSectorData;
+    Discs discs;
+    make_discs(discs);
+    discs.other.data[table + 2 * 4] = 0xE7;
+    discs.other.data[table + 2 * 4 + 1] = 0x01;
+    disruptor::LanguageDisc disc;
+    std::string why;
+    expect(disc.build(discs.home, discs.other, why) && disc.briefing_waits()[4] == 588 && disc.briefing_waits()[5] == 0,
+           "a laid-out disc carries its player's briefing waits");
+    discs.other.data[table + 2 * 9 + 1] = 0x80;
+    expect(!disc.build(discs.home, discs.other, why) && why == "the other executable has no table of briefing waits this build can read" &&
+               disc.briefing_waits()[4] == 0,
+           "a disc whose table cannot be read is refused, and keeps no waits of the layout before");
 }
 
 void test_a_german_disc_is_laid_out() {
@@ -858,6 +925,7 @@ void test_a_german_disc_is_laid_out() {
     std::string why;
     expect(disc.build(discs.home, discs.other, why), "a German disc must be laid out");
     expect(!unpack(disc.pack()).empty() && g_unpacked_signs.size() == 4 && g_unpacked_signs[3].drawn == "SS", "with a pack that names its four signs");
+    expect(disc.sound_starts()[0] == 3, "and with its movies' sound starts");
 }
 
 void test_a_disc_without_words_gives_movies_and_speech() {
@@ -866,6 +934,8 @@ void test_a_disc_without_words_gives_movies_and_speech() {
     disruptor::LanguageDisc disc;
     std::string why;
     expect(disc.build(discs.home, discs.other, why) && disc.pack().empty(), "a Japanese disc must be laid out, with no pack");
+    expect(std::all_of(disc.sound_starts().begin(), disc.sound_starts().end(), [](int16_t start) { return start == 0; }),
+           "and its movies start their sound on the first frame");
     if (disc.sectors() == 0) return;
     const Bytes head = read(disc, 220).data;
     const auto piece_sector = [&](uint32_t index, uint32_t sector) { return read(disc, 220 + disruptor::le32(head.data() + 4 * index) / kSectorData + sector); };
@@ -901,6 +971,8 @@ void test_a_disc_without_words_gives_movies_and_speech() {
     Discs french;
     make_discs(french);
     expect(disc.build(french.home, french.other, why) && !disc.tall_hints(), "a layout after it forgets that its hints were tall");
+    expect(disc.sound_starts()[0] == 3 && !disc.build(unknown.home, unknown.other, why) && disc.sound_starts()[0] == 0,
+           "a refused layout keeps no sound starts of the one before");
 }
 
 size_t record_of(const MemoryImage &image, const std::string &name);
@@ -1113,6 +1185,9 @@ int main() {
     test_the_pack_pairs_the_two_executables();
     test_places_come_from_calls_that_pair_up();
     test_the_executable_takes_the_other_tables();
+    test_the_sound_starts_come_from_the_fifth_table();
+    test_the_briefing_waits_come_from_the_table_before_the_movies();
+    test_a_layout_carries_its_briefing_waits();
     test_the_two_discs_become_one();
     test_strings_fit_the_menu_raster();
     test_signs_go_where_the_us_routine_reaches();

@@ -92,6 +92,7 @@ struct Arguments {
     bool updates_window = false; // the home page with the Updates window open
     Screen screen = Screen::home;
     int page = 0;
+    int scroll = 0;
 };
 
 Arguments parse(int count, char** values) {
@@ -114,6 +115,9 @@ Arguments parse(int count, char** values) {
         } else if (words[i] == "--page" && more) {
             const auto page = words[++i];
             std::from_chars(page.data(), page.data() + page.size(), arguments.page);
+        } else if (words[i] == "--scroll" && more) {
+            const auto pixels = words[++i];
+            std::from_chars(pixels.data(), pixels.data() + pixels.size(), arguments.scroll);
         } else {
             throw std::runtime_error("Usage: DisruptorLauncher.exe --verify IMAGE | --import IMAGE [--root FOLDER] | "
                                      "--check [--root FOLDER]");
@@ -304,6 +308,7 @@ int run_window(const Arguments& arguments, Updater& updater, Activity& activity,
     View view(session, updater, activity, choices_file);
     view.style(scale);
     view.show(arguments.screen, arguments.page);
+    if (arguments.screenshot) view.for_picture(static_cast<float>(arguments.scroll));
     if (arguments.updates_window) view.open_updates();
     view.attach(window, renderer);
     SDL_SetWindowHitTest(window, hit_test, &view);

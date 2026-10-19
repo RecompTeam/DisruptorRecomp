@@ -24,6 +24,20 @@ static inline uint32_t psx_ws_ft4_signature_words(const uint32_t *words) {
     return hash;
 }
 
+/* Fingerprint the `count` words of a GP0 command as it is drawn, CLUT and page included. */
+static inline uint32_t psx_gpu_command_signature(const uint32_t *words, int count) {
+    uint32_t hash = 2166136261u;
+    for (int i = 0; i < count; i++) {
+        uint32_t word = words[i];
+        for (int byte = 0; byte < 4; byte++) {
+            hash ^= word & 0xFFu;
+            hash *= 16777619u;
+            word >>= 8;
+        }
+    }
+    return hash;
+}
+
 static inline int psx_ws_tag_match_result(
         uint32_t now, uint32_t stamp, int content_validated,
         uint32_t expected_signature, const uint32_t *current_words) {

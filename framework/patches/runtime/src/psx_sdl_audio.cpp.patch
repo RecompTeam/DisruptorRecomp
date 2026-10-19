@@ -1,0 +1,62 @@
+diff --git a/runtime/src/psx_sdl_audio.cpp b/runtime/src/psx_sdl_audio.cpp
+index 03c64590381807054cd56a571627090701a2599c..99d2f670aa6491118b5c970a882dd09928bf311d 100644
+--- a/runtime/src/psx_sdl_audio.cpp
++++ b/runtime/src/psx_sdl_audio.cpp
+@@ -2,6 +2,16 @@
+ 
+ #include <algorithm>
+ #include <cstring>
++
++static int s_device_frames;
++
++extern "C" int psx_sdl_audio_device_frames(void) { return s_device_frames; }
++
++extern "C" const char *psx_sdl_audio_driver(void)
++{
++    const char *driver = SDL_GetCurrentAudioDriver();
++    return driver ? driver : "";
++}
+ 
+ #if defined(PSX_SDL3)
+ 
+@@ -47,7 +57,9 @@
+ 
+     const SDL_AudioDeviceID device = SDL_GetAudioStreamDevice(s_audio_stream);
+     SDL_AudioSpec obtained = requested;
+-    (void)SDL_GetAudioDeviceFormat(device, &obtained, nullptr);
++    int device_frames = 0;
++    (void)SDL_GetAudioDeviceFormat(device, &obtained, &device_frames);
++    s_device_frames = device_frames > 0 ? device_frames : 0;
+     if (have) {
+         std::memset(have, 0, sizeof(*have));
+         have->freq = obtained.freq;
+@@ -57,6 +69,12 @@
+     }
+ 
+     return device;
++}
++
++extern "C" const char *psx_sdl_audio_device_name(void)
++{
++    const char *name = s_audio_stream ? SDL_GetAudioDeviceName(SDL_GetAudioStreamDevice(s_audio_stream)) : nullptr;
++    return name ? name : "";
+ }
+ 
+ extern "C" int psx_sdl_audio_resume(SDL_AudioDeviceID)
+@@ -107,6 +125,8 @@
+ 
+ #else
+ 
++extern "C" const char *psx_sdl_audio_device_name(void) { return "the default device"; }
++
+ extern "C" SDL_AudioDeviceID psx_sdl_audio_open(
+     const PsxSdlAudioSpec *want, PsxSdlAudioSpec *have)
+ {
+@@ -130,6 +150,7 @@
+         have->channels = obtained.channels;
+         have->samples = obtained.samples;
+     }
++    s_device_frames = device ? obtained.samples : 0;
+     return device;
+ }
+ 

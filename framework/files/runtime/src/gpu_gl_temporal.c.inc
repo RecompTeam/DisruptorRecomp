@@ -43,6 +43,9 @@ typedef struct {
     uint64_t texture_generation[TEMP_MAX_TEXTURES];
 } TemporalScene;
 static TemporalScene s_temp_build[TEMP_BUILD_SLOTS], s_temp_prev, s_temp_curr;
+/* Slots the builder skips (in matching, or a retired scene still sampled), apart since a publish copies scenes whole. */
+static int s_temp_held[TEMP_BUILD_SLOTS];
+static uint64_t s_temp_generation; /* a reset's count: a scene matched across one is not published */
 static GpuTemporalCamera s_temp_camera; /* the last interval's camera, a hypothesis for the next */
 static SDL_atomic_t s_temp_worker_ready;
 static uint64_t s_temp_published, s_temp_replays, s_temp_fallbacks;
@@ -60,7 +63,7 @@ static GLint s_temp_uPull=-1;
 static int s_temp_fill;         /* departed faces are leaving their depth where the scene left none, see temporal_submit */
 static float s_temp_scratch[TEXBATCH_MAXV * TEXV], s_temp_under[TEXBATCH_MAXV * TEXV];
 typedef struct {
-    GLint shift, xhalf, visual, options, twin, mask, filter, pass, semi, fade, fade_at;
+    GLint shift, xhalf, visual, options, twin, mask, filter, pass, semi, fade, fade_at, fade_power, dissolve, clear;
 } TemporalUniforms;
 static TemporalUniforms s_temp_uniforms[2];
 
@@ -180,14 +183,16 @@ static int temporal_recording(void) {
 static TemporalScene *temporal_builder(GLuint fbo, int y, int h) {
     for (int i=0;i<TEMP_BUILD_SLOTS;++i) {
         TemporalScene *s=&s_temp_build[i];
-        if (fbo && s->capture_fbo==fbo && s->active &&
+        if (!s_temp_held[i] && fbo && s->capture_fbo==fbo && s->active &&
             s->clear_y<=y && s->clear_y+s->clear_h>=y+h) return s;
     }
     return NULL;
 }
 static void temporal_reset(void) {
-    for (int i = 0; i < TEMP_BUILD_SLOTS; ++i) { s_temp_build[i].active = 0; s_temp_build[i].capture_fbo=0; }
+    for (int i = 0; i < TEMP_BUILD_SLOTS; ++i)
+        if (!s_temp_held[i]) { s_temp_build[i].active = 0; s_temp_build[i].capture_fbo=0; }
     s_temp_prev.active = s_temp_curr.active = 0;
+    ++s_temp_generation;
 }
 static int temporal_allocate(TemporalScene *s) {
     if (!s->vertices) s->vertices = (float *)malloc(TEMP_MAX_VERTS * TEXV * sizeof(float));
@@ -204,13 +209,13 @@ static int temporal_allocate(TemporalScene *s) {
 static void temporal_begin(GLuint fbo, int y, int h, uint16_t color) {
     TemporalScene *s=NULL;
     for (int i=0;i<TEMP_BUILD_SLOTS;++i)
-        if (s_temp_build[i].capture_fbo==fbo && s_temp_build[i].clear_y==y) { s=&s_temp_build[i]; break; }
+        if (!s_temp_held[i] && s_temp_build[i].capture_fbo==fbo && s_temp_build[i].clear_y==y) { s=&s_temp_build[i]; break; }
     if (!s) for (int i=0;i<TEMP_BUILD_SLOTS;++i)
-        if (!s_temp_build[i].active) { s=&s_temp_build[i]; break; }
+        if (!s_temp_held[i] && !s_temp_build[i].active) { s=&s_temp_build[i]; break; }
     if (!s) return;
     for (int i=0;i<TEMP_BUILD_SLOTS;++i) {
         TemporalScene *other=&s_temp_build[i];
-        if (other!=s && other->capture_fbo==fbo && other->active &&
+        if (!s_temp_held[i] && other!=s && other->capture_fbo==fbo && other->active &&
             other->clear_y<y+h && y<other->clear_y+other->clear_h)
             other->active=0;
     }
@@ -230,7 +235,7 @@ static void temporal_begin(GLuint fbo, int y, int h, uint16_t color) {
 }
 static void temporal_invalidate_surface(GLuint fbo) {
     for (int i=0;i<TEMP_BUILD_SLOTS;++i)
-        if (s_temp_build[i].capture_fbo==fbo) s_temp_build[i].bad=4;
+        if (!s_temp_held[i] && s_temp_build[i].capture_fbo==fbo) s_temp_build[i].bad=4;
 }
 
 /* Snapshot every distinct texture generation used by this scene. This also
@@ -242,16 +247,26 @@ static int temporal_texture(TemporalScene *s) {
     if (s->texture_count == TEMP_MAX_TEXTURES) { s->bad = 3; return -1; }
     int i = s->texture_count++;
     GLint read_fbo = 0, texture = 0;
-    glGetIntegerv(0x8CAA /* GL_READ_FRAMEBUFFER_BINDING */, &read_fbo);
-    glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture);
+    /* The queries wait for the driver's thread to drain: 4% of the emulation thread in a crowd, measured. */
+    const int queried = !p_glCopyImageSubData || !s->textures[i];
+    if (queried) {
+        glGetIntegerv(0x8CAA /* GL_READ_FRAMEBUFFER_BINDING */, &read_fbo);
+        glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture);
+    }
     if (!s->textures[i])
         s->textures[i] = make_tex(PSXGL_R16UI, VRAM_W, VRAM_H,
                                   PSXGL_RED_INTEGER, GL_UNSIGNED_SHORT);
-    p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, s_raw_fbo);
-    glBindTexture(GL_TEXTURE_2D, s->textures[i]);
-    glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, VRAM_W, VRAM_H);
-    p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, (GLuint)read_fbo);
-    glBindTexture(GL_TEXTURE_2D, (GLuint)texture);
+    if (p_glCopyImageSubData) {
+        p_glCopyImageSubData(s_raw_tex, GL_TEXTURE_2D, 0, 0, 0, 0, s->textures[i], GL_TEXTURE_2D, 0, 0, 0, 0,
+                             VRAM_W, VRAM_H, 1);
+        if (queried) glBindTexture(GL_TEXTURE_2D, (GLuint)texture);
+    } else {
+        p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, s_raw_fbo);
+        glBindTexture(GL_TEXTURE_2D, s->textures[i]);
+        glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, VRAM_W, VRAM_H);
+        p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, (GLuint)read_fbo);
+        glBindTexture(GL_TEXTURE_2D, (GLuint)texture);
+    }
     s->texture_generation[i] = s_temporal_raw_generation;
     return i;
 }
@@ -321,7 +336,7 @@ static void temporal_draw(const float *vertices, const uint64_t *identities, int
          * Do not publish an incomplete command list as a valid scene. */
         for (int i=0;i<TEMP_BUILD_SLOTS;++i) {
             TemporalScene *other=&s_temp_build[i];
-            if (other->active && other->capture_fbo==g_wide_cur &&
+            if (!s_temp_held[i] && other->active && other->capture_fbo==g_wide_cur &&
                 other->clear_y<=s_area_y2 && s_area_y1<other->clear_y+other->clear_h)
                 other->bad=5;
         }
@@ -464,16 +479,23 @@ static void temporal_dump_mesh(void) {
 }
 #endif
 
-/* Everything about the scene being captured that needs no lock, 1.7 ms of
- * matching above all: the presenter reads neither the builder's arrays nor
- * the current scene's departure arrays. Game thread only. */
-static TemporalScene *s_temp_ready;
-static void temporal_prepare(GLuint fbo, int y, int w, int h) {
+/* What a captured scene is matched against: the current scene as the capture found it. */
+typedef struct {
+    int ok;
+    const GpuTemporalTriangle *triangles;
+    int nt;
+    GpuTemporalTriangle *start, *gone_to;
+    int *gone;
+    int backdrop;
+    float backdrop_origin;
+} TemporalAgainst;
+
+/* The builder's scene for a display band moved to the band's rows, the cheap part of a capture. Game thread. */
+static TemporalScene *temporal_prepare_scene(GLuint fbo, int y, int w, int h) {
     TemporalScene *s=temporal_builder(fbo,y,h);
-    s_temp_ready=NULL;
     if (!temporal_recording() || !s || !s->active || s->bad ||
         s->clear_y > y || s->clear_y+s->clear_h < y+h ||
-        s->width != w || s->scale != s_scale || !s->nc) return;
+        s->width != w || s->scale != s_scale || !s->nc) return NULL;
     s->origin_y=y; s->height=h; s->matched=s->world=s->moving=0;
     s->backdrop_back=0.0f;
     memset(&s->mesh_stats,0,sizeof(s->mesh_stats));
@@ -492,24 +514,49 @@ static void temporal_prepare(GLuint fbo, int y, int w, int h) {
         if (s->triangles[i].world) ++s->world;
     }
     memcpy(s->from,s->triangles,s->nt*sizeof(*s->from));
-    if (s_temp_curr.active && s_temp_curr.width==w && s_temp_curr.height==h &&
-        s_temp_curr.scale==s_scale && s_temp_curr.tint==s->tint) {
-        gpu_temporal_match(s_temp_curr.triangles,s_temp_curr.nt,s->triangles,s->nt,s->matches);
+    return s;
+}
+
+/* With the present mutex held, or on the game thread while no scene is in matching. */
+static void temporal_against(const TemporalScene *s, int w, int h, TemporalAgainst *a) {
+    a->ok=s_temp_curr.active && s_temp_curr.width==w && s_temp_curr.height==h &&
+          s_temp_curr.scale==s_scale && s_temp_curr.tint==s->tint;
+    a->triangles=s_temp_curr.triangles; a->nt=s_temp_curr.nt;
+    a->start=s_temp_curr.start; a->gone_to=s_temp_curr.gone_to; a->gone=s_temp_curr.gone;
+    a->backdrop=s_temp_curr.backdrop; a->backdrop_origin=s_temp_curr.backdrop_origin;
+}
+
+/* 2 ms a frame at the original draw distance, 7 to 15 at 3x: unlocked, the presenter reads no array this writes. */
+static void temporal_match_scene(TemporalScene *s, const TemporalAgainst *a) {
+    if (a->ok) {
+        gpu_temporal_match(a->triangles,a->nt,s->triangles,s->nt,s->matches);
         for (int i=0; i<s->nt; ++i)
             if (s->matches[i]>=0) ++s->matched;
         s->moving=gpu_temporal_mesh_prepare_scene(
-            s_temp_curr.triangles,s_temp_curr.nt,s->triangles,s->nt,s->matches,s->from,
-            &s->mesh_stats,s_temp_curr.start,s_temp_curr.gone_to,s_temp_curr.gone,
+            a->triangles,a->nt,s->triangles,s->nt,s->matches,s->from,
+            &s->mesh_stats,a->start,a->gone_to,a->gone,
             &s_temp_camera);
         s->camera=s_temp_camera;
         s->onward_ok=s->camera.inliers>=GPU_TEMPORAL_CAMERA_MIN_INLIERS && gpu_temporal_camera_invert(&s->camera,&s->onward);
-        if (s->backdrop && s_temp_curr.backdrop)
-            s->backdrop_back=psx_ws_backdrop_back(s_temp_curr.backdrop_origin,s->backdrop_origin,s->backdrop_period,TEMP_BACKDROP_MOST);
+        if (s->backdrop && a->backdrop)
+            s->backdrop_back=psx_ws_backdrop_back(a->backdrop_origin,s->backdrop_origin,s->backdrop_period,TEMP_BACKDROP_MOST);
     } else {
         s_temp_camera.inliers=0;
-        s->camera.inliers=0;
+        /* Whole, not its inliers alone: which slot a scene gets, and the camera left there, depends on the matching thread. */
+        memset(&s->camera,0,sizeof(s->camera));
+        memset(&s->onward,0,sizeof(s->onward));
         s->onward_ok=0;
     }
+}
+
+static TemporalScene *s_temp_ready;
+static void temporal_prepare(GLuint fbo, int y, int w, int h) {
+    TemporalAgainst against;
+    TemporalScene *s=temporal_prepare_scene(fbo,y,w,h);
+    s_temp_ready=NULL;
+    if (!s) return;
+    temporal_against(s,w,h,&against);
+    temporal_match_scene(s,&against);
     s_temp_ready=s;
 }
 
@@ -546,7 +593,7 @@ static void temporal_uniforms_init(GLuint p, TemporalUniforms *u) {
     TEMP_U(shift,"u_shift"); TEMP_U(xhalf,"u_xhalf"); TEMP_U(visual,"u_visual");
     TEMP_U(options,"u_visual_options"); TEMP_U(twin,"u_twin"); TEMP_U(mask,"u_maskset");
     TEMP_U(filter,"u_filter"); TEMP_U(pass,"u_semipass"); TEMP_U(semi,"u_semimode");
-    TEMP_U(fade,"u_fade"); TEMP_U(fade_at,"u_fade_at");
+    TEMP_U(fade,"u_fade"); TEMP_U(fade_at,"u_fade_at"); TEMP_U(fade_power,"u_fade_power"); TEMP_U(dissolve,"u_dissolve"); TEMP_U(clear,"u_clear");
 #undef TEMP_U
     p_glUseProgram(p);
     p_glUniform1f(p_glGetUniformLocation(p,"u_xscale"),1);
@@ -687,7 +734,8 @@ static void temporal_submit(const TemporalScene *s,const TemporalCommand *c,int 
     if (wide<narrow) wide=narrow;
     glEnable(GL_SCISSOR_TEST); glScissor(0,sy*s->scale,s->width*s->scale,sh*s->scale);
     p_glUseProgram(s_temp_tex_prog);
-    smooth_fade_uniforms(u->fade, u->fade_at, s_temp_fade_nearer);
+    smooth_fade_uniforms(u->fade, u->fade_at, u->fade_power, s_temp_fade_nearer);
+    edge_dissolve_batch(u->dissolve,u->clear,c->semi,c->check);
     p_glUniform1f(u->shift,0.5f/s->scale-1.0f/64.0f);
     p_glUniform1f(u->xhalf,s->width/2.0f); p_glUniform1f(u->visual,1);
     p_glUniform4f(u->options,0,0,s->tint,-1.0f);
@@ -719,7 +767,8 @@ static void temporal_submit_faces(const TemporalScene *s,const TemporalCommand *
     if (sh<=0 || count<=0) return;
     glEnable(GL_SCISSOR_TEST); glScissor(0,sy*s->scale,s->width*s->scale,sh*s->scale);
     p_glUseProgram(t?s_temp_tex_prog:s_temp_geo_prog);
-    if (t) smooth_fade_uniforms(u->fade, u->fade_at, s_temp_fade_nearer);
+    if (t) smooth_fade_uniforms(u->fade, u->fade_at, u->fade_power, s_temp_fade_nearer);
+    if (t) edge_dissolve_batch(u->dissolve,u->clear,c->semi,c->check);
     p_glUniform1f(u->shift,0.5f/s->scale-1.0f/64.0f);
     p_glUniform1f(u->xhalf,s->width/2.0f); p_glUniform1f(u->visual,1);
     p_glUniform4f(u->options,0,0,s->tint,s_temp_underlaying ? -1.0f : 0.0f);
@@ -772,7 +821,8 @@ static void temporal_submit_faces(const TemporalScene *s,const TemporalCommand *
     if (fill && s_crack_fill>0.0f) {  /* the edges of the exact world polygons, see s_crack_fill */
         p_glUniform4f(u->options,0,0,s->tint,2.0f);
         glPolygonMode(GL_FRONT_AND_BACK,GL_LINE); glLineWidth(filler_line_width(s->scale));
-        glDepthFunc(GL_LESS); glDepthMask(GL_FALSE); glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_FALSE); glDisable(GL_BLEND);
+        glDepthFunc(GL_LESS); glDepthMask(GL_FALSE); glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_FALSE);
+        if (c->semi<0) opaque_blend(); else glDisable(GL_BLEND);
         s_temp_filling=1; temporal_mask(c->check,c->mask); s_temp_filling=0;
         p_glUniform1i(u->pass,c->semi<0?0:4); glDrawArrays(GL_TRIANGLES,0,count);
         glPolygonMode(GL_FRONT_AND_BACK,GL_FILL); glDepthFunc(GL_ALWAYS); glDepthMask(GL_TRUE);
@@ -801,7 +851,7 @@ static void temporal_submit_faces(const TemporalScene *s,const TemporalCommand *
             temporal_mask(0,c->mask);
             p_glUniform1i(u->pass,0); glDrawArrays(GL_TRIANGLES,0,count);
         } else if (c->semi<0) {
-            temporal_mask(c->check,c->mask);
+            opaque_blend(); temporal_mask(c->check,c->mask);
             p_glUniform1i(u->pass,0); glDrawArrays(GL_TRIANGLES,0,count);
         } else {
             temporal_mask(c->check,c->mask);
@@ -825,7 +875,7 @@ static void temporal_submit_faces(const TemporalScene *s,const TemporalCommand *
             glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
         }
     } else if (c->semi<0) {
-        glDisable(GL_BLEND); temporal_mask(c->check,c->mask);
+        opaque_blend(); temporal_mask(c->check,c->mask);
         p_glUniform1i(u->pass,0); glDrawArrays(GL_TRIANGLES,0,count);
     } else {
         glDisable(GL_BLEND); temporal_mask(c->check,c->mask);

@@ -42,13 +42,15 @@ constexpr const char* kReleasesPage = "https://github.com/RecompTeam/DisruptorRe
 constexpr const char* kTeamPage = "https://github.com/RecompTeam";
 constexpr const char* kDiscord = "https://discord.gg/hWbFatkXpU";
 constexpr const char* kGuidePage = "https://github.com/RecompTeam/DisruptorRecomp/blob/main/docs/PLAYING.md";
-constexpr float kFontSize = 16.0f;
+constexpr float kFontSize = 16.0f, kSmallSize = 15.0f;
+// Inter's thin stems drawn light on dark lose weight in grayscale blending: coverage of the regular face times 1.25.
+constexpr float kRegularInk = 1.25f;
 constexpr float kSidebarWidth = 216.0f, kCaptionHeight = 40.0f, kCaptionButton = 46.0f, kResizeEdge = 6.0f;
 
 // The game's own colours: its menus are dark green, its logo red.
 constexpr unsigned kBackground = 0x0b0f0c, kSurface = 0x121813, kRaised = 0x1a231b, kBorder = 0x263228;
-// Text keeps WCAG AA contrast on every panel colour: muted 7.5:1 at worst, faint 5.1:1, red text 5.3:1.
-constexpr unsigned kText = 0xe7ede7, kMuted = 0xa7b5a8, kFaint = 0x86948a, kLink = 0x9fd8a6, kRedText = 0xff5a5f;
+// Text keeps WCAG AA contrast on every panel colour: muted 10.2:1 at worst, faint 5.1:1, red text 5.3:1.
+constexpr unsigned kText = 0xe7ede7, kMuted = 0xc8cfc9, kFaint = 0x86948a, kLink = 0x9fd8a6, kRedText = 0xff5a5f;
 constexpr unsigned kRed = 0xe3262b, kRedHover = 0xff3a3f, kRedPressed = 0xc41f24;
 constexpr unsigned kGreen = 0x6fcf7a, kAmber = 0xe0a43a;
 constexpr int kTriggerReleased = 8000, kTriggerPressed = 16384;
@@ -95,9 +97,10 @@ ImFont* font_from_resource(int id, const ImFontConfig& config, const ImWchar* ra
 }
 
 // A font of the launcher's own, with the icons and then a system font merged in for letters it has none of.
-ImFont* load_font(int id, const char* system_file) {
+ImFont* load_font(int id, const char* system_file, float ink = 1.0f) {
     ImFontConfig own;
     own.FontDataOwnedByAtlas = false;
+    own.RasterizerMultiply = ink;
     ImFont* font = font_from_resource(id, own);
     if (!font) return nullptr;
     ImFontConfig merged;
@@ -113,6 +116,7 @@ ImFont* load_font(int id, const char* system_file) {
     if (fs::is_regular_file(fallback, missing)) {
         ImFontConfig system;
         system.MergeMode = true;
+        system.RasterizerMultiply = ink;
         const std::u8string name = fallback.u8string();
         ImGui::GetIO().Fonts->AddFontFromFileTTF(reinterpret_cast<const char*>(name.c_str()), kFontSize, &system);
     }
@@ -366,7 +370,7 @@ void View::style(float scale) {
     if (body_) return;
     // Snapped to the pixel grid vertically only, as ClearType does: crisp small text that keeps its spacing.
     ImGui::GetIO().Fonts->FontLoaderFlags = ImGuiFreeTypeLoaderFlags_LightHinting;
-    body_ = load_font(regular_font, "segoeui.ttf");
+    body_ = load_font(regular_font, "segoeui.ttf", kRegularInk);
     if (!body_) body_ = ImGui::GetIO().Fonts->AddFontDefault();
     bold_ = load_font(semibold_font, "segoeuib.ttf");
     if (!bold_) bold_ = body_;
@@ -605,13 +609,15 @@ void View::sidebar(const UpdateView& update) {
     if (small(icon::circle_help, "Help", true, "The guide to setting up and playing. F1 opens it too.", screen_ == Screen::help))
         screen_ = Screen::help;
     if (small(icon::info, "About", true, nullptr, screen_ == Screen::about)) screen_ = Screen::about;
-    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 14.0f * scale_);
     ImGui::PushStyleColor(ImGuiCol_Text, rgb(kFaint));
     ImGui::PushFont(nullptr, kFontSize * 0.8f);
     ImGui::PushStyleColor(ImGuiCol_TextLink, rgb(kFaint));
-    if (ImGui::TextLink(shown_version(DISRUPTOR_BUILD_VERSION).c_str())) updates_open_ = true;
-    hand_when_hovered();
-    tooltip("Updates: this version, the newest one and the release notes.");
+    if (!version_hidden_) {
+        ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 14.0f * scale_);
+        if (ImGui::TextLink(shown_version(DISRUPTOR_BUILD_VERSION).c_str())) updates_open_ = true;
+        hand_when_hovered();
+        tooltip("Updates: this version, the newest one and the release notes.");
+    }
     ImGui::PopStyleColor(2);
     // Another page hides the home page's update card: the foot of the side bar says one is waiting.
     if (waiting) {
@@ -808,7 +814,7 @@ void View::first_run(bool dialog_open) {
     };
     centred(body_, 30.0f * scale_, dragging_ ? kRed : 0x9fb39f, icon::disc_3, 22.0f * scale_);
     centred(bold_, 17.0f * scale_, kText, dragging_ ? "Drop it to import" : "Drop your Disruptor (USA) disc image here", 66.0f * scale_);
-    centred(body_, 14.0f * scale_, kMuted, "BIN/CUE, ISO or IMG. It is copied and checked, your file stays where it is.",
+    centred(body_, kSmallSize * scale_, kMuted, "BIN/CUE, ISO or IMG. It is copied and checked, your file stays where it is.",
             94.0f * scale_);
     const std::string choose = std::string(icon::upload) + "  Choose file...";
     const char* earlier = "Played an earlier copy? Bring its saves";
@@ -1180,6 +1186,7 @@ void View::settings() {
     ImGui::Spacing();
     ImGui::PushStyleColor(ImGuiCol_ChildBg, rgb(kSurface));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(18.0f * scale_, 8.0f * scale_));
+    if (rows_scroll_ > 0.0f) ImGui::SetNextWindowScroll(ImVec2(0.0f, rows_scroll_));
     ImGui::BeginChild("rows", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding);
     rows();
     if (page_ == static_cast<int>(Page::controls)) pad_buttons();
@@ -1260,7 +1267,7 @@ void View::key_table() {
     const auto actions = key_actions();
     float label_width = 0.0f;
     for (const KeyAction& action : actions) label_width = std::max(label_width, ImGui::CalcTextSize(action.label).x);
-    const float small = kFontSize * 0.875f;
+    const float small = kSmallSize;
     const float mouse_width = modern ? body_->CalcTextSizeA(small, FLT_MAX, 0.0f, "Right click").x + 8.0f * scale_ : 0.0f;
     const int columns = modern ? 3 : 2;
     constexpr ImGuiTableFlags flags = ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_PadOuterX;
@@ -1313,7 +1320,7 @@ void View::key_table() {
         }
         ImGui::EndTable();
     }
-    ImGui::PushFont(nullptr, kFontSize * 0.875f);
+    ImGui::PushFont(nullptr, kSmallSize);
     if (!key_note_.empty()) {
         ImGui::PushStyleColor(ImGuiCol_Text, rgb(kAmber));
         wrapped(key_note_);
@@ -1452,7 +1459,7 @@ void View::pad_buttons() {
         }
         ImGui::EndTable();
     }
-    ImGui::PushFont(nullptr, kFontSize * 0.875f);
+    ImGui::PushFont(nullptr, kSmallSize);
     if (!pad_note_.empty()) {
         ImGui::PushStyleColor(ImGuiCol_Text, rgb(kAmber));
         wrapped(pad_note_);
@@ -1694,9 +1701,14 @@ void View::rows() {
             ImGui::SameLine(0.0f, 10.0f * scale_);
             tag("EXPERIMENTAL", kAmber);
         }
-        ImGui::PushFont(nullptr, kFontSize * 0.875f);
+        ImGui::PushFont(nullptr, kSmallSize);
         ImGui::PushStyleColor(ImGuiCol_Text, rgb(kMuted));
         if (option.hint) hint_lines(option.hint, text_width);
+        if (option.notice) {
+            ImGui::PushStyleColor(ImGuiCol_Text, rgb(kAmber));
+            ImGui::TextUnformatted(option.notice);
+            ImGui::PopStyleColor();
+        }
         if (session_.editable() && !file.applies(option) && !option.needs.empty() && !placement.child) {
             std::string needs = "Needs ";
             for (std::size_t index = 0; index < option.needs.size(); ++index) {
@@ -1814,7 +1826,7 @@ bool View::updates_popup(const UpdateView& update) {
         ImGui::PushFont(bold_, kFontSize * 1.0625f);
         ImGui::TextUnformatted("Check at start");
         ImGui::PopFont();
-        ImGui::PushFont(nullptr, kFontSize * 0.875f);
+        ImGui::PushFont(nullptr, kSmallSize);
         hint_lines("Looks for a newer release at every start.\nOnly what changed is downloaded when it can be.",
                    ImGui::GetContentRegionAvail().x - toggle_width - 16.0f * scale_);
         ImGui::PopFont();
@@ -1884,7 +1896,7 @@ bool View::updates_popup(const UpdateView& update) {
     group_heading(update.state == UpdateState::available ? "What is new" : "Release notes", false);
     ImGui::Dummy(ImVec2(0.0f, 2.0f * scale_));
     if (update.notes.empty()) {
-        ImGui::PushFont(nullptr, kFontSize * 0.875f);
+        ImGui::PushFont(nullptr, kSmallSize);
         muted("The notes of a newer release appear here once a check finds one.");
         ImGui::PopFont();
     } else {

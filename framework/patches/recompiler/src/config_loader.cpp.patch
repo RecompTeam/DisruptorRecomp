@@ -1,5 +1,5 @@
 diff --git a/recompiler/src/config_loader.cpp b/recompiler/src/config_loader.cpp
-index 246483fe90be378f8baf3e85671b692986823a8e..594f30cb0ecffafd821f03780263a839027fae4d 100644
+index 246483fe90be378f8baf3e85671b692986823a8e..1a8d645c7848be938cbe005132fbc93d2fe0457c 100644
 --- a/recompiler/src/config_loader.cpp
 +++ b/recompiler/src/config_loader.cpp
 @@ -3,13 +3,27 @@
@@ -93,7 +93,16 @@ index 246483fe90be378f8baf3e85671b692986823a8e..594f30cb0ecffafd821f03780263a839
          h.u32(site.address);
          h.u32(site.expected);
      }
-@@ -496,11 +552,19 @@
+@@ -280,6 +336,8 @@
+         // `default` is the launcher-facing alias for the pre-selected language.
+         if (loc.contains("default"))
+             rt.language = toml::find<std::string>(loc, "default");
++        if (loc.contains("capture"))
++            rt.text_capture = toml::find<bool>(loc, "capture");
+         // Optional launcher dropdown options: languages = [ {code, label}, ... ].
+         if (loc.contains("languages") && toml::find(loc, "languages").is_array()) {
+             for (const auto& e : toml::find(loc, "languages").as_array()) {
+@@ -496,11 +554,19 @@
          const toml::value& video = toml::find(cfg, "video");
          if (video.contains("supersampling")) {
              const auto n = toml::find<int64_t>(video, "supersampling");
@@ -115,7 +124,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..594f30cb0ecffafd821f03780263a839
          }
          if (video.contains("antialiasing")) {
              rt.video_antialiasing = toml::find<bool>(video, "antialiasing");
-@@ -662,6 +726,10 @@
+@@ -662,6 +728,10 @@
          }
          if (ct.contains("lock_device")) {
              rt.controller_lock_device = toml::find<bool>(ct, "lock_device");
@@ -126,7 +135,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..594f30cb0ecffafd821f03780263a839
          }
          if (ct.contains("deadzone")) {
              const auto n = toml::find<int64_t>(ct, "deadzone");
-@@ -1264,6 +1332,41 @@
+@@ -1264,6 +1334,41 @@
          for (const auto& a : arr)
              mod_function_entry_funcs.push_back(
                  parse_hex(a, "recompiler.mod_function_entry_funcs"));
@@ -168,7 +177,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..594f30cb0ecffafd821f03780263a839
      }
      std::vector<uint32_t> hot_funcs;
      if (recomp.contains("hot_funcs")) {
-@@ -1451,6 +1554,10 @@
+@@ -1451,6 +1556,10 @@
      std::vector<uint32_t> ws_cull_screen_x_sites;
      std::vector<uint32_t> ws_cull_slti_sites;
      std::vector<uint32_t> ws_cull_slti_lower_sites;
@@ -179,7 +188,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..594f30cb0ecffafd821f03780263a839
      std::vector<uint32_t> ws_cull_bltz_sites;
      std::vector<uint32_t> ws_cull_negsub_sites;
      std::vector<uint32_t> ws_cull_vxrange_sites;
-@@ -1459,6 +1566,9 @@
+@@ -1459,6 +1568,9 @@
      std::vector<uint32_t> ws_cull_xclip_load_sites;
      std::vector<WidescreenCullKeepSite> ws_cull_keep_sites;
      std::vector<WidescreenAngleSite> ws_cull_angle_sites;
@@ -189,7 +198,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..594f30cb0ecffafd821f03780263a839
      WidescreenAspectConeConfig ws_aspect_cone;
      int ws_cull_guard_pixels = 0;
      int ws_cull_activation_guard_pixels = 0;
-@@ -1484,6 +1594,10 @@
+@@ -1484,6 +1596,10 @@
              load_sites("screen_x_sites", ws_cull_screen_x_sites);
              load_sites("slti_sites",  ws_cull_slti_sites);
              load_sites("slti_lower_sites", ws_cull_slti_lower_sites);
@@ -200,7 +209,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..594f30cb0ecffafd821f03780263a839
              load_sites("bltz_sites",  ws_cull_bltz_sites);
              load_sites("negsub_sites", ws_cull_negsub_sites);
              load_sites("vxrange_sites", ws_cull_vxrange_sites);
-@@ -1552,6 +1666,85 @@
+@@ -1552,6 +1668,85 @@
                              "{}: duplicate cull-angle address 0x{:08X}",
                              config_path.string(), site.address));
                      ws_cull_angle_sites.push_back(site);
@@ -286,7 +295,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..594f30cb0ecffafd821f03780263a839
                  }
              }
              if (cull.contains("aspect_cone")) {
-@@ -1886,6 +2079,7 @@
+@@ -1886,6 +2081,7 @@
          /*ws_auto_ui_squash*/      ws_auto_ui_squash,
          /*data_shard_funcs*/      data_shard_funcs,
          /*mod_function_entry_funcs*/ mod_function_entry_funcs,
@@ -294,7 +303,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..594f30cb0ecffafd821f03780263a839
          /*hot_funcs*/             hot_funcs,
          /*vsync_query_func*/      vsync_query_func,
          /*vsync_counter_addr*/    vsync_counter_addr,
-@@ -1901,6 +2095,10 @@
+@@ -1901,6 +2097,10 @@
          /*ws_cull_screen_x_sites*/ ws_cull_screen_x_sites,
          /*ws_cull_slti_sites*/    ws_cull_slti_sites,
          /*ws_cull_slti_lower_sites*/ ws_cull_slti_lower_sites,
@@ -305,7 +314,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..594f30cb0ecffafd821f03780263a839
          /*ws_cull_bltz_sites*/    ws_cull_bltz_sites,
          /*ws_cull_negsub_sites*/  ws_cull_negsub_sites,
          /*ws_cull_vxrange_sites*/ ws_cull_vxrange_sites,
-@@ -1909,6 +2107,8 @@
+@@ -1909,6 +2109,8 @@
          /*ws_cull_xclip_load_sites*/ ws_cull_xclip_load_sites,
          /*ws_cull_keep_sites*/    ws_cull_keep_sites,
          /*ws_cull_angle_sites*/   ws_cull_angle_sites,
@@ -314,7 +323,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..594f30cb0ecffafd821f03780263a839
          /*ws_aspect_cone*/         ws_aspect_cone,
          /*ws_cull_guard_pixels*/  ws_cull_guard_pixels,
          /*ws_cull_activation_guard_pixels*/ ws_cull_activation_guard_pixels,
-@@ -1995,7 +2195,7 @@
+@@ -1995,7 +2197,7 @@
      return go;
  }
  
@@ -323,7 +332,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..594f30cb0ecffafd821f03780263a839
  
  UserSettings load_user_settings(const fs::path& path) {
      UserSettings s;
-@@ -2004,7 +2204,10 @@
+@@ -2004,7 +2206,10 @@
  
      toml::value doc;
      try {
@@ -335,7 +344,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..594f30cb0ecffafd821f03780263a839
      } catch (const std::exception&) {
          // Malformed file: fall back to all-defaults rather than refuse to boot,
          // but tell the caller so the user hears about it (and so the file can
-@@ -2026,7 +2229,7 @@
+@@ -2026,7 +2231,7 @@
          });
          if (v.contains("supersampling")) try_get([&]{
              const auto n = toml::find<int64_t>(v, "supersampling");
@@ -344,7 +353,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..594f30cb0ecffafd821f03780263a839
          });
          if (v.contains("window_width")) try_get([&]{
              const auto n = toml::find<int64_t>(v, "window_width");
-@@ -2087,8 +2290,16 @@
+@@ -2087,8 +2292,16 @@
          });
          if (v.contains("frame_interpolation_fps")) try_get([&]{
              s.frame_interpolation_fps = toml::find<int>(v, "frame_interpolation_fps");
@@ -362,7 +371,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..594f30cb0ecffafd821f03780263a839
          });
          if (v.contains("aspect_ratio")) try_get([&]{
              const auto m = toml::find<std::string>(v, "aspect_ratio");
-@@ -2106,6 +2317,17 @@
+@@ -2106,6 +2319,17 @@
          const toml::value& a = toml::find(doc, "audio");
          if (a.contains("spu_hq")) try_get([&]{
              s.spu_hq = toml::find<bool>(a, "spu_hq"); s.has_spu_hq = true;
@@ -380,7 +389,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..594f30cb0ecffafd821f03780263a839
          });
      }
      if (doc.contains("launcher")) {
-@@ -2230,15 +2452,69 @@
+@@ -2230,15 +2454,69 @@
              if (n >= 0 && n <= 32767) { s.deadzone = (int)n; s.has_deadzone = true; }
          });
      }
@@ -451,7 +460,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..594f30cb0ecffafd821f03780263a839
      if (!f.is_open()) return false;
  
      // TOML strings use forward slashes so backslash escaping is never an issue.
-@@ -2247,7 +2523,7 @@
+@@ -2247,7 +2525,7 @@
          return str;
      };
  
@@ -460,7 +469,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..594f30cb0ecffafd821f03780263a839
      f << "# Overrides the bundled game.toml; the command line overrides this file.\n\n";
  
      f << "[video]\n";
-@@ -2287,6 +2563,11 @@
+@@ -2287,6 +2565,11 @@
          f << "frame_interpolation = " << (s.frame_interpolation ? "true" : "false") << "\n";
      if (s.has_frame_interpolation_fps)
          f << "frame_interpolation_fps = " << s.frame_interpolation_fps << "\n";
@@ -472,7 +481,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..594f30cb0ecffafd821f03780263a839
      if (s.has_aspect_ratio)
          f << "aspect_ratio      = \"" << s.aspect_num << ":" << s.aspect_den << "\"\n";
      if (s.has_adaptive_view)
-@@ -2294,6 +2575,10 @@
+@@ -2294,6 +2577,10 @@
      f << "\n[audio]\n";
      if (s.has_spu_hq)
          f << "spu_hq = " << (s.spu_hq ? "true" : "false") << "\n";
@@ -483,7 +492,7 @@ index 246483fe90be378f8baf3e85671b692986823a8e..594f30cb0ecffafd821f03780263a839
      if (s.has_skip_launcher)
          f << "\n[launcher]\nskip_launcher = " << (s.skip_launcher ? "true" : "false") << "\n";
      if ((s.has_netplay_player_name && !s.netplay_player_name.empty()) ||
-@@ -2353,7 +2638,28 @@
+@@ -2353,7 +2640,28 @@
              f << "extra_late = " << s.parappa_timing_extra_late << "\n";
      }
  

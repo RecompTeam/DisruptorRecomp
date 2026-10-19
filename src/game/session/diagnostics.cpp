@@ -17,6 +17,12 @@ extern "C" int gl_renderer_debug_messages_active(void);
 extern "C" int gl_renderer_debug_message_take(char *text, int size, unsigned *id, int *severity, int *context, unsigned *lost);
 extern "C" int gpu_ws_displayed_flat(void);
 extern "C" int gpu_ws_displayed_menu(void);
+extern "C" int psx_audio_out_stats(double *fill_ms, double *target_ms, uint64_t *underruns, uint64_t *overflow_drops,
+                                   double *correction, int *legacy, int *host_rate);
+extern "C" int psx_audio_device_frames(void);
+extern "C" double psx_audio_sdl_queued_ms(void);
+extern "C" const char *psx_sdl_audio_driver(void);
+extern "C" const char *psx_sdl_audio_device_name(void);
 
 namespace disruptor::diagnostics {
 namespace {
@@ -37,7 +43,33 @@ struct Session {
     std::vector<std::string> devices;
     DriverMessages driver;
     uint32_t lost = 0;
+    uint64_t underruns = 0, drops = 0;
 };
+
+struct Sound {
+    bool known = false;
+    double queued_ms = 0.0, target_ms = 0.0, correction = 0.0;
+    uint64_t underruns = 0, drops = 0;
+    int rate = 0, legacy = 0;
+};
+
+Sound sound_now() {
+    Sound sound;
+    sound.known = psx_audio_out_stats(&sound.queued_ms, &sound.target_ms, &sound.underruns, &sound.drops, &sound.correction,
+                                      &sound.legacy, &sound.rate) != 0;
+    return sound;
+}
+
+SoundSetup sound_setup(const Sound& sound) {
+    SoundSetup setup;
+    setup.driver = psx_sdl_audio_driver();
+    setup.device = psx_sdl_audio_device_name();
+    setup.device_rate = sound.rate;
+    setup.legacy = sound.legacy != 0;
+    for (const char* name : {"SDL_AUDIO_DRIVER", "SDL_AUDIO_DEVICE_SAMPLE_FRAMES", "SDL_AUDIO_FREQUENCY", "PIPEWIRE_LATENCY", "PULSE_LATENCY_MSEC"})
+        if (const char* value = std::getenv(name)) setup.environment.push_back(std::string(name) + "=" + value);
+    return setup;
+}
 
 Session g_session;
 const std::chrono::steady_clock::time_point g_began = std::chrono::steady_clock::now();
@@ -83,6 +115,16 @@ Moment moment_now() {
     const SDL_WindowFlags flags = sdl_window ? SDL_GetWindowFlags(sdl_window) : 0;
     moment.focused = (flags & SDL_WINDOW_INPUT_FOCUS) != 0;
     moment.minimized = (flags & SDL_WINDOW_MINIMIZED) != 0;
+    if (const Sound sound = sound_now(); sound.known) {
+        moment.sound_queued_ms = sound.queued_ms;
+        moment.sound_underruns = sound.underruns >= g_session.underruns ? sound.underruns - g_session.underruns : sound.underruns;
+        g_session.underruns = sound.underruns;
+        moment.sound_drops = sound.drops >= g_session.drops ? sound.drops - g_session.drops : sound.drops;
+        g_session.drops = sound.drops;
+        moment.sound_target_ms = sound.target_ms;
+        moment.sound_sdl_ms = psx_audio_sdl_queued_ms();
+        moment.sound_trim = sound.correction;
+    }
     return moment;
 }
 
@@ -137,7 +179,58 @@ std::string pulse_line(const Stretch& stretch, const Moment& moment) {
     if (moment.minimized) line += ", minimized";
     if (moment.repeated) line += ", driver messages repeated " + std::to_string(moment.repeated);
     if (moment.lost) line += ", driver messages lost " + std::to_string(moment.lost);
+    if (moment.sound_queued_ms >= 0.0) {
+        std::snprintf(text, sizeof text, ", sound queued %.0f ms of %.0f, ", moment.sound_queued_ms, moment.sound_target_ms);
+        line += text;
+        if (moment.sound_sdl_ms >= 0.0) {
+            std::snprintf(text, sizeof text, "SDL holds %.0f ms, ", moment.sound_sdl_ms);
+            line += text;
+        }
+        std::snprintf(text, sizeof text, "rate trim %+.2f%%, %llu underruns, %llu overflow drops", moment.sound_trim * 100.0,
+                      static_cast<unsigned long long>(moment.sound_underruns), static_cast<unsigned long long>(moment.sound_drops));
+        line += text;
+    }
     return line;
+}
+
+std::string sound_setup_line(const SoundSetup& setup) {
+    std::string line = "sound: SDL driver " + (setup.driver.empty() ? std::string("unknown") : setup.driver) + ", device '" +
+                       (setup.device.empty() ? std::string("unknown") : setup.device) + "'";
+    if (setup.device_rate > 0 && setup.device_rate != 44100) line += ", the game's 44100 Hz resampled to " + std::to_string(setup.device_rate);
+    if (setup.legacy) line += ", queued without the resampler";
+    if (setup.environment.empty()) {
+        line += ", none of SDL_AUDIO_DRIVER, SDL_AUDIO_DEVICE_SAMPLE_FRAMES, SDL_AUDIO_FREQUENCY, PIPEWIRE_LATENCY, PULSE_LATENCY_MSEC set";
+    } else {
+        line += ", set:";
+        for (const auto& entry : setup.environment) line += " " + entry;
+    }
+    return line;
+}
+
+std::string movie_line(const MovieMoment& moment) {
+    char text[320];
+    const int length = std::snprintf(text, sizeof text,
+                                     "movie %u frame %u: sound %.2f s into its data (pitch 0x%X), picture %.2f s at %d a second, "
+                                     "sound minus picture %+.0f ms in the game",
+                                     moment.movie, moment.frame, moment.sound_seconds, moment.pitch, moment.picture_seconds,
+                                     moment.pictures_a_second, (moment.sound_seconds - moment.picture_seconds) * 1000.0);
+    std::string line(text, static_cast<size_t>(std::max(length, 0)));
+    if (moment.leaving_ms >= 0.0) {
+        std::snprintf(text, sizeof text, ", sound leaves the game %.0f ms later", moment.leaving_ms);
+        line += text;
+    }
+    return line;
+}
+
+std::string sound_line(int rate, int frames, double queue_ms) {
+    char text[160];
+    if (frames > 0 && rate > 0) {
+        std::snprintf(text, sizeof text, "sound: device %d Hz with a buffer of %d frames (%.1f ms), queue held at %.0f ms", rate, frames,
+                      1000.0 * frames / rate, queue_ms);
+    } else {
+        std::snprintf(text, sizeof text, "sound: device %d Hz, its buffer not told, queue held at %.0f ms", rate, queue_ms);
+    }
+    return text;
 }
 
 std::vector<std::string> device_changes(const std::vector<std::string>& before, const std::vector<std::string>& now) {
@@ -191,6 +284,12 @@ void frame_at(double seconds) {
         session.next_pulse = seconds + pulse_seconds;
         session.next_devices = seconds;
         say(std::string("detailed logging on, driver messages ") + driver_text(disruptor_diagnostics_driver_state()));
+        if (const Sound sound = sound_now(); sound.known) {
+            say(sound_line(sound.rate, psx_audio_device_frames(), sound.target_ms));
+            say(sound_setup_line(sound_setup(sound)));
+            session.underruns = sound.underruns;
+            session.drops = sound.drops;
+        }
     } else {
         session.stretch.frame(waited);
     }
@@ -241,6 +340,14 @@ void disruptor_diagnostics_note(const char *format, ...) {
     std::vsnprintf(text, sizeof text, format, arguments);
     va_end(arguments);
     disruptor::diagnostics::say(text);
+}
+
+double disruptor_diagnostics_sound_leaving_ms(void) {
+    const disruptor::diagnostics::Sound sound = disruptor::diagnostics::sound_now();
+    if (!sound.known) return -1.0;
+    const double held = psx_audio_sdl_queued_ms();
+    const int frames = psx_audio_device_frames();
+    return sound.queued_ms + (held > 0.0 ? held : 0.0) + (frames > 0 && sound.rate > 0 ? 1000.0 * frames / sound.rate : 0.0);
 }
 
 }  // extern "C"

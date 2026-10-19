@@ -1,6 +1,7 @@
 #include "cpu_state.h"
 #include "mod_plugins.h"
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -84,6 +85,8 @@ void psx_mod_write_byte(std::uint32_t address, std::uint8_t value) {
     seed_byte(address, value);
 }
 
+std::uint32_t psx_mod_gpu_dma_resolve_address(std::uint32_t address) { return address; }
+
 std::uint16_t psx_mod_read_half(std::uint32_t address) {
     const std::size_t p = physical(address);
     return static_cast<std::uint16_t>(g_ram[p + 0]) |
@@ -100,8 +103,6 @@ std::uint32_t psx_mod_read_word(std::uint32_t address) {
     return load_word(address);
 }
 
-/* Any call is a test failure: the feature must be savestate-safe and may only
- * substitute destination GPRs after exact renderer loads. */
 void psx_mod_write_word(std::uint32_t address, std::uint32_t value) {
     g_writes.emplace_back(address, value);
     seed_word(address, value);
@@ -112,11 +113,26 @@ void psx_mod_write_word(std::uint32_t address, std::uint32_t value) {
 #include "../../src/game/render/far_rendering.cpp"
 
 namespace {
+int g_smooth_fade = 0;
+int g_published = 0;
+std::uint32_t g_published_far = 0u;
+std::int32_t g_published_fade = 0;
+}  // namespace
+
+extern "C" int gl_renderer_smooth_fade(void) { return g_smooth_fade; }
+
+extern "C" void disruptor_render_arena_publish_fades(void) {
+    ++g_published;
+    disruptor_far_rendering_drawn_distances(&g_published_far, &g_published_fade);
+}
+
+namespace {
 
 constexpr std::uint32_t kTestPlayer = 0x80010000u;
 constexpr std::uint32_t kRendererContext = 0x80020000u;
 constexpr std::uint32_t kTestStack = 0x80030000u;
 constexpr std::uint32_t kPrimitiveBuffer = 0x80040000u;
+constexpr std::uint32_t kSprite = 0x5EA5u;  /* what the words of a drawn sprite hash to */
 constexpr std::uint32_t kReviewedVisibleSpanBase = 0x80079D18u;
 
 static_assert(kVisibleSpanBase == kReviewedVisibleSpanBase,
@@ -184,6 +200,7 @@ void reset_state() {
     g_ls_mode = 0;
     g_ls_replay_active = 0;
     g_writes.clear();
+    g_smooth_fade = 0;
 }
 
 void seed_live_game(CPUState *cpu, std::uint32_t far_distance = 1024u,
@@ -242,7 +259,13 @@ void invoke_first_fade(CPUState *cpu) {
     invoke_load(cpu, kDistanceLoadSites[5], 0x8004106Cu);
 }
 
-void test_registration_and_stateless_substitution() {
+bool only_distance_writes() {
+    for (const auto& [address, value] : g_writes)
+        if (address != kFarDistance && address != kFadeStart) return false;
+    return true;
+}
+
+void test_registration_and_written_distances() {
     expect(g_renderer_callback != nullptr, "renderer callback registered");
     expect(g_registered_address == kRendererEntry,
            "renderer entry is address pinned");
@@ -255,19 +278,19 @@ void test_registration_and_stateless_substitution() {
                DISRUPTOR_FAR_RENDERING_OK,
            "1.25x preset accepted");
     enter(&cpu);
-    expect(load_word(kFarDistance) == 1024u && load_word(kFadeStart) == 256u,
-           "renderer entry never changes guest distance globals");
+    expect(load_word(kFarDistance) == 1280u && load_word(kFadeStart) == 512u,
+           "renderer entry writes the 1.25x far plane and the fade start shifted by the same delta");
 
     invoke_first_far(&cpu);
-    expect(cpu.gpr[12] == 1280u,
-           "exact far load receives the 1.25x value in its destination GPR");
+    expect(cpu.gpr[12] == 1280u, "an exact far load reads the written value");
     invoke_first_fade(&cpu);
-    expect(static_cast<std::int32_t>(cpu.gpr[2]) == 512,
-           "fade load shifts by the same delta and preserves retail ramp");
-    expect(g_writes.empty(), "load substitution performs zero guest writes");
+    expect(static_cast<std::int32_t>(cpu.gpr[2]) == 512, "an exact fade load reads the written value");
 
     seed_word(kPrimitivePointer, kPrimitiveBuffer + 0x240u);
     exit_renderer(&cpu);
+    expect(load_word(kFarDistance) == 1024u && load_word(kFadeStart) == 256u && g_writes.size() == 4u &&
+               only_distance_writes(),
+           "the epilogue puts the game's own values back, and only the two globals are ever written");
     const auto d = diagnostics();
     expect(d.completed_frames == 1u && d.substituted_loads == 2u,
            "completed frame and exact substituted loads are counted");
@@ -299,9 +322,10 @@ void test_independent_depth_fade_modes() {
                    DISRUPTOR_FAR_RENDERING_DEPTH_FADE_DISABLED,
            "fade mode is independent of the draw-distance preset");
 
+    enter(&cpu);
     invoke_first_far(&cpu);
     expect(cpu.gpr[12] == 1024u,
-           "retail draw distance leaves far loads untouched");
+           "retail draw distance leaves the far plane as it is");
     invoke_first_fade(&cpu);
     expect(cpu.gpr[2] == 1024u,
            "no-depth-fade moves fade start to the retail far plane");
@@ -316,11 +340,13 @@ void test_independent_depth_fade_modes() {
                d.far_load_substitutions == 0u &&
                d.fade_load_substitutions == 1u,
            "fade-only diagnostic counts only the audited fade load");
+    exit_renderer(&cpu);
 
     disruptor_far_rendering_set_preset(DISRUPTOR_FAR_RENDERING_FAR);
     expect(disruptor_far_rendering_get_depth_fade_mode() ==
                DISRUPTOR_FAR_RENDERING_DEPTH_FADE_DISABLED,
            "distance changes preserve the independently selected fade mode");
+    enter(&cpu);
     invoke_first_far(&cpu);
     invoke_first_fade(&cpu);
     d = diagnostics();
@@ -329,15 +355,16 @@ void test_independent_depth_fade_modes() {
     expect(d.substituted_loads == 2u &&
                d.far_load_substitutions == 1u &&
                d.fade_load_substitutions == 1u,
-           "combined extension reports one far and one fade substitution");
-    expect(load_word(kFarDistance) == 1024u &&
-               load_word(kFadeStart) == 256u && g_writes.empty(),
-           "no-depth-fade and extended distance perform zero guest writes");
+           "combined extension reports one far and one fade load");
+    exit_renderer(&cpu);
+    expect(load_word(kFarDistance) == 1024u && load_word(kFadeStart) == 256u,
+           "no-depth-fade and extended distance give the game's values back");
 
     expect(disruptor_far_rendering_set_depth_fade_mode(
                DISRUPTOR_FAR_RENDERING_DEPTH_FADE_RETAIL) ==
                DISRUPTOR_FAR_RENDERING_OK,
            "retail fade ramp remains the safe escape hatch");
+    enter(&cpu);
     invoke_first_fade(&cpu);
     expect(cpu.gpr[2] == 768u,
            "retail ramp still shifts with an extended far plane");
@@ -348,6 +375,49 @@ void test_independent_depth_fade_modes() {
                d.far_load_substitutions == 0u &&
                d.fade_load_substitutions == 1u,
            "fade-mode changes reset comparison metrics without changing preset");
+    exit_renderer(&cpu);
+}
+
+void test_drawn_distances_are_the_globals() {
+    reset_state();
+    CPUState cpu{};
+    seed_live_game(&cpu);
+    std::uint32_t far_distance = 0u;
+    std::int32_t fade_start = 0;
+    const auto drawn = [&] { disruptor_far_rendering_drawn_distances(&far_distance, &fade_start); };
+
+    disruptor_far_rendering_set_preset(DISRUPTOR_FAR_RENDERING_FAR);
+    drawn();
+    expect(far_distance == 1024u && fade_start == 256, "outside a written frame they are the game's own values");
+    g_published = 0;
+    enter(&cpu);
+    expect(g_published == 1 && g_published_far == 1536u && g_published_fade == 768,
+           "a written entry publishes the preset's values to the renderer's fades");
+    drawn();
+    invoke_first_far(&cpu);
+    invoke_first_fade(&cpu);
+    expect(far_distance == 1536u && fade_start == 768 && cpu.gpr[12] == far_distance &&
+               static_cast<std::int32_t>(cpu.gpr[2]) == fade_start,
+           "inside the renderer they are the written ones, not scaled again");
+    exit_renderer(&cpu);
+    drawn();
+    expect(far_distance == 1024u && fade_start == 256, "after the epilogue they are the game's again");
+
+    cpu.gpr[4] = 0u;
+    enter(&cpu);
+    expect(g_published == 2 && g_published_far == 1024u && g_published_fade == 256 && load_word(kFarDistance) == 1024u,
+           "a rejected entry publishes the game's values, which the renderer draws with");
+    exit_renderer(&cpu);
+    cpu.gpr[4] = kRendererContext;
+    g_ls_mode = 1;
+    enter(&cpu);
+    g_ls_mode = 0;
+    expect(g_published == 2, "the comparator's entry publishes nothing");
+    seed_word(kFarDistance, 1u);
+    drawn();
+    expect(far_distance == 1u && fade_start == 256, "implausible globals are handed over as they are");
+    disruptor_far_rendering_drawn_distances(nullptr, &fade_start);
+    disruptor_far_rendering_drawn_distances(&far_distance, nullptr);
 }
 
 void test_live_billboard_fade_site() {
@@ -363,16 +433,19 @@ void test_live_billboard_fade_site() {
                site.allowed_return_addresses[0] == 0x80043FE0u,
            "live billboard fade site retains its exact ancestry contract");
 
+    enter(&cpu);
     invoke_load(&cpu, site, 0x80043FE0u);
     auto d = diagnostics();
     expect(cpu.gpr[2] == 256u && d.substituted_loads == 0u &&
-               d.fade_load_substitutions == 0u,
-           "Retail leaves the live billboard fade load unchanged");
+               d.fade_load_substitutions == 0u && g_writes.empty(),
+           "Retail writes nothing and leaves the live billboard fade load as it is");
+    exit_renderer(&cpu);
 
     expect(disruptor_far_rendering_set_preset(
                DISRUPTOR_FAR_RENDERING_FAR) ==
                DISRUPTOR_FAR_RENDERING_OK,
            "1.5x preset is accepted for the billboard fade test");
+    enter(&cpu);
     invoke_load(&cpu, site, 0x80043FE0u);
     d = diagnostics();
     expect(cpu.gpr[2] == 768u && d.substituted_loads == 1u &&
@@ -382,23 +455,24 @@ void test_live_billboard_fade_site() {
 
     invoke_load(&cpu, site, 0x80001234u);
     d = diagnostics();
-    expect(cpu.gpr[2] == 256u && d.substituted_loads == 1u &&
-               d.fade_load_substitutions == 1u,
-           "wrong billboard saved RA fails closed without incrementing counts");
+    expect(d.substituted_loads == 1u && d.fade_load_substitutions == 1u,
+           "a wrong billboard saved RA is not counted");
+    exit_renderer(&cpu);
 
     expect(disruptor_far_rendering_set_depth_fade_mode(
                DISRUPTOR_FAR_RENDERING_DEPTH_FADE_DISABLED) ==
                DISRUPTOR_FAR_RENDERING_OK,
            "nearest-row mode is accepted for the billboard fade test");
+    enter(&cpu);
     invoke_load(&cpu, site, 0x80043FE0u);
     d = diagnostics();
     expect(cpu.gpr[2] == 1536u && d.substituted_loads == 1u &&
                d.far_load_substitutions == 0u &&
                d.fade_load_substitutions == 1u,
            "nearest-row mode moves the live billboard fade to the 1.5x far plane");
-    expect(load_word(kFarDistance) == 1024u &&
-               load_word(kFadeStart) == 256u && g_writes.empty(),
-           "billboard fade substitution performs zero guest writes");
+    exit_renderer(&cpu);
+    expect(load_word(kFarDistance) == 1024u && load_word(kFadeStart) == 256u && only_distance_writes(),
+           "the billboard fade path gives the game's values back");
 }
 
 void test_all_sites_and_ancestry_contracts() {
@@ -406,6 +480,7 @@ void test_all_sites_and_ancestry_contracts() {
     CPUState cpu{};
     seed_live_game(&cpu);
     disruptor_far_rendering_set_preset(DISRUPTOR_FAR_RENDERING_FAR);
+    enter(&cpu);
 
     for (const DistanceLoadSite& site : kDistanceLoadSites) {
         const std::uint32_t destination = (site.opcode >> 16u) & 31u;
@@ -414,44 +489,33 @@ void test_all_sites_and_ancestry_contracts() {
         for (std::uint8_t i = 0; i < site.allowed_return_count; ++i) {
             invoke_load(&cpu, site, site.allowed_return_addresses[i]);
             expect(cpu.gpr[destination] == expected,
-                   "every audited saved-RA ancestry substitutes exactly");
+                   "every audited saved-RA ancestry reads the written value");
         }
 
         seed_word(cpu.gpr[29] + site.saved_ra_offset, 0x80001234u);
-        cpu.gpr[destination] = site.kind == DistanceKind::Far ? 1024u : 256u;
+        cpu.gpr[destination] = expected;
         disruptor_far_rendering_instruction_hook(
             &cpu, site.pc, site.opcode,
             DISRUPTOR_FAR_RENDERING_AFTER_INSTRUCTION);
-        expect(cpu.gpr[destination] ==
-                   (site.kind == DistanceKind::Far ? 1024u : 256u),
-               "same helper outside renderer ancestry remains retail");
     }
+    auto d = diagnostics();
+    expect(d.substituted_loads == 16u &&
+               d.far_load_substitutions == 7u &&
+               d.fade_load_substitutions == 9u,
+           "all exact sites count under the right split counter, other callers not at all");
+    exit_renderer(&cpu);
 
+    for (const DistanceLoadSite& site : kDistanceLoadSites) {
+        if (site.kind != DistanceKind::Far) continue;
+        invoke_load(&cpu, site, site.allowed_return_addresses[0]);
+        expect(cpu.gpr[(site.opcode >> 16u) & 31u] == 1024u, "outside the renderer every far load reads the game's own value");
+    }
     cpu.gpr[2] = 1024u;
     disruptor_far_rendering_instruction_hook(
         &cpu, 0x800247C4u, 0x8F8204A0u,
         DISRUPTOR_FAR_RENDERING_AFTER_INSTRUCTION);
-    expect(cpu.gpr[2] == 1024u,
-           "unreviewed global load outside renderer remains untouched");
-
-    cpu.gpr[3] = 1024u;
-    disruptor_far_rendering_instruction_hook(
-        &cpu, 0x8004030Cu, 0x8F8304A0u,
-        DISRUPTOR_FAR_RENDERING_AFTER_INSTRUCTION);
-    cpu.gpr[2] = 256u;
-    disruptor_far_rendering_instruction_hook(
-        &cpu, 0x80040464u, 0x8F820494u,
-        DISRUPTOR_FAR_RENDERING_AFTER_INSTRUCTION);
-    expect(cpu.gpr[3] == 1024u && cpu.gpr[2] == 256u &&
-               load_word(kFarDistance) == 1024u &&
-               load_word(kFadeStart) == 256u,
-           "setup loads which feed guest stores are explicitly excluded");
-    expect(g_writes.empty(), "all audited load routes remain RAM-read-only");
-    const auto d = diagnostics();
-    expect(d.substituted_loads == 16u &&
-               d.far_load_substitutions == 7u &&
-               d.fade_load_substitutions == 9u,
-           "all exact sites contribute to the correct split counter");
+    expect(cpu.gpr[2] == 1024u && diagnostics().substituted_loads == 16u,
+           "an unreviewed load is neither changed nor counted");
 }
 
 void test_retail_baseline_and_metric_reset() {
@@ -490,16 +554,19 @@ void test_current_globals_and_signed_fade() {
     CPUState cpu{};
     seed_live_game(&cpu, 1200u, 432);
     disruptor_far_rendering_set_preset(DISRUPTOR_FAR_RENDERING_EXTENDED);
+    enter(&cpu);
     invoke_first_far(&cpu);
     invoke_first_fade(&cpu);
     expect(cpu.gpr[12] == 1500u &&
                static_cast<std::int32_t>(cpu.gpr[2]) == 732,
-           "stateless hooks scale current script-provided globals");
+           "each entry scales the current script-provided globals");
+    exit_renderer(&cpu);
     expect(load_word(kFarDistance) == 1200u && load_word(kFadeStart) == 432u,
-           "script globals stay authoritative in RAM");
+           "script globals are the game's again after the renderer");
 
     seed_word(kFarDistance, 512u);
     seed_word(kFadeStart, static_cast<std::uint32_t>(-256));
+    enter(&cpu);
     invoke_first_far(&cpu);
     invoke_first_fade(&cpu);
     expect(cpu.gpr[12] == 640u &&
@@ -509,56 +576,78 @@ void test_current_globals_and_signed_fade() {
     expect(d.source_fade_start == -256 &&
                d.effective_fade_start == -128,
            "signed fade is preserved in public diagnostics");
+    exit_renderer(&cpu);
+    expect(static_cast<std::int32_t>(load_word(kFadeStart)) == -256, "a negative fade start is given back as it was");
+
+    enter(&cpu);
+    seed_word(kFarDistance, 900u);
+    exit_renderer(&cpu);
+    expect(load_word(kFarDistance) == 900u && static_cast<std::int32_t>(load_word(kFadeStart)) == -256,
+           "a global the game rewrote inside the renderer keeps its new value, the other is given back");    enter(&cpu);
+    seed_word(kFadeStart, 100u);
+    exit_renderer(&cpu);
+    expect(load_word(kFarDistance) == 900u && load_word(kFadeStart) == 100u,
+           "a fade start the game rewrote inside the renderer keeps its new value");
 }
 
 void test_guards_and_exact_dispatch() {
     reset_state();
     CPUState cpu{};
     disruptor_far_rendering_set_preset(DISRUPTOR_FAR_RENDERING_EXTENDED);
-    invoke_first_far(&cpu);
-    expect(cpu.gpr[12] == 0u, "pre-game load hook is side-effect free");
+    seed_word(kFarDistance, 1024u);
+    seed_word(kFadeStart, 256u);
+    cpu.gpr[4] = kRendererContext;
+    cpu.gpr[29] = kTestStack;
+    seed_word(kRendererContext + kRendererPrimitiveStartOffset, kPrimitiveBuffer);
+    enter(&cpu);
+    exit_renderer(&cpu);
+    expect(g_writes.empty(), "before the game has started nothing is written");
 
     seed_live_game(&cpu);
+    const auto rejected = [&](const char *message) {
+        enter(&cpu);
+        expect(g_writes.empty() && load_word(kFarDistance) == 1024u, message);
+        exit_renderer(&cpu);
+    };
     seed_byte(kSceneMode, 1u);
-    invoke_first_far(&cpu);
-    expect(cpu.gpr[12] == 1024u, "map/cutscene scene mode fails closed");
+    rejected("map/cutscene scene mode writes nothing");
     seed_byte(kSceneMode, 0u);
     seed_byte(kScriptedCamera, 1u);
-    invoke_first_far(&cpu);
-    expect(cpu.gpr[12] == 1024u, "scripted camera fails closed");
+    rejected("a scripted camera writes nothing");
     seed_byte(kScriptedCamera, 0u);
-
-    seed_word(kFarDistance, 0u);
-    invoke_first_far(&cpu);
-    expect(cpu.gpr[12] == 0u, "invalid distance global fails closed");
-    seed_word(kFarDistance, 1024u);
+    seed_word(kCurrentHealth, 0u);
+    rejected("a dead player writes nothing");
+    seed_word(kCurrentHealth, 80u);
     seed_word(kFadeStart, 2048u);
-    invoke_first_far(&cpu);
-    expect(cpu.gpr[12] == 1024u, "fade beyond far fails closed");
+    rejected("a fade beyond far writes nothing");
     seed_word(kFadeStart, 256u);
+    seed_word(kFarDistance, 0u);
+    enter(&cpu);
+    expect(g_writes.empty() && load_word(kFarDistance) == 0u, "an invalid distance global writes nothing");
+    exit_renderer(&cpu);
+    seed_word(kFarDistance, 1024u);
 
+    enter(&cpu);
+    expect(load_word(kFarDistance) == 1280u, "a live frame writes the extended far plane");
     seed_word(kTestStack + 164u, 0x800410E0u);
     cpu.gpr[12] = 999u;
     disruptor_far_rendering_instruction_hook(
         &cpu, 0x8003A914u, 0x8F8C04A0u,
         DISRUPTOR_FAR_RENDERING_AFTER_INSTRUCTION);
-    expect(cpu.gpr[12] == 999u,
-           "post-load source mismatch fails closed before substitution");
+    expect(cpu.gpr[12] == 999u && diagnostics().substituted_loads == 0u && diagnostics().invalid_globals >= 1u,
+           "a load that did not read the written value is reported, not changed");
 
-    seed_word(kTestStack + 164u, 0x800410E0u);
-    cpu.gpr[12] = 1024u;
+    cpu.gpr[12] = 1280u;
     disruptor_far_rendering_instruction_hook(
         &cpu, 0x8003A914u, 0x8F8C04A0u,
         DISRUPTOR_FAR_RENDERING_BEFORE_INSTRUCTION);
     disruptor_far_rendering_instruction_hook(
         &cpu, 0x8003A914u, 0x8F8C04A1u,
         DISRUPTOR_FAR_RENDERING_AFTER_INSTRUCTION);
-    expect(cpu.gpr[12] == 1024u,
-           "phase/opcode mismatch is an exact no-op");
+    expect(diagnostics().substituted_loads == 0u, "phase/opcode mismatch is an exact no-op");
     invoke_first_far(&cpu);
-    expect(cpu.gpr[12] == 1280u, "exact AFTER hook substitutes");
-    expect(diagnostics().invalid_globals >= 2u,
-           "invalid global values remain visible in diagnostics");
+    expect(cpu.gpr[12] == 1280u && diagnostics().substituted_loads == 1u, "the exact AFTER hook counts the load");
+    exit_renderer(&cpu);
 }
 
 void test_nested_toggle_netplay_and_lockstep() {
@@ -573,26 +662,32 @@ void test_nested_toggle_netplay_and_lockstep() {
     expect(d.nested_entries == 1u && d.missed_epilogues == 1u &&
                d.rejected_entries == 1u,
            "nested/missed entry fails closed for diagnostics");
-    expect(g_writes.empty(), "nested cleanup never writes guest RAM");
+    expect(load_word(kFarDistance) == 1024u && load_word(kFadeStart) == 256u,
+           "a missed epilogue gives the game's values back at the next entry");
 
     enter(&cpu);
+    expect(load_word(kFarDistance) == 1280u, "the next clean entry writes again");
     expect(disruptor_far_rendering_set_preset(
                DISRUPTOR_FAR_RENDERING_RETAIL) ==
                DISRUPTOR_FAR_RENDERING_OK,
            "Retail toggle always succeeds");
-    expect(diagnostics().active == 0 && g_writes.empty(),
-           "mid-frame toggle abandons metrics without guest mutation");
+    expect(diagnostics().active == 0 && load_word(kFarDistance) == 1024u && load_word(kFadeStart) == 256u,
+           "a mid-frame toggle abandons the frame and gives the game's values back");
+    exit_renderer(&cpu);
 
     disruptor_far_rendering_set_preset(DISRUPTOR_FAR_RENDERING_FAR);
     disruptor_far_rendering_set_depth_fade_mode(
         DISRUPTOR_FAR_RENDERING_DEPTH_FADE_DISABLED);
     enter(&cpu);
+    expect(load_word(kFarDistance) == 1536u && load_word(kFadeStart) == 1536u, "1.5x without a ramp is written");
     g_netplay = true;
     expect(disruptor_far_rendering_get_preset() ==
                DISRUPTOR_FAR_RENDERING_RETAIL &&
                disruptor_far_rendering_get_depth_fade_mode() ==
                    DISRUPTOR_FAR_RENDERING_DEPTH_FADE_RETAIL,
            "netplay transition forces distance and fade controls to Retail");
+    expect(load_word(kFarDistance) == 1024u && load_word(kFadeStart) == 256u,
+           "the netplay transition gives the game's values back");
     expect(disruptor_far_rendering_set_preset(
                DISRUPTOR_FAR_RENDERING_EXTENDED) ==
                DISRUPTOR_FAR_RENDERING_NETPLAY_BLOCKED,
@@ -610,6 +705,7 @@ void test_nested_toggle_netplay_and_lockstep() {
                DISRUPTOR_FAR_RENDERING_OK,
            "retail fade ramp remains selectable during netplay");
 
+    exit_renderer(&cpu);
     g_netplay = false;
     disruptor_far_rendering_set_preset(DISRUPTOR_FAR_RENDERING_EXTENDED);
     enter(&cpu);
@@ -620,41 +716,451 @@ void test_nested_toggle_netplay_and_lockstep() {
                disruptor_far_rendering_get_depth_fade_mode() ==
                    DISRUPTOR_FAR_RENDERING_DEPTH_FADE_RETAIL,
            "lockstep comparator rejects no-depth-fade mode");
-    invoke_first_far(&cpu);
-    expect(cpu.gpr[12] == 1024u, "lockstep record suppresses substitution");
     exit_renderer(&cpu);
-    expect(diagnostics().completed_frames == 0u,
-           "comparator transition abandons incomplete wall-span metrics");
+    expect(diagnostics().completed_frames == 0u && load_word(kFarDistance) == 1024u,
+           "a comparator transition abandons the frame and gives the game's values back");
+    const std::size_t before = g_writes.size();
+    enter(&cpu);
+    expect(g_writes.size() == before, "the lockstep recorder writes nothing");
     g_ls_mode = 0;
     g_ls_replay_active = 1;
-    invoke_first_far(&cpu);
-    expect(cpu.gpr[12] == 1024u, "lockstep replay suppresses substitution");
-    expect(g_writes.empty(), "netplay/lockstep paths perform zero guest writes");
+    enter(&cpu);
+    expect(g_writes.size() == before, "the lockstep replay writes nothing");
+    g_ls_replay_active = 0;
+    expect(only_distance_writes(), "netplay and lockstep paths touch no other guest RAM");
 }
 
-void test_savestate_abandon_is_stateless() {
+void test_savestates_keep_the_game_values() {
     reset_state();
     CPUState cpu{};
     seed_live_game(&cpu);
     disruptor_far_rendering_set_preset(DISRUPTOR_FAR_RENDERING_FAR);
     enter(&cpu);
-    expect(diagnostics().active == 1, "metrics window starts at entry");
-    disruptor_far_rendering_abandon_metrics();
-    expect(diagnostics().active == 0,
-           "savestate load abandons the stale wall-span window");
-
+    expect(diagnostics().active == 1 && load_word(kFarDistance) == 1536u, "metrics window and writes start at entry");
+    disruptor_far_rendering_state_saving();
+    expect(load_word(kFarDistance) == 1024u && load_word(kFadeStart) == 256u,
+           "a savestate taken inside the renderer captures the game's own values");
     invoke_first_far(&cpu);
-    invoke_first_fade(&cpu);
-    expect(cpu.gpr[12] == 1536u && cpu.gpr[2] == 768u,
-           "exact loads still substitute without an entry metrics window");
+    expect(cpu.gpr[12] == 1024u && diagnostics().substituted_loads == 0u,
+           "the audited loads after the save read the game's distance (registers already loaded keep theirs)");
     exit_renderer(&cpu);
-    const auto d = diagnostics();
-    expect(d.completed_frames == 0u && d.substituted_loads == 2u,
-           "resumed mid-render loads are counted without false frame timing");
-    expect(d.far_load_substitutions == 1u &&
-               d.fade_load_substitutions == 1u,
-           "savestate-safe substitutions retain split diagnostics");
-    expect(g_writes.empty(), "savestate-safe path never mutates guest RAM");
+    expect(load_word(kFarDistance) == 1024u, "the epilogue after a save writes nothing back");
+
+    enter(&cpu);
+    expect(load_word(kFarDistance) == 1536u, "the next frame writes again");
+    const std::size_t before = g_writes.size();
+    seed_word(kFarDistance, 1536u);
+    seed_word(kFadeStart, 768u);
+    disruptor_far_rendering_abandon_metrics();
+    expect(diagnostics().active == 0, "savestate load abandons the stale wall-span window");
+    exit_renderer(&cpu);
+    expect(g_writes.size() == before && load_word(kFarDistance) == 1536u,
+           "after a savestate load the restored RAM is left as the state holds it");
+    seed_word(kFarDistance, 1024u);
+    seed_word(kFadeStart, 256u);
+    enter(&cpu);
+    invoke_first_far(&cpu);
+    expect(cpu.gpr[12] == 1536u, "the frame after a load writes from the restored globals");
+    exit_renderer(&cpu);
+}
+
+void test_screen_effects_see_the_game_values() {
+    reset_state();
+    CPUState cpu{};
+    seed_live_game(&cpu);
+    disruptor_far_rendering_set_preset(DISRUPTOR_FAR_RENDERING_FAR);
+    enter(&cpu);
+    invoke_first_far(&cpu);
+    expect(cpu.gpr[12] == 1536u, "the traversal reads the written far plane");
+    hook_after(&cpu, kAfterTraversal, kAfterTraversalOpcode);
+    expect(load_word(kFarDistance) == 1024u && load_word(kFadeStart) == 256u,
+           "the screen effects after the traversal see the game's own values");
+    seed_word(kFadeStart, load_word(kFadeStart) - 4u);
+    cpu.gpr[2] = kReviewedVisibleSpanBase;
+    hook_after(&cpu, kBeforeVisibleLoop, kBeforeVisibleLoopOpcode);
+    expect(load_word(kFarDistance) == 1536u && load_word(kFadeStart) == 764u,
+           "the visible loop gets the preset's values again, from the fade the effects left");
+    exit_renderer(&cpu);
+    expect(load_word(kFarDistance) == 1024u && load_word(kFadeStart) == 252u,
+           "after the frame the game keeps its own fade, moved only by the effect's own step");
+
+    seed_word(kFarDistance, 4000u);
+    seed_word(kFadeStart, 3232u);
+    enter(&cpu);
+    hook_after(&cpu, kAfterTraversal, kAfterTraversalOpcode);
+    seed_word(kFarDistance, 1024u);
+    seed_word(kFadeStart, 256u);
+    hook_after(&cpu, kBeforeVisibleLoop, kBeforeVisibleLoopOpcode);
+    expect(load_word(kFarDistance) == 1536u && load_word(kFadeStart) == 768u,
+           "an effect that brings an unextendable far plane down gets it extended for the visible loop");
+    exit_renderer(&cpu);
+
+    enter(&cpu);
+    hook_after(&cpu, kAfterTraversal, kAfterTraversalOpcode);
+    g_netplay = true;
+    hook_after(&cpu, kBeforeVisibleLoop, kBeforeVisibleLoopOpcode);
+    expect(!g_frame.active && g_preset == DISRUPTOR_FAR_RENDERING_RETAIL && load_word(kFarDistance) == 1024u,
+           "netplay beginning while the effects run retires the frame and writes nothing again");
+    g_netplay = false;
+    exit_renderer(&cpu);
+}
+
+void test_fades_follow_the_effects() {
+    reset_state();
+    CPUState cpu{};
+    seed_live_game(&cpu);
+    enter(&cpu);
+    hook_after(&cpu, kAfterTraversal, kAfterTraversalOpcode);
+    seed_word(kFadeStart, 252u);
+    g_published = 0;
+    cpu.gpr[2] = kReviewedVisibleSpanBase;
+    hook_after(&cpu, kBeforeVisibleLoop, kBeforeVisibleLoopOpcode);
+    expect(g_published == 1 && g_published_far == 1024u && g_published_fade == 252,
+           "at the original distance the fades take the start the effects left in the same frame");
+    exit_renderer(&cpu);
+
+    disruptor_far_rendering_set_preset(DISRUPTOR_FAR_RENDERING_FAR);
+    enter(&cpu);
+    hook_after(&cpu, kAfterTraversal, kAfterTraversalOpcode);
+    seed_word(kFadeStart, 248u);
+    g_published = 0;
+    hook_after(&cpu, kBeforeVisibleLoop, kBeforeVisibleLoopOpcode);
+    expect(g_published == 1 && g_published_far == 1536u && g_published_fade == 760,
+           "at 1.5x the fades take the distances written again after the effects");
+    g_ls_mode = 1;
+    hook_after(&cpu, kBeforeVisibleLoop, kBeforeVisibleLoopOpcode);
+    g_ls_mode = 0;
+    expect(g_published == 1, "the comparator publishes nothing to the renderer");
+    exit_renderer(&cpu);
+}
+
+void test_saves_wait_for_the_epilogue() {
+    reset_state();
+    CPUState cpu{};
+    seed_live_game(&cpu);
+    enter(&cpu);
+    expect(disruptor_far_rendering_save_deferred() == 0, "at the original distance a save is never held back");
+    exit_renderer(&cpu);
+
+    disruptor_far_rendering_set_preset(DISRUPTOR_FAR_RENDERING_FAR);
+    expect(disruptor_far_rendering_save_deferred() == 0, "outside the renderer a save is taken at once");
+    enter(&cpu);
+    expect(disruptor_far_rendering_save_deferred() == 1, "inside a written frame a save waits");
+    hook_after(&cpu, kAfterTraversal, kAfterTraversalOpcode);
+    expect(disruptor_far_rendering_save_deferred() == 1, "while the effects run on the game's values a save still waits");
+    cpu.gpr[2] = kReviewedVisibleSpanBase;
+    hook_after(&cpu, kBeforeVisibleLoop, kBeforeVisibleLoopOpcode);
+    exit_renderer(&cpu);
+    expect(disruptor_far_rendering_save_deferred() == 0, "after the epilogue the save is taken");
+    enter(&cpu);
+    hook_after(&cpu, kAfterTraversal, kAfterTraversalOpcode);
+    seed_word(kFadeStart, 4000u);
+    hook_after(&cpu, kBeforeVisibleLoop, kBeforeVisibleLoopOpcode);
+    expect(load_word(kFarDistance) == 1024u && disruptor_far_rendering_save_deferred() == 1,
+           "a frame written at its entry holds a save back to its end even when the rewrite after the effects fails");
+    exit_renderer(&cpu);
+    seed_word(kFadeStart, 256u);
+    enter(&cpu);
+    disruptor_far_rendering_abandon_metrics();
+    expect(disruptor_far_rendering_save_deferred() == 0, "a loaded state holds nothing back");
+    exit_renderer(&cpu);
+}
+
+void test_fog_for_sprites() {
+    reset_state();
+    CPUState cpu{};
+    seed_live_game(&cpu);
+    disruptor_far_rendering_set_preset(DISRUPTOR_FAR_RENDERING_FAR);
+    g_smooth_fade = 1;
+    enter(&cpu);
+    std::int32_t start = 0, length = 0;
+    int power = 0;
+    disruptor_far_rendering_fog_ramp(&start, &length, &power);
+    expect(start == 256 && length == 1280 && power == 1,
+           "the smooth fade's fog spans from the game's own start to the 1.5x far plane, evenly");
+    const DistanceLoadSite& sprites = kDistanceLoadSites[6];
+    const DistanceLoadSite& enemies = kDistanceLoadSites[12];
+    expect(sprites.pc == 0x8003BA30u && enemies.pc == 0x80043184u, "the sprite and enemy fade loads are where they are taken to be");
+    const auto pressed = [&](const DistanceLoadSite& site, std::uint32_t range_register, std::int32_t range,
+                             std::uint32_t saved_ra) {
+        cpu.gpr[range_register] = static_cast<std::uint32_t>(range);
+        invoke_load(&cpu, site, saved_ra);
+        return range - static_cast<std::int32_t>(cpu.gpr[(site.opcode >> 16u) & 31u]);
+    };
+    expect(pressed(sprites, 18u, 900, 0x800411ACu) == 386 && disruptor_far_rendering_packet_fraction(kPrimitiveBuffer, kSprite) == 8,
+           "a sprite gets row 6 of the stretched fog and a share of 2/64 of row 7, by its packet");
+    expect(pressed(sprites, 18u, 200, 0x800411ACu) == -56, "short of the fog's start a sprite gets the nearest row");
+    expect(pressed(sprites, 18u, 1535, 0x800411ACu) == 767 && disruptor_far_rendering_packet_fraction(kPrimitiveBuffer, kSprite) == 0,
+           "the last row blends with nothing past it");
+    expect(pressed(sprites, 18u, 5000, 0x800411ACu) == 768, "past the far plane the game clamps to its last row itself");
+    cpu.gpr[kListPacketRegister] = 0x80050000u;
+    expect(pressed(enemies, 20u, 1000, 0x80043FE0u) == 446 && disruptor_far_rendering_packet_fraction(0x80050000u, kSprite) == 248,
+           "an enemy from the list gets the same fog, its share by the packet in s5");
+    exit_renderer(&cpu);
+    cpu.gpr[kListPacketRegister] = 0x80050100u;
+    expect(pressed(enemies, 20u, 1000, 0x80043FE0u) == 446 && disruptor_far_rendering_packet_fraction(0x80050100u, kSprite) == 248,
+           "the list drawn after the renderer's epilogue gets the frame's fog from the game's own fade start");
+    disruptor_far_rendering_fog_ramp(&start, &length, &power);
+    expect(start == 256 && length == 1280, "until the next entry the renderer keeps the frame's fog");
+
+    disruptor_far_rendering_set_fog_exponent(2);
+    enter(&cpu);
+    expect(disruptor_far_rendering_packet_fraction(0x80050100u, kSprite) == 248, "the last frame's shares hold through the next frame");
+    expect(pressed(sprites, 18u, 900, 0x800411ACu) == 194, "a squared fog stays thinner near the viewer");
+    disruptor_far_rendering_fog_ramp(&start, &length, &power);
+    expect(power == 2, "the renderer gets the power too");
+    exit_renderer(&cpu);
+    enter(&cpu);
+    expect(disruptor_far_rendering_packet_fraction(0x80050100u, kSprite) == -1, "shares older than the frame before are gone");
+    exit_renderer(&cpu);
+
+    const DistanceLoadSite& backdrop = kDistanceLoadSites[5];
+    const DistanceLoadSite& shadow = kDistanceLoadSites[10];
+    const DistanceLoadSite& weapon = kDistanceLoadSites[11];
+    disruptor_far_rendering_set_fog_exponent(1);
+    enter(&cpu);
+    expect(backdrop.pc == 0x8003B2CCu && shadow.pc == 0x8003D28Cu && weapon.pc == 0x8003FB0Cu, "the other fade loads are where they are taken to be");
+    expect(pressed(backdrop, 3u, 1800, 0x8004106Cu) - 900 == 386, "the backdrop fades by half the sum it holds");
+    expect(pressed(shadow, 23u, 900, 0x800411C4u) == 386, "a shadow fades out over the stretched fog too");
+    cpu.gpr[2] = 10u;
+    invoke_load(&cpu, weapon, 0x8004122Cu);
+    expect(728 - static_cast<std::int32_t>(cpu.gpr[4]) == 283, "the weapon's fade takes the depth it works out from its byte");
+    cpu.gpr[4] = kRendererContext;
+    exit_renderer(&cpu);
+
+    g_smooth_fade = 0;
+    disruptor_far_rendering_set_preset(DISRUPTOR_FAR_RENDERING_FAR);
+    enter(&cpu);
+    expect(pressed(sprites, 18u, 900, 0x800411ACu) == 132 && disruptor_far_rendering_packet_fraction(kPrimitiveBuffer, kSprite) == -1,
+           "without the smooth fade a sprite keeps the fog moved out with the far plane, and no share");
+    disruptor_far_rendering_fog_ramp(&start, &length, &power);
+    expect(start == 768 && length == 768 && power == 1, "and so does the renderer's fade");
+    exit_renderer(&cpu);
+    expect(pressed(enemies, 20u, 1000, 0x80043FE0u) == 232, "the list after the epilogue gets the moved fog, not the game's word");
+
+    g_smooth_fade = 1;
+    disruptor_far_rendering_set_preset(DISRUPTOR_FAR_RENDERING_RETAIL);
+    enter(&cpu);
+    expect(pressed(sprites, 18u, 900, 0x800411ACu) == 644 && disruptor_far_rendering_packet_fraction(kPrimitiveBuffer, kSprite) == 16,
+           "at the original distance a sprite blends rows under the smooth fade too");
+    exit_renderer(&cpu);
+}
+
+void test_fog_shares_belong_to_their_packet() {
+    reset_state();
+    CPUState cpu{};
+    seed_live_game(&cpu);
+    disruptor_far_rendering_set_preset(DISRUPTOR_FAR_RENDERING_FAR);
+    g_smooth_fade = 1;
+    const DistanceLoadSite& sprites = kDistanceLoadSites[6];
+    const DistanceLoadSite& enemies = kDistanceLoadSites[12];
+    const auto fade = [&](const DistanceLoadSite& site, std::uint32_t range_register, std::int32_t range, std::uint32_t saved_ra) {
+        cpu.gpr[range_register] = static_cast<std::uint32_t>(range);
+        invoke_load(&cpu, site, saved_ra);
+    };
+    enter(&cpu);
+    fade(sprites, 18u, 900, 0x800411ACu);
+    expect(disruptor_far_rendering_packet_fraction(kPrimitiveBuffer, kSprite) == 8 &&
+               disruptor_far_rendering_packet_fraction(kPrimitiveBuffer, kSprite) == 8,
+           "the sprite's packet keeps its share for every draw of the same words");
+    expect(disruptor_far_rendering_packet_fraction(kPrimitiveBuffer, kSprite + 1u) == -1 &&
+               disruptor_far_rendering_packet_fraction(kPrimitiveBuffer, kSprite) == -1,
+           "other words at the address are another primitive, and the share is gone");
+
+    cpu.gpr[kListPacketRegister] = 0x80050000u;
+    fade(enemies, 20u, 1000, 0x80043FE0u);
+    std::int32_t rows = 0;
+    expect(disruptor_far_rendering_list_fade_rows(0x80050000u, 1000, 1300, &rows) == 1 && rows == 3,
+           "a body faded by its led key moves by the stretched fog's rows to its own key");
+    expect(disruptor_far_rendering_packet_fraction(0x80050000u, kSprite) == 200, "and its share is its own key's");
+    expect(disruptor_far_rendering_list_fade_rows(0x80050100u, 1000, 1300, &rows) == 0,
+           "another body's packet is not the one the fog shaped");
+    invoke_load(&cpu, enemies, 0x80041000u);
+    expect(disruptor_far_rendering_list_fade_rows(0x80050000u, 1000, 1300, &rows) == 0,
+           "a list load from another caller, left to the game, leaves no body shaped");
+    exit_renderer(&cpu);
+
+    g_smooth_fade = 0;
+    enter(&cpu);
+    cpu.gpr[kListPacketRegister] = 0x80050000u;
+    fade(enemies, 20u, 1000, 0x80043FE0u);
+    expect(disruptor_far_rendering_list_fade_rows(0x80050000u, 1000, 1100, &rows) == 1 && rows == 2,
+           "without the smooth fade the rows are those of the fog moved out with the far plane");
+    exit_renderer(&cpu);
+
+    g_smooth_fade = 1;
+    enter(&cpu);
+    fade(sprites, 18u, 900, 0x800411ACu);
+    exit_renderer(&cpu);
+    disruptor_far_rendering_abandon_metrics();
+    expect(disruptor_far_rendering_packet_fraction(kPrimitiveBuffer, kSprite) == -1, "a loaded state's packets have no shares");
+    expect(disruptor_far_rendering_list_fade_rows(0x80050000u, 1000, 1100, &rows) == 0, "nor a shaped body");
+    cpu.gpr[kListPacketRegister] = 0x80050000u;
+    cpu.gpr[20] = 1000u;
+    invoke_load(&cpu, enemies, 0x80043FE0u);
+    expect(cpu.gpr[(enemies.opcode >> 16u) & 31u] == 256u, "the list drawn right after a load takes the game's own fade start");
+
+    enter(&cpu);
+    fade(sprites, 18u, 900, 0x800411ACu);
+    exit_renderer(&cpu);
+    g_ls_replay_active = 1;
+    enter(&cpu);
+    g_ls_replay_active = 0;
+    expect(disruptor_far_rendering_packet_fraction(kPrimitiveBuffer, kSprite) == -1, "a comparator frame hands out no shares from before");
+}
+
+void test_transitions_inside_a_written_frame() {
+    reset_state();
+    CPUState cpu{};
+    seed_live_game(&cpu);
+    disruptor_far_rendering_set_preset(DISRUPTOR_FAR_RENDERING_FAR);
+    enter(&cpu);
+    g_netplay = true;
+    invoke_first_far(&cpu);
+    expect(cpu.gpr[12] == 1024u && load_word(kFarDistance) == 1024u && load_word(kFadeStart) == 256u,
+           "netplay beginning inside a frame gives the load and the globals the game's values at once");
+    g_netplay = false;
+    exit_renderer(&cpu);
+
+    disruptor_far_rendering_set_preset(DISRUPTOR_FAR_RENDERING_FAR);
+    enter(&cpu);
+    g_ls_mode = 1;
+    cpu.gpr[31] = 0x800410E0u;
+    hook_after(&cpu, kTraversalRoomMark, kTraversalRoomMarkOpcode);
+    expect(load_word(kFarDistance) == 1024u && diagnostics().active == 0,
+           "the comparator beginning inside a frame abandons it and gives the globals back");
+    g_ls_mode = 0;
+    exit_renderer(&cpu);
+}
+
+void test_presets_up_to_twice() {
+    reset_state();
+    CPUState cpu{};
+    seed_live_game(&cpu);
+    const std::uint32_t expected[] = {1024u, 1280u, 1536u, 2048u};
+    for (int preset = DISRUPTOR_FAR_RENDERING_RETAIL; preset < DISRUPTOR_FAR_RENDERING_PRESET_COUNT; ++preset) {
+        expect(disruptor_far_rendering_set_preset(preset) == DISRUPTOR_FAR_RENDERING_OK, "every preset is accepted");
+        enter(&cpu);
+        expect(load_word(kFarDistance) == expected[preset] &&
+                   load_word(kFadeStart) == 256u + (expected[preset] - 1024u),
+               "each preset writes its multiple of the far plane and moves the fade start by as much");
+        exit_renderer(&cpu);
+    }
+    seed_word(kFarDistance, 2000u);
+    seed_word(kFadeStart, 1232u);
+    disruptor_far_rendering_set_preset(DISRUPTOR_FAR_RENDERING_DOUBLE);
+    enter(&cpu);
+    expect(load_word(kFarDistance) == 3688u, "2x of a long far plane stops at the ordering table's limit");
+    exit_renderer(&cpu);
+    expect(disruptor_far_rendering_set_preset(DISRUPTOR_FAR_RENDERING_PRESET_COUNT) == DISRUPTOR_FAR_RENDERING_INVALID_PRESET,
+           "no preset past 2x");
+}
+
+void test_edge_margin_under_the_smooth_fade() {
+    reset_state();
+    CPUState cpu{};
+    seed_live_game(&cpu);
+    disruptor_far_rendering_set_preset(DISRUPTOR_FAR_RENDERING_RETAIL);
+    enter(&cpu);
+    expect(g_writes.empty() && disruptor_far_rendering_edge_margin() == 0, "without the smooth fade the original distance writes nothing");
+    exit_renderer(&cpu);
+
+    g_smooth_fade = 1;
+    expect(disruptor_far_rendering_edge_margin() == 1, "the smooth fade keeps the meshes past the fog's end");
+    enter(&cpu);
+    expect(load_word(kFarDistance) == 1024u + kEdgeMargin && load_word(kFadeStart) == 256u,
+           "the meshes are kept a margin past the far plane, the fade start stays");
+    invoke_first_far(&cpu);
+    expect(cpu.gpr[12] == 1024u + kEdgeMargin, "rooms are walked to the margin");
+    invoke_load(&cpu, kDistanceLoadSites[1], 0x800411ACu);
+    expect(cpu.gpr[3] == 1024u, "an object is drawn no further than the fog's end");
+    std::uint32_t far_distance = 0u;
+    std::int32_t fade_start = 0;
+    disruptor_far_rendering_drawn_distances(&far_distance, &fade_start);
+    expect(far_distance == 1024u && fade_start == 256, "the fades end at the far plane seen, not at the margin");
+    std::int32_t start = 0, length = 0;
+    int power = 0;
+    disruptor_far_rendering_fog_ramp(&start, &length, &power);
+    expect(start == 256 && length == 768, "the fog ends at the far plane seen");
+    exit_renderer(&cpu);
+    expect(load_word(kFarDistance) == 1024u && load_word(kFadeStart) == 256u, "the epilogue gives the game its own far plane back");
+
+    disruptor_far_rendering_set_preset(DISRUPTOR_FAR_RENDERING_DOUBLE);
+    seed_word(kFarDistance, 1800u);
+    seed_word(kFadeStart, 1032u);
+    enter(&cpu);
+    expect(load_word(kFarDistance) == 3688u && load_word(kFadeStart) == 2664u,
+           "a lengthened far plane near the ordering table's limit gives the whole margin its room, the fade start moves with it");
+    invoke_load(&cpu, kDistanceLoadSites[1], 0x800411ACu);
+    expect(cpu.gpr[3] == 3432u, "objects stop where the fog now ends");
+    std::int32_t far_start = 0, far_length = 0;
+    disruptor_far_rendering_fog_ramp(&far_start, &far_length, &power);
+    expect(far_start == 1032 && far_length == 2400, "and so does the fog");
+    exit_renderer(&cpu);
+    disruptor_far_rendering_set_preset(DISRUPTOR_FAR_RENDERING_RETAIL);
+    seed_word(kFarDistance, 3600u);
+    seed_word(kFadeStart, 2832u);
+    enter(&cpu);
+    expect(load_word(kFarDistance) == 3688u, "the game's own long far plane keeps what room the limit leaves");
+    invoke_load(&cpu, kDistanceLoadSites[1], 0x800411ACu);
+    expect(cpu.gpr[3] == 3600u, "and is never shortened");
+    exit_renderer(&cpu);
+    disruptor_far_rendering_set_preset(DISRUPTOR_FAR_RENDERING_EXTENDED);
+    seed_word(kFarDistance, 3500u);
+    seed_word(kFadeStart, 2732u);
+    enter(&cpu);
+    invoke_load(&cpu, kDistanceLoadSites[1], 0x800411ACu);
+    expect(load_word(kFarDistance) == 3688u && cpu.gpr[3] == 3500u, "a lengthened far plane gives way no further than the game's own");
+    exit_renderer(&cpu);
+    disruptor_far_rendering_set_preset(DISRUPTOR_FAR_RENDERING_DOUBLE);
+    seed_word(kFarDistance, 1800u);
+    seed_word(kFadeStart, 1032u);
+    enter(&cpu);
+    hook_after(&cpu, kAfterTraversal, kAfterTraversalOpcode);
+    expect(load_word(kFarDistance) == 1800u, "the screen effects see the game's own far plane under the margin too");
+    cpu.gpr[2] = kReviewedVisibleSpanBase;
+    hook_after(&cpu, kBeforeVisibleLoop, kBeforeVisibleLoopOpcode);
+    invoke_load(&cpu, kDistanceLoadSites[1], 0x800411ACu);
+    expect(load_word(kFarDistance) == 3688u && load_word(kFadeStart) == 2664u && cpu.gpr[3] == 3432u,
+           "the visible loop gets the margin again, with the room made at the limit");
+    exit_renderer(&cpu);
+    disruptor_far_rendering_set_preset(DISRUPTOR_FAR_RENDERING_RETAIL);
+    seed_word(kFarDistance, 3800u);
+    seed_word(kFadeStart, 3032u);
+    const std::size_t written = g_writes.size();
+    enter(&cpu);
+    expect(g_writes.size() == written && load_word(kFarDistance) == 3800u, "a script's far plane past the limit is neither extended nor cut");
+    exit_renderer(&cpu);
+
+    disruptor_far_rendering_set_preset(DISRUPTOR_FAR_RENDERING_RETAIL);
+    seed_word(kFarDistance, 1024u);
+    seed_word(kFadeStart, 256u);
+    disruptor_far_rendering_set_depth_fade_mode(DISRUPTOR_FAR_RENDERING_DEPTH_FADE_DISABLED);
+    expect(disruptor_far_rendering_edge_margin() == 0, "with the depth fade off nothing dissolves, so no margin");
+    disruptor_far_rendering_set_depth_fade_mode(DISRUPTOR_FAR_RENDERING_DEPTH_FADE_RETAIL);
+    g_netplay = true;
+    expect(disruptor_far_rendering_edge_margin() == 0, "a network game never gets the margin");
+    g_netplay = false;
+    g_ls_mode = 1;
+    expect(disruptor_far_rendering_edge_margin() == 0, "neither does the comparator");
+    g_ls_mode = 0;
+}
+
+void test_far_plane_kept_inside_the_ordering_table() {
+    reset_state();
+    CPUState cpu{};
+    seed_live_game(&cpu, 3000u, 2232);
+    disruptor_far_rendering_set_preset(DISRUPTOR_FAR_RENDERING_FAR);
+    enter(&cpu);
+    expect(load_word(kFarDistance) == 3688u && load_word(kFadeStart) == 2920u,
+           "a far plane is extended no further than the ordering table reaches, the fade by the same amount");
+    exit_renderer(&cpu);
+    seed_word(kFarDistance, 4000u);
+    seed_word(kFadeStart, 3232u);
+    enter(&cpu);
+    expect(load_word(kFarDistance) == 4000u && load_word(kFadeStart) == 3232u && g_writes.size() == 4u,
+           "a far plane already past that limit is not extended");
+    exit_renderer(&cpu);
 }
 
 void test_visibility_recursion_and_packet_stages() {
@@ -737,6 +1243,7 @@ void test_portal_and_object_decision_observers() {
     disruptor_far_rendering_set_preset(
         DISRUPTOR_FAR_RENDERING_EXTENDED);
     enter(&cpu);
+    const std::size_t entry_writes = g_writes.size();
 
     constexpr std::uint32_t kSourceSquared = 1024u * 1024u;
     constexpr std::uint32_t kEffectiveSquared = 1280u * 1280u;
@@ -791,6 +1298,8 @@ void test_portal_and_object_decision_observers() {
     cpu.gpr[3] = 1u; /* impossible result: token must fail closed */
     hook_after(&cpu, 0x8003B8D8u, 0x0072182Au);
 
+    expect(g_writes.size() == entry_writes && load_word(kFarDistance) == 1280u,
+           "visibility decision observers never write guest state");
     seed_word(kPrimitivePointer, kPrimitiveBuffer + 0x80u);
     exit_renderer(&cpu);
     const auto d = diagnostics();
@@ -806,8 +1315,6 @@ void test_portal_and_object_decision_observers() {
            "all object observers report direct retail-reject/effective-accept flips");
     expect(d.observer_sequence_errors == 1u,
            "impossible post-SLT result invalidates exactly one pending token");
-    expect(g_writes.empty(),
-           "visibility decision observers never write guest state");
 }
 
 void test_observer_safety_guards_and_abandon() {
@@ -867,8 +1374,9 @@ void test_reset_and_versioned_snapshot() {
                DISRUPTOR_FAR_RENDERING_RETAIL &&
                disruptor_far_rendering_get_depth_fade_mode() ==
                    DISRUPTOR_FAR_RENDERING_DEPTH_FADE_RETAIL &&
-               d.renderer_entries == 0u && g_writes.empty(),
-           "session reset clears both host-only controls without writes");
+               d.renderer_entries == 0u && load_word(kFarDistance) == 1024u && load_word(kFadeStart) == 256u &&
+               disruptor_far_rendering_save_deferred() == 0,
+           "session reset clears both controls and gives the game's values back before a save is let in");
     expect(d.abi_version ==
                DISRUPTOR_FAR_RENDERING_DIAGNOSTICS_ABI_VERSION &&
                d.struct_size == sizeof(d),
@@ -927,21 +1435,31 @@ void test_reset_and_versioned_snapshot() {
 }  // namespace
 
 int main() {
-    test_registration_and_stateless_substitution();
+    test_registration_and_written_distances();
     test_independent_depth_fade_modes();
+    test_drawn_distances_are_the_globals();
     test_live_billboard_fade_site();
     test_all_sites_and_ancestry_contracts();
     test_retail_baseline_and_metric_reset();
     test_current_globals_and_signed_fade();
     test_guards_and_exact_dispatch();
     test_nested_toggle_netplay_and_lockstep();
-    test_savestate_abandon_is_stateless();
+    test_savestates_keep_the_game_values();
+    test_screen_effects_see_the_game_values();
+    test_fades_follow_the_effects();
+    test_saves_wait_for_the_epilogue();
+    test_fog_for_sprites();
+    test_fog_shares_belong_to_their_packet();
+    test_transitions_inside_a_written_frame();
+    test_presets_up_to_twice();
+    test_edge_margin_under_the_smooth_fade();
+    test_far_plane_kept_inside_the_ordering_table();
     test_visibility_recursion_and_packet_stages();
     test_portal_and_object_decision_observers();
     test_observer_safety_guards_and_abandon();
     test_reset_and_versioned_snapshot();
 
-    expect(g_writes.empty(), "far rendering must perform zero guest RAM writes");
+    expect(only_distance_writes(), "far rendering writes no guest RAM but the two distance globals");
     if (g_failures != 0) {
         std::cerr << g_failures << " far-rendering test(s) failed\n";
         return 1;

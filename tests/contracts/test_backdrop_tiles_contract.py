@@ -269,8 +269,9 @@ require(
     and "    s->active = 1; s->bad = 0; s->nv = s->nt = s->nc = 0;\n    s->backdrop = 0; s->backdrop_back = 0.0f;\n"
     in presenter
     and "    s->origin_y=y; s->height=h; s->matched=s->world=s->moving=0;\n    s->backdrop_back=0.0f;\n" in presenter
-    and "        if (s->backdrop && s_temp_curr.backdrop)\n"
-    "            s->backdrop_back=psx_ws_backdrop_back(s_temp_curr.backdrop_origin,s->backdrop_origin,s->backdrop_period,TEMP_BACKDROP_MOST);\n"
+    and "    a->backdrop=s_temp_curr.backdrop; a->backdrop_origin=s_temp_curr.backdrop_origin;\n" in presenter
+    and "        if (s->backdrop && a->backdrop)\n"
+    "            s->backdrop_back=psx_ws_backdrop_back(a->backdrop_origin,s->backdrop_origin,s->backdrop_period,TEMP_BACKDROP_MOST);\n"
     in presenter
     and "#define TEMP_BACKDROP_MOST 12.0f" in presenter
     and "#define TEMP_BACKDROP_END_CARRY 2.0f" in presenter,

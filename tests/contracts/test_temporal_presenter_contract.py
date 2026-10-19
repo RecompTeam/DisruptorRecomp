@@ -138,7 +138,7 @@ require(
 capture = function_body(renderer, "static int interp_capture(GLuint fbo, int x, int y, int w, int h,")
 require(
     "temporal_prepare(fbo, y, w, h);" in capture
-    and capture.index("    if (s_interp_blend_mode == 2 && !under_lock) {") < capture.index("    SDL_LockMutex(s_interp_mutex);"),
+    and capture.index("    } else if (s_interp_blend_mode == 2 && !under_lock) {") < capture.index("    SDL_LockMutex(s_interp_mutex);"),
     "a capture must match its scene before it takes the presenter's lock",
 )
 publish = function_body(temporal, "static void temporal_publish(GLuint fbo, int y, int h)")
@@ -146,11 +146,58 @@ require(
     "gpu_temporal_match(" not in publish and "gpu_temporal_mesh_prepare_scene(" not in publish,
     "under the lock a scene is only rotated in",
 )
-prepare = function_body(temporal, "static void temporal_prepare(GLuint fbo, int y, int w, int h)")
+matching = function_body(temporal, "static void temporal_match_scene(TemporalScene *s, const TemporalAgainst *a)")
+against = function_body(temporal, "static void temporal_against(const TemporalScene *s, int w, int h, TemporalAgainst *a)")
 require(
-    "&s->mesh_stats,s_temp_curr.start,s_temp_curr.gone_to,s_temp_curr.gone," in prepare
-    and "s_temp_prev" not in prepare,
-    "matching may write only the builder and the current scene's departure arrays, which the presenter does not read",
+    "&s->mesh_stats,a->start,a->gone_to,a->gone," in matching
+    and "s_temp_prev" not in matching
+    and "s_temp_curr" not in matching
+    and "a->start=s_temp_curr.start; a->gone_to=s_temp_curr.gone_to; a->gone=s_temp_curr.gone;" in against
+    and "        memset(&s->camera,0,sizeof(s->camera));\n        memset(&s->onward,0,sizeof(s->onward));\n" in matching,
+    "matching may write only the builder and the current scene's departure arrays, which the presenter does not read, "
+    "and reads the current scene only through what the capture took of it",
+)
+job = function_body(renderer, "static void interp_match_job(const InterpMatchJob *job)")
+post = function_body(renderer, "static void interp_match_post(TemporalScene *scene, GLuint fbo, int y, int w, int h, int dst, int linear,")
+release = function_body(renderer, "static void interp_match_release(void)")
+builder = function_body(temporal, "static TemporalScene *temporal_builder(GLuint fbo, int y, int h)")
+reset = function_body(temporal, "static void temporal_reset(void)")
+begin = function_body(temporal, "static void temporal_begin(GLuint fbo, int y, int h, uint16_t color)")
+require(
+    job.index("    temporal_match_scene(job->scene, &job->against);") < job.index("    SDL_LockMutex(s_interp_mutex);")
+    and "    if (job->generation == s_temp_generation) {\n" in job
+    and "    temporal_against(scene, w, h, &job.against);\n    job.generation = s_temp_generation;\n" in post
+    and "    s_temp_held[slot] = 1;\n    s_match_retired = slot;\n" in post
+    and capture.index("    if (s_match_thread) interp_match_wait();") < capture.index("    if (apart) {\n        scene = temporal_prepare_scene")
+    < capture.index("    SDL_LockMutex(s_interp_mutex);")
+    and capture.count("ready = s_interp_valid >= 2;") == 2
+    and capture.index("        s_interp_draw_fence = NULL;\n    }\n    interp_match_release();\n") > 0
+    and "    s_temp_held[s_match_retired] = 0;\n" in release
+    and "if (!s_temp_held[i] && fbo && s->capture_fbo==fbo && s->active &&" in builder
+    and "        if (!s_temp_held[i]) { s_temp_build[i].active = 0; s_temp_build[i].capture_fbo=0; }\n" in reset
+    and "    ++s_temp_generation;\n" in reset
+    and begin.count("!s_temp_held[i]") == 3
+    and "    else if (s_interp_valid >= 2) dst = 3 - s_interp_prev - s_interp_cur;\n" in capture,
+    "the matching thread matches unlocked and publishes under the lock unless a reset came between, a capture in any mode "
+    "waits for it before preparing and tells a pair ready only once published, a slot it holds is left alone by the builder and by a reset until a capture after the "
+    "presenter's last draw fence, and a picture goes to the one slot the presenter is not drawing from",
+)
+reset_wrapper = function_body(renderer, "static void interp_reset_history(void) {")
+suspend = function_body(renderer, "static void interp_set_suspended(int *reason, int suspended) {")
+setter = function_body(renderer, "void gl_renderer_set_interpolation(int enabled, double host_hz, double target_hz,")
+loop = function_body(renderer, "static int interp_thread_main(void *opaque) {")
+require(
+    all(body.index("    interp_match_wait();\n") < body.index("SDL_LockMutex(s_interp_mutex);") for body in (reset_wrapper, suspend, setter))
+    and "        const int diag = s_interp_diag;\n        SDL_UnlockMutex(s_interp_mutex);\n" in loop
+    and "            if (diag && !s_interp_settle)\n" in loop,
+    "a history reset waits for the matching thread before it takes the present mutex, so a captured frame is published "
+    "before the reset clears it, and the presenter reads the diagnostics switch under the mutex",
+)
+stop = function_body(renderer, "void gl_renderer_shutdown(void)")
+require(
+    stop.index("    interp_match_stop();\n") < stop.index("        temporal_release();\n")
+    and stop.index("        SDL_WaitThread(s_interp_thread, NULL);\n") < stop.index("    interp_match_stop();\n"),
+    "the matching thread stops before the scenes it may hold are freed",
 )
 
 quad_draw = function_body(renderer, "static float interp_draw_quad(float alpha, int lx, int ly, int lw, int lh) {")

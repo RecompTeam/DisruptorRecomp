@@ -10,6 +10,7 @@ bool prerequisite_on(const Option &option) {
         return gpu_geometry_correction_enabled() != 0;
     if (key == "disruptor.mouse_aim") return disruptor_mouse_aim_enabled() != 0;
     if (key == "disruptor.ambient_occlusion") return gl_renderer_ssao() != 0;
+    if (key == "disruptor.smooth_fade") return gl_renderer_smooth_fade() != 0;
     if (key == "disruptor.vertical_look") return disruptor_mouse_vertical_look_enabled() != 0;
     if (key == "disruptor.separate_vertical_speed")
         return disruptor_mouse_vertical_follows_horizontal() == 0;
@@ -55,10 +56,12 @@ bool option_slider(const char *key, float *value) {
 
 bool option_list(const char *key, int *index, size_t skipped) {
     const Option &option = *find_option(key);
-    const auto shown = option.choices.subspan(skipped);
+    const auto offered = option.choices.first(std::min(option.choices.size(), static_cast<size_t>(option.highest + 1)));
+    const auto shown = offered.subspan(std::min(skipped, offered.size()));
     const bool moved = ImGui::Combo(option.label, index, shown.data(),
                                     static_cast<int>(shown.size()));
     disruptor::ui::hint(option.hint);
+    if (option.notice) ImGui::TextColored(ImVec4(0.878f, 0.643f, 0.227f, 1.0f), "%s", option.notice);
     return moved;
 }
 

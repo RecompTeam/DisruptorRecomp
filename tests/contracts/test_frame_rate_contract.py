@@ -89,9 +89,51 @@ for name in ("game.toml", "game-widescreen.toml"):
     )
     require(patch is not None, f"{name} must carry the guarded frame-floor patch")
     require(
-        re.search(r"^\[audio\]\nbuffer_ms = 90\n", config, re.MULTILINE) is not None,
-        f"{name} must hold the sound 90 ms ahead of the device, the default 180 put it 0.2 s behind the movies",
+        re.search(r"^\[audio\]\nbuffer_ms = 45\n", config, re.MULTILINE) is not None,
+        f"{name} must hold the sound 45 ms ahead of the device, the default 180 put it 0.2 s behind the movies",
     )
+    require(
+        re.search(r"^\[localization\]\ncapture = false\n", config, re.MULTILINE) is not None,
+        f"{name} must stop the text capture scan, it took 40% of the emulation thread in a crowd",
+    )
+
+loader = read("psxrecomp/recompiler/src/config_loader.cpp")
+translation = read("psxrecomp/runtime/src/text_xlate.cpp")
+runtime_main = read("psxrecomp/runtime/src/main.cpp")
+require(
+    '        if (loc.contains("capture"))\n            rt.text_capture = toml::find<bool>(loc, "capture");\n' in loader
+    and "            text_xlate_set_capture(gc.runtime.text_capture ? 1 : 0);\n" in runtime_main
+    and "    g_capture_on.store(capenv && capenv[0] ? capenv[0] != '0' : enabled != 0);\n" in translation,
+    "the configuration's capture switch must reach the translation layer, the environment still first",
+)
+renderer = read("psxrecomp/runtime/src/gpu_gl_renderer.c")
+presenter = read("psxrecomp/runtime/src/gpu_gl_temporal.c.inc")
+uploads = renderer[renderer.index("static void flush_cpu_upload(void) {") :]
+uploads = uploads[: uploads.index("\n}\n")]
+require(
+    "        p_glBindBuffer(PSXGL_PIXEL_UNPACK_BUFFER, s_up_pbo);\n"
+    "        p_glBufferData(PSXGL_PIXEL_UNPACK_BUFFER, (ptrdiff_t)bytes, pixels, PSXGL_STREAM_DRAW);\n"
+    "        glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, w, h, format, type, (const void *)0);\n"
+    "        p_glBindBuffer(PSXGL_PIXEL_UNPACK_BUFFER, 0);\n" in renderer
+    and "    p_glGenBuffers(1, &s_up_pbo);\n" in renderer
+    and uploads.count("upload_rect(") == 2
+    and "glTexSubImage2D" not in uploads,
+    "uploads of the game's pictures go through a buffer: a direct one waited for the queued draws, 45 ms a second",
+)
+snapshot = presenter[presenter.index("static int temporal_texture(TemporalScene *s) {") :]
+snapshot = snapshot[: snapshot.index("\n}\n")]
+require(
+    "    const int queried = !p_glCopyImageSubData || !s->textures[i];\n"
+    "    if (queried) {\n"
+    "        glGetIntegerv(0x8CAA /* GL_READ_FRAMEBUFFER_BINDING */, &read_fbo);\n"
+    "        glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture);\n"
+    "    }\n" in snapshot
+    and snapshot.count("glGetIntegerv(") == 2
+    and "        p_glCopyImageSubData(s_raw_tex, GL_TEXTURE_2D, 0, 0, 0, 0, s->textures[i], GL_TEXTURE_2D, 0, 0, 0, 0,\n"
+    in presenter
+    and '|| SDL_GL_ExtensionSupported("GL_ARB_copy_image")\n' in renderer,
+    "a scene's texture snapshot asks the driver nothing when it can copy texture to texture: the queries waited for it",
+)
 
 for token in (
     "0x8004B3D4u",
@@ -121,7 +163,7 @@ require(
     "fixed-step loop states must keep the retail cadence",
 )
 require(
-    "static_cast<int32_t>(cpu->gpr[4]) >= 0" in source and "g_psx_cyc_overclock_shift = 0u;" in source,
+    "static_cast<int32_t>(cpu->gpr[4]) >= 0" in source and "    if (waits) set_cpu_shift(0u);\n" in source,
     "every waiting VSync call must run at the stock instruction cost",
 )
 require(
@@ -178,6 +220,24 @@ require(
     "        if (cycles == 0u) return;\n"
     "    }\n" in cycle_header,
     "the divisor must charge whole cycles and carry the remainder",
+)
+waits_header = read("psxrecomp/runtime/include/psx_cyc_overclock.h")
+icache = read("psxrecomp/runtime/src/psx_icache.c")
+memory = read("psxrecomp/runtime/src/memory.c")
+require(
+    "+runtime/include/psx_cyc_overclock.h" in manifest.splitlines()
+    and "runtime/src/psx_icache.c" in manifest.splitlines()
+    and "    disruptor_unit_test(psx_cyc_overclock " in cmake
+    and "    if (!g_psx_cyc_overclock_shift) return cycles;\n" in waits_header
+    and all('#include "psx_cyc_overclock.h"\n' in text for text in (cycle_source, icache, memory))
+    and "    cpu->muldiv_ts_done = psx_cycle_count + (uint64_t)psx_cyc_overclocked_latency(latency);\n" in cycle_source
+    and "    cpu->gte_ts_done = psx_cycle_count + (uint64_t)psx_cyc_overclocked_latency(latency);\n" in cycle_source
+    and "        psx_advance_cycles(psx_cyc_overclocked_wait(4u));\n" in icache
+    and "    psx_advance_cycles(psx_cyc_overclocked_wait(cost));\n" in icache
+    and "    psx_advance_cycles(phys < 0x00800000u ? psx_cyc_overclocked_wait(fudge + cost) : fudge + cost);\n" in memory
+    and "    if (shift == g_psx_cyc_overclock_shift) return;\n    g_psx_cyc_overclock_shift = shift;\n    g_psx_cyc_overclock_carry = 0u;\n}\n" in source,
+    "the overclock divides the GTE and multiplier latencies without the elapsed carry, instruction cache refills and main "
+    "RAM loads off the inline path with it, leaves device waits whole, and another divisor starts from no carry",
 )
 
 present_rate = read("src/game/frame/present_rate.h")

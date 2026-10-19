@@ -1,0 +1,16 @@
+diff --git a/runtime/src/text_xlate.cpp b/runtime/src/text_xlate.cpp
+index 562630ee5dcb91f8595e329cf5c3d6ce31314151..534c0c94ac963ec9088079ccd6f0c4d62356f871 100644
+--- a/runtime/src/text_xlate.cpp
++++ b/runtime/src/text_xlate.cpp
+@@ -918,6 +918,11 @@
+     load_tables_locked();
+ }
+ 
++extern "C" void text_xlate_set_capture(int enabled) {
++    const char* capenv = std::getenv("PSX_XLATE_CAPTURE");
++    g_capture_on.store(capenv && capenv[0] ? capenv[0] != '0' : enabled != 0);
++}
++
+ extern "C" void text_xlate_set_language(const char* language) {
+     // PSX_LANG env is an authoring/testing override — if set it pins the language
+     // and the launcher's choice is ignored (matches text_xlate_init precedence).

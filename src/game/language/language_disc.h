@@ -1,6 +1,7 @@
 #ifndef DISRUPTOR_LANGUAGE_DISC_H
 #define DISRUPTOR_LANGUAGE_DISC_H
 
+#include <array>
 #include <cstdint>
 #include <string>
 #include <unordered_map>
@@ -12,6 +13,8 @@ constexpr uint32_t kRawSector = 2352;
 constexpr uint32_t kSectorData = 2048;
 constexpr uint32_t kHintBytes = 0x5000;  /* a level's hint, 320 by 32 in 16 bits: what the US code loads of it */
 constexpr uint32_t kTallHintBytes = 0xA000;  /* one twice as tall, as the Japanese disc has them */
+constexpr uint32_t kMovies = 20;  /* the entries of each movie table */
+constexpr uint32_t kMissions = 16;  /* the entries of the table of briefing waits */
 
 class DiscImage {
   public:
@@ -45,6 +48,10 @@ class LanguageDisc {
     bool tall_hints() const { return tall_hints_; }
     /* The language of the disc laid out, as KnownDisc names it: empty until build succeeds. */
     const char *language() const { return language_; }
+    /* The frame number each movie's sound starts on in the other disc's player, 0 for its first frame. */
+    const std::array<int16_t, kMovies> &sound_starts() const { return sound_starts_; }
+    /* The VBlanks of this build each mission's briefing plays in the other disc's player before its mission starts. */
+    const std::array<int16_t, kMissions> &briefing_waits() const { return briefing_waits_; }
 
   private:
     struct Run {
@@ -65,6 +72,8 @@ class LanguageDisc {
     uint32_t sectors_ = 0;
     bool tall_hints_ = false;
     const char *language_ = "";
+    std::array<int16_t, kMovies> sound_starts_{};
+    std::array<int16_t, kMissions> briefing_waits_{};
 };
 
 }  // namespace disruptor

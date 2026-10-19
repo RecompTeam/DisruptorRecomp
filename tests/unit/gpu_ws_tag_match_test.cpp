@@ -1,5 +1,6 @@
 #include "gpu_ws_tag_match.h"
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <iostream>
@@ -78,6 +79,24 @@ int main() {
                kStamp + 2u, kStamp, 0, 0u, reused.data()) ==
                PSX_WS_TAG_MATCH,
            "legacy provenance retains address-and-age behavior");
+
+    const int length = static_cast<int>(original.size());
+    const std::uint32_t drawn = psx_gpu_command_signature(original.data(), length);
+    for (std::size_t i = 0; i < original.size(); ++i) {
+        for (std::uint32_t bit = 0; bit < 32u; ++bit) {
+            auto other = original;
+            other[i] ^= 1u << bit;
+            if (psx_gpu_command_signature(other.data(), length) == drawn) {
+                expect(false, "a drawn command's fingerprint covers every bit of every word, CLUT and page too");
+                break;
+            }
+        }
+    }
+    std::array<std::uint32_t, 12> longer{};
+    std::copy(original.begin(), original.end(), longer.begin());
+    longer[9] = 0xDEADBEEFu;
+    expect(psx_gpu_command_signature(longer.data(), length) == drawn,
+           "words past the command's length are not its own");
 
     if (g_failures != 0) return 1;
     std::cout << "GPU widescreen tag matching tests passed\n";

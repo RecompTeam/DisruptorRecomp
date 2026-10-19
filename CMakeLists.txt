@@ -45,8 +45,10 @@ set(DISRUPTOR_EXTRA_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings/user_folder.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/intro_skip.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/language.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/language_briefing.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/language_disc.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/language_hints.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/language_movie_sound.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/language_source.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/restart.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/baton_choice.cpp"
@@ -363,8 +365,11 @@ disruptor_unit_test(disruptor_baton_choice tests/unit/disruptor_baton_choice_tes
     disruptor_unit_test(disruptor_backdrop_tiles tests/unit/disruptor_backdrop_tiles_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_intro_skip tests/unit/disruptor_intro_skip_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_frame_rate tests/unit/disruptor_frame_rate_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(psx_cyc_overclock tests/unit/psx_cyc_overclock_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_language tests/unit/disruptor_language_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_language_hints tests/unit/disruptor_language_hints_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_language_movie_sound tests/unit/disruptor_language_movie_sound_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_language_briefing tests/unit/disruptor_language_briefing_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_language_disc tests/unit/disruptor_language_disc_test.cpp)
     disruptor_unit_test(disruptor_launcher_menu_art tests/unit/launcher_menu_art_test.cpp
         SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/launcher/menu_art.cpp")

@@ -19,6 +19,7 @@ void draw_experimental_tab() {
     }
     if (!sampling_applies) ImGui::EndDisabled();
     draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
+
 }
 
 }  // namespace disruptor::menu

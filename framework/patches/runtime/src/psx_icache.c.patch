@@ -1,0 +1,30 @@
+diff --git a/runtime/src/psx_icache.c b/runtime/src/psx_icache.c
+index 5ba898a343a368b10f6436ccbb286881355f122e..3055b4ec199a0e88cbefe7d9d898e669f57edd44 100644
+--- a/runtime/src/psx_icache.c
++++ b/runtime/src/psx_icache.c
+@@ -8,6 +8,7 @@
+ #include "psx_icache.h"
+ #include "cpu_state.h"
+ #include "psx_cycles.h"
++#include "psx_cyc_overclock.h"
+ #include <stdint.h>
+ #include <stdlib.h>
+ #include <string.h>
+@@ -84,7 +85,7 @@
+     cpu->read_absorb_which = 0u;
+ 
+     if (addr >= 0xA0000000u) { /* KSEG1 / uncached (BIOS ROM) */
+-        psx_advance_cycles(4u);
++        psx_advance_cycles(psx_cyc_overclocked_wait(4u));
+         return;
+     }
+ 
+@@ -100,7 +101,7 @@
+         g_psx_icache_tv[bidx + i] &= ~0x2u;
+         cost++;
+     }
+-    psx_advance_cycles(cost);
++    psx_advance_cycles(psx_cyc_overclocked_wait(cost));
+ #else
+     (void)cpu;
+     (void)addr;

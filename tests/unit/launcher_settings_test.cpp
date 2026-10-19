@@ -66,7 +66,12 @@ void table() {
         require(std::string_view(one.key).find('.') != std::string_view::npos, "a key lacks its section");
         if (one.kind == Kind::choice)
             require(!one.choices.empty() && one.initial >= 0 && one.initial < static_cast<int>(one.choices.size()) &&
-                    one.highest == static_cast<int>(one.choices.size()) - 1, "a choice starts outside its list");
+                    one.initial <= one.highest && one.highest < static_cast<int>(one.choices.size()), "a choice starts outside its list");
+        if (one.kind == Kind::choice && one.highest < static_cast<int>(one.choices.size()) - 1)
+            require(std::string_view(one.key) == "disruptor.draw_distance" || std::string_view(one.key) == "disruptor.fog_shape",
+                    "only the draw distance and the fog shape offer fewer choices than they name");
+        require(!one.notice || (one.kind == Kind::choice && one.highest < static_cast<int>(one.choices.size()) - 1),
+                "a notice stands only beside choices that are not all offered");
         if (one.kind == Kind::toggle) require(one.initial == 0 || one.initial == 1, "a toggle starts as neither");
         for (const char* need : one.needs)
             require(option(need).kind == Kind::toggle && &option(need) != &one, "a row needs no toggle");
@@ -182,6 +187,48 @@ void separate_vertical_from_file(const fs::path& folder) {
             "a speed written once writes down the switch the older file implied, so the next speeds leave it");
 }
 
+void draw_distance_list() {
+    const Option& list = option("disruptor.draw_distance");
+    require(list.kind == Kind::choice && list.initial == 0 && list.choices.size() == 4 && list.needs.empty() &&
+                std::string_view(list.choices[0]) == "Original",
+            "the draw distance is a list of four that starts at the original and needs nothing");
+    Settings fresh;
+    require(!list.saved(fresh) && list.get(fresh) == 0, "a file that does not name it draws at the original distance");
+    const int percents[] = {100, 125, 150, 200};
+    for (int index = 0; index < 4; ++index) {
+        Settings chosen;
+        list.set(chosen, index);
+        require(list.saved(chosen) && chosen.draw_distance == percents[index] && list.get(chosen) == index,
+                "each choice is written as its percent and read back as itself");
+    }
+    Settings odd;
+    odd.has_draw_distance = true;
+    odd.draw_distance = 110;
+    require(list.get(odd) == -1, "a percent the list does not have is no choice");
+    require(list.highest == 0 && list.notice && std::string_view(list.notice) == "Longer distances come in a later release.",
+            "only the original distance is offered for now, and the notice says why");
+    Settings farther;
+    list.set(farther, 2);
+    require(stored(farther, list) == 0, "a longer distance saved by an older build starts at the original");
+}
+
+void fog_shape_list() {
+    const Option& list = option("disruptor.fog_shape");
+    require(list.kind == Kind::choice && list.initial == 0 && list.choices.size() == 3 && list.needs.size() == 1 &&
+                std::string_view(list.needs[0]) == "disruptor.smooth_fade" && std::string_view(list.choices[0]) == "Even",
+            "the fog shape is a list of three that starts even and needs the smooth fade");
+    for (int index = 0; index < 3; ++index) {
+        Settings chosen;
+        list.set(chosen, index);
+        require(chosen.has_fog_shape && chosen.fog_shape == index && list.get(chosen) == index, "each shape is written as its index");
+    }
+    require(list.highest == 0 && list.notice && std::string_view(list.notice) == "Other shapes come in a later release.",
+            "only the even fog is offered for now, and the notice says why");
+    Settings late;
+    list.set(late, 2);
+    require(stored(late, list) == 0, "another shape saved by an older build starts even");
+}
+
 void antialiasing_list() {
     const Option& list = option("disruptor.multisampling");
     require(list.kind == Kind::choice && list.initial == 0 && list.choices.size() == 9 &&
@@ -285,7 +332,7 @@ void placements() {
     std::vector<std::string> enhancements;
     for (const auto& row : rows)
         if (row.page == Page::enhancements) enhancements.emplace_back(row.key);
-    require(enhancements.size() == 12 && enhancements.front() == "disruptor.frame_unlock" && rows[5].group &&
+    require(enhancements.size() == 14 && enhancements.front() == "disruptor.frame_unlock" && rows[5].group &&
                 std::string_view(rows[5].key) == "disruptor.frame_unlock",
             "Enhancements opens with its frame rate group, 60 FPS gameplay first");
 }
@@ -343,6 +390,12 @@ void round_trip(const fs::path& folder) {
         SettingsFile settings(file);
         settings.set_display_rate(240.0);
         require(settings.load(), "the file must load");
+        if (one.kind == Kind::choice && one.highest < static_cast<int>(one.choices.size()) - 1) {
+            require(settings.set(one, one.highest + 1) && settings.shown(one) == one.initial,
+                    "a choice past the offered ones, written by an older build, shows as the first");
+            fs::remove(file);
+            continue;
+        }
         const int value = other_value(settings, one);
         require(value != settings.shown(one), "the test value must differ from the one shown");
         require(settings.set(one, value) && settings.shown(one) == value, "a set value must be the one shown");
@@ -706,6 +759,8 @@ int main() {
         needed();
         placements();
         antialiasing_list();
+        draw_distance_list();
+        fog_shape_list();
         described();
         absent(folder);
         antialiasing_from_file(folder);

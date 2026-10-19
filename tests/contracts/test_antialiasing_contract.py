@@ -246,9 +246,9 @@ require(
     and '"disruptor.sample_shading"' not in options
     and '"disruptor.downscale_averaging"' not in options
     and '"disruptor.edge_smoothing"' not in options
-    and "                        std::span<const char* const> needs = {}) {\n"
-    "    return {key, Kind::choice, label, saved, get, set, initial, 0, static_cast<int>(choices.size()) - 1,\n"
-    "            choices, needs, Unit::none, hint};\n" in options,
+    and "                        std::span<const char* const> needs = {}, int offered = 0, const char* notice = nullptr) {\n"
+    "    return {key, Kind::choice, label, saved, get, set, initial, 0,\n"
+    "            (offered > 0 ? offered : static_cast<int>(choices.size())) - 1, choices, needs, Unit::none, hint, notice};\n" in options,
     "anti-aliasing is a saved setting that starts off, one list over the samples and their shading that needs geometry "
     "correction, and the two filters are withdrawn from the shared table",
 )
@@ -334,4 +334,9 @@ require(
 )
 require("    disruptor_contract(antialiasing)\n" in cmake, "this contract must remain registered")
 
+require(renderer.count("noperspective centroid out vec2 v_uv; noperspective centroid out vec3 v_uvq;") == 1
+        and renderer.count("noperspective centroid in vec2 v_uv; noperspective centroid in vec3 v_uvq;") == 1
+        and '"centroid out vec2 v_uvw;' in renderer and '"centroid in vec2 v_uvw;\\n"' in renderer,
+        "with multisampling and no sample shading a pixel is shaded once: its texture place is taken inside the polygon, "
+        "not at a pixel centre outside it, which read the texel past a sprite's edge and drew a line along it")
 print("Disruptor anti-aliasing source contract: PASS")

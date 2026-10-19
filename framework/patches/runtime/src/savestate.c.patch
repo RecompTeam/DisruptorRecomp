@@ -1,8 +1,15 @@
 diff --git a/runtime/src/savestate.c b/runtime/src/savestate.c
-index b04e4ac0a7a80eac7201e3217e1a2982bda9ce33..eb28ad251414ddae3c9d7ed0516c007e78e37a89 100644
+index b04e4ac0a7a80eac7201e3217e1a2982bda9ce33..427074c1401c24915c7418caa33e06416609d8d2 100644
 --- a/runtime/src/savestate.c
 +++ b/runtime/src/savestate.c
-@@ -210,6 +210,7 @@
+@@ -204,12 +204,14 @@
+     if (s_save_pending < 0 && s_load_pending < 0) return;   /* hot path: nothing staged */
+ 
+     if (s_save_pending >= 0) {
++        if (psx_frontend_savestate_deferred()) return;
+         int slot = s_save_pending;
+         s_save_pending = -1;
+         char path[600];
          if (savestate_slot_path(slot, path, sizeof(path))) {
              /* Save the exact resume PC (cpu->pc is 0 mid-block; resume_pc is the
               * block leader the interrupt path would resume at). */

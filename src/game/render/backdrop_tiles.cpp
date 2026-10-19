@@ -20,6 +20,9 @@
 
 namespace {
 
+constexpr uint32_t kVBlanks = 0x8005B920u;  /* libetc's VBlank count */
+constexpr uint32_t kSkyVBlanks = 300u;      /* five seconds: the sky still counts as behind the world this long after a tile */
+
 constexpr uint32_t kLoadLeftEdge = 0x8003B328u;
 constexpr uint32_t kComputeScroll = 0x8003B338u;
 constexpr uint32_t kLoadRightEdge = 0x8003B348u;
@@ -36,6 +39,8 @@ constexpr int kPacketRegister = 17;  /* $s1 */
 constexpr int kEdgeRegister = 24;    /* $t8 */
 
 int32_t g_span_left = 0;
+bool g_sky_seen = false;
+uint32_t g_sky_at = 0u;
 
 uint32_t widened(uint32_t edge, bool right_edge) {
     return static_cast<uint32_t>(
@@ -69,9 +74,16 @@ extern "C" void disruptor_backdrop_tiles_instruction_hook(
             return;
         case kTileQueued:
             if (instruction != kTileQueuedWord) return;
+            g_sky_seen = cpu->read_word != nullptr;
+            if (g_sky_seen) g_sky_at = cpu->read_word(kVBlanks);
             gpu_ws_tag_screen_tile(cpu, cpu->gpr[kPacketRegister]);
             return;
         default:
             return;
     }
+}
+
+/* Whether the world stands against the sky: indoors the void behind it is the clear colour, which nothing should show. */
+extern "C" int disruptor_backdrop_tiles_sky_behind(uint32_t vblanks) {
+    return g_sky_seen && vblanks - g_sky_at <= kSkyVBlanks ? 1 : 0;
 }

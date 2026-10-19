@@ -17,6 +17,11 @@ bool allocation_fails = false;
 bool netplay = false;
 int told = 0;
 bool margin_forced = false;
+int preset = 0;
+int edge_margin = 0;
+uint32_t drawn_far = 1280u;
+int32_t drawn_fade = 512;
+float ssao_from = 0.0f, ssao_to = 0.0f, palette_start = 0.0f, palette_step = 0.0f;
 uint8_t *bytes(uint32_t address) {
     uint32_t offset;
     if (psx_mod_gpu_dma_aperture_offset_for(address, 4u, allocated, &offset))
@@ -36,8 +41,25 @@ int psx_netplay_active(void) { return netplay; }
 /* As in the runtime: no margin for a frame the game has just called flat, unless it is forced or the frame is native-wide. */
 int32_t psx_mod_widescreen_x_margin(void) { return told && !margin_forced ? 0 : margin; }
 void gpu_ws_tell_frame_kind(int flat) { told = flat; }
-void gl_renderer_set_ssao_fade(float, float) {}
-void gl_renderer_set_palette_fade(int, float, float, float) {}
+void gl_renderer_set_ssao_fade(float from, float to) { ssao_from = from; ssao_to = to; }
+void gl_renderer_set_palette_fade(int, float start, float step, float) { palette_start = start; palette_step = step; }
+int disruptor_far_rendering_get_preset(void) { return preset; }
+int disruptor_far_rendering_edge_margin(void) { return edge_margin; }
+int32_t ramp_start = 512, ramp_length = 768;
+int ramp_power = 1, published_power = 0;
+void disruptor_far_rendering_fog_ramp(int32_t *start, int32_t *length, int *power) {
+    *start = ramp_start;
+    *length = ramp_length;
+    *power = ramp_power;
+}
+void gl_renderer_set_palette_fade_power(int power) { published_power = power; }
+int sky_behind = 0, edge_sky = -1;
+void gl_renderer_set_edge_sky(int sky) { edge_sky = sky; }
+int disruptor_backdrop_tiles_sky_behind(uint32_t) { return sky_behind; }
+void disruptor_far_rendering_drawn_distances(uint32_t *far_distance, int32_t *fade_start) {
+    *far_distance = drawn_far;
+    *fade_start = drawn_fade;
+}
 uint8_t psx_mod_read_byte(uint32_t address) { return *bytes(address); }
 uint32_t psx_mod_read_word(uint32_t address) {
     uint32_t value; std::memcpy(&value, bytes(address), 4); return value;
@@ -166,5 +188,49 @@ int main() {
         require(told == 0 && psx_mod_read_word(kContexts[1] + kArenaOffset) == moved,
                 "the first frame of a world was not told so before its arena was chosen");
     }
+
+    margin = 0;
+    preset = DISRUPTOR_FAR_RENDERING_FAR;
+    renderer_entry(&cpu, kRendererEntry);
+    require(psx_mod_read_word(kContexts[1] + kArenaOffset) == moved,
+            "a longer draw distance at 4:3 gave the arena back to the retail root");
+    preset = DISRUPTOR_FAR_RENDERING_RETAIL;
+    renderer_entry(&cpu, kRendererEntry);
+    require(psx_mod_read_word(kContexts[1] + kArenaOffset) == original[1],
+            "the original draw distance at 4:3 kept the enhanced arena");
+    edge_margin = 1;
+    renderer_entry(&cpu, kRendererEntry);
+    require(psx_mod_read_word(kContexts[1] + kArenaOffset) == moved,
+            "meshes kept past the fog's end at 4:3 left the arena at the retail root");
+    edge_margin = 0;
+    preset = DISRUPTOR_FAR_RENDERING_EXTENDED;
+    renderer_entry(&cpu, kRendererEntry);
+    require(psx_mod_read_word(kContexts[1] + kArenaOffset) == moved,
+            "a longer draw distance at 4:3 did not move the arena");
+
+    sky_behind = 1;
+    renderer_entry(&cpu, kRendererEntry);
+    require(edge_sky == 1, "the renderer is told the sky stands behind the world");
+    sky_behind = 0;
+    renderer_entry(&cpu, kRendererEntry);
+    require(edge_sky == 0, "and when it no longer does");
+
+    drawn_far = 1600u;
+    drawn_fade = 832;
+    ramp_start = 832;
+    renderer_entry(&cpu, kRendererEntry);
+    require(palette_start == 8.0f * 832.0f && ssao_from == 4.0f * 832.0f && ssao_to == 4.0f * 1600.0f,
+            "the fades did not follow the distances the renderer draws with");
+    drawn_fade = -64;
+    ramp_start = -64;
+    renderer_entry(&cpu, kRendererEntry);
+    require(palette_start == -512.0f && ssao_from == -256.0f, "a fade start before the camera lost its sign");
+    ramp_start = 256;
+    ramp_length = 1280;
+    renderer_entry(&cpu, kRendererEntry);
+    ramp_power = 3;
+    renderer_entry(&cpu, kRendererEntry);
+    require(palette_start == 8.0f * 256.0f && palette_step == 8.0f * 1280.0f / 12.0f && published_power == 3,
+            "the palette fade spans the fog the far rendering hands over, with its power");
     std::puts("PASS: dense ultrawide packets preserve textures and 24-bit DMA links");
 }

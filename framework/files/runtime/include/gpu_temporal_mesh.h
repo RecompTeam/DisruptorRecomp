@@ -652,27 +652,115 @@ static inline void gpu_temporal_mesh_pair_sprites(
     free(candidates);
 }
 
+static inline int gpu_temporal_camera_projects(const GpuTemporalCamera *camera, const GpuTemporalTriangle *triangle,
+                                               double px[3], double py[3]) {
+    for (int vertex = 0; vertex < 3; ++vertex)
+        if (!gpu_temporal_mesh_known_depth(triangle->depth[vertex]) ||
+            !gpu_temporal_camera_project(camera, triangle->x[vertex], triangle->y[vertex],
+                                         triangle->depth[vertex], &px[vertex], &py[vertex])) return 0;
+    return 1;
+}
+
+static inline int gpu_temporal_camera_coincides(const GpuTemporalTriangle *candidate, uint64_t material,
+                                                const double px[3], const double py[3]) {
+    if (candidate->material != material || !candidate->world) return 0;
+    for (int vertex = 0; vertex < 3; ++vertex) {
+        const double dx = candidate->x[vertex] - px[vertex];
+        const double dy = candidate->y[vertex] - py[vertex];
+        if (!(dx * dx + dy * dy <= GPU_TEMPORAL_CAMERA_TOLERANCE * GPU_TEMPORAL_CAMERA_TOLERANCE)) return 0;
+    }
+    return 1;
+}
+
 /* A previous same-material face where the camera puts this one marks a wrong pick in the static world, not a moving object. */
 static inline int gpu_temporal_camera_rematch(
         const GpuTemporalCamera *camera, const GpuTemporalTriangle *prev,
         int prev_n, const GpuTemporalTriangle *triangle) {
     double px[3], py[3];
-    for (int vertex = 0; vertex < 3; ++vertex)
-        if (!gpu_temporal_mesh_known_depth(triangle->depth[vertex]) ||
-            !gpu_temporal_camera_project(camera, triangle->x[vertex], triangle->y[vertex],
-                                         triangle->depth[vertex], &px[vertex], &py[vertex])) return -1;
-    for (int candidate = 0; candidate < prev_n; ++candidate) {
-        int coincides = 1;
-        if (prev[candidate].material != triangle->material || !prev[candidate].world) continue;
-        for (int vertex = 0; vertex < 3 && coincides; ++vertex) {
-            const double dx = prev[candidate].x[vertex] - px[vertex];
-            const double dy = prev[candidate].y[vertex] - py[vertex];
-            coincides = dx * dx + dy * dy <=
-                        GPU_TEMPORAL_CAMERA_TOLERANCE * GPU_TEMPORAL_CAMERA_TOLERANCE;
-        }
-        if (coincides) return candidate;
-    }
+    if (!gpu_temporal_camera_projects(camera, triangle, px, py)) return -1;
+    for (int candidate = 0; candidate < prev_n; ++candidate)
+        if (gpu_temporal_camera_coincides(&prev[candidate], triangle->material, px, py)) return candidate;
     return -1;
+}
+
+#define GPU_TEMPORAL_FACE_CELL 4.0  /* px: a corner within the tolerance of a point lies in at most two cells a side */
+#define GPU_TEMPORAL_FACE_FAR 1.0e9 /* px: past this the index is not asked */
+
+/* A frame's world faces by material and the cell of their first corner: the answer of gpu_temporal_camera_rematch, the
+ * lowest index that coincides, without its scan of every face, which grew with the square of the faces drawn. */
+typedef struct GpuTemporalFaceIndex {
+    const GpuTemporalTriangle *faces;
+    int count, mask, failed;
+    int *head, *next;
+} GpuTemporalFaceIndex;
+
+static inline uint64_t gpu_temporal_face_bucket(uint64_t material, int64_t column, int64_t row) {
+    uint64_t hash = material * 0x9E3779B97F4A7C15ull;
+    hash ^= (uint64_t)column * 0xC2B2AE3D27D4EB4Full + (hash << 6) + (hash >> 2);
+    hash ^= (uint64_t)row * 0x165667B19E3779F9ull + (hash << 6) + (hash >> 2);
+    return hash ^ (hash >> 29);
+}
+
+static inline int gpu_temporal_face_indexable(double x, double y) {
+    return fabs(x) < GPU_TEMPORAL_FACE_FAR && fabs(y) < GPU_TEMPORAL_FACE_FAR;
+}
+
+static inline void gpu_temporal_face_index_free(GpuTemporalFaceIndex *index) {
+    free(index->head);
+    free(index->next);
+    memset(index, 0, sizeof(*index));
+}
+
+static inline int gpu_temporal_face_index_build(GpuTemporalFaceIndex *index, const GpuTemporalTriangle *faces, int count) {
+    int buckets = 1;
+    gpu_temporal_face_index_free(index);
+    while (buckets < 2 * count) buckets <<= 1;
+    index->head = (int *)malloc((size_t)buckets * sizeof(*index->head));
+    index->next = (int *)malloc((size_t)(count > 0 ? count : 1) * sizeof(*index->next));
+    if (!index->head || !index->next) {
+        gpu_temporal_face_index_free(index);
+        index->failed = 1;
+        return 0;
+    }
+    index->faces = faces;
+    index->count = count;
+    index->mask = buckets - 1;
+    for (int bucket = 0; bucket < buckets; ++bucket) index->head[bucket] = -1;
+    for (int face = 0; face < count; ++face) {
+        const GpuTemporalTriangle *triangle = &faces[face];
+        const double x = triangle->x[0], y = triangle->y[0];
+        if (!triangle->world || !gpu_temporal_face_indexable(x, y)) continue;
+        const uint64_t bucket = gpu_temporal_face_bucket(triangle->material, (int64_t)floor(x / GPU_TEMPORAL_FACE_CELL),
+                                                         (int64_t)floor(y / GPU_TEMPORAL_FACE_CELL)) & (uint64_t)index->mask;
+        index->next[face] = index->head[bucket];
+        index->head[bucket] = face;
+    }
+    return 1;
+}
+
+/* gpu_temporal_camera_rematch through `index`, made of `faces` on first use. */
+static inline int gpu_temporal_camera_rematch_in(GpuTemporalFaceIndex *index, const GpuTemporalTriangle *faces, int count,
+                                                 const GpuTemporalCamera *camera, const GpuTemporalTriangle *triangle) {
+    double px[3], py[3];
+    const double reach = GPU_TEMPORAL_CAMERA_TOLERANCE;
+    int best = -1;
+    if (index->faces != faces && (index->failed || !gpu_temporal_face_index_build(index, faces, count)))
+        return gpu_temporal_camera_rematch(camera, faces, count, triangle);
+    if (!gpu_temporal_camera_projects(camera, triangle, px, py)) return -1;
+    if (!gpu_temporal_face_indexable(px[0] - reach, py[0] - reach) || !gpu_temporal_face_indexable(px[0] + reach, py[0] + reach))
+        return gpu_temporal_camera_rematch(camera, faces, count, triangle);
+    const int64_t first_column = (int64_t)floor((px[0] - reach) / GPU_TEMPORAL_FACE_CELL);
+    const int64_t last_column = (int64_t)floor((px[0] + reach) / GPU_TEMPORAL_FACE_CELL);
+    const int64_t first_row = (int64_t)floor((py[0] - reach) / GPU_TEMPORAL_FACE_CELL);
+    const int64_t last_row = (int64_t)floor((py[0] + reach) / GPU_TEMPORAL_FACE_CELL);
+    for (int64_t column = first_column; column <= last_column; ++column)
+        for (int64_t row = first_row; row <= last_row; ++row) {
+            const uint64_t bucket = gpu_temporal_face_bucket(triangle->material, column, row) & (uint64_t)index->mask;
+            for (int face = index->head[bucket]; face >= 0; face = index->next[face])
+                if ((best < 0 || face < best) && gpu_temporal_camera_coincides(&faces[face], triangle->material, px, py))
+                    best = face;
+        }
+    return best;
 }
 
 typedef struct GpuTemporalMeshPoint {
@@ -922,6 +1010,9 @@ static inline int gpu_temporal_mesh_prepare_scene(
     int shift[3] = {0, 0, 0};
     unsigned corner_mask = 1;
     GpuTemporalCamera camera, forward;
+    GpuTemporalFaceIndex prev_faces, curr_faces;
+    memset(&prev_faces, 0, sizeof(prev_faces));
+    memset(&curr_faces, 0, sizeof(curr_faces));
     if (stats) memset(stats, 0, sizeof(*stats));
     if (!departed_to || !departed_from) departed = NULL;
     if (departed && prev)
@@ -1077,12 +1168,12 @@ static inline int gpu_temporal_mesh_prepare_scene(
                       GPU_TEMPORAL_CAMERA_TOLERANCE * GPU_TEMPORAL_CAMERA_TOLERANCE;
         }
         if (has_camera && dynamic && !trusted[triangle]) {
-            const int rematched = gpu_temporal_camera_rematch(&camera, prev, prev_n, &curr[triangle]);
+            const int rematched = gpu_temporal_camera_rematch_in(&prev_faces, prev, prev_n, &camera, &curr[triangle]);
             if (rematched >= 0) { previous = rematched; dynamic = 0; }
         }
         if (dynamic && has_forward && !trusted[triangle]) {
             /* The past face still stands where the camera takes it: a look-alike, and the face itself is new. */
-            const int stayed = gpu_temporal_camera_rematch(&forward, curr, curr_n, &prev[previous]);
+            const int stayed = gpu_temporal_camera_rematch_in(&curr_faces, curr, curr_n, &forward, &prev[previous]);
             if (stayed >= 0 && stayed != triangle) dynamic = 0, aliased = 1;
         }
         faces[triangle].matched = !aliased;
@@ -1296,7 +1387,7 @@ static inline int gpu_temporal_mesh_prepare_scene(
         }
         /* A face still submitted has its own interpolated copy on top. */
         if (!known || !carried || !gpu_temporal_mesh_camera_safe(&prev[triangle], &to) ||
-            gpu_temporal_camera_rematch(&forward, curr, curr_n, &prev[triangle]) >= 0) continue;
+            gpu_temporal_camera_rematch_in(&curr_faces, curr, curr_n, &forward, &prev[triangle]) >= 0) continue;
         departed_from[triangle] = start;
         departed_to[triangle] = to;
         departed[triangle] = carried == 3 ? 1 : 2;
@@ -1304,6 +1395,8 @@ static inline int gpu_temporal_mesh_prepare_scene(
     }
 
 cleanup:
+    gpu_temporal_face_index_free(&prev_faces);
+    gpu_temporal_face_index_free(&curr_faces);
     free(corners);
     free(trusted);
     free(pairs);

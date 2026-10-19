@@ -179,9 +179,13 @@ bios_hle = false
 overlay_cache = true
 overlay_backend = "auto"
 
-# The default 180 ms put the sound 0.2 s behind the movies, the deepest drop measured in a whole session was 26 ms.
+# 180 ms put the sound 0.2 s behind the movies. 45 ms held through the two heaviest capsules with the queue never under 34 ms.
 [audio]
-buffer_ms = 90
+buffer_ms = 45
+
+# Its English text has no Shift-JIS to inventory: the scan on every call took 40% of the emulation thread in a crowd.
+[localization]
+capture = false
 
 [video]
 aspect_ratio = "16:9"

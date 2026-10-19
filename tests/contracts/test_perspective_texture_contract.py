@@ -299,8 +299,8 @@ def main() -> int:
             "temporal camera depth must not become a shader attribute")
 
     # Canonical drawing stays affine: only the visual pass, on an exact polygon with valid q, selects uv*q/q.
-    require("noperspective out vec2 v_uv" in tex_vs and
-            "noperspective in vec2 v_uv" in tex_fs,
+    require("noperspective centroid out vec2 v_uv" in tex_vs and
+            "noperspective centroid in vec2 v_uv" in tex_fs,
             "the original canonical affine varying must remain intact")
     for token in ("u_visual > 0.5", "a_visual_flags > 1.5", "a_q > 0.0"):
         require(token in tex_vs,

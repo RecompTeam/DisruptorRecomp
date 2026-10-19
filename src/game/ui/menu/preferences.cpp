@@ -141,6 +141,10 @@ void mark_smooth_fade(bool value) { mark("disruptor.smooth_fade", value); }
 
 void mark_antialiasing(int level) { mark("disruptor.multisampling", level); }
 
+void mark_draw_distance(int preset) { mark("disruptor.draw_distance", preset); }
+
+void mark_fog_shape(int shape) { mark("disruptor.fog_shape", shape); }
+
 
 
 void mark_detailed_logging(bool value) { mark("disruptor.detailed_logging", value); }
@@ -308,6 +312,8 @@ void apply_saved_preferences(const PSXRecompV4::UserSettings &settings) {
     if (settings.has_smooth_fade) gl_renderer_set_smooth_fade(settings.smooth_fade ? 1 : 0);
     if (settings.has_multisampling) gl_renderer_set_multisampling(settings.multisampling);
     if (settings.has_sample_shading) gl_renderer_set_sample_shading(settings.sample_shading ? 1 : 0);
+    (void)disruptor_far_rendering_set_preset(stored(settings, *find_option("disruptor.draw_distance")));
+    disruptor_far_rendering_set_fog_exponent(stored(settings, *find_option("disruptor.fog_shape")) + 1);
     // Downscale averaging and edge smoothing are withdrawn for now: off whatever an older file says.
     gl_renderer_set_downscale_averaging(0);
     gl_renderer_set_edge_smoothing(0);
@@ -398,6 +404,10 @@ void apply_pending_preferences() {
         gl_renderer_set_multisampling(pending.multisampling);
         gl_renderer_set_sample_shading(pending.sample_shading ? 1 : 0);
     }
+    if (changed("disruptor.draw_distance"))
+        (void)disruptor_far_rendering_set_preset(stored(pending, *find_option("disruptor.draw_distance")));
+    if (changed("disruptor.fog_shape"))
+        disruptor_far_rendering_set_fog_exponent(stored(pending, *find_option("disruptor.fog_shape")) + 1);
     if (changed("disruptor.detailed_logging"))
         disruptor_diagnostics_set_detailed(pending.detailed_logging ? 1 : 0);
     if (changed("disruptor.gap_filling"))

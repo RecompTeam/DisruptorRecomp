@@ -100,7 +100,7 @@ require(
     filler_pass_begin(2.0f);
     glPolygonMode(GL_FRONT_AND_BACK, GL_LINE);
     glLineWidth(filler_line_width(s_scale));
-    glDisable(GL_BLEND);
+    if (semi < 0) opaque_blend(); else glDisable(GL_BLEND);
     mask_stencil(s_tb_mask);
     p_glUniform1i(s_uSemimode, semi < 0 ? 0 : semi);
     p_glUniform1i(s_uSemipass, semi < 0 ? 0 : 4);

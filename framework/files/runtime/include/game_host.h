@@ -31,6 +31,8 @@ void psx_game_states_configured(void);
 void psx_game_state_loaded(void);
 /* Called before a save state is written. */
 void psx_game_state_saving(void);
+/* Nonzero holds a requested save state back to a later block leader, as while the game's memory holds values for one frame. */
+int psx_game_state_save_deferred(void);
 /* A key went down or up. `plain` is set for a press without Ctrl, Alt or the system key and for every release. Nonzero when the game took a press. */
 int psx_game_key(int scancode, uint32_t keycode, int down, int plain);
 /* The scancode of the key that fast-forwards while held, or -1 while it must not, as when the game types with it. */
@@ -45,6 +47,8 @@ void psx_game_after_input(void);
  * before it, grown outwards. Then each corner's source address and source word are those of the first copy's corner. */
 int psx_game_grown_quad_sources(uint32_t command_address, const uint32_t *packet, uint32_t source_address[4],
                                 uint32_t source_word[4]);
+/* The share of the next palette row, in 256ths, the game gives the packet at `resolved_packet` whose words hash to `signature`, or -1. */
+int psx_game_packet_fade(uint32_t resolved_packet, uint32_t signature);
 /* Supplied by the generated code, from [[recompiler.instruction_hook]]: the game's calls for an instruction that ran from RAM. */
 void psx_game_instruction_ran(CPUState *cpu, uint32_t address, uint32_t instruction);
 

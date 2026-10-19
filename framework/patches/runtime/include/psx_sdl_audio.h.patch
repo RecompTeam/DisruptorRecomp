@@ -1,0 +1,16 @@
+diff --git a/runtime/include/psx_sdl_audio.h b/runtime/include/psx_sdl_audio.h
+index a2055e832da55f6ec98fe30b39ed83183fd48043..b8d5a5e510e523f2f8f25a69d124dbbd4e320da4 100644
+--- a/runtime/include/psx_sdl_audio.h
++++ b/runtime/include/psx_sdl_audio.h
+@@ -28,6 +28,11 @@
+     SDL_AudioDeviceID device, const void *data, Uint32 bytes);
+ void psx_sdl_audio_lock(SDL_AudioDeviceID device);
+ void psx_sdl_audio_unlock(SDL_AudioDeviceID device);
++/* The opened device's buffer in sample frames, whole, or 0 when it did not tell. */
++int psx_sdl_audio_device_frames(void);
++/* SDL's audio driver and the opened device's name, "" when unknown. */
++const char *psx_sdl_audio_driver(void);
++const char *psx_sdl_audio_device_name(void);
+ 
+ #ifdef __cplusplus
+ }
