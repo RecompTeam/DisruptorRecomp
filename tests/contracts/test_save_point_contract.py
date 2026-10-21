@@ -37,8 +37,7 @@ interrupts = read("psxrecomp/runtime/src/interrupts.c")
 rule = read("psxrecomp/runtime/include/save_point.h")
 
 require(
-    "    disruptor_contract(save_point)\n" in cmake
-    and "    disruptor_unit_test(disruptor_save_point " in cmake,
+    "    disruptor_contract(save_point)\n" in cmake and "    disruptor_unit_test(disruptor_save_point " in cmake,
     "this contract and the rule's unit test are registered",
 )
 require(
@@ -64,12 +63,14 @@ require(
 
 require(
     '#include "save_point.h"\n' in interrupts
-    and "uint32_t psx_irq_compiled_resume_pc = 0;\n#define s_compiled_interrupt_resume_pc psx_irq_compiled_resume_pc\n" in interrupts
+    and "uint32_t psx_irq_compiled_resume_pc = 0;\n#define s_compiled_interrupt_resume_pc psx_irq_compiled_resume_pc\n"
+    in interrupts
     and "int psx_irq_resume_pc_given = 0;\n#define s_resume_pc_given psx_irq_resume_pc_given\n" in interrupts
     and len(re.findall(r"\bs_resume_pc_given\b", interrupts)) == 4
     and interrupts.count("s_resume_pc_given = 1;") == 1
     and interrupts.count("s_resume_pc_given = 0;") == 1
-    and "    psx_irq_compiled_resume_pc = resume_pc;\n    psx_irq_resume_pc_given = 0;\n    psx_cyc_batch_flush();\n" in read("psxrecomp/runtime/include/cpu_state.h")
+    and "    psx_irq_compiled_resume_pc = resume_pc;\n    psx_irq_resume_pc_given = 0;\n    psx_cyc_batch_flush();\n"
+    in read("psxrecomp/runtime/include/cpu_state.h")
     and len(re.findall(r"\bpsx_irq_resume_pc_given\b", read("psxrecomp/runtime/include/cpu_state.h"))) == 2,
     "the mark is declared off, set in one place, taken in one place and read nowhere else; the inline edge takes it, "
     "as the check it stands for would, before its flush",

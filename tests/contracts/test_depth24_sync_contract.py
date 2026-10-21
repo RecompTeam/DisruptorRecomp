@@ -17,7 +17,7 @@ def require(condition: bool, message: str) -> None:
 
 def body(source: str, signature: str) -> str:
     start = source.index(signature)
-    return source[start:source.index("\n}\n", start)]
+    return source[start : source.index("\n}\n", start)]
 
 
 def enclosing(source: str, block: str) -> list[str]:
@@ -62,7 +62,8 @@ ensure = body(renderer, "static void ensure_cpu(void)")
 require(
     "    if (!s_raster_ok || !s_gpu_dirty) return;\n" in ensure
     and "    flush_cpu_upload();\n    pack_flush();\n    p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, s_raw_fbo);\n"
-    "    glReadPixels(0, 0, VRAM_W, VRAM_H, PSXGL_RED_INTEGER, GL_UNSIGNED_SHORT, s_vram);\n" in ensure
+    "    glReadPixels(0, 0, VRAM_W, VRAM_H, PSXGL_RED_INTEGER, GL_UNSIGNED_SHORT, s_vram);\n"
+    in ensure
     and ensure.count("glReadPixels(") == 1,
     "bringing the CPU copy up to date must first give the GPU every pending upload, or the read back would undo them, and must read the raw copy whole, as halfwords, into the CPU array",
 )
@@ -75,7 +76,8 @@ require(
 margin = body(main, "static void depth24_fix_trailing_margin(uint32_t *buf, uint32_t w, uint32_t h,")
 require(
     "    const uint32_t margin = (uint32_t)g_video_depth24_trailing_margin;\n"
-    "    if (margin == 0u || margin >= w) return;\n    uint32_t start = w - margin;\n" in margin
+    "    if (margin == 0u || margin >= w) return;\n    uint32_t start = w - margin;\n"
+    in margin
     and "8u;" not in margin,
     "a 24-bit frame must keep every column when the title sets no trailing margin, and blank only the margin it sets",
 )

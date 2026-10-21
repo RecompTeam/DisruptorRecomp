@@ -117,7 +117,8 @@ require(
     "    take_back(guest, g_shifts);\n"
     "    if (!cpu || cpu->gpr[31] != kWorldLoop || !wanted() || (guest.word(kTicks) & 1u) == 0u) return;\n"
     "    lead(guest, g_shifts, cpu->gpr[4], guest.word(kMoverList), guest.word(kMoverCount), guest.byte(kPlayerSector));\n"
-    "}\n" in motion
+    "}\n"
+    in motion
     and "constexpr uint32_t kWorldLoop = 0x800411A4u;" in motion
     and "void sector_drawn(CPUState *, uint32_t) {\n    Guest guest;\n    take_back(guest, g_shifts);\n}\n" in motion
     and "void draw_world(CPUState *, uint32_t) {\n"
@@ -127,23 +128,24 @@ require(
     "    const uint32_t sector = guest.word(kSectors + 4u * guest.byte(kPlayerSector));\n"
     "    const uint32_t riding = sector != 0u ? guest.byte(sector + kSectorLift) : kNoSector;\n"
     "    lag(guest, g_lifts, guest.word(kLiftRecords), kCameraHeight, guest.word(kPlayerHeight) - guest.word(kPlayerStands), riding);\n"
-    "}\n" in motion
-    and "void frame_waits(CPUState *cpu, uint32_t) {\n"
-    "    Guest guest;\n"
-    "    take_back(guest, g_shifts);\n" in motion
+    "}\n"
+    in motion
+    and "void frame_waits(CPUState *cpu, uint32_t) {\n    Guest guest;\n    take_back(guest, g_shifts);\n" in motion
     and "    if (cpu && cpu->gpr[31] == kFrameWait) catch_up(guest, g_lifts);\n" in motion
     and "void tick_begins(CPUState *, uint32_t) {\n"
     "    Guest guest;\n"
     "    take_back(guest, g_shifts);\n"
     "    catch_up(guest, g_lifts);\n"
     "    note(guest, g_lifts, guest.word(kLiftRecords), guest.word(kLiftCount));\n"
-    "}\n" in motion
+    "}\n"
+    in motion
     and '    if (!psx_mod_register_function_entry_plugin("disruptor.mover_motion.drawn", kAfterSector, sector_drawn) ||\n'
     '        !psx_mod_register_function_entry_plugin("disruptor.mover_motion.tick", kTick, tick_begins) ||\n'
     '        !psx_mod_register_function_entry_plugin("disruptor.mover_motion.vsync", kVSync, frame_waits) ||\n'
     '        !psx_mod_register_function_entry_plugin("disruptor.mover_motion.draw", kDrawSector, draw_sector) ||\n'
     '        !psx_mod_register_function_entry_plugin("disruptor.mover_motion.world", kDrawWorld, draw_world)) {\n'
-    "        g_off = true;\n" in motion
+    "        g_off = true;\n"
+    in motion
     and "constexpr uint32_t kDrawWorld = 0x80040E68u;\n" in motion
     and "constexpr uint32_t kFrameWait = 0x80043E84u;" in motion
     and "constexpr uint32_t kLiftCount = 0x80071408u;" in motion
@@ -158,7 +160,8 @@ require(
     "with every hook registered, and the module writes guest memory through one call",
 )
 require(
-    'extern "C" void disruptor_mover_motion_state_loaded(void) {\n    forget(g_shifts);\n    forget(g_lifts);\n}\n' in motion
+    'extern "C" void disruptor_mover_motion_state_loaded(void) {\n    forget(g_shifts);\n    forget(g_lifts);\n}\n'
+    in motion
     and "    disruptor_mover_motion_state_loaded();\n" in host,
     "a loaded state has no half step and no lag of this run to take back",
 )
@@ -171,7 +174,8 @@ require(
     and "    if (lifts.count != 0 || records != lifts.records) return;\n" in steps
     and "        if (step / 2 == 0 || step > kMostLiftStep || step < -kMostLiftStep) continue;\n" in steps
     and "            if (address == camera && !carries) continue;\n" in steps
-    and "        const bool carries = index == riding && memory.byte(record + kLiftCarries) != 0u && memory.word(record + kLiftFloor) == stands;\n" in steps
+    and "        const bool carries = index == riding && memory.byte(record + kLiftCarries) != 0u && memory.word(record + kLiftFloor) == stands;\n"
+    in steps
     and "        if (memory.word(one.address) == one.left) memory.write(one.address, one.left + one.back);\n" in steps,
     "a lift is held back by half the step it took in the tick, from heights noted for the same records, the camera only with the "
     "lift of the player's sector that carries the player and has them on its floor (what the game's own carrying leaves), and a "
@@ -179,10 +183,13 @@ require(
 )
 require(
     steps.count("memory.write(") == 4
-    and "            if (memory.word(at) == shifts.left[index]) memory.write(at, shifts.left[index] - one.delta);\n" in steps
+    and "            if (memory.word(at) == shifts.left[index]) memory.write(at, shifts.left[index] - one.delta);\n"
+    in steps
     and "                shifts.left[shifts.words] = memory.word(at) + delta;\n"
-    "                memory.write(at, shifts.left[shifts.words++]);\n" in steps
-    and "            if (delta == 0u || shifts.words + (found[part].last - found[part].first) / 4u > kMostHeld) continue;\n" in steps
+    "                memory.write(at, shifts.left[shifts.words++]);\n"
+    in steps
+    and "            if (delta == 0u || shifts.words + (found[part].last - found[part].first) / 4u > kMostHeld) continue;\n"
+    in steps
     and "    if (shifts.count != 0) return;\n" in steps
     and "        if (sector == kNoSector || sector == player) continue;\n" in steps
     and "psx_mod" not in steps,
@@ -193,12 +200,15 @@ require(
 mesh = read("psxrecomp/runtime/include/gpu_temporal_mesh.h")
 require(
     "            for (int index = 0; index <= candidate_count; ++index) {\n"
-    "                const int *proposed = index < candidate_count ? candidates[index].shift : zero;\n" in mesh
+    "                const int *proposed = index < candidate_count ? candidates[index].shift : zero;\n"
+    in mesh
     and "                const int rides = !proposed[0] && !proposed[1] && !proposed[2];\n" in mesh
-    and "                    near_camera &= rides || abs(proposed[axis] - best_shift[axis]) <= GPU_TEMPORAL_TWIN_OBJECT_REACH;\n" in mesh
+    and "                    near_camera &= rides || abs(proposed[axis] - best_shift[axis]) <= GPU_TEMPORAL_TWIN_OBJECT_REACH;\n"
+    in mesh
     and "                    trusted[triangle] = rides ? 3 : 2;\n" in mesh
     and "        const int rides = trusted[points[point].corner / 3] == 3;\n" in mesh
-    and "        if (point && gpu_temporal_mesh_compare_point(&points[point - 1], &points[point])) last[0] = last[1] = -1;\n" in mesh
+    and "        if (point && gpu_temporal_mesh_compare_point(&points[point - 1], &points[point])) last[0] = last[1] = -1;\n"
+    in mesh
     and "        if (last[rides] >= 0) gpu_temporal_mesh_union(nodes, last[rides], points[point].corner);\n" in mesh
     and "                (trusted[a->triangle] == 3) == (trusted[b->triangle] == 3) &&\n" in mesh
     and "        if (has_camera && trusted[triangle] >= 2) dynamic = 1;\n" in mesh
@@ -213,15 +223,20 @@ frontend = read("psxrecomp/runtime/src/main.cpp")
 saving = read("psxrecomp/runtime/src/savestate.c")
 require(
     "            psx_frontend_before_savestate_save();\n            CPUState snap = *cpu;\n" in saving
-    and 'extern "C" void psx_frontend_before_savestate_save(void) {\n#ifdef PSX_HAS_GAME_HOST\n    psx_game_state_saving();\n#endif\n}\n' in frontend
+    and 'extern "C" void psx_frontend_before_savestate_save(void) {\n#ifdef PSX_HAS_GAME_HOST\n    psx_game_state_saving();\n#endif\n}\n'
+    in frontend
     and "void psx_game_state_saving(void);\n" in read("psxrecomp/runtime/include/game_host.h")
     and "void psx_game_state_saving(void) {\n    disruptor_mover_motion_state_saving();\n" in host
-    and 'extern "C" void disruptor_mover_motion_state_saving(void) {\n    Guest guest;\n    take_back(guest, g_shifts);\n    catch_up(guest, g_lifts);\n}\n' in motion,
+    and 'extern "C" void disruptor_mover_motion_state_saving(void) {\n    Guest guest;\n    take_back(guest, g_shifts);\n    catch_up(guest, g_lifts);\n}\n'
+    in motion,
     "a half step and a lag are taken out of memory before a state is written, so that no saved state holds one",
 )
 
 image_path = ROOT / "input" / "SLUS_002.24"
-require("--require-artifacts" not in sys.argv[1:] or image_path.exists(), "the build gate must check the retail image: it is absent")
+require(
+    "--require-artifacts" not in sys.argv[1:] or image_path.exists(),
+    "the build gate must check the retail image: it is absent",
+)
 if not image_path.exists():
     print("Disruptor mover steps source contract: PASS (retail image absent)")
     sys.exit(0)

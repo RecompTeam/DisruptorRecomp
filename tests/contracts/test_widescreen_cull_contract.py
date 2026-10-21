@@ -27,7 +27,9 @@ SCREEN_BOUNDS = {
 # The same funnel's bounds up and down, 220 and 21 of the 240 rows, stay vanilla.
 VERTICAL_BOUNDS = (0x8003D128, 0x8003D138, 0x8003D140, 0x8003D148)
 SITES = [
-    (f"0x{first + offset:08X}", f"0x{words[index]:08X}") for first, words in FUNNELS.values() for offset, index in ((0, 0), (12, 3))
+    (f"0x{first + offset:08X}", f"0x{words[index]:08X}")
+    for first, words in FUNNELS.values()
+    for offset, index in ((0, 0), (12, 3))
 ]
 
 
@@ -44,7 +46,9 @@ def listed(path: str) -> list[tuple[str, str]]:
     """The side-plane sites a game file names, or nothing when a block of them is not an address and an instruction."""
     text = read(path)
     sites = re.findall(
-        r'^\[\[widescreen\.cull\.horizontal_slt\]\]\naddress = "(0x[0-9A-F]{8})"\nexpected = "(0x[0-9A-F]{8})"$', text, re.MULTILINE
+        r'^\[\[widescreen\.cull\.horizontal_slt\]\]\naddress = "(0x[0-9A-F]{8})"\nexpected = "(0x[0-9A-F]{8})"$',
+        text,
+        re.MULTILINE,
     )
     return sites if len(sites) == text.count("[[widescreen.cull.horizontal_slt]]") else []
 
@@ -66,8 +70,8 @@ def shape(words: tuple[int, ...]) -> str:
 
 def bounds(path: str, key: str) -> list[str]:
     """The addresses a game file lists under one key of its widescreen cull table."""
-    table = re.search(r'^\[widescreen\.cull\]\n((?:\w+ = \[.*\]\n)+)', read(path), re.MULTILINE)
-    line = re.search(rf'^{key} = \[(.*)\]$', table.group(1), re.MULTILINE) if table else None
+    table = re.search(r"^\[widescreen\.cull\]\n((?:\w+ = \[.*\]\n)+)", read(path), re.MULTILINE)
+    line = re.search(rf"^{key} = \[(.*)\]$", table.group(1), re.MULTILINE) if table else None
     return re.findall(r'"(0x[0-9A-F]{8})"', line.group(1)) if line else []
 
 
@@ -84,7 +88,9 @@ require(
     "one left at 45 degrees drops its pickups a turn step before they leave a 16:9 picture, a seventh inside the edge of a 21:9 one",
 )
 for key, sites in SCREEN_BOUNDS.items():
-    table = audit[audit.index("SCREEN_RIGHT_BOUND_SITES = {" if key == "slti_sites" else "SCREEN_LEFT_BOUND_SITES = {") :]
+    table = audit[
+        audit.index("SCREEN_RIGHT_BOUND_SITES = {" if key == "slti_sites" else "SCREEN_LEFT_BOUND_SITES = {") :
+    ]
     named = [(f"0x{address:08X}", f"0x{word:08X}") for address, word, _ in sites]
     require(
         bounds("game.toml", key) == bounds("game-widescreen.toml", key) == [address for address, _ in named]
@@ -94,20 +100,25 @@ for key, sites in SCREEN_BOUNDS.items():
         "20 pixels inside a wide picture's edge, as it did under a television's frame",
     )
 require(
-    "int psx_ws_cull_slti(uint32_t sx, uint32_t imm) {\n    return ((int32_t)sx < (int32_t)imm + psx_ws_x_margin()) ? 1 : 0;\n}\n" in runtime
+    "int psx_ws_cull_slti(uint32_t sx, uint32_t imm) {\n    return ((int32_t)sx < (int32_t)imm + psx_ws_x_margin()) ? 1 : 0;\n}\n"
+    in runtime
     and "int psx_ws_cull_slti_lower(uint32_t sx, uint32_t imm) {\n"
     "    int32_t bound = (int32_t)(int16_t)(uint16_t)imm;\n"
-    "    return ((int32_t)sx < bound - psx_ws_x_margin()) ? 1 : 0;\n}\n" in runtime
+    "    return ((int32_t)sx < bound - psx_ws_x_margin()) ? 1 : 0;\n}\n"
+    in runtime
     and '            return fmt::format("{} = psx_ws_cull_slti({}, {});"\n' in codegen
     and '            return fmt::format("{} = psx_ws_cull_slti_lower({}, {});"\n' in codegen,
     "the two bounds move out by the picture's margin and stay where they are at 4:3, where the margin is nothing",
 )
 require(
     all(not shape(words) for _, words in FUNNELS.values())
-    and shape((0x0068182A, 0x144001C7, 0x00081023, 0x0062102A, 0x144001C4)) == "the first test is not slt v0, bound, step"
+    and shape((0x0068182A, 0x144001C7, 0x00081023, 0x0062102A, 0x144001C4))
+    == "the first test is not slt v0, bound, step"
     and shape((0x0068102A, 0x144001C7, 0x00071023, 0x0062102A, 0x144001C4)) == "the step is not negated into v0"
-    and shape((0x0068102A, 0x144001C7, 0x00081023, 0x0068102A, 0x144001C4)) == "the second test is not slt v0, bound, v0"
-    and shape((0x02A9102A, 0x14400256, 0x00091023, 0x0062102A, 0x14400253)) == "the second test is not slt v0, bound, v0"
+    and shape((0x0068102A, 0x144001C7, 0x00081023, 0x0068102A, 0x144001C4))
+    == "the second test is not slt v0, bound, v0"
+    and shape((0x02A9102A, 0x14400256, 0x00091023, 0x0062102A, 0x14400253))
+    == "the second test is not slt v0, bound, v0"
     and shape((0x0068102A, 0x104001C7, 0x00081023, 0x0062102A, 0x144001C4)) == "a test is not followed by its branch",
     "every funnel must test one bound against a step aside and against its negation: the widened test takes the bound first",
 )
@@ -115,11 +126,14 @@ require(
     '            "{} = psx_ws_horizontal_slt({}, {});"\n'
     '            "  /* aspect-scaled camera-horizontal side plane */{}",\n'
     "            reg_name(get_rd(instr)), reg_name(get_rs(instr)),\n"
-    "            reg_name(get_rt(instr)), comment);" in codegen
+    "            reg_name(get_rt(instr)), comment);"
+    in codegen
     and "        if (instr != site.expected) {\n            if (config_.overlay_mode) continue;" in codegen,
     "the generator must refuse a site whose instruction is not the expected one and hand the bound to the widened test first",
 )
-require("    disruptor_contract(widescreen_cull RETAIL)\n" in cmake, "the gate must run this contract with the retail image")
+require(
+    "    disruptor_contract(widescreen_cull RETAIL)\n" in cmake, "the gate must run this contract with the retail image"
+)
 
 image_path = ROOT / "input" / "SLUS_002.24.code"
 if image_path.exists():
@@ -132,9 +146,12 @@ if image_path.exists():
         for address, word, _ in sites:
             require(retail[(address - LOAD_ADDRESS) // 4] == word, f"retail screen bound changed at 0x{address:08X}")
     drawing = range((0x80038000 - LOAD_ADDRESS) // 4, (0x80044000 - LOAD_ADDRESS) // 4)
-    compared = sorted(LOAD_ADDRESS + at * 4 for at in drawing if retail[at] >> 26 == 10 and retail[at] & 0xFFFF in (300, 21, 220))
+    compared = sorted(
+        LOAD_ADDRESS + at * 4 for at in drawing if retail[at] >> 26 == 10 and retail[at] & 0xFFFF in (300, 21, 220)
+    )
     require(
-        compared == sorted([address for sites in SCREEN_BOUNDS.values() for address, _, _ in sites] + list(VERTICAL_BOUNDS)),
+        compared
+        == sorted([address for sites in SCREEN_BOUNDS.values() for address, _, _ in sites] + list(VERTICAL_BOUNDS)),
         f"the drawing code compares with 300, 21 or 220 somewhere else: {[f'0x{at:08X}' for at in compared]}",
     )
     tests = [LOAD_ADDRESS + at * 4 for at in range(len(retail) - 4) if not shape(retail[at : at + 5])]
@@ -148,19 +165,29 @@ if generated:
     translated = "".join(path.read_text(encoding="utf-8") for path in generated)
     emitted = {
         "psx_ws_horizontal_slt": [
-            (f"cpu->gpr[{int(word, 16) >> 11 & 31}] = psx_ws_horizontal_slt(cpu->gpr[{int(word, 16) >> 21 & 31}], cpu->gpr[{int(word, 16) >> 16 & 31}]);", address, word)
+            (
+                f"cpu->gpr[{int(word, 16) >> 11 & 31}] = psx_ws_horizontal_slt(cpu->gpr[{int(word, 16) >> 21 & 31}], cpu->gpr[{int(word, 16) >> 16 & 31}]);",
+                address,
+                word,
+            )
             for address, word in SITES
         ],
         **{
             helper: [
-                (f"cpu->gpr[{word >> 16 & 31}] = {helper}(cpu->gpr[{word >> 21 & 31}], {word & 0xFFFF});", f"0x{address:08X}", f"0x{word:08X}")
+                (
+                    f"cpu->gpr[{word >> 16 & 31}] = {helper}(cpu->gpr[{word >> 21 & 31}], {word & 0xFFFF});",
+                    f"0x{address:08X}",
+                    f"0x{word:08X}",
+                )
                 for address, word, _ in SCREEN_BOUNDS[key]
             ]
             for helper, key in (("psx_ws_cull_slti", "slti_sites"), ("psx_ws_cull_slti_lower", "slti_lower_sites"))
         },
     }
     for helper, calls in emitted.items():
-        found = re.findall(r"(cpu->gpr\[\d+\] = " + helper + r"\([^;\n]*\);)[^\n]*/\* (0x[0-9A-F]{8}): (0x[0-9A-F]{8}) \*/", translated)
+        found = re.findall(
+            r"(cpu->gpr\[\d+\] = " + helper + r"\([^;\n]*\);)[^\n]*/\* (0x[0-9A-F]{8}): (0x[0-9A-F]{8}) \*/", translated
+        )
         require(
             sorted(found) == sorted(calls) and translated.count(helper + "(") == len(calls),
             f"the translated code calls {helper} as {sorted(found)}, the game files and the retail instructions give {sorted(calls)}: regenerate it",

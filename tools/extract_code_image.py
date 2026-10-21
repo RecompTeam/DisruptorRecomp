@@ -28,18 +28,14 @@ def u32(data: bytes, offset: int) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("source", nargs="?", type=Path, default=Path("input/SLUS_002.24"))
-    parser.add_argument(
-        "output", nargs="?", type=Path, default=Path("input/SLUS_002.24.code")
-    )
+    parser.add_argument("output", nargs="?", type=Path, default=Path("input/SLUS_002.24.code"))
     args = parser.parse_args()
 
     source = args.source.read_bytes()
     digest = hashlib.sha256(source).hexdigest()
     if digest != SOURCE_SHA256:
         raise SystemExit(
-            "error: unsupported source executable\n"
-            f"expected SHA-256 {SOURCE_SHA256}\n"
-            f"actual   SHA-256 {digest}"
+            f"error: unsupported source executable\nexpected SHA-256 {SOURCE_SHA256}\nactual   SHA-256 {digest}"
         )
     if source[:8] != b"PS-X EXE":
         raise SystemExit("error: source is not a PS-X EXE")

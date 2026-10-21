@@ -6,7 +6,10 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-read = lambda name: (ROOT / name).read_text(encoding="utf-8")
+
+
+def read(name: str) -> str:
+    return (ROOT / name).read_text(encoding="utf-8")
 
 
 def require(condition: bool, message: str) -> None:
@@ -21,31 +24,47 @@ options = read("src/game/settings/options.cpp")
 settings = read("src/game/settings/game_user_settings.h")
 saved = read("src/game/settings/saved.cpp")
 preferences = read("src/game/ui/menu/preferences.cpp")
-require("bool has_selection_wheels = false; bool selection_wheels = false;" in settings and
-        '"disruptor.selection_wheels", "Weapon and psionic wheels", 0,' in options,
-        "both wheels must share one option that defaults off")
-require('s.has_selection_wheels = true;' in saved and 'if (s.has_selection_wheels)' in saved and
-        'settings.has_selection_wheels && settings.selection_wheels' in preferences and
-        'changed("disruptor.selection_wheels")' in preferences,
-        "the single wheel preference must save and apply both true and false")
-require(mouse.index("if (disruptor_selection_wheel_frame())") < mouse.index("if (!g_mouse.enabled || !sdl_window) return;") and
-        "press = disruptor_selection_wheel_filter_press(press);" in mouse,
-        "wheels must read the final input sample even with modern controls off, and prevent later selector injection")
-require("psx_keybinds_get_button(1, PSX_KB_L1)" in wheel and "psx_keybinds_get_button(1, PSX_KB_R1)" in wheel,
-        "the wheels must follow the existing configured selection bindings")
-require("gl_renderer_set_host_ui_suspended(1);" in menu and
-        "disruptor_selection_wheels_set_available(g_menu.imgui_ready && backend == PSX_HOST_UI_BACKEND_OPENGL)" in menu,
-        "only a ready overlay can replace the selectors, and drawing must suspend interpolation")
-require("disruptor_selection_wheel_cancel();" in read("src/game/host.cpp"),
-        "loading a save state must cancel stale wheel input")
-require("disruptor_capsule_note_byte(address" in wheel,
-        "wheel selections must be present in replay capsules")
-require("    disruptor_capsule_after_input();\n    disruptor_selection_wheel_guard_input();" in read("src/game/host.cpp"),
-        "open wheels must also neutralise input on fast-forward frames with no presentation hook")
+require(
+    "bool has_selection_wheels = false; bool selection_wheels = false;" in settings
+    and '"disruptor.selection_wheels", "Weapon and psionic wheels", 0,' in options,
+    "both wheels must share one option that defaults off",
+)
+require(
+    "s.has_selection_wheels = true;" in saved
+    and "if (s.has_selection_wheels)" in saved
+    and "settings.has_selection_wheels && settings.selection_wheels" in preferences
+    and 'changed("disruptor.selection_wheels")' in preferences,
+    "the single wheel preference must save and apply both true and false",
+)
+require(
+    mouse.index("if (disruptor_selection_wheel_frame())") < mouse.index("if (!g_mouse.enabled || !sdl_window) return;")
+    and "press = disruptor_selection_wheel_filter_press(press);" in mouse,
+    "wheels must read the final input sample even with modern controls off, and prevent later selector injection",
+)
+require(
+    "psx_keybinds_get_button(1, PSX_KB_L1)" in wheel and "psx_keybinds_get_button(1, PSX_KB_R1)" in wheel,
+    "the wheels must follow the existing configured selection bindings",
+)
+require(
+    "gl_renderer_set_host_ui_suspended(1);" in menu
+    and "disruptor_selection_wheels_set_available(g_menu.imgui_ready && backend == PSX_HOST_UI_BACKEND_OPENGL)" in menu,
+    "only a ready overlay can replace the selectors, and drawing must suspend interpolation",
+)
+require(
+    "disruptor_selection_wheel_cancel();" in read("src/game/host.cpp"),
+    "loading a save state must cancel stale wheel input",
+)
+require("disruptor_capsule_note_byte(address" in wheel, "wheel selections must be present in replay capsules")
+require(
+    "    disruptor_capsule_after_input();\n    disruptor_selection_wheel_guard_input();" in read("src/game/host.cpp"),
+    "open wheels must also neutralise input on fast-forward frames with no presentation hook",
+)
 
 retail = (ROOT / "input/SLUS_002.24.code", ROOT / "input/SLUS_002.24")
-require("--require-artifacts" not in sys.argv[1:] or all(artifact.exists() for artifact in retail),
-        "the build gate must check the retail image and executable: one is absent")
+require(
+    "--require-artifacts" not in sys.argv[1:] or all(artifact.exists() for artifact in retail),
+    "the build gate must check the retail image and executable: one is absent",
+)
 path = ROOT / "input/SLUS_002.24.code"
 if path.exists():
     image = path.read_bytes()
@@ -71,7 +90,8 @@ if path.exists():
         0x80056A60: (7, 0, 0, 3, 3, 5, 0, 0, 7, 7),
     }.items():
         offset = 0x800 + address - load
-        require(image[offset:offset + len(indices)] == bytes(indices),
-                f"retail ammo mapping changed at 0x{address:08X}")
+        require(
+            image[offset : offset + len(indices)] == bytes(indices), f"retail ammo mapping changed at 0x{address:08X}"
+        )
 
 print("Weapon and psionic wheel contract: PASS")

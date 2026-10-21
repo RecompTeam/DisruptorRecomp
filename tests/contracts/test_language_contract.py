@@ -166,7 +166,8 @@ require(
     and "constexpr int kStringRegister = 4;" in source
     and '        if (!psx_mod_register_function_entry_plugin("disruptor.language.text", routine, text_entry))' in source
     and "    for (const uint32_t routine : {kMenuDraw, kStripDraw}) {\n"
-    '        if (!psx_mod_register_function_entry_plugin("disruptor.language.layout", routine, place_entry))' in source
+    '        if (!psx_mod_register_function_entry_plugin("disruptor.language.layout", routine, place_entry))'
+    in source
     and "constexpr uint32_t kMenuDraw = 0x8001A46Cu;" in source
     and "constexpr uint32_t kStripDraw = 0x800429DCu;" in source
     and "constexpr int kXRegister = 5;" in source
@@ -179,7 +180,8 @@ require(
     "    if (!cpu || !may_run()) return;\n"
     "    if (g_state == State::kUnread) read_pack();\n"
     "    if (g_state != State::kOn) return;\n"
-    "    if (const uint32_t other = stand_in(cpu->gpr[kStringRegister], routine == kLargeFont)) cpu->gpr[kStringRegister] = other;" in source
+    "    if (const uint32_t other = stand_in(cpu->gpr[kStringRegister], routine == kLargeFont)) cpu->gpr[kStringRegister] = other;"
+    in source
     and "constexpr uint32_t kLargeFont = kTextRoutines[1];" in source
     and source.count("kLargeFont") == 2
     and "    if (large_font) {\n"
@@ -187,7 +189,8 @@ require(
     "        for (const char letter : words) {\n"
     "            const std::string &sign = g_signs[static_cast<uint8_t>(letter)];\n"
     "            changed = changed || !sign.empty();\n"
-    "            given += sign.empty() ? std::string(1, letter) : sign;" in source
+    "            given += sign.empty() ? std::string(1, letter) : sign;"
+    in source
     and "    if (!changed || words.empty() || words.size() > kLongestString) return 0u;" in source
     and source.count("g_signs") == 3
     and "    const auto place = g_places.find(cpu->gpr[kReturnRegister]);\n"
@@ -195,13 +198,18 @@ require(
     "    const int x = routine == kStripDraw ? kStripXRegister : kXRegister;\n"
     "    const auto [home_x, other_x] = place->second;\n"
     "    if (home_x == kAnyX) cpu->gpr[x] += static_cast<uint32_t>(other_x);\n"
-    "    else if (static_cast<int32_t>(cpu->gpr[x]) == home_x) cpu->gpr[x] = static_cast<uint32_t>(other_x);" in source
+    "    else if (static_cast<int32_t>(cpu->gpr[x]) == home_x) cpu->gpr[x] = static_cast<uint32_t>(other_x);"
+    in source
     and "    return word == (0x0C000000u | (routine >> 2 & 0x03FFFFFFu));" in source
     and "constexpr int32_t kAnyX = -32768;" in rules
     and "using rules::kAnyX;" in source
-    and source.count("if (!cpu || !may_run()) return;\n    if (g_state == State::kUnread) read_pack();\n    if (g_state != State::kOn) return;\n") == 2
+    and source.count(
+        "if (!cpu || !may_run()) return;\n    if (g_state == State::kUnread) read_pack();\n    if (g_state != State::kOn) return;\n"
+    )
+    == 2
     and source.count("cpu->gpr[") == 6
-    and "    return psx_mod_game_started() && !psx_netplay_active() && g_ls_mode == 0 && g_ls_replay_active == 0;" in source
+    and "    return psx_mod_game_started() && !psx_netplay_active() && g_ls_mode == 0 && g_ls_replay_active == 0;"
+    in source
     and "    if (g_state == State::kOn || !may_run()) return 0;\n    const int taken = take_pack(data, size);" in source
     and source.count("take_pack(") == 2,
     "a text hook may change $a0 alone, the menu hook $a1 alone and the pause menu's line hook $a2 alone, where the pack names a jal of "
@@ -229,19 +237,24 @@ require(
     "guest memory may be read from main RAM only: a string through the one bounded reader, a place's call where it is bounded too",
 )
 require(
-    "        if (!guest_string(address, text) || rules::hash_of(text) != hash || !rules::entry_fits(text, words, format)) return 0;" in source
+    "        if (!guest_string(address, text) || rules::hash_of(text) != hash || !rules::entry_fits(text, words, format)) return 0;"
+    in source
     and "    for (const char byte : text) hash = (hash ^ static_cast<uint8_t>(byte)) * 16777619u;" in rules
     and "    uint32_t hash = 2166136261u;" in rules
     and "std::count(format.kinds.begin(), format.kinds.end(), 's') <= 1;" in rules
     and "    if (text.empty() || text.size() > kLongestString || words.empty() || words.size() > kLongestString) return false;\n"
     "    if (words.find('\\0') != std::string_view::npos) return false;\n"
     "    if (text.find('%') == std::string_view::npos) return !has_part(words, 0);\n"
-    "    return parse_format(text, format) && !has_part(words, format.kinds.size());" in rules
+    "    return parse_format(text, format) && !has_part(words, format.kinds.size());"
+    in rules
     and all(name not in source for name in ("parse_format(", "has_part(", "kRamEnd", "0x34504C44"))
     and "        const bool text_part = fits->kinds[static_cast<size_t>(byte - 1)] == 's';" in source
-    and "        many = !taken.empty();\n        taken = parts;\n        parts.resize(before);\n        if (many) return false;" in source
-    and "        if (take_parts(format, text, parts, many)) fits = fits ? fits : &format;\n        else if (many) return false;" in source
-    and "        if (format.kinds[part] == 'd' && !next.empty() && next.front() >= '0' && next.front() <= '9') return false;" in rules
+    and "        many = !taken.empty();\n        taken = parts;\n        parts.resize(before);\n        if (many) return false;"
+    in source
+    and "        if (take_parts(format, text, parts, many)) fits = fits ? fits : &format;\n        else if (many) return false;"
+    in source
+    and "        if (format.kinds[part] == 'd' && !next.empty() && next.front() >= '0' && next.front() <= '9') return false;"
+    in rules
     and "    if (!head || word_at(head) != rules::kMagic) return 0;" in source
     and "constexpr uint32_t kMagic = 0x34504C44u;" in rules
     and "    if (count == 0u || count > rules::kMostStrings) return 0;" in source
@@ -250,10 +263,13 @@ require(
     and "    if (!last) return 0;" in source
     and "    if (signs > rules::kMostSigns || pack.left() != signs * 4u) return 0;" in source
     and "        const bool sized = sign[1] == 2u || (sign[1] == 1u && sign[3] == 0u);\n"
-    "        if (!sized || !rules::sign_fits(sign[0], drawn) || !given[sign[0]].empty()) return 0;" in source
+    "        if (!sized || !rules::sign_fits(sign[0], drawn) || !given[sign[0]].empty()) return 0;"
+    in source
     and "constexpr uint32_t kMostSigns = 8u;" in rules
-    and "    return written >= 'a' && written <= 'z' && !drawn.empty() && drawn.size() <= 2 && std::all_of(drawn.begin(), drawn.end(), drawable);" in rules
-    and "        return (byte >= '0' && byte <= '9') || (byte >= 'A' && byte <= 'Z') || (byte >= 'a' && byte <= kLastDrawn);" in rules
+    and "    return written >= 'a' && written <= 'z' && !drawn.empty() && drawn.size() <= 2 && std::all_of(drawn.begin(), drawn.end(), drawable);"
+    in rules
+    and "        return (byte >= '0' && byte <= '9') || (byte >= 'A' && byte <= 'Z') || (byte >= 'a' && byte <= kLastDrawn);"
+    in rules
     and "constexpr uint8_t kLastDrawn = 0x90;" in rules
     and "        if (count > left_) return nullptr;" in source
     and source.count("data[") == 4
@@ -270,20 +286,25 @@ require(
     and "constexpr std::array<uint16_t, 4> kStage = {0x2C0, 0x1E0, 0x140, 0x20};" in hints
     and "constexpr std::array<uint16_t, 4> kTallStage = {0x2C0, 0x1C0, 0x140, 0x40};" in hints
     and "constexpr uint32_t kRowsHigher = 16;" in hints
-    and "constexpr int kRectRegister = 4;\nconstexpr int kSizeRegister = 6;\nconstexpr int kRowRegister = 6;\nconstexpr int kReturnRegister = 31;" in hints
+    and "constexpr int kRectRegister = 4;\nconstexpr int kSizeRegister = 6;\nconstexpr int kRowRegister = 6;\nconstexpr int kReturnRegister = 31;"
+    in hints
     and "    return g_hooked && psx_mod_game_started() && !psx_netplay_active() && g_ls_mode == 0 && g_ls_replay_active == 0 &&\n"
-    "           disruptor_language_disc_tall_hints() != 0;" in hints
+    "           disruptor_language_disc_tall_hints() != 0;"
+    in hints
     and "    if (!cpu || cpu->gpr[kReturnRegister] != kReadReturn) return;\n"
     "    g_hint = Hint::kUntouched;\n"
     "    if (cpu->gpr[kSizeRegister] != disruptor::kHintBytes || !tall_hints() || tall_stage() == 0u) return;\n"
     "    cpu->gpr[kSizeRegister] = disruptor::kTallHintBytes;\n"
-    "    g_hint = Hint::kReadTall;" in hints
+    "    g_hint = Hint::kReadTall;"
+    in hints
     and "    if (!cpu || cpu->gpr[kReturnRegister] != kStageReturn) return;\n"
     "    const bool tall = g_hint == Hint::kReadTall && us_stage(cpu->gpr[kRectRegister]);\n"
     "    g_hint = tall ? Hint::kStagedTall : Hint::kUntouched;\n"
-    "    if (tall) cpu->gpr[kRectRegister] = g_tall_stage;" in hints
+    "    if (tall) cpu->gpr[kRectRegister] = g_tall_stage;"
+    in hints
     and "    if (!cpu || g_hint != Hint::kStagedTall) return;" in hints
-    and "    if (move == kMoves.end() || cpu->gpr[kRowRegister] != move->row || !us_stage(cpu->gpr[kRectRegister])) return;" in hints
+    and "    if (move == kMoves.end() || cpu->gpr[kRowRegister] != move->row || !us_stage(cpu->gpr[kRectRegister])) return;"
+    in hints
     and "    if (rect < kRamFirst || rect > kRamEnd - 2u * kStage.size() || rect % 2u != 0u) return false;" in hints
     and "    g_hooked = hook_all();" in hints
     and hints.count("!tall_hints()") == 1
@@ -313,7 +334,8 @@ require(
     and "constexpr uint32_t kHeld = 2u;" in movie_sound
     and "    if (!active()) {\n        if (started == kHeld) started = 0u;\n    } else {\n" in movie_sound
     and "constexpr uint32_t kVBlanks = 0x8005B920u;" in movie_sound
-    and "    if (g_holding && psx_mod_read_word(kVBlanks) - g_held_at > kMostVBlanks) g_holding = false;\n" in movie_sound
+    and "    if (g_holding && psx_mod_read_word(kVBlanks) - g_held_at > kMostVBlanks) g_holding = false;\n"
+    in movie_sound
     and "    g_holding = started == kHeld;\n    g_held_at = psx_mod_read_word(kVBlanks);\n}\n" in movie_sound
     and "    disruptor_language_movie_sound_state_loaded();\n" in read("src/game/host.cpp")
     and "disruptor_language_movie_sound_save_deferred();\n}\n" in read("src/game/host.cpp")
@@ -342,7 +364,8 @@ require(
     and "    if (count >= kUsWait) return count;\n"
     "    if (count < 0) return count == -1 ? kUsWait - 1 : count;\n"
     "    if (count + 1 >= wait) return kUsWait - 1;\n"
-    "    return count == kUsWait - 1 ? kUsWait - 1 - wait : count;\n" in briefing
+    "    return count == kUsWait - 1 ? kUsWait - 1 - wait : count;\n"
+    in briefing
     and briefing.count("psx_mod_write_") == 1
     and "    if (left != count) psx_mod_write_word(kCount, static_cast<uint32_t>(left));\n" in briefing
     and "int disruptor_language_disc_briefing_wait(uint32_t mission);" in header
@@ -358,7 +381,9 @@ for name in ("game.toml", "game-widescreen.toml"):
     entries = re.search(r"mod_function_entry_funcs\s*=\s*\[([^\]]*)\]", read(name))
     require(
         entries is not None
-        and all(f'"0x{routine:08X}"' in entries.group(1) for routine in (*ROUTINES, MENU_DRAW, STRIP_DRAW, *HINT_ROUTINES))
+        and all(
+            f'"0x{routine:08X}"' in entries.group(1) for routine in (*ROUTINES, MENU_DRAW, STRIP_DRAW, *HINT_ROUTINES)
+        )
         and f'"0x{COUNTING_ROUTINE:08X}"' not in entries.group(1),
         f"{name} must emit an entry hook for the two width routines, the menu's, the pause menu's line routine and the hint's three, and "
         "none for the counting one",
@@ -368,17 +393,21 @@ image_path = ROOT / "input" / "SLUS_002.24.code"
 if image_path.exists():
     image = image_path.read_bytes()
     for first, (end, digest, returned) in RETAIL_ROUTINES.items():
-        body = image[ROM_TEXT_OFFSET + first - LOAD_ADDRESS:ROM_TEXT_OFFSET + end - LOAD_ADDRESS]
+        body = image[ROM_TEXT_OFFSET + first - LOAD_ADDRESS : ROM_TEXT_OFFSET + end - LOAD_ADDRESS]
         require(len(body) == end - first, f"retail text routine outside image: 0x{first:08X}")
         require(hashlib.sha256(body).hexdigest() == digest, f"retail text routine changed: 0x{first:08X}")
         words = struct.unpack(f"<{len(body) // 4}I", body)
         calls = [word for word in words if word >> 26 == 3 or (word >> 26 == 0 and word & 0x3F == 9)]
         require(
-            not calls and words.count(JR_RA) == 1 and words[-2:] == (JR_RA, returned) and words.count(LOAD_CHARACTER) == 1,
+            not calls
+            and words.count(JR_RA) == 1
+            and words[-2:] == (JR_RA, returned)
+            and words.count(LOAD_CHARACTER) == 1,
             f"the routine at 0x{first:08X} must call nothing, read its string through $a0 and return as audited",
         )
     require(
-        all(RETAIL_ROUTINES[routine][2] == WIDTH for routine in ROUTINES) and RETAIL_ROUTINES[COUNTING_ROUTINE][2] == COUNT,
+        all(RETAIL_ROUTINES[routine][2] == WIDTH for routine in ROUTINES)
+        and RETAIL_ROUTINES[COUNTING_ROUTINE][2] == COUNT,
         "only routines that return a width may be hooked",
     )
     for address, instruction in HINT_INSTRUCTIONS.items():
@@ -400,7 +429,9 @@ if image_path.exists():
     stores = [
         LOAD_ADDRESS + 4 * index
         for index, word in enumerate(text)
-        if word >> 26 in (0x28, 0x29, 0x2A, 0x2B, 0x2E) and (word >> 21) & 31 == 28 and word & 0xFFFF in range(0x5B4 - 3, 0x5B4 + 4)
+        if word >> 26 in (0x28, 0x29, 0x2A, 0x2B, 0x2E)
+        and (word >> 21) & 31 == 28
+        and word & 0xFFFF in range(0x5B4 - 3, 0x5B4 + 4)
     ]
     absolute = [
         LOAD_ADDRESS + 4 * index
@@ -411,7 +442,10 @@ if image_path.exists():
         LOAD_ADDRESS + 4 * index
         for index, word in enumerate(text)
         if word >> 26 in (0x08, 0x09, 0x0D)
-        and (((word >> 21) & 31 == 28 and word & 0xFFFF in range(0x5B4 - 3, 0x5B4 + 4)) or word & 0xFFFF in range(0x1700 - 3, 0x1700 + 4))
+        and (
+            ((word >> 21) & 31 == 28 and word & 0xFFFF in range(0x5B4 - 3, 0x5B4 + 4))
+            or word & 0xFFFF in range(0x1700 - 3, 0x1700 + 4)
+        )
     ]
     require(
         tuple(stores) == BRIEFING_COUNT_STORES and not absolute and not pointers,
@@ -430,31 +464,38 @@ if image_path.exists():
         return False
 
     require(
-        not any(word >> 26 in (0x28, 0x29, 0x2A, 0x2B, 0x2E) and word & 0xFFFF in range(0x5B4 - 3, 0x5B4 + 4) for word in raise_words[:-1])
+        not any(
+            word >> 26 in (0x28, 0x29, 0x2A, 0x2B, 0x2E) and word & 0xFFFF in range(0x5B4 - 3, 0x5B4 + 4)
+            for word in raise_words[:-1]
+        )
         and not any(leaves_before_raise(0x800122E8 + 4 * index, word) for index, word in enumerate(raise_words[:-1]))
         and raise_words[-1] == 0xAF8205B4,
         "between the callback's last MoveImage and its raise of the count nothing may store to the count, and no branch or jump may "
         "leave or pass the load the raise starts from",
     )
     gp_setups = [index for index in range(len(text) - 1) if text[index] == 0x3C1C8007 and text[index + 1] == 0x279C114C]
-    require(len(gp_setups) == 1, "the executable must set $gp to 0x8007114C, which the briefing's count and mission are read by")
+    require(
+        len(gp_setups) == 1,
+        "the executable must set $gp to 0x8007114C, which the briefing's count and mission are read by",
+    )
     between = struct.unpack_from("<33I", image, ROM_TEXT_OFFSET + 0x800485C4 - LOAD_ADDRESS)
     require(
         not any(writes_register(word, 21) for word in between),
         "nothing between the wait and the key-on test may write $s5 itself",
     )
-    menu = image[ROM_TEXT_OFFSET + MENU_DRAW - LOAD_ADDRESS:ROM_TEXT_OFFSET + MENU_DRAW_END - LOAD_ADDRESS]
+    menu = image[ROM_TEXT_OFFSET + MENU_DRAW - LOAD_ADDRESS : ROM_TEXT_OFFSET + MENU_DRAW_END - LOAD_ADDRESS]
     takes_x = struct.unpack_from("<I", image, ROM_TEXT_OFFSET + MENU_DRAW_TAKES_X[0] - LOAD_ADDRESS)[0]
     require(
         hashlib.sha256(menu).hexdigest() == MENU_DRAW_HASH and takes_x == MENU_DRAW_TAKES_X[1],
         "the menu's string routine must be the audited one and take its x from $a1",
     )
-    lines = image[ROM_TEXT_OFFSET + STRIP_DRAW - LOAD_ADDRESS:ROM_TEXT_OFFSET + STRIP_DRAW_END - LOAD_ADDRESS]
+    lines = image[ROM_TEXT_OFFSET + STRIP_DRAW - LOAD_ADDRESS : ROM_TEXT_OFFSET + STRIP_DRAW_END - LOAD_ADDRESS]
     takes_line_x = struct.unpack_from("<I", image, ROM_TEXT_OFFSET + STRIP_DRAW_TAKES_X[0] - LOAD_ADDRESS)[0]
     require(
         hashlib.sha256(lines).hexdigest() == STRIP_DRAW_HASH and takes_line_x == STRIP_DRAW_TAKES_X[1],
         "the pause menu's line routine must be the audited one and take its x from $a2",
     )
+
 
 def hook_at_entry(own: str, routine: int) -> bool:
     """Whether a generated routine runs its entry hook once, before its first block and with nothing between."""
@@ -462,7 +503,7 @@ def hook_at_entry(own: str, routine: int) -> bool:
     first_block = re.search(r"^block_[0-9A-F]{8}:", own, re.MULTILINE)
     if own.count(hook) != 1 or first_block is None or first_block.group(0) != f"block_{routine:08X}:":
         return False
-    between = own[own.index(hook) + len(hook):first_block.start()] if own.index(hook) < first_block.start() else "x"
+    between = own[own.index(hook) + len(hook) : first_block.start()] if own.index(hook) < first_block.start() else "x"
     return re.fullmatch(r"(\s|/\*.*?\*/)*", between, re.DOTALL) is not None
 
 
@@ -472,7 +513,7 @@ if generated:
     for routine in (*ROUTINES, MENU_DRAW, STRIP_DRAW, *HINT_ROUTINES):
         hook = f"psx_mod_function_entry(cpu, 0x{routine:08X}u);"
         start = text.find(f"\nvoid func_{routine:08X}(CPUState* cpu)\n{{")
-        own = text[start:text.find("\nvoid func_", start + 1)] if start >= 0 else ""
+        own = text[start : text.find("\nvoid func_", start + 1)] if start >= 0 else ""
         require(
             text.count(hook) == 1 and hook_at_entry(own, routine),
             f"generated guest code must run exactly one entry hook at 0x{routine:08X}, in that routine, right before its first block",
@@ -481,7 +522,10 @@ if generated:
         late = own.replace(hook, "", 1).replace(label, f"{label}\n    {hook}", 1)
         busy = own.replace(hook, f"{hook}\n    cpu->gpr[4] = 0;", 1)
         require(
-            hook in late and not hook_at_entry(late, routine) and not hook_at_entry(busy, routine) and not hook_at_entry(own + hook, routine),
+            hook in late
+            and not hook_at_entry(late, routine)
+            and not hook_at_entry(busy, routine)
+            and not hook_at_entry(own + hook, routine),
             "the check of a hook's place must refuse a hook inside a block, one with a statement before the first block, and two",
         )
     require(

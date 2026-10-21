@@ -32,8 +32,7 @@ STAGED = (
     "}\n"
 )
 MERGED = (
-    "    for (const Option *option : g_preferences.changed)\n"
-    "        option->set(settings, option->get(pending));\n"
+    "    for (const Option *option : g_preferences.changed)\n        option->set(settings, option->get(pending));\n"
 )
 settings_loader = read("src/game/settings/saved.cpp")
 
@@ -68,8 +67,10 @@ require(
     and gpu.count("psx_ws_hud_thirds_centre(") == 1
     and scale_header.count("psx_ws_hud_thirds_centre(") == 2
     and scale_header.count("2 * *x + *w") == 0
-    and "    centre_x = psx_ws_hud_thirds_centre(*x, *w, strip, screen_w);\n    centre_y = 2 * *y + *h;\n" in scale_header
-    and scale_header.index("        return 0;\n    centre_x = ") > scale_header.index("squash_num <= 0 || squash_den <= 0)")
+    and "    centre_x = psx_ws_hud_thirds_centre(*x, *w, strip, screen_w);\n    centre_y = 2 * *y + *h;\n"
+    in scale_header
+    and scale_header.index("        return 0;\n    centre_x = ")
+    > scale_header.index("squash_num <= 0 || squash_den <= 0)")
     and "void gpu_ws_set_hud_text_strip(int wide) { ws_hud_strip = wide > 0 ? wide : 0; }" in gpu
     and "void gpu_ws_set_hud_text_strip(int wide);" in header
     and gpu.count("ws_hud_strip") - gpu.count("ws_hud_strip_wide") == 3,
@@ -113,7 +114,8 @@ require(
 require(
     '    if (option_slider("disruptor.hud_scale", &hud_scale)) {\n'
     "        gpu_ws_set_hud_scale(hud_scale);\n"
-    "        mark_hud_scale(hud_scale);" in menu
+    "        mark_hud_scale(hud_scale);"
+    in menu
     and 'slider("disruptor.hud_scale", "HUD size", 100,' in options
     and '"The weapon keeps its size.", 50, 100, Unit::percent,' in options,
     "the settings menu must apply the size live and stage it for saving",

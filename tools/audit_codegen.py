@@ -17,9 +17,7 @@ EXPECTED_DISPATCH_ENTRIES = 12_797
 EXPECTED_FUSED_STEPS = 17_133
 FINITE_SKYLINE_RENDERER = 0x8003A0F0
 
-FUNCTION_DEFINITION = re.compile(
-    r"^void func_([0-9A-F]{8})\(CPUState\* cpu\)$", re.MULTILINE
-)
+FUNCTION_DEFINITION = re.compile(r"^void func_([0-9A-F]{8})\(CPUState\* cpu\)$", re.MULTILINE)
 DIRECT_CALL = re.compile(r"\bfunc_([0-9A-F]{8})\(cpu\);")
 DISPATCH_ENTRY = re.compile(
     r"\{0x([0-9A-F]{8})u, 0x([0-9A-F]{8})u, \d+u, \d+u, "
@@ -258,29 +256,21 @@ INTERPRETED_CALL = re.compile(
 # vanilla and squashes the final CPU projection at the exact sites above.
 VANILLA_PORTAL_AND_POINT_SITES = (
     "cpu->gpr[2] = 0x0140;  /* 0x8003A430: 0x34020140 */",
-    "cpu->write_word(cpu->gpr[29] + 44, cpu->gpr[0]);  "
-    "/* 0x8003A434: 0xAFA0002C */",
-    "cpu->gpr[2] = ((int32_t)cpu->gpr[4] < 321) ? 1 : 0;  "
-    "/* 0x8003A580: 0x28820141 */",
-    "cpu->gpr[4] = cpu->gpr[0];  /* move */  "
-    "/* 0x8003A584: 0x00002021 */",
-    "cpu->gpr[2] = ((int32_t)cpu->gpr[4] < 320) ? 1 : 0;  "
-    "/* 0x8003A69C: 0x28820140 */",
-    "cpu->gpr[2] = (cpu->gpr[6] < (uint32_t)321) ? 1 : 0;  "
-    "/* 0x8003B6E8: 0x2CC20141 */",
-    "cpu->gpr[2] = ((int32_t)cpu->gpr[7] < -160) ? 1 : 0;  "
-    "/* 0x8003F6C0: 0x28E2FF60 */",
+    "cpu->write_word(cpu->gpr[29] + 44, cpu->gpr[0]);  /* 0x8003A434: 0xAFA0002C */",
+    "cpu->gpr[2] = ((int32_t)cpu->gpr[4] < 321) ? 1 : 0;  /* 0x8003A580: 0x28820141 */",
+    "cpu->gpr[4] = cpu->gpr[0];  /* move */  /* 0x8003A584: 0x00002021 */",
+    "cpu->gpr[2] = ((int32_t)cpu->gpr[4] < 320) ? 1 : 0;  /* 0x8003A69C: 0x28820140 */",
+    "cpu->gpr[2] = (cpu->gpr[6] < (uint32_t)321) ? 1 : 0;  /* 0x8003B6E8: 0x2CC20141 */",
+    "cpu->gpr[2] = ((int32_t)cpu->gpr[7] < -160) ? 1 : 0;  /* 0x8003F6C0: 0x28E2FF60 */",
     "cpu->gpr[7] = -160;  /* 0x8003F6D0: 0x2407FF60 */",
-    "cpu->gpr[2] = ((int32_t)cpu->gpr[7] < 480) ? 1 : 0;  "
-    "/* 0x8003F6DC: 0x28E201E0 */",
+    "cpu->gpr[2] = ((int32_t)cpu->gpr[7] < 480) ? 1 : 0;  /* 0x8003F6DC: 0x28E201E0 */",
     "cpu->gpr[7] = 0x01E0;  /* 0x8003F6E8: 0x340701E0 */",
 )
 
 
 def billboard_seam_precedes_texture_stores(shard_text: str) -> bool:
     """Whether the 0x8003D488 hook precedes its CLUT and page stores."""
-    seam = shard_text.find(
-        "disruptor_billboard_aspect_instruction_hook(cpu, 0x8003D488u, ")
+    seam = shard_text.find("disruptor_billboard_aspect_instruction_hook(cpu, 0x8003D488u, ")
     late = ["/* 0x8003D4A0: 0xA602000E */", "/* 0x8003D4A8: 0xA6020016 */"]
     if seam < 0 or any(shard_text.count(comment) != 1 for comment in late):
         return False
@@ -330,18 +320,18 @@ def generated_function_body(source: str, address: int) -> str | None:
         return None
     next_match = re.search(
         r"^void func_[0-9A-F]{8}\(CPUState\* cpu\)\s*\{",
-        source[start_match.end():],
+        source[start_match.end() :],
         re.MULTILINE,
     )
-    end = (start_match.end() + next_match.start()
-           if next_match is not None else len(source))
-    return source[start_match.start():end]
+    end = start_match.end() + next_match.start() if next_match is not None else len(source)
+    return source[start_match.start() : end]
 
 
 FUSED_HEAD = re.compile(r"^    psx_cyc_step([234])\(cpu, ((?:0x[0-9A-F]+u, )*0x[0-9A-F]+u)\);$")
 SINGLE_STEP = re.compile(r"^    psx_cyc_step\(cpu, (0x[0-9A-F]+u)\);$")
 REGISTER_ASSIGNMENT = re.compile(
-    r"^(?:(?:uint32_t|int) )?(cpu->gpr\[\d+\]|_jt_[0-9A-F]{8}|_bc_[0-9A-F]{8}) = ([^;{}\"']*);$")
+    r"^(?:(?:uint32_t|int) )?(cpu->gpr\[\d+\]|_jt_[0-9A-F]{8}|_bc_[0-9A-F]{8}) = ([^;{}\"']*);$"
+)
 GENERAL_REGISTER = re.compile(r"cpu->gpr\[(\d+)\]")
 CAST_TYPES = {"uint32_t", "int32_t", "uint16_t", "int16_t", "uint8_t", "int8_t", "uint64_t", "int64_t"}
 REGISTER_MARKS = set(" ()+-<>|^~!=?:&_@")
@@ -414,17 +404,25 @@ def fused_step_violations(shard_text: str) -> tuple[int, list[str]]:
             violations.append(f"{where}: psx_cyc_step{head.group(1)} with {len(masks)} masks")
             continue
         single = SINGLE_STEP.match(lines[index + 2]) if index + 3 < len(lines) else None
-        if (lines[index - 1] != "#if defined(PSX_ENABLE_BLOCK_CYCLES) && !defined(PSX_COSIM)" or
-                lines[index + 1] != "#elif defined(PSX_ENABLE_BLOCK_CYCLES)" or single is None or
-                single.group(1) != masks[0] or lines[index + 3] != "#endif"):
+        if (
+            lines[index - 1] != "#if defined(PSX_ENABLE_BLOCK_CYCLES) && !defined(PSX_COSIM)"
+            or lines[index + 1] != "#elif defined(PSX_ENABLE_BLOCK_CYCLES)"
+            or single is None
+            or single.group(1) != masks[0]
+            or lines[index + 3] != "#endif"
+        ):
             violations.append(f"{where}: the co-simulation build does not keep the first step")
             continue
         members_owed += len(masks) - 1
         cursor = index + 4
         for mask in masks[1:]:
             while cursor < len(lines) and lines[cursor] != "#if defined(PSX_ENABLE_BLOCK_CYCLES) && defined(PSX_COSIM)":
-                if (lines[cursor] == "#ifdef PSX_COSIM" and cursor + 2 < len(lines) and
-                        lines[cursor + 1].startswith("    cosim_instr(") and lines[cursor + 2] == "#endif"):
+                if (
+                    lines[cursor] == "#ifdef PSX_COSIM"
+                    and cursor + 2 < len(lines)
+                    and lines[cursor + 1].startswith("    cosim_instr(")
+                    and lines[cursor + 2] == "#endif"
+                ):
                     cursor += 3
                     continue
                 if not register_only(lines[cursor]):
@@ -450,9 +448,7 @@ def main() -> int:
     failures: list[str] = []
 
     if len(shards) != EXPECTED_SHARDS:
-        failures.append(
-            f"expected {EXPECTED_SHARDS} generated shards, found {len(shards)}"
-        )
+        failures.append(f"expected {EXPECTED_SHARDS} generated shards, found {len(shards)}")
     if not dispatch_path.is_file():
         failures.append(f"missing {dispatch_path}")
     if failures:
@@ -468,55 +464,38 @@ def main() -> int:
     if fused_heads != EXPECTED_FUSED_STEPS:
         failures.append(f"expected {EXPECTED_FUSED_STEPS} fused step runs, found {fused_heads}")
 
-    skyline_body = generated_function_body(
-        shard_text, FINITE_SKYLINE_RENDERER)
+    skyline_body = generated_function_body(shard_text, FINITE_SKYLINE_RENDERER)
     if skyline_body is None:
-        failures.append(
-            f"missing finite-skyline renderer 0x{FINITE_SKYLINE_RENDERER:08X}")
+        failures.append(f"missing finite-skyline renderer 0x{FINITE_SKYLINE_RENDERER:08X}")
     else:
         enable = "gte_ws_set_suppress(1);"
         disable = "gte_ws_set_suppress(0);"
         if skyline_body.count(enable) != 1 or skyline_body.count(disable) != 1:
-            failures.append(
-                "finite-skyline renderer lost its single balanced GTE "
-                "unsquash scope")
+            failures.append("finite-skyline renderer lost its single balanced GTE unsquash scope")
         elif skyline_body.index(enable) > skyline_body.index(disable):
-            failures.append(
-                "finite-skyline GTE unsquash scope closes before it opens")
+            failures.append("finite-skyline GTE unsquash scope closes before it opens")
 
     definition_matches = FUNCTION_DEFINITION.findall(shard_text)
     definitions = {int(value, 16) for value in definition_matches}
     if len(definition_matches) != len(definitions):
         failures.append("duplicate generated function definitions")
     if len(definitions) != EXPECTED_FUNCTIONS:
-        failures.append(
-            f"expected {EXPECTED_FUNCTIONS} functions, found {len(definitions)}"
-        )
+        failures.append(f"expected {EXPECTED_FUNCTIONS} functions, found {len(definitions)}")
 
     direct_calls = {int(value, 16) for value in DIRECT_CALL.findall(shard_text)}
     missing_direct_calls = direct_calls - definitions
     if missing_direct_calls:
-        failures.append(
-            "direct calls without definitions: "
-            + format_addresses(missing_direct_calls)
-        )
+        failures.append("direct calls without definitions: " + format_addresses(missing_direct_calls))
 
     dispatch_matches = DISPATCH_ENTRY.findall(dispatch_text)
     if len(dispatch_matches) != EXPECTED_DISPATCH_ENTRIES:
-        failures.append(
-            "expected "
-            f"{EXPECTED_DISPATCH_ENTRIES} dispatch entries, "
-            f"found {len(dispatch_matches)}"
-        )
+        failures.append(f"expected {EXPECTED_DISPATCH_ENTRIES} dispatch entries, found {len(dispatch_matches)}")
 
     dispatch_addresses = {int(address, 16) for address, _, _ in dispatch_matches}
     dispatch_functions = {int(function, 16) for _, _, function in dispatch_matches}
     missing_dispatch_functions = dispatch_functions - definitions
     if missing_dispatch_functions:
-        failures.append(
-            "dispatch rows reference missing functions: "
-            + format_addresses(missing_dispatch_functions)
-        )
+        failures.append("dispatch rows reference missing functions: " + format_addresses(missing_dispatch_functions))
 
     function_entries = {
         int(address, 16)
@@ -526,36 +505,21 @@ def main() -> int:
     missing_function_entries = definitions - function_entries
     extra_function_entries = function_entries - definitions
     if missing_function_entries:
-        failures.append(
-            "functions without primary dispatch entries: "
-            + format_addresses(missing_function_entries)
-        )
+        failures.append("functions without primary dispatch entries: " + format_addresses(missing_function_entries))
     if extra_function_entries:
-        failures.append(
-            "primary dispatch entries without functions: "
-            + format_addresses(extra_function_entries)
-        )
+        failures.append("primary dispatch entries without functions: " + format_addresses(extra_function_entries))
 
     static_targets = {int(value, 16) for value in CPS_STATIC_TARGET.findall(shard_text)}
-    resident_targets = {
-        value for value in static_targets if CODE_START <= value < CODE_END
-    }
+    resident_targets = {value for value in static_targets if CODE_START <= value < CODE_END}
     missing_static_targets = resident_targets - dispatch_addresses
     if missing_static_targets:
-        failures.append(
-            "resident CPS targets without dispatch entries: "
-            + format_addresses(missing_static_targets)
-        )
+        failures.append("resident CPS targets without dispatch entries: " + format_addresses(missing_static_targets))
 
     # Both halves keep the retail unsigned portal representation, so both stay LHU.
     if not UNSIGNED_PORTAL_LEFT.search(shard_text):
-        failures.append(
-            "portal left edge is not the retail unsigned load at 0x80041184"
-        )
+        failures.append("portal left edge is not the retail unsigned load at 0x80041184")
     if not UNSIGNED_PORTAL_RIGHT.search(shard_text):
-        failures.append(
-            "portal right edge load changed unexpectedly at 0x80041178"
-        )
+        failures.append("portal right edge load changed unexpectedly at 0x80041178")
 
     projection_tags = re.findall(
         r"/\* ws CPU-projected screen-x \*/\s*"
@@ -579,15 +543,10 @@ def main() -> int:
         r"/\* (0x[0-9A-F]{8}): (0x[0-9A-F]{8}) \*/",
         shard_text,
     )
-    generated_yaw_sites = {
-        address: (word, offset) for offset, address, word in yaw_tags
-    }
+    generated_yaw_sites = {address: (word, offset) for offset, address, word in yaw_tags}
     if generated_yaw_sites != YAW_CONE_SITES:
         failures.append(
-            "yaw-cone sites differ: expected "
-            + str(YAW_CONE_SITES)
-            + ", found "
-            + str(generated_yaw_sites)
+            "yaw-cone sites differ: expected " + str(YAW_CONE_SITES) + ", found " + str(generated_yaw_sites)
         )
     if shard_text.count("psx_ws_yaw_cone_offset(") != len(YAW_CONE_SITES):
         failures.append("unexpected yaw-cone helper call count")
@@ -598,9 +557,7 @@ def main() -> int:
         r"/\* (0x[0-9A-F]{8}): (0x[0-9A-F]{8}) \*/",
         shard_text,
     )
-    generated_side_plane_sites = {
-        address: word for address, word in side_plane_tags
-    }
+    generated_side_plane_sites = {address: word for address, word in side_plane_tags}
     if generated_side_plane_sites != HORIZONTAL_SIDE_PLANE_SITES:
         failures.append(
             "horizontal side-plane sites differ: expected "
@@ -608,9 +565,7 @@ def main() -> int:
             + ", found "
             + str(generated_side_plane_sites)
         )
-    if shard_text.count("psx_ws_horizontal_slt(") != len(
-        HORIZONTAL_SIDE_PLANE_SITES
-    ):
+    if shard_text.count("psx_ws_horizontal_slt(") != len(HORIZONTAL_SIDE_PLANE_SITES):
         failures.append("unexpected horizontal side-plane helper call count")
 
     for helper, note, expected, name in (
@@ -631,25 +586,19 @@ def main() -> int:
         r"0x([0-9A-F]{8})u, 0x([0-9A-F]{8})u, 1\)",
         shard_text,
     )
-    generated_vertical_camera_sites = {
-        int(address, 16): int(word, 16)
-        for address, word in vertical_camera_matches
-    }
-    if (generated_vertical_camera_sites != VERTICAL_CAMERA_SITES or
-            len(vertical_camera_matches) != len(VERTICAL_CAMERA_SITES)):
+    generated_vertical_camera_sites = {int(address, 16): int(word, 16) for address, word in vertical_camera_matches}
+    if generated_vertical_camera_sites != VERTICAL_CAMERA_SITES or len(vertical_camera_matches) != len(
+        VERTICAL_CAMERA_SITES
+    ):
         failures.append(
             "reviewed vertical-camera hooks differ: expected "
             + str(VERTICAL_CAMERA_SITES)
             + ", found "
             + str(generated_vertical_camera_sites)
         )
-    renderer_entry_hook = (
-        "psx_mod_function_entry(cpu, 0x80040E68u)"
-    )
+    renderer_entry_hook = "psx_mod_function_entry(cpu, 0x80040E68u)"
     if shard_text.count(renderer_entry_hook) != 1:
-        failures.append(
-            "expected exactly one reviewed renderer function-entry hook"
-        )
+        failures.append("expected exactly one reviewed renderer function-entry hook")
 
     far_rendering_raw_matches = re.findall(
         r"disruptor_far_rendering_instruction_hook\(cpu, "
@@ -667,20 +616,12 @@ def main() -> int:
         r"disruptor_far_rendering_instruction_hook\(",
         shard_text,
     )
-    generated_far_rendering_sites = {
-        int(address, 16): int(word, 16)
-        for address, word in far_rendering_matches
-    }
+    generated_far_rendering_sites = {int(address, 16): int(word, 16) for address, word in far_rendering_matches}
     if far_rendering_directive_lines:
-        failures.append(
-            "far-rendering hook shares a preprocessor-directive line"
-        )
+        failures.append("far-rendering hook shares a preprocessor-directive line")
     if len(far_rendering_raw_matches) != len(far_rendering_matches):
-        failures.append(
-            "far-rendering hooks must be separate generated statements"
-        )
-    if (generated_far_rendering_sites != FAR_RENDERING_SITES or
-            len(far_rendering_matches) != len(FAR_RENDERING_SITES)):
+        failures.append("far-rendering hooks must be separate generated statements")
+    if generated_far_rendering_sites != FAR_RENDERING_SITES or len(far_rendering_matches) != len(FAR_RENDERING_SITES):
         failures.append(
             "reviewed far-rendering hooks differ: expected "
             + str(FAR_RENDERING_SITES)
@@ -693,12 +634,10 @@ def main() -> int:
         r"0x([0-9A-F]{8})u, 0x([0-9A-F]{8})u, 1\)",
         shard_text,
     )
-    generated_billboard_aspect_sites = {
-        int(address, 16): int(word, 16)
-        for address, word in billboard_aspect_matches
-    }
-    if (generated_billboard_aspect_sites != BILLBOARD_ASPECT_SITES or
-            len(billboard_aspect_matches) != len(BILLBOARD_ASPECT_SITES)):
+    generated_billboard_aspect_sites = {int(address, 16): int(word, 16) for address, word in billboard_aspect_matches}
+    if generated_billboard_aspect_sites != BILLBOARD_ASPECT_SITES or len(billboard_aspect_matches) != len(
+        BILLBOARD_ASPECT_SITES
+    ):
         failures.append(
             "reviewed billboard-aspect hooks differ: expected "
             + str(BILLBOARD_ASPECT_SITES)
@@ -706,22 +645,15 @@ def main() -> int:
             + str(generated_billboard_aspect_sites)
         )
     if not billboard_seam_precedes_texture_stores(shard_text):
-        failures.append(
-            "the 0x8003D488 billboard seam must precede its packet's CLUT "
-            "and texture page stores"
-        )
+        failures.append("the 0x8003D488 billboard seam must precede its packet's CLUT and texture page stores")
 
     backdrop_tile_matches = re.findall(
         r"disruptor_backdrop_tiles_instruction_hook\(cpu, "
         r"0x([0-9A-F]{8})u, 0x([0-9A-F]{8})u, 1\)",
         shard_text,
     )
-    generated_backdrop_tile_sites = {
-        int(address, 16): int(word, 16)
-        for address, word in backdrop_tile_matches
-    }
-    if (generated_backdrop_tile_sites != BACKDROP_TILE_SITES or
-            len(backdrop_tile_matches) != len(BACKDROP_TILE_SITES)):
+    generated_backdrop_tile_sites = {int(address, 16): int(word, 16) for address, word in backdrop_tile_matches}
+    if generated_backdrop_tile_sites != BACKDROP_TILE_SITES or len(backdrop_tile_matches) != len(BACKDROP_TILE_SITES):
         failures.append(
             "reviewed backdrop-tile hooks differ: expected "
             + str(BACKDROP_TILE_SITES)
@@ -734,12 +666,8 @@ def main() -> int:
         r"0x([0-9A-F]{8})u, 0x([0-9A-F]{8})u, 1\)",
         shard_text,
     )
-    generated_backdrop_tile_sites = {
-        int(address, 16): int(word, 16)
-        for address, word in backdrop_tile_matches
-    }
-    if (generated_backdrop_tile_sites != BACKDROP_TILE_SITES or
-            len(backdrop_tile_matches) != len(BACKDROP_TILE_SITES)):
+    generated_backdrop_tile_sites = {int(address, 16): int(word, 16) for address, word in backdrop_tile_matches}
+    if generated_backdrop_tile_sites != BACKDROP_TILE_SITES or len(backdrop_tile_matches) != len(BACKDROP_TILE_SITES):
         failures.append(
             "reviewed backdrop-tile hooks differ: expected "
             + str(BACKDROP_TILE_SITES)
@@ -752,12 +680,8 @@ def main() -> int:
         r"0x([0-9A-F]{8})u, 0x([0-9A-F]{8})u, 1\)",
         shard_text,
     )
-    generated_sprite_depth_sites = {
-        int(address, 16): int(word, 16)
-        for address, word in sprite_depth_matches
-    }
-    if (generated_sprite_depth_sites != SPRITE_DEPTH_SITES or
-            len(sprite_depth_matches) != len(SPRITE_DEPTH_SITES)):
+    generated_sprite_depth_sites = {int(address, 16): int(word, 16) for address, word in sprite_depth_matches}
+    if generated_sprite_depth_sites != SPRITE_DEPTH_SITES or len(sprite_depth_matches) != len(SPRITE_DEPTH_SITES):
         failures.append(
             "reviewed sprite-depth hooks differ: expected "
             + str(SPRITE_DEPTH_SITES)
@@ -765,8 +689,12 @@ def main() -> int:
             + str(generated_sprite_depth_sites)
         )
 
-    for pin in ("cpu->gpr[11] = -256;  /* 0x8004798C: 0x200BFF00 */", "cpu->gpr[11] = 576;  /* 0x800479A8: 0x200B0240 */",
-                "cpu->gpr[12] = -256;  /* 0x800479C4: 0x200CFF00 */", "cpu->gpr[12] = 496;  /* 0x800479E0: 0x200C01F0 */"):
+    for pin in (
+        "cpu->gpr[11] = -256;  /* 0x8004798C: 0x200BFF00 */",
+        "cpu->gpr[11] = 576;  /* 0x800479A8: 0x200B0240 */",
+        "cpu->gpr[12] = -256;  /* 0x800479C4: 0x200CFF00 */",
+        "cpu->gpr[12] = 496;  /* 0x800479E0: 0x200C01F0 */",
+    ):
         if shard_text.count(pin) != 1:
             failures.append("the guard band before the 0x80047A0C scratch store changed: " + pin)
 
@@ -775,12 +703,8 @@ def main() -> int:
         r"0x([0-9A-F]{8})u, 0x([0-9A-F]{8})u, 1\)",
         shard_text,
     )
-    generated_intro_skip_sites = {
-        int(address, 16): int(word, 16)
-        for address, word in intro_skip_matches
-    }
-    if (generated_intro_skip_sites != INTRO_SKIP_SITES or
-            len(intro_skip_matches) != len(INTRO_SKIP_SITES)):
+    generated_intro_skip_sites = {int(address, 16): int(word, 16) for address, word in intro_skip_matches}
+    if generated_intro_skip_sites != INTRO_SKIP_SITES or len(intro_skip_matches) != len(INTRO_SKIP_SITES):
         failures.append(
             "reviewed intro-skip hooks differ: expected "
             + str(INTRO_SKIP_SITES)
@@ -793,13 +717,8 @@ def main() -> int:
         r"0x([0-9A-F]{8})u, 14,",
         shard_text,
     )
-    generated_precision_mfc2 = {
-        int(address, 16): int(word, 16)
-        for address, word in precision_mfc2_matches
-    }
-    if (generated_precision_mfc2 != PRECISION_MFC2_SITES or len(
-        precision_mfc2_matches
-    ) != len(PRECISION_MFC2_SITES)):
+    generated_precision_mfc2 = {int(address, 16): int(word, 16) for address, word in precision_mfc2_matches}
+    if generated_precision_mfc2 != PRECISION_MFC2_SITES or len(precision_mfc2_matches) != len(PRECISION_MFC2_SITES):
         failures.append(
             "reviewed precision MFC2 hooks differ: expected "
             + str(PRECISION_MFC2_SITES)
@@ -812,13 +731,10 @@ def main() -> int:
         r"0x([0-9A-F]{8})u,",
         shard_text,
     )
-    generated_precision_stores = {
-        int(address, 16): int(word, 16)
-        for address, word in precision_store_matches
-    }
-    if (generated_precision_stores != PRECISION_STORE_SITES or len(
-        precision_store_matches
-    ) != len(PRECISION_STORE_SITES)):
+    generated_precision_stores = {int(address, 16): int(word, 16) for address, word in precision_store_matches}
+    if generated_precision_stores != PRECISION_STORE_SITES or len(precision_store_matches) != len(
+        PRECISION_STORE_SITES
+    ):
         failures.append(
             "reviewed precision SW hooks differ: expected "
             + str(PRECISION_STORE_SITES)
@@ -832,12 +748,11 @@ def main() -> int:
         shard_text,
     )
     generated_precision_scratch_stores = {
-        int(address, 16): int(word, 16)
-        for address, word in precision_scratch_store_matches
+        int(address, 16): int(word, 16) for address, word in precision_scratch_store_matches
     }
-    if (generated_precision_scratch_stores != PRECISION_SCRATCH_STORE_SITES or
-            len(precision_scratch_store_matches) !=
-            len(PRECISION_SCRATCH_STORE_SITES)):
+    if generated_precision_scratch_stores != PRECISION_SCRATCH_STORE_SITES or len(
+        precision_scratch_store_matches
+    ) != len(PRECISION_SCRATCH_STORE_SITES):
         failures.append(
             "reviewed precision scratchpad SW hooks differ: expected "
             + str(PRECISION_SCRATCH_STORE_SITES)
@@ -851,12 +766,11 @@ def main() -> int:
         shard_text,
     )
     generated_precision_copy_loads = {
-        int(address, 16): (int(word, 16), int(gpr))
-        for address, word, gpr in precision_copy_load_matches
+        int(address, 16): (int(word, 16), int(gpr)) for address, word, gpr in precision_copy_load_matches
     }
-    if (generated_precision_copy_loads != PRECISION_COPY_LOAD_SITES or len(
-        precision_copy_load_matches
-    ) != len(PRECISION_COPY_LOAD_SITES)):
+    if generated_precision_copy_loads != PRECISION_COPY_LOAD_SITES or len(precision_copy_load_matches) != len(
+        PRECISION_COPY_LOAD_SITES
+    ):
         failures.append(
             "reviewed precision packet-copy LW hooks differ: expected "
             + str(PRECISION_COPY_LOAD_SITES)
@@ -870,12 +784,11 @@ def main() -> int:
         shard_text,
     )
     generated_precision_copy_stores = {
-        int(address, 16): (int(word, 16), int(gpr))
-        for address, word, gpr in precision_copy_store_matches
+        int(address, 16): (int(word, 16), int(gpr)) for address, word, gpr in precision_copy_store_matches
     }
-    if (generated_precision_copy_stores != PRECISION_COPY_STORE_SITES or len(
-        precision_copy_store_matches
-    ) != len(PRECISION_COPY_STORE_SITES)):
+    if generated_precision_copy_stores != PRECISION_COPY_STORE_SITES or len(precision_copy_store_matches) != len(
+        PRECISION_COPY_STORE_SITES
+    ):
         failures.append(
             "reviewed precision packet-copy SW hooks differ: expected "
             + str(PRECISION_COPY_STORE_SITES)
@@ -891,9 +804,7 @@ def main() -> int:
 
     for site in VANILLA_PORTAL_AND_POINT_SITES:
         if site not in shard_text:
-            failures.append(
-                "retail portal/outcode invariant changed unexpectedly: " + site
-            )
+            failures.append("retail portal/outcode invariant changed unexpectedly: " + site)
     for tag in (
         "/* ws manual lower",
         "/* ws manual upper",

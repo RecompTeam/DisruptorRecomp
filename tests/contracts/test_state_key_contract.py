@@ -68,7 +68,8 @@ require(
 hashing = read("psxrecomp/runtime/hash_codegen.cmake")
 require(
     'string(SHA256 _h "${_cat}")\nstring(SUBSTRING "${_h}" 0 8 _h8)\n' in hashing
-    and "        h.codegen_hash  != (uint32_t)PSX_OVERLAY_CODEGEN_HASH ||\n" in read("psxrecomp/runtime/src/boot_state.c")
+    and "        h.codegen_hash  != (uint32_t)PSX_OVERLAY_CODEGEN_HASH ||\n"
+    in read("psxrecomp/runtime/src/boot_state.c")
     and "getenv" not in read("psxrecomp/runtime/src/boot_state.c"),
     "the key is the first eight digits of the sources' hash, and a state of another key is refused, whatever the environment",
 )

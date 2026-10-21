@@ -69,20 +69,25 @@ require(
     "    s_resume_pc_given = 1;\n"
     "    psx_check_interrupts(cpu); \n"
     "    s_compiled_interrupt_resume_pc = prev;\n"
-    "}\n" in interrupts
+    "}\n"
+    in interrupts
     and "void psx_check_interrupts(CPUState* cpu) {\n"
     "    const int save_point = s_resume_pc_given;\n"
     "    s_resume_pc_given = 0;\n"
     "    psx_cyc_batch_flush();\n"
     "    psx_check_interrupts_flushed(cpu, save_point);\n"
-    "}\n" in interrupts,
+    "}\n"
+    in interrupts,
     "the wrapper the inline edge unrolls, and the check that takes the mark and flushes before its rest",
 )
-flushed = interrupts[interrupts.index("void psx_check_interrupts_flushed(CPUState* cpu, int save_point) {"):]
+flushed = interrupts[interrupts.index("void psx_check_interrupts_flushed(CPUState* cpu, int save_point) {") :]
 flushed = flushed[: flushed.index("    if (in_exception && !(cpu->cop0[COP0_SR] & 0x01u)) return;")]
-flushed_code = "\n".join(line.rstrip() for line in re.sub(r"/\*.*?\*/", "", flushed, flags=re.DOTALL).split("\n") if line.strip())
+flushed_code = "\n".join(
+    line.rstrip() for line in re.sub(r"/\*.*?\*/", "", flushed, flags=re.DOTALL).split("\n") if line.strip()
+)
 require(
-    flushed_code == (
+    flushed_code
+    == (
         "void psx_check_interrupts_flushed(CPUState* cpu, int save_point) {\n"
         "    extern int g_ls_suppress_record;\n"
         "#define PSX_CHECK_INTERRUPTS_RETURN() do { if (g_ls_suppress_record > 0) g_ls_suppress_record--; return; } while (0)\n"
@@ -143,23 +148,35 @@ for name, exported in (
     ("s_fast_maintenance", "psx_irq_fast_maintenance"),
     ("s_compiled_interrupt_resume_pc", "psx_irq_compiled_resume_pc"),
 ):
-    require(re.findall(rf"^#define {name} (\w+)$", interrupts, re.MULTILINE) == [exported]
-            and re.search(rf"^(?:int|uint32_t) {exported}(?: = 0)?;", interrupts, re.MULTILINE) is not None
-            and re.search(rf"\b{exported}\b", cpu_state) is not None,
-            f"interrupts.c's {name} is {exported}, the state the inline edge reads")
-require("static uint32_t s_fast_maintenance" not in interrupts and "static int in_exception;" not in interrupts
-        and "static uint32_t s_compiled_interrupt_resume_pc" not in interrupts,
-        "no second copy of the inline edge's state")
-require("s_callbacks.check_interrupts_at  = overlay_ci_at_wrapper;" in read("psxrecomp/runtime/src/overlay_loader.c"),
-        "overlay DLLs reach the check through the host's callback table, not by the symbol's name")
+    require(
+        re.findall(rf"^#define {name} (\w+)$", interrupts, re.MULTILINE) == [exported]
+        and re.search(rf"^(?:int|uint32_t) {exported}(?: = 0)?;", interrupts, re.MULTILINE) is not None
+        and re.search(rf"\b{exported}\b", cpu_state) is not None,
+        f"interrupts.c's {name} is {exported}, the state the inline edge reads",
+    )
+require(
+    "static uint32_t s_fast_maintenance" not in interrupts
+    and "static int in_exception;" not in interrupts
+    and "static uint32_t s_compiled_interrupt_resume_pc" not in interrupts,
+    "no second copy of the inline edge's state",
+)
+require(
+    "s_callbacks.check_interrupts_at  = overlay_ci_at_wrapper;" in read("psxrecomp/runtime/src/overlay_loader.c"),
+    "overlay DLLs reach the check through the host's callback table, not by the symbol's name",
+)
 icache_header = read("psxrecomp/runtime/include/psx_icache.h")
 icache = read("psxrecomp/runtime/src/psx_icache.c")
-require("    if (g_psx_icache_tv[(addr & 0xFFCu) >> 2] == addr) return;\n    psx_icache_fetch_miss(cpu, addr);\n" in icache_header
-        and "    if (g_psx_icache_active < 0) g_psx_icache_active = psx_icache_enabled();\n    if (!g_psx_icache_active) return;\n"
-        "    uint32_t idx = (addr & 0xFFCu) >> 2;\n    if (g_psx_icache_tv[idx] == addr) return;" in icache
-        and "    if (g_psx_icache_active < 0) {\n        psx_icache_fetch(cpu, addr);\n        return;\n    }\n"
-        "    if (!g_psx_icache_active) return;\n" in icache_header,
-        "the inline fetch returns on the miss path's own hit, and the flag a hit leaves unresolved is resolved by each reader")
+require(
+    "    if (g_psx_icache_tv[(addr & 0xFFCu) >> 2] == addr) return;\n    psx_icache_fetch_miss(cpu, addr);\n"
+    in icache_header
+    and "    if (g_psx_icache_active < 0) g_psx_icache_active = psx_icache_enabled();\n    if (!g_psx_icache_active) return;\n"
+    "    uint32_t idx = (addr & 0xFFCu) >> 2;\n    if (g_psx_icache_tv[idx] == addr) return;"
+    in icache
+    and "    if (g_psx_icache_active < 0) {\n        psx_icache_fetch(cpu, addr);\n        return;\n    }\n"
+    "    if (!g_psx_icache_active) return;\n"
+    in icache_header,
+    "the inline fetch returns on the miss path's own hit, and the flag a hit leaves unresolved is resolved by each reader",
+)
 flag_lines = {
     "psxrecomp/runtime/src/psx_icache.c": [
         "int g_psx_icache_active = -1;",
@@ -182,30 +199,44 @@ for folder in ("psxrecomp/runtime", "psxrecomp/generated", "src", "generated"):
             lines = [line for line in read(relative).split("\n") if re.search(r"\bg_psx_icache_active\b", line)]
             if lines:
                 named[relative] = lines
-require(named == flag_lines,
-        "the cache flag is set at its definition, by the reset and by the miss path's resolve, and read only by the miss "
-        "path and the interpreter's fetch, each after resolving it: whether a hit resolved it is never seen")
-require("    psx_icache_reset();   \n" in read("psxrecomp/runtime/src/main.cpp")
-        and read("psxrecomp/runtime/src/main.cpp").index("    psx_icache_reset();   \n")
-        < read("psxrecomp/runtime/src/main.cpp").index("    cpu.read_word  = psx_read_word;\n")
-        and "void psx_icache_reset(void) {\n    g_psx_icache_active = psx_icache_enabled();\n"
-        "    for (int i = 0; i < 1024; i++) g_psx_icache_tv[i] = 0x1u;\n}\n" in icache
-        and "    static int s = -1;\n    if (s < 0) {\n" in icache,
-        "the runtime resolves the flag and empties the tags before the CPU runs, and the setting is read once")
-require("#if defined(PSX_OVERLAY_DLL_BUILD)\nvoid psx_check_interrupts_at(struct CPUState* cpu, uint32_t resume_pc);\n#endif\n"
-        in interrupts_header and interrupts.count("void psx_check_interrupts_at_slow(CPUState* cpu, uint32_t resume_pc) {\n") == 1,
-        "overlay DLLs keep the call, every other build takes the inline edge")
+require(
+    named == flag_lines,
+    "the cache flag is set at its definition, by the reset and by the miss path's resolve, and read only by the miss "
+    "path and the interpreter's fetch, each after resolving it: whether a hit resolved it is never seen",
+)
+require(
+    "    psx_icache_reset();   \n" in read("psxrecomp/runtime/src/main.cpp")
+    and read("psxrecomp/runtime/src/main.cpp").index("    psx_icache_reset();   \n")
+    < read("psxrecomp/runtime/src/main.cpp").index("    cpu.read_word  = psx_read_word;\n")
+    and "void psx_icache_reset(void) {\n    g_psx_icache_active = psx_icache_enabled();\n"
+    "    for (int i = 0; i < 1024; i++) g_psx_icache_tv[i] = 0x1u;\n}\n"
+    in icache
+    and "    static int s = -1;\n    if (s < 0) {\n" in icache,
+    "the runtime resolves the flag and empties the tags before the CPU runs, and the setting is read once",
+)
+require(
+    "#if defined(PSX_OVERLAY_DLL_BUILD)\nvoid psx_check_interrupts_at(struct CPUState* cpu, uint32_t resume_pc);\n#endif\n"
+    in interrupts_header
+    and interrupts.count("void psx_check_interrupts_at_slow(CPUState* cpu, uint32_t resume_pc) {\n") == 1,
+    "overlay DLLs keep the call, every other build takes the inline edge",
+)
 
 require(
     "#define parity_trace_note_write(addr, width, writer_pc) \\\n"
-    "    do { if (g_parity_trace_armed) (parity_trace_note_write)((addr), (width), (writer_pc)); } while (0)\n" in memory
+    "    do { if (g_parity_trace_armed) (parity_trace_note_write)((addr), (width), (writer_pc)); } while (0)\n"
+    in memory
     and "#define card_data_writes_check(phys, value, width) \\\n"
-    "    do { if (g_card_data_writes_armed) (void)(card_data_writes_check)((phys), (value), (width)); } while (0)\n" in memory,
+    "    do { if (g_card_data_writes_armed) (void)(card_data_writes_check)((phys), (value), (width)); } while (0)\n"
+    in memory,
     "the store hooks are skipped only when their own armed flag is clear",
 )
-require("uint32_t g_parity_trace_armed = 0;" in parity and "#define s_armed g_parity_trace_armed\n" in parity
-        and "void parity_trace_note_write(uint32_t addr, uint32_t width, uint32_t writer_pc)\n{\n    if (!s_armed || s_frozen) return;\n" in parity,
-        "the parity hook returns at once when its flag is clear")
+require(
+    "uint32_t g_parity_trace_armed = 0;" in parity
+    and "#define s_armed g_parity_trace_armed\n" in parity
+    and "void parity_trace_note_write(uint32_t addr, uint32_t width, uint32_t writer_pc)\n{\n    if (!s_armed || s_frozen) return;\n"
+    in parity,
+    "the parity hook returns at once when its flag is clear",
+)
 for width, old, value, last in (
     (4, "read_ram_word(phys)", "val", "        ram[phys]     = (uint8_t)(val);\n"),
     (2, "(uint32_t)read_ram_half(phys)", "(uint32_t)val", "        ram[phys]     = (uint8_t)(val);\n"),
@@ -223,54 +254,77 @@ for width, old, value, last in (
         "#endif\n" + last
     )
     require(memory.count(hooks) == 1, f"the {width}-byte RAM store calls every hook once, before its bytes land")
-require(len(re.findall(r"\bparity_trace_note_write\(phys, ", memory)) == 3
-        and len(re.findall(r"\bcard_data_writes_check\(phys, (?!value, width\))", memory)) == 3,
-        "the hooks are called by the three RAM store widths and nowhere else")
-require("volatile int g_card_data_writes_armed = 0;" in card and "#define s_armed g_card_data_writes_armed\n" in card
-        and "int card_data_writes_check(uint32_t phys, uint32_t value, uint8_t width) {\n    if (!s_armed) return 0;\n" in card,
-        "the card hook returns at once when its flag is clear")
-require("#ifdef PSX_NO_DEBUG_TOOLS\n#define debug_server_trace_write_check(phys, old_val, new_val, width) ((void)0)\n#endif\n" in memory
-        and "                                    uint32_t new_val, uint8_t width)\n{\n#ifdef PSX_NO_DEBUG_TOOLS\n"
-        "    (void)phys; (void)old_val; (void)new_val; (void)width;\n    return;\n#endif\n" in debug_server,
-        "the write trace is compiled out only where its body returns at once")
+require(
+    len(re.findall(r"\bparity_trace_note_write\(phys, ", memory)) == 3
+    and len(re.findall(r"\bcard_data_writes_check\(phys, (?!value, width\))", memory)) == 3,
+    "the hooks are called by the three RAM store widths and nowhere else",
+)
+require(
+    "volatile int g_card_data_writes_armed = 0;" in card
+    and "#define s_armed g_card_data_writes_armed\n" in card
+    and "int card_data_writes_check(uint32_t phys, uint32_t value, uint8_t width) {\n    if (!s_armed) return 0;\n"
+    in card,
+    "the card hook returns at once when its flag is clear",
+)
+require(
+    "#ifdef PSX_NO_DEBUG_TOOLS\n#define debug_server_trace_write_check(phys, old_val, new_val, width) ((void)0)\n#endif\n"
+    in memory
+    and "                                    uint32_t new_val, uint8_t width)\n{\n#ifdef PSX_NO_DEBUG_TOOLS\n"
+    "    (void)phys; (void)old_val; (void)new_val; (void)width;\n    return;\n#endif\n"
+    in debug_server,
+    "the write trace is compiled out only where its body returns at once",
+)
 for guard in (
     "    if (phys < 0x10u && g_debug_last_store_pc == 0xBFC10A00u &&\n        fntrace_is_game_started()) return;\n",
     "    if (phys == 0u && fntrace_is_game_started()) {\n",
     "        if (g_debug_last_store_pc == 0xBFC117E4u &&\n            fntrace_is_game_started() &&\n",
 ):
     require(guard in memory, "the game-start test comes after the cheap compares of its chain: " + guard.strip())
-require("int fntrace_is_game_started(void) { return s_game_started; }" in read("psxrecomp/runtime/src/fntrace.c"),
-        "the game-start test has no side effect, so its place in the chain is free")
+require(
+    "int fntrace_is_game_started(void) { return s_game_started; }" in read("psxrecomp/runtime/src/fntrace.c"),
+    "the game-start test has no side effect, so its place in the chain is free",
+)
 
 require(
     "static inline void gte_precision_word_write_begin(void) {\n"
     "    g_gte_precision_word_commit.domain = 0u;\n"
-    "    g_gte_precision_word_commit.pending = 0u;\n}\n" in precision
+    "    g_gte_precision_word_commit.pending = 0u;\n}\n"
+    in precision
     and "    g_gte_precision_word_commit.physical = physical;\n"
     "    g_gte_precision_word_commit.domain = 1u;\n"
-    "    g_gte_precision_word_commit.pending = 1u;\n" in precision
+    "    g_gte_precision_word_commit.pending = 1u;\n"
+    in precision
     and "#define s_precision_word_commit g_gte_precision_word_commit\n" in gte
     and "static_assert(PRECISION_WORD_DOMAIN_NONE == 0 && PRECISION_WORD_DOMAIN_MAIN_RAM == 1," in gte
     and 'extern "C" void gte_precision_word_write_begin' not in gte,
     "the inline token writers write gte.cpp's own token with its enum's values",
 )
 gpu = read("psxrecomp/runtime/src/gpu.c")
-require("void gpu_geometry_diagnostics_set_detail(int enabled) {\n"
-        "    if (enabled && !s_geometry_diag_detail) {\n"
-        "        geometry_diag_clear_vertex_detail(&s_geometry_diag_cumulative);\n"
-        "        geometry_diag_clear_vertex_detail(&s_geometry_diag_live_current);\n"
-        "        geometry_diag_clear_vertex_detail(&s_geometry_diag_live_latest);\n"
-        "    }\n" in gpu
-        and "    memset(stats->depth_vertices, 0,\n           offsetof(GpuGeometryCorrectionCounters, partial_polygon_rejections) -\n"
-        "               offsetof(GpuGeometryCorrectionCounters, depth_vertices));\n" in gpu
-        and "    for (int i = 0; s_geometry_diag_detail && i < count; ++i) {\n" in gpu,
-        "the per-vertex fields count only under detail and start from zero when it is switched on")
+require(
+    "void gpu_geometry_diagnostics_set_detail(int enabled) {\n"
+    "    if (enabled && !s_geometry_diag_detail) {\n"
+    "        geometry_diag_clear_vertex_detail(&s_geometry_diag_cumulative);\n"
+    "        geometry_diag_clear_vertex_detail(&s_geometry_diag_live_current);\n"
+    "        geometry_diag_clear_vertex_detail(&s_geometry_diag_live_latest);\n"
+    "    }\n"
+    in gpu
+    and "    memset(stats->depth_vertices, 0,\n           offsetof(GpuGeometryCorrectionCounters, partial_polygon_rejections) -\n"
+    "               offsetof(GpuGeometryCorrectionCounters, depth_vertices));\n"
+    in gpu
+    and "    for (int i = 0; s_geometry_diag_detail && i < count; ++i) {\n" in gpu,
+    "the per-vertex fields count only under detail and start from zero when it is switched on",
+)
 indexes = re.findall(r"s_precision_(?:tag|projection)\[([^\]]+)\]", gte)
-require(set(indexes) == {"PRECISION_STORE_SIZE", "slot", "precision_hash(physical)"} and indexes.count("PRECISION_STORE_SIZE") == 2,
-        "the provenance tags and projections are only ever indexed by the address's hash")
+require(
+    set(indexes) == {"PRECISION_STORE_SIZE", "slot", "precision_hash(physical)"}
+    and indexes.count("PRECISION_STORE_SIZE") == 2,
+    "the provenance tags and projections are only ever indexed by the address's hash",
+)
 slots = re.findall(r"^\s*const uint32_t slot = ([^;]+);$", gte, re.MULTILINE)
-require(slots == ["precision_hash(physical)"] * 4 and gte.count("s_precision_projection[slot]") == 4,
-        "every slot is the hash of the one address whose tag it reads, and its projection is the tag's own")
+require(
+    slots == ["precision_hash(physical)"] * 4 and gte.count("s_precision_projection[slot]") == 4,
+    "every slot is the hash of the one address whose tag it reads, and its projection is the tag's own",
+)
 
 game_dispatch = ROOT / "generated" / "SLUS_002.24.code_dispatch.c"
 # A build without the game leaves an empty file here (build.sh).
@@ -280,25 +334,39 @@ if game_dispatch.is_file() and game_dispatch.stat().st_size:
     keys = [re.fullmatch(r"    \{0x([0-9A-F]{8})u, [^{}]*\},", row) for row in rows]
     require(all(keys), "every row of the game's dispatch table is a plain entry the checks below can read")
     entries = [int(key.group(1), 16) for key in keys]
-    index_text = re.search(r"static const uint(?:16|32)_t k_psx_game_dispatch_index\[\] = \{\n(.*?)\n\};", text, re.DOTALL)
-    lookup = re.search(r"    const uint32_t offset = addr - 0x([0-9A-F]{8})u;\n"
-                       r"    if \(\(addr & 3u\) \|\| offset > 0x([0-9A-F]+)u\) return 0;\n"
-                       r"    const uint32_t index = k_psx_game_dispatch_index\[offset >> 2\];\n"
-                       r"    return index \? &k_psx_game_dispatch\[index - 1u\] : 0;\n", text)
+    index_text = re.search(
+        r"static const uint(?:16|32)_t k_psx_game_dispatch_index\[\] = \{\n(.*?)\n\};", text, re.DOTALL
+    )
+    lookup = re.search(
+        r"    const uint32_t offset = addr - 0x([0-9A-F]{8})u;\n"
+        r"    if \(\(addr & 3u\) \|\| offset > 0x([0-9A-F]+)u\) return 0;\n"
+        r"    const uint32_t index = k_psx_game_dispatch_index\[offset >> 2\];\n"
+        r"    return index \? &k_psx_game_dispatch\[index - 1u\] : 0;\n",
+        text,
+    )
     require(index_text is not None and lookup is not None, "the game's dispatch resolves through its word index")
     index = [int(value) for value in re.findall(r"(\d+)u,", index_text.group(1))]
     low, span = int(lookup.group(1), 16), int(lookup.group(2), 16)
     expected = [0] * (span // 4 + 1)
     for position, key in enumerate(entries):
         expected[(key - low) // 4] = position + 1
-    require(all(key & 3 == 0 for key in entries) and entries == sorted(set(entries)) and entries[0] == low and entries[-1] == low + span and index == expected,
-            f"the word index names each of the {len(entries)} keys at its own word and nothing else")
+    require(
+        all(key & 3 == 0 for key in entries)
+        and entries == sorted(set(entries))
+        and entries[0] == low
+        and entries[-1] == low + span
+        and index == expected,
+        f"the word index names each of the {len(entries)} keys at its own word and nothing else",
+    )
 elif "--require-artifacts" in sys.argv:
     require(False, "the translated game's dispatch is not there")
 
-require("        if (dispatch_keys[i] <= dispatch_keys[i - 1])\n            throw std::runtime_error(fmt::format(\n"
-        "                \"dispatch table key 0x{:08X} follows 0x{:08X}: the binary search and its key gap need ascending keys\","
-        in emitter, "the generator refuses keys out of order")
+require(
+    "        if (dispatch_keys[i] <= dispatch_keys[i - 1])\n            throw std::runtime_error(fmt::format(\n"
+    '                "dispatch table key 0x{:08X} follows 0x{:08X}: the binary search and its key gap need ascending keys",'
+    in emitter,
+    "the generator refuses keys out of order",
+)
 dispatch_path = ROOT / "psxrecomp" / "generated" / "OpenBIOS_dispatch.c"
 if not dispatch_path.is_file():
     require("--require-artifacts" not in sys.argv, "the translated BIOS is not there")
@@ -309,11 +377,15 @@ table = re.search(r"static const DispatchEntry dispatch_table\[(\d+)\] = \{\n(.*
 require(table is not None, "the generated BIOS has its dispatch table")
 keys = [int(key, 16) for key in re.findall(r"^    \{ 0x([0-9A-F]{8})u, ", table.group(2), re.MULTILINE)]
 require(len(keys) == int(table.group(1)) and keys == sorted(set(keys)), "the table's keys are whole and ascending")
-gap = re.findall(r"if \(!found && !\(phys > 0x([0-9A-F]{8})u && phys < 0x([0-9A-F]{8})u\)\) \{\n        while \(lo <= hi\) \{",
-                 dispatch)
+gap = re.findall(
+    r"if \(!found && !\(phys > 0x([0-9A-F]{8})u && phys < 0x([0-9A-F]{8})u\)\) \{\n        while \(lo <= hi\) \{",
+    dispatch,
+)
 require(len(gap) == 1, "one search, guarded once")
 low, high = (int(value, 16) for value in gap[0])
-require(low in keys and high in keys and not any(low < key < high for key in keys),
-        "no key of the table lies inside the gap the search skips")
+require(
+    low in keys and high in keys and not any(low < key < high for key in keys),
+    "no key of the table lies inside the gap the search skips",
+)
 require(low < 0x00010000 and high >= 0x00200000, "the gap covers the game's RAM, else the guard buys nothing")
 print(f"hot paths contract: PASS (gap 0x{low:08X} to 0x{high:08X}, {len(keys)} keys)")

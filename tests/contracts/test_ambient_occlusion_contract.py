@@ -35,8 +35,7 @@ STAGED = (
     "}\n"
 )
 MERGED = (
-    "    for (const Option *option : g_preferences.changed)\n"
-    "        option->set(settings, option->get(pending));\n"
+    "    for (const Option *option : g_preferences.changed)\n        option->set(settings, option->get(pending));\n"
 )
 loader = read("src/game/settings/saved.cpp")
 settings = read("src/game/settings/game_user_settings.h")
@@ -67,7 +66,8 @@ void gl_renderer_set_ssao_view(int view) {
     s_ssao_view = view >= 1 && view <= 4 ? view : 0;
     ssao_mode();
 }
-""" in renderer
+"""
+    in renderer
     and """void gl_renderer_set_ssao_tilt(float tilt) {
     if (tilt >= 0.0f && tilt < 0.95f) s_ssao_tilt = tilt;
 }
@@ -75,7 +75,8 @@ void gl_renderer_set_ssao_shape(float radius, float strength) {
     if (radius > 0.0f) s_ssao_radius = radius;
     if (strength >= 0.0f) s_ssao_strength = strength;
 }
-""" in renderer
+"""
+    in renderer
     and "int gl_renderer_ssao(void) { return s_ssao_on; }\n" in renderer,
     "the setting and a diagnostic view are kept apart, the first of them has the mirror's depth made afresh, and a reach "
     "or a strength that is not one changes nothing",
@@ -92,20 +93,23 @@ require(
         mark_occlusion(occlusion);
     }
     if (!occlusion_applies) ImGui::EndDisabled();
-""" in enhancements
+"""
+    in enhancements
     and """    const bool shape_applies = applies("disruptor.occlusion_reach") &&
                                applies("disruptor.occlusion_strength");
     if (!shape_applies) ImGui::BeginDisabled();
     ImGui::SetNextItemWidth(260.0f);
     const bool reach_moved = option_slider("disruptor.occlusion_reach", &reach);
-""" in enhancements
+"""
+    in enhancements
     and """        option_slider("disruptor.occlusion_strength", &strength);
     if (!shape_applies) ImGui::EndDisabled();
     if (reach_moved || strength_moved) {
         gl_renderer_set_ssao_shape(static_cast<float>(reach), strength / 100.0f);
         mark_occlusion_shape(reach, strength);
     }
-""" in enhancements
+"""
+    in enhancements
     and menu.count('option_toggle("disruptor.ambient_occlusion"') == 1
     and "occlusion" not in experimental
     and experimental.count("ImGui::BeginDisabled()") == experimental.count("ImGui::EndDisabled()") == 1
@@ -123,44 +127,53 @@ void mark_occlusion_shape(int reach, int strength) {
     mark("disruptor.occlusion_reach", reach);
     mark("disruptor.occlusion_strength", strength);
 }
-""" in menu
+"""
+    in menu
     and STAGED in menu
     and MERGED in menu
-    and '    toggle<&Settings::has_ambient_occlusion, &Settings::ambient_occlusion>(\n        "disruptor.ambient_occlusion",' in options
+    and '    toggle<&Settings::has_ambient_occlusion, &Settings::ambient_occlusion>(\n        "disruptor.ambient_occlusion",'
+    in options
     and "write<&Settings::has_occlusion_reach, &Settings::occlusion_reach>, needs_occlusion)" in options
     and "write<&Settings::has_occlusion_strength, &Settings::occlusion_strength>, needs_occlusion)" in options
     and """    if (!env_override_present("PSX_GL_SSAO")) {
         if (settings.has_ambient_occlusion) gl_renderer_set_ssao(settings.ambient_occlusion ? 1 : 0);
-""" in menu
+"""
+    in menu
     and """    gl_renderer_set_ssao_shape(
         settings.has_occlusion_reach && !env_override_present("PSX_GL_SSAO_RADIUS")
             ? static_cast<float>(settings.occlusion_reach) : -1.0f,
         settings.has_occlusion_strength && !env_override_present("PSX_GL_SSAO_STRENGTH")
             ? settings.occlusion_strength / 100.0f : -1.0f);
-""" in menu
+"""
+    in menu
     and """    if (changed("disruptor.ambient_occlusion"))
         gl_renderer_set_ssao(pending.ambient_occlusion ? 1 : 0);
     if (changed("disruptor.occlusion_reach") ||
         changed("disruptor.occlusion_strength"))
         gl_renderer_set_ssao_shape(static_cast<float>(pending.occlusion_reach), pending.occlusion_strength / 100.0f);
-""" in menu,
+"""
+    in menu,
     "the switch and the shape are each staged as options of the shared table, merged into the file's settings, applied at the "
     "next start unless the environment decides that one, and applied when another run saved them",
 )
 
 require(
     """            const int reach = toml::find<int>(d, "occlusion_reach");
-""" in loader
+"""
+    in loader
     and """            const int percent = toml::find<int>(d, "occlusion_strength");
-""" in loader
+"""
+    in loader
     and """        if (s.has_occlusion_reach && s.occlusion_reach >= 50 && s.occlusion_reach <= 800)
             f << "occlusion_reach = " << s.occlusion_reach << "\\n";
         if (s.has_occlusion_strength && s.occlusion_strength >= 0 && s.occlusion_strength <= 300)
             f << "occlusion_strength = " << s.occlusion_strength << "\\n";
-""" in loader
+"""
+    in loader
     and """        if (s.has_ambient_occlusion)
             f << "ambient_occlusion = " << (s.ambient_occlusion ? "true" : "false") << "\\n";
-""" in loader
+"""
+    in loader
     and "    bool has_ambient_occlusion = false; bool ambient_occlusion = false;\n" in settings
     and "    bool has_occlusion_reach = false; int occlusion_reach = 160;" in settings
     and "    bool has_occlusion_strength = false; int occlusion_strength = 80;" in settings,
@@ -180,7 +193,8 @@ require(
     and 'constexpr const char* occlusion_key = "disruptor.ambient_occlusion";\n' in options
     and '    {"disruptor.ambient_occlusion", Page::enhancements, "Shading"},\n'
     '    {"disruptor.occlusion_reach", Page::enhancements, nullptr, true},\n'
-    '    {"disruptor.occlusion_strength", Page::enhancements, nullptr, true},\n' in launcher
+    '    {"disruptor.occlusion_strength", Page::enhancements, nullptr, true},\n'
+    in launcher
     and launcher.count("Page::experimental") == 1,
     "the launcher's Enhancements page holds these three rows and its Experimental page the anti-aliasing list: the switch needs geometry correction, the sliders the switch, "
     "with the menu's own bounds",

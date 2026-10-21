@@ -38,8 +38,7 @@ STAGED = (
     "}\n"
 )
 MERGED = (
-    "    for (const Option *option : g_preferences.changed)\n"
-    "        option->set(settings, option->get(pending));\n"
+    "    for (const Option *option : g_preferences.changed)\n        option->set(settings, option->get(pending));\n"
 )
 
 require(
@@ -56,13 +55,15 @@ require(
     if (visual_flags & 2)
         psx_turned_perspective(px, pq, s_yaw_sin, s_yaw_cos, (float)g_wide_cur_base + s_yaw_center_x, s_yaw_focal_x);
 }
-""" in renderer
+"""
+    in renderer
     and "    const int visual_flags = take_visual_triangle(xs, ys, px, py, pq, pz, pid);\n"
     "    PsxTurnCorner cut[PSX_TURN_CLIP_MAX];\n"
     "    const int near_face = s_near_set;\n"
     "    const int cut_corners = near_face ? -1 : turn_clip(px, py, visual_flags, cut);\n"
     "    const float whole_q[3] = {pq[0], pq[1], pq[2]};\n"
-    "    turned_perspective(px, pq, visual_flags);\n" in renderer
+    "    turned_perspective(px, pq, visual_flags);\n"
+    in renderer
     and renderer.count("turned_perspective(px, pq, visual_flags);") == 1,
     "every textured triangle with exact corners has its weights turned by the turn the picture is drawn under",
 )
@@ -78,7 +79,8 @@ clip = between(renderer, "static int turn_clip(", "\n}\n")
 require(
     "    if (!visual_flags ||\n"
     "        !psx_turn_band(s_yaw_sin, s_yaw_cos, (float)g_wide_cur_base + s_yaw_center_x, s_yaw_focal_x, &low, &high))\n"
-    "        return -1;\n" in clip
+    "        return -1;\n"
+    in clip
     and "    if (px[0] >= low && px[0] <= high && px[1] >= low && px[1] <= high && px[2] >= low && px[2] <= high) return -1;\n"
     in clip
     and clip.endswith("    return psx_turn_clip(px, py, low, high, cut);"),
@@ -87,18 +89,22 @@ require(
 require(
     "        if (s_tb_n + 3 + (cut_corners > 2 ? 3 * (cut_corners - 2) : 0) > TEXBATCH_MAXV) { s_batch_reason[6]++; flush_tex_batch(); }\n"
     in renderer
-    and "            vp[20] = visual_flags || s_flat_sides[0] != 0.0f || s_flat_sides[1] != 0.0f ? px[cut_corners >= 0 ? 0 : i] : (float)xs[i];" in renderer
+    and "            vp[20] = visual_flags || s_flat_sides[0] != 0.0f || s_flat_sides[1] != 0.0f ? px[cut_corners >= 0 ? 0 : i] : (float)xs[i];"
+    in renderer
     and "            vp[21] = visual_flags ? py[cut_corners >= 0 ? 0 : i] : (float)ys[i];\n" in renderer
     and "        for (int piece = 0; piece + 2 < cut_corners; ++piece) {" in renderer
     and "            const int corner_of[3] = {0, piece + 1, piece + 2};\n"
-    "            const int perspective = whole_q[0] > 0.0f && whole_q[1] > 0.0f && whole_q[2] > 0.0f;\n" in renderer
-    and "                piece_q[i] = mixed_q[i] = perspective ? psx_turn_mix(&cut[corner_of[i]], whole_q) : 0.0f;\n" in renderer
+    "            const int perspective = whole_q[0] > 0.0f && whole_q[1] > 0.0f && whole_q[2] > 0.0f;\n"
+    in renderer
+    and "                piece_q[i] = mixed_q[i] = perspective ? psx_turn_mix(&cut[corner_of[i]], whole_q) : 0.0f;\n"
+    in renderer
     and "            turned_perspective(piece_x, piece_q, visual_flags);\n" in renderer
     and "                memcpy(vp, whole, TEXV * sizeof(float));\n" in renderer
     and "                    vp[channel] = own >= 0 ? whole[own * TEXV + channel]\n"
     "                                           : psx_turn_mix(corner, of_corners) / (channel < 4 && perspective ? mixed_q[i] : 1.0f);\n"
     in renderer
-    and "                vp[20] = corner->x;\n                vp[21] = corner->y;\n                vp[22] = piece_q[i];\n" in renderer
+    and "                vp[20] = corner->x;\n                vp[21] = corner->y;\n                vp[22] = piece_q[i];\n"
+    in renderer
     and "        const uint64_t cut_id = pid[0] == pid[1] && pid[1] == pid[2] ? pid[0] : 0u;" in renderer
     and "                s_tb_identity[s_tb_n + i] = own >= 0 ? pid[own] : cut_id;\n" in renderer,
     "a cut textured triangle keeps its canonical picture, is one point in the mirror, and its pieces are one point in the "
@@ -119,7 +125,8 @@ require(
 require(
     "static float turned_depth(float x, float depth, int visual_flags) {\n"
     "    return visual_flags ? psx_turned_depth(x, depth, s_yaw_sin, s_yaw_cos, (float)g_wide_cur_base + s_yaw_center_x, s_yaw_focal_x)\n"
-    "                        : depth;\n" in renderer
+    "                        : depth;\n"
+    in renderer
     and "        for (int k = 0; k < cut_corners; ++k) cut_z[k] = turned_depth(cut[k].x, psx_turn_depth(&cut[k], pz), visual_flags);\n"
     in renderer
     and "            const float piece_z[3] = {cut_z[0], cut_z[piece + 1], cut_z[piece + 2]};\n" in renderer
@@ -135,7 +142,8 @@ require(
     and "        s_fb_identity[s_fb_n] = cut_corners >= 0 ? TEMPORAL_CUT_IDENTITY : pid[i];\n" in renderer
     and "        const int cut = identities && identities[i]==TEMPORAL_CUT_IDENTITY &&\n"
     "            identities[i+1]==TEMPORAL_CUT_IDENTITY && identities[i+2]==TEMPORAL_CUT_IDENTITY;\n"
-    "        t->world = !cut;\n" in temporal
+    "        t->world = !cut;\n"
+    in temporal
     and "        t->modelled = !sprite && !partial && !cut && identities && identities[i] && identities[i+1] && identities[i+2] &&\n"
     in temporal,
     "the whole of a cut triangle is marked, and the in-between presenter takes a marked triangle for no world face",
@@ -145,7 +153,8 @@ require(
     """    gr_set_presentation_yaw(ws_geometry_correction &&
                                 isfinite(s_geometry_camera_yaw_residual)
                                 ? s_geometry_camera_yaw_residual : 0.0,
-""" in gpu,
+"""
+    in gpu,
     "the picture is turned only with geometry correction on, which is why the menu greys the setting without it",
 )
 
@@ -157,7 +166,8 @@ require(
                 g_mouse.mouse_aim_enabled
             ? shown
             : 0.0);
-""" in mouse
+"""
+    in mouse
     and mouse.count("    g_mouse.fractional_yaw = 0.0;\n    g_mouse.shown_yaw_fraction = 0.0;\n") == 2
     and mouse.count("g_mouse.shown_yaw_fraction = 0.0;") == 2
     and "    double shown_yaw_fraction = 0.0;  // what fractional_yaw was a frame ago\n" in mouse,
@@ -174,7 +184,8 @@ require(
         mark_smooth_turn(smooth);
     }
     if (!turn_applies) ImGui::EndDisabled();
-""" in controls
+"""
+    in controls
     and menu.count('option_toggle("disruptor.high_precision_camera"') == 1
     and controls.count("ImGui::BeginDisabled()") == controls.count("ImGui::EndDisabled()"),
     "the setting is on the Controls tab alone, greyed without mouse aim or geometry correction, applied and staged when changed",
@@ -185,19 +196,23 @@ require(
     disruptor_high_precision_camera_set_enabled(enabled ? 1 : 0);
     if (!env_override_present("PSX_GEOMETRY_FULL_YAW")) gl_renderer_set_full_yaw(enabled ? 1 : 0);
 }
-""" in menu
+"""
+    in menu
     and 'void mark_smooth_turn(bool value) { mark("disruptor.high_precision_camera", value); }\n' in menu
     and STAGED in menu
     and MERGED in menu
-    and '    toggle<&Settings::has_high_precision_camera, &Settings::high_precision_camera>(\n        "disruptor.high_precision_camera",' in options
+    and '    toggle<&Settings::has_high_precision_camera, &Settings::high_precision_camera>(\n        "disruptor.high_precision_camera",'
+    in options
     and """    if (const char *forced = std::getenv("PSX_DISRUPTOR_HIGH_PRECISION_CAMERA"))
         apply_smooth_turn(forced[0] != '\\0' && forced[0] != '0');
     else
         apply_smooth_turn(stored(settings, *find_option("disruptor.high_precision_camera")) != 0);
-""" in menu
+"""
+    in menu
     and """    if (changed("disruptor.high_precision_camera"))
         apply_smooth_turn(pending.high_precision_camera);
-""" in menu,
+"""
+    in menu,
     "a change switches the mouse module and the renderer's full turn together, is staged as an option of the shared table, merged "
     "into the file's settings, applied at the next start with the environment first, and applied when another run saved it",
 )

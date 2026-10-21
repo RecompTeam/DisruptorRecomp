@@ -15,9 +15,7 @@ def u32(data: bytes, offset: int) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "exe", nargs="?", type=Path, default=Path("input/SLUS_002.24.code")
-    )
+    parser.add_argument("exe", nargs="?", type=Path, default=Path("input/SLUS_002.24.code"))
     parser.add_argument("--output", type=Path, default=Path("seeds/functions.txt"))
     args = parser.parse_args()
 
@@ -28,7 +26,7 @@ def main() -> int:
     entry = u32(data, 0x10)
     load = u32(data, 0x18)
     text_size = u32(data, 0x1C)
-    payload = data[0x800:0x800 + text_size]
+    payload = data[0x800 : 0x800 + text_size]
     end = load + len(payload)
 
     seeds = {entry}

@@ -28,15 +28,16 @@ header = read("src/game/session/cheats.h")
 game = read("game.toml")
 wide = read("game-widescreen.toml")
 
-require("disruptor_cheats_test.cpp" in cmake and
-        "    disruptor_unit_test(disruptor_cheats " in cmake,
-        "behavioral cheat test must remain registered")
+require(
+    "disruptor_cheats_test.cpp" in cmake and "    disruptor_unit_test(disruptor_cheats " in cmake,
+    "behavioral cheat test must remain registered",
+)
 for config, name in ((game, "game.toml"), (wide, "game-widescreen.toml")):
-    entry_match = re.search(
-        r"mod_function_entry_funcs\s*=\s*\[([^\]]*)\]", config)
-    require(entry_match is not None and
-            '"0x80020DD8"' in entry_match.group(1),
-            f"{name} must retain the audited damage-function hook")
+    entry_match = re.search(r"mod_function_entry_funcs\s*=\s*\[([^\]]*)\]", config)
+    require(
+        entry_match is not None and '"0x80020DD8"' in entry_match.group(1),
+        f"{name} must retain the audited damage-function hook",
+    )
 
 for token in (
     "DISRUPTOR_CHEAT_GAME_NOT_READY",
@@ -44,29 +45,46 @@ for token in (
     "DISRUPTOR_CHEAT_UNVERIFIED_STATE",
     "disruptor_cheats_reset_session",
 ):
-    require(token in header and token in source,
-            f"cheat API is missing fail-closed token {token}")
+    require(token in header and token in source, f"cheat API is missing fail-closed token {token}")
 
 for address in (
-    "0x80020DD8u", "0x80077660u", "0x80077664u",
-    "0x80056A90u", "0x80056AB0u",
-    "0x800770FCu", "0x80077100u", "0x80077104u", "0x80077108u",
-    "0x8007710Cu", "0x80077110u", "0x80077114u", "0x80077118u",
-    "0x80077B5Cu", "0x80077B60u", "0x80077B64u",
-    "0x80077B68u", "0x80077B6Cu",
-    "0x80077627u", "0x80077629u", "0x80077668u", "0x8007766Cu",
+    "0x80020DD8u",
+    "0x80077660u",
+    "0x80077664u",
+    "0x80056A90u",
+    "0x80056AB0u",
+    "0x800770FCu",
+    "0x80077100u",
+    "0x80077104u",
+    "0x80077108u",
+    "0x8007710Cu",
+    "0x80077110u",
+    "0x80077114u",
+    "0x80077118u",
+    "0x80077B5Cu",
+    "0x80077B60u",
+    "0x80077B64u",
+    "0x80077B68u",
+    "0x80077B6Cu",
+    "0x80077627u",
+    "0x80077629u",
+    "0x80077668u",
+    "0x8007766Cu",
     "0x80071690u",
 ):
     require(address in source, f"reviewed cheat identity missing: {address}")
 
-require("kExpectedMaximumAmmo" in source and
-        "0u, 200u, 100u, 50u, 50u, 10u, 100u, 1u" in source,
-        "All Weapons must validate and copy the retail resource maxima")
-require(source.index("maximum_ammo_table_matches()") <
-        source.index("psx_mod_write_word(kLiveAmmoBase"),
-        "All Weapons must validate the executable state before its first write")
-require("psx_mod_write_byte(kCheatedMarker, 1u)" in source,
-        "retail save/endgame cheat consequence must not be bypassed")
+require(
+    "kExpectedMaximumAmmo" in source and "0u, 200u, 100u, 50u, 50u, 10u, 100u, 1u" in source,
+    "All Weapons must validate and copy the retail resource maxima",
+)
+require(
+    source.index("maximum_ammo_table_matches()") < source.index("psx_mod_write_word(kLiveAmmoBase"),
+    "All Weapons must validate the executable state before its first write",
+)
+require(
+    "psx_mod_write_byte(kCheatedMarker, 1u)" in source, "retail save/endgame cheat consequence must not be bypassed"
+)
 
 # Private retail input is absent from clean checkouts: its instructions are pinned when present.
 image_path = ROOT / "input" / "SLUS_002.24.code"
@@ -75,8 +93,7 @@ if image_path.exists():
 
     def word(pc: int) -> int:
         offset = ROM_TEXT_OFFSET + pc - LOAD_ADDRESS
-        require(0 <= offset <= len(image) - 4,
-                f"retail instruction outside image: 0x{pc:08X}")
+        require(0 <= offset <= len(image) - 4, f"retail instruction outside image: 0x{pc:08X}")
         return struct.unpack_from("<I", image, offset)[0]
 
     expected = {
@@ -98,15 +115,12 @@ if image_path.exists():
         0x800415B0: 0xA3820544,  # gp+0x544 cheated marker
     }
     for pc, instruction in expected.items():
-        require(word(pc) == instruction,
-                f"retail cheat identity changed at 0x{pc:08X}")
+        require(word(pc) == instruction, f"retail cheat identity changed at 0x{pc:08X}")
 
 generated = list((ROOT / "generated").glob("SLUS_002.24.code_full_*.c"))
 if generated:
     hook = "psx_mod_function_entry(cpu, 0x80020DD8u)"
-    hook_count = sum(path.read_text(encoding="utf-8").count(hook)
-                     for path in generated)
-    require(hook_count == 1,
-            "generated guest code must contain exactly one God-mode entry hook")
+    hook_count = sum(path.read_text(encoding="utf-8").count(hook) for path in generated)
+    require(hook_count == 1, "generated guest code must contain exactly one God-mode entry hook")
 
 print("Disruptor cheat source/codegen contract: PASS")

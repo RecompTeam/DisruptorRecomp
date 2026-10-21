@@ -328,7 +328,8 @@ require(
     and 'set_property(SOURCE report.cpp APPEND PROPERTY COMPILE_DEFINITIONS\n    "DISRUPTOR_BUILD_VERSION=\\"${DISRUPTOR_BUILD_VERSION}\\"")\n'
     in launcher_cmake
     and "    add_test(NAME disruptor_launcher_report COMMAND disruptor-launcher-report-test)\n" in launcher_cmake
-    and "Press **Report a problem** in the launcher, at the foot of its side bar or on its **Troubleshooting** page." in playing
+    and "Press **Report a problem** in the launcher, at the foot of its side bar or on its **Troubleshooting** page."
+    in playing
     and "your disc image, BIOS and saves are never included" in playing,
     "the report is built into the launcher with the build's version, its test is registered, and the guide tells a player "
     "of the button and of what it leaves out",

@@ -36,7 +36,8 @@ require(
     "void interrupts_resync_after_restore(void) {\n    post_exception_cooldown_until = 0;\n}\n" in interrupts
     and "        psx_mod_gpu_dma_memory_restore(NULL, 0u);\n"
     "    interrupts_resync_after_restore();\n"
-    "    cpu->muldiv_ts_done = cpu->gte_ts_done = psx_cycle_count; /*" in state
+    "    cpu->muldiv_ts_done = cpu->gte_ts_done = psx_cycle_count; /*"
+    in state
     and state.count("interrupts_resync_after_restore();") == 1
     and state.index("        psx_cycle_count = cyc;")
     < state.index("    if (!ok || (seen & required) != required)\n        return 0;\n")
@@ -45,7 +46,10 @@ require(
     "clock are dropped, or no interrupt arrives until the clock is there again",
 )
 require(
-    all(name not in hashed for name in ("runtime/include/interrupts.h", "runtime/src/interrupts.c", "runtime/src/boot_state.c"))
+    all(
+        name not in hashed
+        for name in ("runtime/include/interrupts.h", "runtime/src/interrupts.c", "runtime/src/boot_state.c")
+    )
     and "runtime/include/psx_cycles.h" in hashed
     and "runtime/include/psx_cycles.h" not in changed,
     "the resets live outside the files that key save states: the scheduler's header is one of those, so its resync keeps its signature",
@@ -129,7 +133,8 @@ require(
     and "        if (unlocked) set_cpu_shift(g_cpu_shift.load(std::memory_order_relaxed));\n" in rate
     and "    if (waits) set_cpu_shift(0u);\n" in rate
     and rate.count("g_psx_cyc_overclock_carry") == 1
-    and "    if (shift == g_psx_cyc_overclock_shift) return;\n    g_psx_cyc_overclock_shift = shift;\n    g_psx_cyc_overclock_carry = 0u;\n}\n" in rate,
+    and "    if (shift == g_psx_cyc_overclock_shift) return;\n    g_psx_cyc_overclock_shift = shift;\n    g_psx_cyc_overclock_carry = 0u;\n}\n"
+    in rate,
     "a state holds the instruction cost divider frame unlock sets and its carry, a carry over its divider is refused, frame "
     "unlock drops the carry only where the divider changes, and a state without the two still loads",
 )

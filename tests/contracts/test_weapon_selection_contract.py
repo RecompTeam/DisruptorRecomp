@@ -19,8 +19,10 @@ for address in ("0x80077627u", "0x800770F4u", "0x8007145Cu"):
 
 image_path = ROOT / "input/SLUS_002.24.code"
 exe_path = ROOT / "input/SLUS_002.24"
-require("--require-artifacts" not in sys.argv[1:] or (image_path.exists() and exe_path.exists()),
-        "the build gate must check the retail image and executable: one is absent")
+require(
+    "--require-artifacts" not in sys.argv[1:] or (image_path.exists() and exe_path.exists()),
+    "the build gate must check the retail image and executable: one is absent",
+)
 if image_path.exists():
     image = image_path.read_bytes()
     # The original weapon-list confirm checks ownership then stores the ID.
@@ -39,13 +41,20 @@ if exe_path.exists():
     image = exe_path.read_bytes()
     base = struct.unpack_from("<I", image, 0x18)[0]
     names = (
-        b"Beeatch", b"18mm Semi", b"18mm Auto", b"Phase Rifle",
-        b"Phase Repeater", b"Lockon Cannon", b"AM Blaster", b"AM Cyclone",
-        b"Zodiac", b"Plasma Lance",
+        b"Beeatch",
+        b"18mm Semi",
+        b"18mm Auto",
+        b"Phase Rifle",
+        b"Phase Repeater",
+        b"Lockon Cannon",
+        b"AM Blaster",
+        b"AM Cyclone",
+        b"Zodiac",
+        b"Plasma Lance",
     )
     for weapon, name in enumerate(names):
         offset = 0x800 + 0x8005725C - base + weapon * 16
-        actual = image[offset:offset + 16].split(b"\0", 1)[0]
+        actual = image[offset : offset + 16].split(b"\0", 1)[0]
         require(actual == name, f"retail HUD weapon order changed in slot {weapon + 1}")
 
 print("Disruptor weapon selection retail contract: PASS")

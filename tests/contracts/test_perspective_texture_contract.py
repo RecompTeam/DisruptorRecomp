@@ -69,26 +69,21 @@ def compact(source: str) -> str:
 
 
 def interpolate_uv(
-        weights: tuple[float, float, float],
-        uvs: tuple[tuple[float, float], tuple[float, float], tuple[float, float]],
-        q: tuple[float, float, float]) -> tuple[float, float]:
+    weights: tuple[float, float, float],
+    uvs: tuple[tuple[float, float], tuple[float, float], tuple[float, float]],
+    q: tuple[float, float, float],
+) -> tuple[float, float]:
     """Reference the shader's noperspective (uv*q)/q reconstruction."""
-    denominator = sum(weight * reciprocal
-                      for weight, reciprocal in zip(weights, q))
-    require(denominator > 0.0,
-            "deterministic perspective fixture must have positive q")
+    denominator = sum(weight * reciprocal for weight, reciprocal in zip(weights, q))
+    require(denominator > 0.0, "deterministic perspective fixture must have positive q")
     return tuple(
-        sum(weight * uv[axis] * reciprocal
-            for weight, uv, reciprocal in zip(weights, uvs, q)) /
-        denominator
+        sum(weight * uv[axis] * reciprocal for weight, uv, reciprocal in zip(weights, uvs, q)) / denominator
         for axis in (0, 1)
     )
 
 
-def require_uv_close(actual: tuple[float, float],
-                     expected: tuple[float, float], message: str) -> None:
-    require(all(isclose(a, e, rel_tol=1.0e-12, abs_tol=1.0e-12)
-                for a, e in zip(actual, expected)), message)
+def require_uv_close(actual: tuple[float, float], expected: tuple[float, float], message: str) -> None:
+    require(all(isclose(a, e, rel_tol=1.0e-12, abs_tol=1.0e-12) for a, e in zip(actual, expected)), message)
 
 
 def main() -> int:
@@ -107,126 +102,134 @@ def main() -> int:
         sum(weight * uv[0] for weight, uv in zip(weights, uvs)),
         sum(weight * uv[1] for weight, uv in zip(weights, uvs)),
     )
-    require_uv_close(interpolate_uv(weights, uvs, (1.0, 1.0, 1.0)),
-                     affine,
-                     "equal depths must reproduce affine interpolation")
-    unequal = interpolate_uv(weights, uvs, (1.0, 0.5, 0.25))
-    require_uv_close(unequal, (20.0, 10.0),
-                     "known unequal depths must follow (uv*q)/q")
     require_uv_close(
-        interpolate_uv(weights, uvs, (7.0, 3.5, 1.75)), unequal,
-        "common reciprocal-depth scaling must cancel")
+        interpolate_uv(weights, uvs, (1.0, 1.0, 1.0)), affine, "equal depths must reproduce affine interpolation"
+    )
+    unequal = interpolate_uv(weights, uvs, (1.0, 0.5, 0.25))
+    require_uv_close(unequal, (20.0, 10.0), "known unequal depths must follow (uv*q)/q")
+    require_uv_close(
+        interpolate_uv(weights, uvs, (7.0, 3.5, 1.75)), unequal, "common reciprocal-depth scaling must cancel"
+    )
 
-    quad_uv = ((0.0, 0.0), (64.0, 0.0),
-               (0.0, 64.0), (64.0, 64.0))
+    quad_uv = ((0.0, 0.0), (64.0, 0.0), (0.0, 64.0), (64.0, 64.0))
     quad_q = (1.0, 0.5, 0.25, 0.125)
     # The point on edge 1-2 must reconstruct identically from both vertex orderings.
     first_edge = interpolate_uv(
-        (0.0, 0.4, 0.6),
-        (quad_uv[0], quad_uv[1], quad_uv[2]),
-        (quad_q[0], quad_q[1], quad_q[2]))
+        (0.0, 0.4, 0.6), (quad_uv[0], quad_uv[1], quad_uv[2]), (quad_q[0], quad_q[1], quad_q[2])
+    )
     second_edge = interpolate_uv(
-        (0.6, 0.4, 0.0),
-        (quad_uv[2], quad_uv[1], quad_uv[3]),
-        (quad_q[2], quad_q[1], quad_q[3]))
-    require_uv_close(first_edge, second_edge,
-                     "quad halves must agree along their shared 1-2 diagonal")
+        (0.6, 0.4, 0.0), (quad_uv[2], quad_uv[1], quad_uv[3]), (quad_q[2], quad_q[1], quad_q[3])
+    )
+    require_uv_close(first_edge, second_edge, "quad halves must agree along their shared 1-2 diagonal")
 
     # Texture correction switches independently of geometry, for a same-geometry A/B.
     env_pos = main_cpp.find('std::getenv("PSX_TEXTURE_CORRECTION")')
-    require(env_pos >= 0,
-            "main must expose the independent PSX_TEXTURE_CORRECTION gate")
+    require(env_pos >= 0, "main must expose the independent PSX_TEXTURE_CORRECTION gate")
     env_gate = main_cpp[env_pos : env_pos + 240]
-    require("g_texture_correction" in env_gate,
-            "the texture environment gate must update its own setting")
-    require("g_geometry_correction =" not in env_gate,
-            "the texture environment gate must not mutate geometry correction")
-    require(re.search(
-        r"gpu_texture_correction_set\s*\(\s*g_texture_correction\s*\?\s*1\s*:\s*0\s*\)",
-        main_cpp) is not None,
-        "startup must apply the independent texture-correction setting")
-    require("gpu_geometry_correction_set" in main_cpp,
-            "texture correction must not replace the geometry startup gate")
+    require("g_texture_correction" in env_gate, "the texture environment gate must update its own setting")
+    require(
+        "g_geometry_correction =" not in env_gate, "the texture environment gate must not mutate geometry correction"
+    )
+    require(
+        re.search(r"gpu_texture_correction_set\s*\(\s*g_texture_correction\s*\?\s*1\s*:\s*0\s*\)", main_cpp)
+        is not None,
+        "startup must apply the independent texture-correction setting",
+    )
+    require("gpu_geometry_correction_set" in main_cpp, "texture correction must not replace the geometry startup gate")
 
     # The GPU front-end uses renderer dispatch and gates q on exact provenance before any per-vertex depth.
-    require("sw_set_perspective_triangle(" not in gpu,
-            "gpu.c must not bypass the active renderer with a SW-only setter")
+    require(
+        "sw_set_perspective_triangle(" not in gpu, "gpu.c must not bypass the active renderer with a SW-only setter"
+    )
     texture_sig = function_signature(gpu, "prepare_texture_triangle")
     texture = function_body(gpu, "prepare_texture_triangle")
     resolve_texture = function_body(gpu, "resolve_texture_vertices")
     queue_texture = function_body(gpu, "queue_texture_triangle")
-    require(re.search(r"\(\s*int\s+exact\b", texture_sig) is not None,
-            "texture preparation must receive the exact-polygon verdict")
+    require(
+        re.search(r"\(\s*int\s+exact\b", texture_sig) is not None,
+        "texture preparation must receive the exact-polygon verdict",
+    )
     exact_pos = resolve_texture.find("!exact")
     lookup_pos = resolve_texture.find("gte_precision_load_perspective_word_ex")
-    require(0 <= exact_pos < lookup_pos,
-            "depth lookup must activate only beyond the exact-polygon gate")
-    require("qmax" in resolve_texture,
-            "perspective q must come from reviewed exact depth provenance")
+    require(0 <= exact_pos < lookup_pos, "depth lookup must activate only beyond the exact-polygon gate")
+    require("qmax" in resolve_texture, "perspective q must come from reviewed exact depth provenance")
     turned = function_body(gl, "turned_perspective")
-    require("s_texture_correction_yaw_active" not in gpu and
-            "    if (visual_flags & 2)\n        psx_turned_perspective(px, pq, s_yaw_sin, s_yaw_cos, "
-            "(float)g_wide_cur_base + s_yaw_center_x, s_yaw_focal_x);" in turned and
-            "    turned_perspective(px, pq, visual_flags);\n" in gl,
-            "under a fractional yaw q must be divided by the turn's denominator for the whole triangle, or dropped for it")
+    require(
+        "s_texture_correction_yaw_active" not in gpu
+        and "    if (visual_flags & 2)\n        psx_turned_perspective(px, pq, s_yaw_sin, s_yaw_cos, "
+        "(float)g_wide_cur_base + s_yaw_center_x, s_yaw_focal_x);"
+        in turned
+        and "    turned_perspective(px, pq, visual_flags);\n" in gl,
+        "under a fractional yaw q must be divided by the turn's denominator for the whole triangle, or dropped for it",
+    )
     reset_pos = queue_texture.find("gr_set_perspective_triangle(0")
     accept_pos = queue_texture.find("gr_set_perspective_triangle(1")
-    require(0 <= reset_pos < accept_pos,
-            "failed q must reset before exact q can be queued")
-    require("resolve_texture_vertices(exact" in texture and
-            "queue_texture_triangle" in texture,
-            "triangle wrapper must preserve the exact verdict through q queueing")
+    require(0 <= reset_pos < accept_pos, "failed q must reset before exact q can be queued")
+    require(
+        "resolve_texture_vertices(exact" in texture and "queue_texture_triangle" in texture,
+        "triangle wrapper must preserve the exact verdict through q queueing",
+    )
 
     prepare_sig = function_signature(gpu, "prepare_precise_triangle")
     prepare = function_body(gpu, "prepare_precise_triangle")
-    require(re.search(r"\bint\s+prepare_precise_triangle\b", prepare_sig) is not None,
-            "triangle precision preparation must return its exact verdict")
-    require("return exact" in prepare,
-            "textured triangles must be able to reuse the geometry verdict")
+    require(
+        re.search(r"\bint\s+prepare_precise_triangle\b", prepare_sig) is not None,
+        "triangle precision preparation must return its exact verdict",
+    )
+    require("return exact" in prepare, "textured triangles must be able to reuse the geometry verdict")
 
     for name in ("gp0_exec_textured_tri", "gp0_exec_shaded_textured_tri"):
         body = function_body(gpu, name)
-        require(re.search(
-            r"\b(?:const\s+)?int\s+\w+\s*=\s*prepare_precise_triangle\s*\(",
-            body) is not None,
-            f"{name} must retain the exact geometry verdict")
-        require(re.search(r"prepare_texture_triangle\s*\(\s*\w+\s*,", body)
-                is not None,
-                f"{name} must pass its exact verdict into texture preparation")
+        require(
+            re.search(r"\b(?:const\s+)?int\s+\w+\s*=\s*prepare_precise_triangle\s*\(", body) is not None,
+            f"{name} must retain the exact geometry verdict",
+        )
+        require(
+            re.search(r"prepare_texture_triangle\s*\(\s*\w+\s*,", body) is not None,
+            f"{name} must pass its exact verdict into texture preparation",
+        )
 
     for name in ("gp0_exec_textured_quad", "gp0_exec_shaded_textured_quad"):
         body = function_body(gpu, name)
-        require(body.count("prepare_precise_quad_vertices") == 1,
-                f"{name} must preflight the whole quad once")
-        require(body.count("resolve_texture_vertices(") == 1 and
-                "precise_quad" in body,
-                f"{name} must resolve all four q values once from the exact verdict")
-        require(len(re.findall(
-            r"queue_texture_triangle\s*\(\s*perspective_quad\b", body)) == 2,
-                f"{name} must give both halves the same atomic q verdict")
+        require(body.count("prepare_precise_quad_vertices") == 1, f"{name} must preflight the whole quad once")
+        require(
+            body.count("resolve_texture_vertices(") == 1 and "precise_quad" in body,
+            f"{name} must resolve all four q values once from the exact verdict",
+        )
+        require(
+            len(re.findall(r"queue_texture_triangle\s*\(\s*perspective_quad\b", body)) == 2,
+            f"{name} must give both halves the same atomic q verdict",
+        )
         first_q = re.search(
             r"queue_texture_triangle\s*\(\s*perspective_quad\s*,\s*(\w+)\s*,"
-            r"\s*0\s*,\s*1\s*,\s*2\s*\)", body)
+            r"\s*0\s*,\s*1\s*,\s*2\s*\)",
+            body,
+        )
         second_q = re.search(
             r"queue_texture_triangle\s*\(\s*perspective_quad\s*,\s*(\w+)\s*,"
-            r"\s*2\s*,\s*1\s*,\s*3\s*\)", body)
-        require(first_q is not None and second_q is not None and
-                first_q.group(1) == second_q.group(1),
-                f"{name} must preserve q order across the shared diagonal")
+            r"\s*2\s*,\s*1\s*,\s*3\s*\)",
+            body,
+        )
+        require(
+            first_q is not None and second_q is not None and first_q.group(1) == second_q.group(1),
+            f"{name} must preserve q order across the shared diagonal",
+        )
 
     # Stricter than subpixel X/Y: reject clamped far depth and the GTE near divide-overflow region.
-    require("GTE_PRECISION_LOOKUP_PERSPECTIVE_INVALID" in gte_header and
-            "gte_precision_load_perspective_word_ex" in gte_header,
-            "the strict perspective-depth lookup must be public and diagnosable")
-    perspective_lookup = function_body(
-        gte, "gte_precision_load_perspective_word_ex")
-    require("precision_lookup_projection" in perspective_lookup and
-            "!projection->perspective_valid" in perspective_lookup and
-            "GTE_PRECISION_LOOKUP_PERSPECTIVE_INVALID" in perspective_lookup,
-            "perspective lookup must layer its strict bit over exact provenance")
+    require(
+        "GTE_PRECISION_LOOKUP_PERSPECTIVE_INVALID" in gte_header
+        and "gte_precision_load_perspective_word_ex" in gte_header,
+        "the strict perspective-depth lookup must be public and diagnosable",
+    )
+    perspective_lookup = function_body(gte, "gte_precision_load_perspective_word_ex")
+    require(
+        "precision_lookup_projection" in perspective_lookup
+        and "!projection->perspective_valid" in perspective_lookup
+        and "GTE_PRECISION_LOOKUP_PERSPECTIVE_INVALID" in perspective_lookup,
+        "perspective lookup must layer its strict bit over exact provenance",
+    )
     projection = source_span(gte, "struct PreciseProjection", "};")
-    require("perspective_valid" in projection,
-            "the depth-validity verdict must travel with copied provenance")
+    require("perspective_valid" in projection, "the depth-validity verdict must travel with copied provenance")
     capture = function_body(gte, "gte_rtps_internal")
     for token in (
         "gte->H != 0",
@@ -234,116 +237,132 @@ def main() -> int:
         "gte->MAC3 <= 0xFFFF",
         "(uint32_t)gte->SZ[3] * 2u > (uint32_t)gte->H",
     ):
-        require(token in capture,
-                f"strict perspective capture predicate missing: {token}")
+        require(token in capture, f"strict perspective capture predicate missing: {token}")
 
     # The software backend is deliberately disconnected: its dormant path modifies native VRAM.
-    require("void gr_set_perspective_triangle(" in render_header,
-            "renderer facade must expose one-shot perspective metadata")
-    require("(*set_perspective_triangle)(" in compact(render_header),
-            "renderer vtable must carry one-shot perspective metadata")
-    sw_backend = source_span(
-        render, "static const GpuRenderBackend SW_BACKEND", "};")
-    require(re.search(
-        r"\.set_perspective_triangle\s*=\s*NULL", sw_backend) is not None,
-        "software backend callback must remain NULL to preserve canonical VRAM")
+    require(
+        "void gr_set_perspective_triangle(" in render_header,
+        "renderer facade must expose one-shot perspective metadata",
+    )
+    require(
+        "(*set_perspective_triangle)(" in compact(render_header),
+        "renderer vtable must carry one-shot perspective metadata",
+    )
+    sw_backend = source_span(render, "static const GpuRenderBackend SW_BACKEND", "};")
+    require(
+        re.search(r"\.set_perspective_triangle\s*=\s*NULL", sw_backend) is not None,
+        "software backend callback must remain NULL to preserve canonical VRAM",
+    )
     dispatch = function_body(render, "gr_set_perspective_triangle")
-    require("g_b->set_perspective_triangle" in dispatch,
-            "perspective metadata must dispatch through the active backend")
-    require(dispatch.count("g_b->set_perspective_triangle") >= 2,
-            "the optional perspective callback must be null-checked")
+    require(
+        "g_b->set_perspective_triangle" in dispatch, "perspective metadata must dispatch through the active backend"
+    )
+    require(
+        dispatch.count("g_b->set_perspective_triangle") >= 2, "the optional perspective callback must be null-checked"
+    )
 
     # The appended temporal depth is CPU metadata: expanding the record must not shift attributes.
-    require("#define TEXV 24" in gl,
-            "textured GL vertices must retain independent q and temporal depth")
+    require("#define TEXV 24" in gl, "textured GL vertices must retain independent q and temporal depth")
     tex_vs = source_span(gl, "static const char *TEX_VS", "static const char *TEX_FS")
     tex_fs = source_span(gl, "static const char *TEX_FS", "static const char *BLIT_VS")
-    require("layout(location=11) in float a_q" in tex_vs,
-            "TEX_VS must consume q at attribute location 11")
+    require("layout(location=11) in float a_q" in tex_vs, "TEX_VS must consume q at attribute location 11")
     gl_compact = compact(gl)
-    require("p_glVertexAttribPointer(11,1,GL_FLOAT,GL_FALSE,st,(void*)(22*sizeof(float)))"
-            in gl_compact,
-            "VAO location 11 must read q from TEXV offset 22")
-    require("p_glEnableVertexAttribArray(11)" in gl_compact,
-            "the q vertex attribute must be enabled")
-    require(re.search(r"vp\s*\[\s*22\s*\]\s*=", gl) is not None,
-            "every queued textured vertex must initialize q")
-    require(".set_perspective_triangle = glb_set_perspective_triangle" in gl,
-            "the GL backend must register its one-shot q setter")
+    require(
+        "p_glVertexAttribPointer(11,1,GL_FLOAT,GL_FALSE,st,(void*)(22*sizeof(float)))" in gl_compact,
+        "VAO location 11 must read q from TEXV offset 22",
+    )
+    require("p_glEnableVertexAttribArray(11)" in gl_compact, "the q vertex attribute must be enabled")
+    require(re.search(r"vp\s*\[\s*22\s*\]\s*=", gl) is not None, "every queued textured vertex must initialize q")
+    require(
+        ".set_perspective_triangle = glb_set_perspective_triangle" in gl,
+        "the GL backend must register its one-shot q setter",
+    )
     gl_set = function_body(gl, "glb_set_perspective_triangle")
-    require("sw_set_perspective_triangle" not in gl_set,
-            "pre-context GL q must not fall through to canonical software VRAM")
+    require(
+        "sw_set_perspective_triangle" not in gl_set, "pre-context GL q must not fall through to canonical software VRAM"
+    )
 
     # Polygon-normalized q cannot identify equal depths across polygons: temporal identity takes the original GTE depth once.
     temporal_route = function_body(render, "gr_set_temporal_depth_triangle")
-    require(temporal_route.count("g_b->set_temporal_depth_triangle") >= 2 and
-            re.search(r"\.set_temporal_depth_triangle\s*=\s*NULL", sw_backend),
-            "temporal metadata must remain an optional presentation callback")
+    require(
+        temporal_route.count("g_b->set_temporal_depth_triangle") >= 2
+        and re.search(r"\.set_temporal_depth_triangle\s*=\s*NULL", sw_backend),
+        "temporal metadata must remain an optional presentation callback",
+    )
     precise = function_body(gpu, "resolve_precise_vertices")
     queue_precise = function_body(gpu, "queue_precise_triangle")
-    require(precise.count("s_precise_vertex_depth[i] = psx_pinned_corner_depth(unpin, pinned[i], z[i]);") == 2 and
-            "s_precise_vertex_depth[i] = z[i]" not in precise and
-            "gr_set_temporal_depth_triangle(psx_pinned_depth_mode(s_precise_vertex_depth[a], s_precise_vertex_depth[b], "
-            "s_precise_vertex_depth[c])," in queue_precise and
-            "s_texture_correction_enabled" not in queue_precise,
-            "temporal depth must use exact GTE depth independently of texture correction")
+    require(
+        precise.count("s_precise_vertex_depth[i] = psx_pinned_corner_depth(unpin, pinned[i], z[i]);") == 2
+        and "s_precise_vertex_depth[i] = z[i]" not in precise
+        and "gr_set_temporal_depth_triangle(psx_pinned_depth_mode(s_precise_vertex_depth[a], s_precise_vertex_depth[b], "
+        "s_precise_vertex_depth[c]),"
+        in queue_precise
+        and "s_texture_correction_enabled" not in queue_precise,
+        "temporal depth must use exact GTE depth independently of texture correction",
+    )
     consume = function_body(gl, "take_visual_triangle")
-    require("exact && s_next_temporal_depth" in consume and
-            "s_next_temporal_depth = 0" in consume,
-            "temporal depth must require exact provenance and be consumed once")
-    for name in ("gpu_flat_rect", "gpu_textured_rect", "gpu_geometry",
-                 "glb_set_geometry_correction"):
-        require("s_next_temporal_depth = 0" in function_body(gl, name),
-                f"{name} must clear unused temporal depth before UI or rejection fallback")
-    require("layout(location=12)" not in tex_vs,
-            "temporal camera depth must not become a shader attribute")
+    require(
+        "exact && s_next_temporal_depth" in consume and "s_next_temporal_depth = 0" in consume,
+        "temporal depth must require exact provenance and be consumed once",
+    )
+    for name in ("gpu_flat_rect", "gpu_textured_rect", "gpu_geometry", "glb_set_geometry_correction"):
+        require(
+            "s_next_temporal_depth = 0" in function_body(gl, name),
+            f"{name} must clear unused temporal depth before UI or rejection fallback",
+        )
+    require("layout(location=12)" not in tex_vs, "temporal camera depth must not become a shader attribute")
 
     # Canonical drawing stays affine: only the visual pass, on an exact polygon with valid q, selects uv*q/q.
-    require("noperspective centroid out vec2 v_uv" in tex_vs and
-            "noperspective centroid in vec2 v_uv" in tex_fs,
-            "the original canonical affine varying must remain intact")
+    require(
+        "noperspective centroid out vec2 v_uv" in tex_vs and "noperspective centroid in vec2 v_uv" in tex_fs,
+        "the original canonical affine varying must remain intact",
+    )
     for token in ("u_visual > 0.5", "a_visual_flags > 1.5", "a_q > 0.0"):
-        require(token in tex_vs,
-                f"visual perspective gate is missing: {token}")
-    require("abs(u_camera.x) <= 0.0000001" not in tex_vs and
-            "a_q/depth_den" not in compact(tex_vs),
-            "the shader must take q as the renderer prepared it: a division per vertex there could mix zero and nonzero q")
-    require("v_uvq" in tex_vs and "v_uvq" in tex_fs and
-            re.search(r"a_uv\s*\*\s*q", tex_vs) is not None,
-            "visual shader must interpolate uv*q and q separately")
-    require("sample_uv" in tex_fs,
-            "fragment sampling must use an explicit local corrected UV")
-    require(re.search(r"sample_uv\s*=\s*v_uvq\.xy\s*/\s*v_uvq\.z", tex_fs)
-            is not None,
-            "the exact visual path must reconstruct UV as (uv*q)/q")
-    require("floor(sample_uv.x)" in tex_fs and
-            "floor(sample_uv.y)" in tex_fs,
-            "nearest and bilinear setup must both start from sample_uv")
-    require("floor(v_uv.x)" not in tex_fs and "floor(v_uv.y)" not in tex_fs,
-            "no nearest/bilinear sampling may bypass the local corrected UV")
+        require(token in tex_vs, f"visual perspective gate is missing: {token}")
+    require(
+        "abs(u_camera.x) <= 0.0000001" not in tex_vs and "a_q/depth_den" not in compact(tex_vs),
+        "the shader must take q as the renderer prepared it: a division per vertex there could mix zero and nonzero q",
+    )
+    require(
+        "v_uvq" in tex_vs and "v_uvq" in tex_fs and re.search(r"a_uv\s*\*\s*q", tex_vs) is not None,
+        "visual shader must interpolate uv*q and q separately",
+    )
+    require("sample_uv" in tex_fs, "fragment sampling must use an explicit local corrected UV")
+    require(
+        re.search(r"sample_uv\s*=\s*v_uvq\.xy\s*/\s*v_uvq\.z", tex_fs) is not None,
+        "the exact visual path must reconstruct UV as (uv*q)/q",
+    )
+    require(
+        "floor(sample_uv.x)" in tex_fs and "floor(sample_uv.y)" in tex_fs,
+        "nearest and bilinear setup must both start from sample_uv",
+    )
+    require(
+        "floor(v_uv.x)" not in tex_fs and "floor(v_uv.y)" not in tex_fs,
+        "no nearest/bilinear sampling may bypass the local corrected UV",
+    )
 
     # Perspective correction is attribute-only: no change to clipping, coverage or geometry through W.
-    require("gl_Position.w" not in tex_vs,
-            "texture correction must not mutate gl_Position.w")
-    require(re.search(
-        r"gl_Position\s*=\s*vec4\([^;]*0\.0\s*,\s*1\.0\s*\)",
-        tex_vs, re.S) is not None,
-        "TEX_VS must keep homogeneous W fixed at 1")
+    require("gl_Position.w" not in tex_vs, "texture correction must not mutate gl_Position.w")
+    require(
+        re.search(r"gl_Position\s*=\s*vec4\([^;]*0\.0\s*,\s*1\.0\s*\)", tex_vs, re.S) is not None,
+        "TEX_VS must keep homogeneous W fixed at 1",
+    )
     flush = function_body(gl, "flush_tex_batch")
-    canonical = flush.find(
-        "geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 0)")
-    visual = flush.find(
-        "geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 1)")
-    require(0 <= canonical < visual,
-            "the canonical affine pass must execute before the visual pass")
+    canonical = flush.find("geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 0)")
+    visual = flush.find("geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 1)")
+    require(0 <= canonical < visual, "the canonical affine pass must execute before the visual pass")
 
     # Rectangles and UI never carry GTE-world metadata: every one-shot is cleared so no q leaks.
     for name in ("gpu_flat_rect", "gpu_textured_rect"):
         body = function_body(gl, name)
-        require("s_next_world = 0" in body and "s_next_precise = 0" in body,
-                f"{name} must remain outside exact world correction")
-        require(re.search(r"s_next_perspective\w*\s*=\s*0", body) is not None,
-                f"{name} must explicitly clear one-shot perspective state")
+        require(
+            "s_next_world = 0" in body and "s_next_precise = 0" in body,
+            f"{name} must remain outside exact world correction",
+        )
+        require(
+            re.search(r"s_next_perspective\w*\s*=\s*0", body) is not None,
+            f"{name} must explicitly clear one-shot perspective state",
+        )
 
     print("perspective texture structural contract: PASS")
     return 0
@@ -353,6 +372,5 @@ if __name__ == "__main__":
     try:
         raise SystemExit(main())
     except AssertionError as exc:
-        print(f"perspective texture structural contract: FAIL: {exc}",
-              file=sys.stderr)
+        print(f"perspective texture structural contract: FAIL: {exc}", file=sys.stderr)
         raise SystemExit(1)

@@ -114,7 +114,8 @@ helpers = read("cmake/DisruptorTests.cmake")
 
 require(
     '    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/DisruptorTests.cmake")\n' in cmake
-    and cmake.index("find_package(Python3 3.11 REQUIRED COMPONENTS Interpreter)") < cmake.index("cmake/DisruptorTests.cmake")
+    and cmake.index("find_package(Python3 3.11 REQUIRED COMPONENTS Interpreter)")
+    < cmake.index("cmake/DisruptorTests.cmake")
     and cmake.index("cmake/DisruptorTests.cmake") < cmake.index("disruptor_contract("),
     "the helpers are loaded after Python is found and before the first registration",
 )

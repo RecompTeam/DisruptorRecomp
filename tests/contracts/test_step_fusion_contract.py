@@ -29,24 +29,37 @@ cyc = read("psxrecomp/runtime/include/psx_cyc.h")
 cycles = read("psxrecomp/runtime/src/psx_cycles.c")
 cmake = read("CMakeLists.txt")
 
-require("    if (!cycle_per_insn) return ss.str();\n    const std::string block_text = ss.str();\n"
-        "    std::string fused = fuse_cycle_steps(block_text, config_.indent);\n"
-        "    if (restore_cycle_steps(fused, config_.indent) != block_text) {\n" in codegen
-        and "        throw std::runtime_error(refusal);\n" in codegen,
-        "every block of the per-instruction cycle model is fused, and the generator refuses one whose steps do not come back")
-require('static const std::set<std::string_view> kCastTypes = {\n'
-        '    "uint32_t", "int32_t", "uint16_t", "int16_t", "uint8_t", "int8_t", "uint64_t", "int64_t"};' in codegen
-        and '    static constexpr std::string_view kAllowedMarks = " ()+-<>|^~!=?:&_@";' in codegen
-        and 'CAST_TYPES = {"uint32_t", "int32_t", "uint16_t", "int16_t", "uint8_t", "int8_t", "uint64_t", "int64_t"}' in read("tools/audit_codegen.py")
-        and 'REGISTER_MARKS = set(" ()+-<>|^~!=?:&_@")' in read("tools/audit_codegen.py"),
-        "the generator's register-only words and marks are the audit's")
+require(
+    "    if (!cycle_per_insn) return ss.str();\n    const std::string block_text = ss.str();\n"
+    "    std::string fused = fuse_cycle_steps(block_text, config_.indent);\n"
+    "    if (restore_cycle_steps(fused, config_.indent) != block_text) {\n"
+    in codegen
+    and "        throw std::runtime_error(refusal);\n" in codegen,
+    "every block of the per-instruction cycle model is fused, and the generator refuses one whose steps do not come back",
+)
+require(
+    "static const std::set<std::string_view> kCastTypes = {\n"
+    '    "uint32_t", "int32_t", "uint16_t", "int16_t", "uint8_t", "int8_t", "uint64_t", "int64_t"};'
+    in codegen
+    and '    static constexpr std::string_view kAllowedMarks = " ()+-<>|^~!=?:&_@";' in codegen
+    and 'CAST_TYPES = {"uint32_t", "int32_t", "uint16_t", "int16_t", "uint8_t", "int8_t", "uint64_t", "int64_t"}'
+    in read("tools/audit_codegen.py")
+    and 'REGISTER_MARKS = set(" ()+-<>|^~!=?:&_@")' in read("tools/audit_codegen.py"),
+    "the generator's register-only words and marks are the audit's",
+)
 for count in (2, 3, 4):
-    require(f"    psx_cyc_run_inline(cpu, masks, {count}u);\n" in cycles,
-            f"psx_cyc_step{count} is the shared run of {count} steps")
-require("    disruptor_unit_test(psx_cyc_run tests/unit/psx_cyc_run_test.cpp RUNTIME_HEADERS)\n" in cmake,
-        "the run's equality with the steps one by one stays tested")
-require(cyc.count("PSX_CYC_HOT void psx_cyc_run_inline(") == 1 and cyc.count("PSX_CYC_HOT void psx_cyc_charge_ones(") == 1,
-        "one run and one charge of ones")
+    require(
+        f"    psx_cyc_run_inline(cpu, masks, {count}u);\n" in cycles,
+        f"psx_cyc_step{count} is the shared run of {count} steps",
+    )
+require(
+    "    disruptor_unit_test(psx_cyc_run tests/unit/psx_cyc_run_test.cpp RUNTIME_HEADERS)\n" in cmake,
+    "the run's equality with the steps one by one stays tested",
+)
+require(
+    cyc.count("PSX_CYC_HOT void psx_cyc_run_inline(") == 1 and cyc.count("PSX_CYC_HOT void psx_cyc_charge_ones(") == 1,
+    "one run and one charge of ones",
+)
 
 shards = sorted(GENERATED.glob("SLUS_002.24.code_full_*.c"))
 if not shards:
@@ -61,8 +74,10 @@ specification.loader.exec_module(audit)
 
 text = "\n".join(path.read_text(encoding="utf-8") for path in shards)
 heads, violations = audit.fused_step_violations(text)
-require(heads == audit.EXPECTED_FUSED_STEPS and not violations,
-        f"the output holds {heads} runs and {len(violations)} violations: {violations[:3]}")
+require(
+    heads == audit.EXPECTED_FUSED_STEPS and not violations,
+    f"the output holds {heads} runs and {len(violations)} violations: {violations[:3]}",
+)
 
 lines = text.split("\n")
 head = next(index for index, line in enumerate(lines) if line.startswith("    psx_cyc_step4(cpu, "))
@@ -91,7 +106,10 @@ for line, what in (
     ("    cpu->gpr[2] = cpu->gpr[3], cpu->hi = 0;", "a comma between its steps"),
     ("    cpu->gpr[2] = r;", "a name standing for a register between its steps"),
     ("    cpu->gpr[2] = π;", "a name outside ASCII between its steps"),
-    ("    cpu->gpr[2] = cpu->gpr[3]; /* note */ g_psx_cyc_batch = 0;", "a statement behind a comment between its steps"),
+    (
+        "    cpu->gpr[2] = cpu->gpr[3]; /* note */ g_psx_cyc_batch = 0;",
+        "a statement behind a comment between its steps",
+    ),
     ("    cpu->gpr[2] = (r)();", "a call through parentheses between its steps"),
     ("    cpu->gpr[2] = (cpu->gpr[3])(cpu->gpr[4]);", "a register called between its steps"),
     ("    cpu->gpr[2] = @;", "the substitute mark itself between its steps"),

@@ -17,7 +17,7 @@ def require(condition: bool, message: str) -> None:
 
 def body(source: str, signature: str) -> str:
     start = source.index(signature)
-    return source[start:source.index("\n}\n", start)]
+    return source[start : source.index("\n}\n", start)]
 
 
 def enclosing(source: str, block: str) -> list[str]:
@@ -65,7 +65,8 @@ require(
 )
 require(
     "int gpu_ws_displayed_native_43(void) { return ws_native_43(1); }\n"
-    "void gpu_ws_tell_frame_kind(int flat) { psx_ws_frame_kinds_tell(&ws_frame_kinds, flat); }" in gpu
+    "void gpu_ws_tell_frame_kind(int flat) { psx_ws_frame_kinds_tell(&ws_frame_kinds, flat); }"
+    in gpu
     and gpu.count("psx_ws_frame_kinds_tell(") == 1
     and "void gpu_ws_tell_frame_kind(int flat);" in header,
     "a game must be able to tell the kind of the frame it begins, as it tells it, and nothing else may",
@@ -76,7 +77,8 @@ require(
     "unless it is forced or native-wide, the cull's margin must follow the kind of the frame being built: a world's first frame gets its moved arena by it",
 )
 require(
-    "\n    psx_ws_frame_kinds_list(&ws_frame_kinds, 1);\n    if (word_count == 0) {" in body(gpu, "void gpu_set_gp0_linked_list_node(")
+    "\n    psx_ws_frame_kinds_list(&ws_frame_kinds, 1);\n    if (word_count == 0) {"
+    in body(gpu, "void gpu_set_gp0_linked_list_node(")
     and "    psx_ws_frame_kinds_list(&ws_frame_kinds, 0);" in body(gpu, "void gpu_ws_end_linked_list(void)")
     and "psx_ws_frame_kinds_list(" not in body(gpu, "void gpu_ws_begin_linked_list(void)")
     and gpu.count("psx_ws_frame_kinds_list(") == 2,
@@ -103,8 +105,11 @@ require(
     "            : psx_ws_frame_kinds_drawing(&ws_frame_kinds, WS_GTE_GAME_MODE_MIN_VERTS);\n"
     "        if (flat >= 0) return !flat;\n"
     "        if ((uint32_t)s_frame_count - ws_last_gte_stamp <= WS_GTE_GAME_MODE_HYSTERESIS) return 1;\n"
-    "    }" in mode
-    and mode.index("ws_gameplay_state_matches()") < mode.index("ws_full_2d_mode()") < mode.index("if (ws_gte_game_mode_cfg) {"),
+    "    }"
+    in mode
+    and mode.index("ws_gameplay_state_matches()")
+    < mode.index("ws_full_2d_mode()")
+    < mode.index("if (ws_gte_game_mode_cfg) {"),
     "a GTE-detected game's frame must be told by its buffer, the grace only where the buffer is not known, after the older gates",
 )
 require(
@@ -123,53 +128,65 @@ require(
     "the two public questions must differ in nothing but the frame",
 )
 require(
-    gpu.count("psx_ws_frame_kinds_project(") == 1 and gpu.count("psx_ws_frame_kinds_area(") == 1
-    and gpu.count("psx_ws_frame_kinds_drawing(") == 1 and gpu.count("psx_ws_frame_kinds_displayed(") == 2,
+    gpu.count("psx_ws_frame_kinds_project(") == 1
+    and gpu.count("psx_ws_frame_kinds_area(") == 1
+    and gpu.count("psx_ws_frame_kinds_drawing(") == 1
+    and gpu.count("psx_ws_frame_kinds_displayed(") == 2,
     "nothing else in the renderer may move or ask the frame kinds",
 )
 upload = body(gpu, "static void gp0_exec_cpu_to_vram(void)")
 require(
     "static void ws_frame_pictured(int x, int y, int w, int h) {\n"
     "    psx_ws_frame_kinds_pictured(&ws_frame_kinds, (uint32_t)x, (uint32_t)y, (uint32_t)w, (uint32_t)h,\n"
-    "                                (uint32_t)ws_disp_w(), (uint32_t)ws_disp_h());\n}" in gpu
+    "                                (uint32_t)ws_disp_w(), (uint32_t)ws_disp_h());\n}"
+    in gpu
     and gpu.count("psx_ws_frame_kinds_pictured(") == 1
     and gpu.count("ws_frame_pictured(") == 2,
     "a picture is measured against buffers the size of the display, and only an upload reports one",
 )
 require(
-    "\n    ws_frame_pictured(vram_write_x, vram_write_y, vram_write_w, vram_write_h);\n    /* Record for debug */\n" in upload
+    "\n    ws_frame_pictured(vram_write_x, vram_write_y, vram_write_w, vram_write_h);\n    /* Record for debug */\n"
+    in upload
     and upload.index("vram_write_h = (h == 0) ? 0x200 : (uint16_t)h;") < upload.index("ws_frame_pictured("),
     "every upload must report where it lands, whatever the front end makes of it",
 )
 require(
     "            gr_copy_rect(src_x, src_y, dst_x, dst_y, w, h);\n"
     "            psx_ws_frame_kinds_copied(&ws_frame_kinds, (uint32_t)src_x, (uint32_t)src_y, (uint32_t)dst_x, (uint32_t)dst_y, (uint32_t)w, (uint32_t)h,\n"
-    "                                      (uint32_t)ws_disp_w(), (uint32_t)ws_disp_h());\n            break;\n" in gpu
+    "                                      (uint32_t)ws_disp_w(), (uint32_t)ws_disp_h());\n            break;\n"
+    in gpu
     and gpu.count("psx_ws_frame_kinds_copied(") == 1,
     "every copy inside video memory must report where it comes from and where it lands: one buffer copied whole onto the other keeps its kind",
 )
 require(
     "    if (opcode >= 0x20 && opcode <= 0x7F) {\n"
-    "        psx_ws_frame_kinds_drawn(&ws_frame_kinds, psx_ws_frame_kinds_blend(opcode));\n" in gpu
+    "        psx_ws_frame_kinds_drawn(&ws_frame_kinds, psx_ws_frame_kinds_blend(opcode));\n"
+    in gpu
     and "        gp0_state = shaded ? GP0_POLYLINE_SHADED : GP0_POLYLINE_MONO;\n"
-    "        psx_ws_frame_kinds_drawn(&ws_frame_kinds, psx_ws_frame_kinds_blend(opcode));\n" in gpu
+    "        psx_ws_frame_kinds_drawn(&ws_frame_kinds, psx_ws_frame_kinds_blend(opcode));\n"
+    in gpu
     and gpu.count("psx_ws_frame_kinds_drawn(") == 2
-    and gpu.index("        psx_ws_frame_kinds_drawn(&ws_frame_kinds, psx_ws_frame_kinds_blend(opcode));\n        int32_t cvx, cvy;")
+    and gpu.index(
+        "        psx_ws_frame_kinds_drawn(&ws_frame_kinds, psx_ws_frame_kinds_blend(opcode));\n        int32_t cvx, cvy;"
+    )
     < gpu.index("    switch (opcode) {\n        case 0x00:"),
     "every drawing command, a polyline too, must say before it is drawn whether it is a blend: the first that is none ends a veil",
 )
 require(
     "    psx_ws_frame_kinds_filled(&ws_frame_kinds, dst_x, dst_y, width, height, (uint32_t)ws_disp_w(), (uint32_t)ws_disp_h());\n"
     "    ws_menu_yield((int)dst_x, (int)dst_y, (int)width, (int)height, 1);\n"
-    "    gr_fill_rect((int)dst_x, (int)dst_y, (int)width, (int)height, color16);\n" in gpu
+    "    gr_fill_rect((int)dst_x, (int)dst_y, (int)width, (int)height, color16);\n"
+    in gpu
     and gpu.count("psx_ws_frame_kinds_filled(") == 1,
     "a fill, which no drawing area bounds, must report the rectangle it clears before it clears it: one that covers a veiled buffer ends its veil",
 )
 require(
     "    const int held = kinds->buffers[slot].known && kinds->buffers[slot].x == x && kinds->buffers[slot].y == y && !kinds->buffers[slot].flat;\n"
-    "    const int flat = kinds->told ? kinds->told_flat : kinds->projected < least;\n" in kinds
+    "    const int flat = kinds->told ? kinds->told_flat : kinds->projected < least;\n"
+    in kinds
     and "    kinds->buffers[slot].veiled = flat && !kinds->told && held;\n"
-    "    kinds->buffers[slot].flat = flat && !kinds->buffers[slot].veiled;\n" in kinds
+    "    kinds->buffers[slot].flat = flat && !kinds->buffers[slot].veiled;\n"
+    in kinds
     and "    if (blend || !buffer->veiled) return;\n    buffer->veiled = 0;\n    buffer->flat = 1;\n" in kinds
     and "    return (opcode & 2u) != 0 && (lines || (opcode & 4u) == 0);\n" in kinds,
     "a frame of too few vertices set on a buffer that holds a world's frame is that frame under a veil, as when a level's end "
@@ -178,14 +195,16 @@ require(
 require(
     "int gpu_ws_displayed_flat(void) {\n"
     "    return ws_gte_game_mode_cfg && !gpu_ws_displayed_menu() &&\n"
-    "           psx_ws_frame_kinds_displayed(&ws_frame_kinds, display_area_x, display_area_y) == 1;\n}" in gpu
+    "           psx_ws_frame_kinds_displayed(&ws_frame_kinds, display_area_x, display_area_y) == 1;\n}"
+    in gpu
     and "int  gpu_ws_displayed_flat(void);" in header,
     "the present must be able to ask whether the frame on display is a flat one that is not the front end's",
 )
 require(
     "        bool wide_present = (!fmv_frame && !di.depth24 && g_ws_engaged &&\n"
     "                             gr_wide_supported() && !gpu_ws_displayed_flat() &&\n"
-    "                             (ws_native_wide_active() || corrected_present));\n" in runtime
+    "                             (ws_native_wide_active() || corrected_present));\n"
+    in runtime
     and runtime.count("wide_present = true") == 0
     and runtime.count("gpu_ws_displayed_flat()") == 1,
     "a flat frame must be presented from video memory whatever would send it to the mirror: uploads and copies do not reach it",

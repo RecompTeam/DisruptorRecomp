@@ -58,8 +58,7 @@ STAGED = (
     "}\n"
 )
 MERGED = (
-    "    for (const Option *option : g_preferences.changed)\n"
-    "        option->set(settings, option->get(pending));\n"
+    "    for (const Option *option : g_preferences.changed)\n        option->set(settings, option->get(pending));\n"
 )
 generator = read("psxrecomp/recompiler/src/code_generator.cpp")
 configs = read("game.toml") + read("game-widescreen.toml")
@@ -125,8 +124,12 @@ require(
     in menu,
     "Escape outside the menu must ask for a skip that lasts half a second",
 )
-for token in ("disruptor_intro_skip_enabled", "disruptor_intro_skip_set_enabled", "disruptor_intro_skip_request",
-              "disruptor_intro_skip_fast_forward"):
+for token in (
+    "disruptor_intro_skip_enabled",
+    "disruptor_intro_skip_set_enabled",
+    "disruptor_intro_skip_request",
+    "disruptor_intro_skip_fast_forward",
+):
     require(token in header and token in source, f"intro-skip API is missing {token}")
 
 host_header = read("psxrecomp/runtime/include/host_ui.h")
@@ -140,7 +143,8 @@ require(
     "        g_boot_over = true;\n"
     "        return 0;\n"
     "    }\n"
-    "    return enabled ? 1 : 0;\n}" in source
+    "    return enabled ? 1 : 0;\n}"
+    in source
     and "constexpr uint32_t kMenuState = 0x800715FCu;" in source
     and "constexpr uint8_t kMainMenu = 0x18u;" in source
     and "constexpr int kBootBudget = 1500;" in source
@@ -151,23 +155,29 @@ require(
     "    if (address == kRendererEntry) g_boot_over = true;" in source
     and "constexpr uint32_t kRendererEntry = 0x80040E68u;" in source
     and '    psx_mod_register_function_entry_plugin("disruptor.intro_skip.renderer", kRendererEntry, renderer_entry);\n'
-    "    psx_host_set_fast_forward_query(disruptor_intro_skip_fast_forward);" in source,
+    "    psx_host_set_fast_forward_query(disruptor_intro_skip_fast_forward);"
+    in source,
     "play must end the boot's fast-forward, and the frontend must be given the module's own query",
 )
 require(
     "void psx_host_set_fast_forward_query(int (*query)(void));" in host_header
     and 'extern "C" void psx_host_set_fast_forward_query(int (*query)(void));' in source
-    and 'extern "C" void psx_host_set_fast_forward_query(int (*query)(void)) {\n    g_fast_forward_query = query;\n}' in host,
+    and 'extern "C" void psx_host_set_fast_forward_query(int (*query)(void)) {\n    g_fast_forward_query = query;\n}'
+    in host,
     "the module and the frontend must agree on the query's shape",
 )
 require(
     "    const bool module_fast_forward = g_fast_forward_query &&\n"
-    "        !psx_netplay_active() && g_fast_forward_query() != 0;\n" in host
+    "        !psx_netplay_active() && g_fast_forward_query() != 0;\n"
+    in host
     and host.count("g_fast_forward_query()") == 1
     and "                     module_fast_forward ||\n"
-    "                     (turbo_loads_active && g_turbo_audio_sink_enabled));" in host
-    and "    if (g_headless || module_fast_forward) {\n        netplay_tail.skip_pace();\n        return;\n    }" in host
-    and host.index("const bool module_fast_forward") < host.index("    if (g_headless || module_fast_forward) {")
+    "                     (turbo_loads_active && g_turbo_audio_sink_enabled));"
+    in host
+    and "    if (g_headless || module_fast_forward) {\n        netplay_tail.skip_pace();\n        return;\n    }"
+    in host
+    and host.index("const bool module_fast_forward")
+    < host.index("    if (g_headless || module_fast_forward) {")
     < host.index("    if (debug_server_turbo_enabled()) {"),
     "the frontend must ask once per VBlank and never under netplay, drop the sound, and neither pace nor present the frame",
 )
@@ -205,7 +215,8 @@ require(
     and '    return settings.has_skip_intro && settings.skip_intro && !std::getenv("PSX_DISRUPTOR_SKIP_INTRO");\n'
     in read("src/game/host.cpp")
     and '    const char *forced = std::getenv("PSX_DISRUPTOR_SKIP_INTRO");\n'
-    "    return forced && forced[0] && forced[0] != '0';\n" in read("src/game/host.cpp"),
+    "    return forced && forced[0] && forced[0] != '0';\n"
+    in read("src/game/host.cpp"),
     "the saved switch, or the environment in its place, must also skip the BIOS animation",
 )
 

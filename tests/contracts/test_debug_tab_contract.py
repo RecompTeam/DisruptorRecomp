@@ -41,14 +41,17 @@ require("    disruptor_contract(debug_tab)\n" in cmake, "this contract is regist
 debug = between(menu, "void draw_debug_tab() {", "void draw_cheats_tab() {")
 require(
     '            if (ImGui::BeginTabItem("Debug")) {\n                draw_debug_tab();\n' in menu
-    and "    if (ImGui::Button(\"Record the screen\") && !gl_renderer_recording_shown()) g_menu.record_shown = true;\n" in debug
+    and '    if (ImGui::Button("Record the screen") && !gl_renderer_recording_shown()) g_menu.record_shown = true;\n'
+    in debug
     and """    int view = gl_renderer_uv_view() ? 6 : gl_renderer_mesh_view() ? 5 : gl_renderer_ssao_view();
-""" in debug
+"""
+    in debug
     and """    if (ImGui::Combo("Diagnostic view", &view, "Off\\0Shading alone\\0Depth\\0Surface normals\\0Fog fade\\0Mesh\\0Texture coordinates\\0")) {
         apply_diagnostic_view(view);
         mark_diagnostic_view(view);
     }
-""" in debug
+"""
+    in debug
     and menu.count('"Diagnostic view"') == 1
     and menu.count('"Record the screen"') == 1,
     "the Debug tab holds the recorder's button, which arms nothing while a recording runs, and the seven views in the "
@@ -56,13 +59,15 @@ require(
 )
 
 require(
-    'inline constexpr const char* kDisruptorDiagnosticViews[] = {"off", "shading", "depth", "normals", "fade", "mesh", "uv"};\n' in settings
+    'inline constexpr const char* kDisruptorDiagnosticViews[] = {"off", "shading", "depth", "normals", "fade", "mesh", "uv"};\n'
+    in settings
     and """void apply_diagnostic_view(int view) {
     gl_renderer_set_ssao_view(view >= 1 && view <= 4 ? view : 0);
     gl_renderer_set_mesh_view(view == 5 ? 1 : 0);
     gl_renderer_set_uv_view(view == 6 ? 1 : 0);
 }
-""" in menu
+"""
+    in menu
     and "void gl_renderer_set_mesh_view(int enabled) { s_mesh_view = enabled != 0; }\n" in renderer
     and "    s_ssao_view = view >= 1 && view <= 4 ? view : 0;\n" in renderer,
     "views 1 to 4 are layers of the occlusion pass and view 5 is the mesh, never two at once",
@@ -74,31 +79,38 @@ require(
     g_preferences.pending.diagnostic_view = value;
     g_preferences.diagnostic_view_changed = true;
 }
-""" in menu
+"""
+    in menu
     and """    if (g_preferences.diagnostic_view_changed) {
         settings.has_diagnostic_view = true;
         settings.diagnostic_view = pending.diagnostic_view;
     }
-""" in menu
+"""
+    in menu
     and """        apply_diagnostic_view(settings.has_diagnostic_view && env_override_present("PSX_DISRUPTOR_CAPSULE_REPLAY")
                                   ? settings.diagnostic_view : 0);
-""" in menu
+"""
+    in menu
     and """    if (g_preferences.diagnostic_view_changed)
         apply_diagnostic_view(pending.diagnostic_view);
-""" in menu,
+"""
+    in menu,
     "a view is written to the file so that a capsule carries it, and at a start only a capsule's replay takes it from there",
 )
 
 require(
     """            const std::string view = toml::find<std::string>(d, "diagnostic_view");
-""" in loader
+"""
+    in loader
     and """                if (view == kDisruptorDiagnosticViews[index]) {
                     s.diagnostic_view = index;
                     s.has_diagnostic_view = true;
-""" in loader
+"""
+    in loader
     and """        if (s.has_diagnostic_view && s.diagnostic_view >= 0 && s.diagnostic_view < kDisruptorDiagnosticViewCount)
             f << "diagnostic_view = " << quoted(kDisruptorDiagnosticViews[s.diagnostic_view]) << "\\n";
-""" in loader
+"""
+    in loader
     and '"disruptor.diagnostic_view",' in read("tests/contracts/test_launcher_contract.py"),
     "the file names a view by its word, a word it does not know is no view, and the launcher is decided not to offer it",
 )
@@ -106,8 +118,10 @@ require(
 require(
     """void start_shown_recording() {
     g_menu.record_shown = false;
-""" in menu
-    and '    g_menu.shown_note = gl_renderer_record_shown(utf8(folder).c_str(), 120, 240, 960) ? "Last recording: " + utf8(folder)\n' in menu
+"""
+    in menu
+    and '    g_menu.shown_note = gl_renderer_record_shown(utf8(folder).c_str(), 120, 240, 960) ? "Last recording: " + utf8(folder)\n'
+    in menu
     and "        if (g_menu.record_shown) start_shown_recording();\n" in menu
     and '    const fs::path folder = g_preferences.path.parent_path() / "shown" / std::to_string(now);\n' in menu,
     "the recording starts when the menu closes: 240 pictures at 960 wide after 120 swaps, in a folder of their own beside "
@@ -118,11 +132,13 @@ require(
     """int gl_renderer_record_shown(const char *folder, int skip, int count, int width) {
     if (!folder || !folder[0] || strlen(folder) >= sizeof s_shown_dir || count <= 0 || count > 2000 || width < 160 ||
         width > 3840 || s_shown_left > 0) return 0;
-""" in renderer
+"""
+    in renderer
     and "int gl_renderer_recording_shown(void) { return s_shown_left > 0; }\n" in renderer
     and renderer.count("    shown_capture(0, 1.0f);\n") == 4
     and renderer.count("    shown_capture(1, shown);\n") == 1
-    and '"index,kind,alpha,microseconds,faces,camera_samples,camera_inliers,carried,held,conflicting,departed\\n"' in renderer
+    and '"index,kind,alpha,microseconds,faces,camera_samples,camera_inliers,carried,held,conflicting,departed\\n"'
+    in renderer
     and '            fprintf(file, "P6\\n%d %d\\n255\\n", s_shown_w, s_shown_h);\n' in renderer
     and "            for (int y = s_shown_h - 1; y >= 0; --y)\n" in renderer,
     "a request out of bounds or during a recording is refused, every swap of a game frame and of an in-between frame is "
@@ -136,22 +152,32 @@ require(
     in renderer
     and "    const int mode = s_uv_view ? 0 : s_ssao_view ? s_ssao_view + 1 : s_ssao_on;\n" in renderer
     and "s_yaw_center_x > 0.0f ? s_yaw_center_x : 160.0f, nearer, s_uv_view ? 1.0f : 0.0f);\n" in renderer
-    and "    const int on = !s_uv_view && (grown > 1 || (s_aa_edges && edges)) && s_aa_prog && lw > 0 && lh > 0;\n" in renderer
+    and "    const int on = !s_uv_view && (grown > 1 || (s_aa_edges && edges)) && s_aa_prog && lw > 0 && lh > 0;\n"
+    in renderer
     and '        "  if (v_bill > 0.5 && u_fade_at.w > 0.5) {\\n"\n'
     '        "    if (blended && v_bill > 0.9) discard;\\n"\n'
     '        "    blend_factor = vec4(0.0);\\n"\n'
     '        "    vec2 cell = floor(mod(sample_uv, 256.0) / 16.0);\\n"\n'
     '        "    frag.rgb = vec3(abs(fract(sample_uv / 32.0) * 2.0 - 1.0), (cell.x + 16.0 * cell.y) / 255.0);\\n"\n'
     '        "  }\\n"\n'
-    '        "}\\n";\n' in renderer
+    '        "}\\n";\n'
+    in renderer
     and "inline constexpr int kDisruptorDiagnosticViewCount = 7;\n" in settings
-    and "static void apply_texel_blend(int mode, int mirror) {\n    if (s_uv_view && mirror) glDisable(GL_BLEND);\n    else apply_psx_blend(mode);\n}\n" in renderer
+    and "static void apply_texel_blend(int mode, int mirror) {\n    if (s_uv_view && mirror) glDisable(GL_BLEND);\n    else apply_psx_blend(mode);\n}\n"
+    in renderer
     and "        apply_texel_blend(semi, s_visual_on);          /* Pass 2: STP=1 texels (blended) */\n" in renderer
-    and "    s_visual_on = on > 0.0f;\n" in body(renderer, "static void geometry_visual_uniforms(GLint visual, GLint camera, GLint options,")
-    and flush.index("    hr_begin(1);\n") < flush.index("geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 0);")
-    < flush.index("    tex_batch_draw_passes(nverts, semi);\n") < flush.index("        wide_target_begin(dx, s_tex_uXoff, s_tex_uXhalf);\n"
-        "        geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 1);\n")
-    < flush.index("        geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 0);\n        wide_target_end(")
+    and "    s_visual_on = on > 0.0f;\n"
+    in body(renderer, "static void geometry_visual_uniforms(GLint visual, GLint camera, GLint options,")
+    and flush.index("    hr_begin(1);\n")
+    < flush.index("geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 0);")
+    < flush.index("    tex_batch_draw_passes(nverts, semi);\n")
+    < flush.index(
+        "        wide_target_begin(dx, s_tex_uXoff, s_tex_uXhalf);\n"
+        "        geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 1);\n"
+    )
+    < flush.index(
+        "        geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 0);\n        wide_target_end("
+    )
     and flush.count("geometry_visual_uniforms(") == 3
     and "apply_psx_blend" not in body(renderer, "static void tex_batch_draw_passes(int nverts, int semi) {")
     and temporal.count("apply_texel_blend(c->semi, 1); temporal_mask(c->check,1);") == 2

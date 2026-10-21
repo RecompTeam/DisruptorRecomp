@@ -216,7 +216,10 @@ presenter = read("psxrecomp/runtime/src/gpu_gl_temporal.c.inc")
 
 def depth_step(clip_z: str) -> int:
     """Returns the step of a 24-bit depth buffer a clip-space z lands on, each product rounded to a float as a GPU has it."""
-    single = lambda value: struct.unpack("f", struct.pack("f", value))[0]
+
+    def single(value: float) -> float:
+        return struct.unpack("f", struct.pack("f", value))[0]
+
     return round(single((single(float(clip_z)) + 1.0) * 0.5) * (2**24 - 1))
 
 

@@ -57,8 +57,7 @@ STAGED = (
     "}\n"
 )
 MERGED = (
-    "    for (const Option *option : g_preferences.changed)\n"
-    "        option->set(settings, option->get(pending));\n"
+    "    for (const Option *option : g_preferences.changed)\n        option->set(settings, option->get(pending));\n"
 )
 manifest = read("framework/FILES.txt")
 cycle_header = read("psxrecomp/runtime/include/psx_cyc.h")
@@ -114,7 +113,8 @@ require(
     "        p_glBindBuffer(PSXGL_PIXEL_UNPACK_BUFFER, s_up_pbo);\n"
     "        p_glBufferData(PSXGL_PIXEL_UNPACK_BUFFER, (ptrdiff_t)bytes, pixels, PSXGL_STREAM_DRAW);\n"
     "        glTexSubImage2D(GL_TEXTURE_2D, 0, x, y, w, h, format, type, (const void *)0);\n"
-    "        p_glBindBuffer(PSXGL_PIXEL_UNPACK_BUFFER, 0);\n" in renderer
+    "        p_glBindBuffer(PSXGL_PIXEL_UNPACK_BUFFER, 0);\n"
+    in renderer
     and "    p_glGenBuffers(1, &s_up_pbo);\n" in renderer
     and uploads.count("upload_rect(") == 2
     and "glTexSubImage2D" not in uploads,
@@ -127,7 +127,8 @@ require(
     "    if (queried) {\n"
     "        glGetIntegerv(0x8CAA /* GL_READ_FRAMEBUFFER_BINDING */, &read_fbo);\n"
     "        glGetIntegerv(GL_TEXTURE_BINDING_2D, &texture);\n"
-    "    }\n" in snapshot
+    "    }\n"
+    in snapshot
     and snapshot.count("glGetIntegerv(") == 2
     and "        p_glCopyImageSubData(s_raw_tex, GL_TEXTURE_2D, 0, 0, 0, 0, s->textures[i], GL_TEXTURE_2D, 0, 0, 0, 0,\n"
     in presenter
@@ -189,7 +190,8 @@ require(
     'void mark_frame_unlock(bool value) { mark("disruptor.frame_unlock", value); }\n' in menu
     and STAGED in menu
     and MERGED in menu
-    and '    toggle<&Settings::has_frame_unlock, &Settings::frame_unlock>(\n        "disruptor.frame_unlock",' in options,
+    and '    toggle<&Settings::has_frame_unlock, &Settings::frame_unlock>(\n        "disruptor.frame_unlock",'
+    in options,
     "a changed switch must reach settings.toml",
 )
 require(
@@ -234,8 +236,10 @@ require(
     and "    cpu->gte_ts_done = psx_cycle_count + (uint64_t)psx_cyc_overclocked_latency(latency);\n" in cycle_source
     and "        psx_advance_cycles(psx_cyc_overclocked_wait(4u));\n" in icache
     and "    psx_advance_cycles(psx_cyc_overclocked_wait(cost));\n" in icache
-    and "    psx_advance_cycles(phys < 0x00800000u ? psx_cyc_overclocked_wait(fudge + cost) : fudge + cost);\n" in memory
-    and "    if (shift == g_psx_cyc_overclock_shift) return;\n    g_psx_cyc_overclock_shift = shift;\n    g_psx_cyc_overclock_carry = 0u;\n}\n" in source,
+    and "    psx_advance_cycles(phys < 0x00800000u ? psx_cyc_overclocked_wait(fudge + cost) : fudge + cost);\n"
+    in memory
+    and "    if (shift == g_psx_cyc_overclock_shift) return;\n    g_psx_cyc_overclock_shift = shift;\n    g_psx_cyc_overclock_carry = 0u;\n}\n"
+    in source,
     "the overclock divides the GTE and multiplier latencies without the elapsed carry, instruction cache refills and main "
     "RAM loads off the inline path with it, leaves device waits whole, and another divisor starts from no carry",
 )
@@ -318,7 +322,8 @@ require(
 require(
     'void mark_present_enabled(bool value) { mark("video.frame_interpolation", value); }\n' in menu
     and MERGED in menu
-    and '    toggle<&Settings::has_frame_interpolation, &Settings::frame_interpolation>(\n        "video.frame_interpolation",' in options,
+    and '    toggle<&Settings::has_frame_interpolation, &Settings::frame_interpolation>(\n        "video.frame_interpolation",'
+    in options,
     "a changed switch must reach settings.toml",
 )
 require(
