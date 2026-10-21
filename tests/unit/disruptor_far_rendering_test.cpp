@@ -129,6 +129,7 @@ extern "C" void disruptor_render_arena_publish_fades(void) {
 namespace {
 
 constexpr std::uint32_t kTestPlayer = 0x80010000u;
+constexpr std::uint32_t kWeaponLoad = 0x80071324u, kWantedWeapon = 0x80077627u, kHeldWeapon = 0x80071484u;
 constexpr std::uint32_t kRendererContext = 0x80020000u;
 constexpr std::uint32_t kTestStack = 0x80030000u;
 constexpr std::uint32_t kPrimitiveBuffer = 0x80040000u;
@@ -583,7 +584,8 @@ void test_current_globals_and_signed_fade() {
     seed_word(kFarDistance, 900u);
     exit_renderer(&cpu);
     expect(load_word(kFarDistance) == 900u && static_cast<std::int32_t>(load_word(kFadeStart)) == -256,
-           "a global the game rewrote inside the renderer keeps its new value, the other is given back");    enter(&cpu);
+           "a global the game rewrote inside the renderer keeps its new value, the other is given back");
+    enter(&cpu);
     seed_word(kFadeStart, 100u);
     exit_renderer(&cpu);
     expect(load_word(kFarDistance) == 900u && load_word(kFadeStart) == 100u,
@@ -647,6 +649,45 @@ void test_guards_and_exact_dispatch() {
     expect(diagnostics().substituted_loads == 0u, "phase/opcode mismatch is an exact no-op");
     invoke_first_far(&cpu);
     expect(cpu.gpr[12] == 1280u && diagnostics().substituted_loads == 1u, "the exact AFTER hook counts the load");
+    exit_renderer(&cpu);
+}
+
+void test_weapon_load_keeps_distance() {
+    reset_state();
+    CPUState cpu{};
+    seed_live_game(&cpu);
+    disruptor_far_rendering_set_preset(DISRUPTOR_FAR_RENDERING_EXTENDED);
+    seed_word(kPlayerPointer, 0u);
+    enter(&cpu);
+    expect(load_word(kFarDistance) == 1024u, "without the player pointer the retail distance stays");
+    exit_renderer(&cpu);
+    seed_byte(kWeaponLoad, 1u);
+    enter(&cpu);
+    expect(load_word(kFarDistance) == 1280u, "a weapon's load keeps the distance without the player pointer");
+    exit_renderer(&cpu);
+    seed_word(kPlayerPointer, kTestPlayer);
+    seed_byte(kTestPlayer + kPlayerInactiveOffset, 1u);
+    enter(&cpu);
+    expect(load_word(kFarDistance) == 1280u, "a weapon's load keeps the distance while the player is marked");
+    exit_renderer(&cpu);
+    seed_byte(kWeaponLoad, 2u);
+    enter(&cpu);
+    expect(load_word(kFarDistance) == 1024u, "another load keeps the retail distance");
+    exit_renderer(&cpu);
+    seed_byte(kWeaponLoad, 0u);
+    seed_byte(kWantedWeapon, 3u);
+    seed_byte(kHeldWeapon, 1u);
+    enter(&cpu);
+    expect(load_word(kFarDistance) == 1280u, "empty hands with another weapon wanted are a switch before its load");
+    exit_renderer(&cpu);
+    seed_byte(kWeaponLoad, 2u);
+    enter(&cpu);
+    expect(load_word(kFarDistance) == 1024u, "not while another load runs");
+    exit_renderer(&cpu);
+    seed_byte(kWeaponLoad, 0u);
+    seed_byte(kHeldWeapon, 3u);
+    enter(&cpu);
+    expect(load_word(kFarDistance) == 1024u, "empty hands with the wanted weapon held are not");
     exit_renderer(&cpu);
 }
 
@@ -1450,6 +1491,7 @@ int main() {
     test_retail_baseline_and_metric_reset();
     test_current_globals_and_signed_fade();
     test_guards_and_exact_dispatch();
+    test_weapon_load_keeps_distance();
     test_nested_toggle_netplay_and_lockstep();
     test_savestates_keep_the_game_values();
     test_screen_effects_see_the_game_values();

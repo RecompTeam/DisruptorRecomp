@@ -20,6 +20,7 @@
 #include "game/render/far_rendering.h"
 
 #include "cpu_state.h"
+#include "game/session/weapon_load.h"
 #include "lockstep.h"
 #include "mod_plugins.h"
 #include "mod_memory.h"
@@ -360,8 +361,9 @@ bool plausible_live_gameplay() {
     }
 
     const uint32_t player = psx_mod_read_word(kPlayerPointer);
-    return valid_main_ram_pointer(player, kPlayerInactiveOffset) &&
-           psx_mod_read_byte(player + kPlayerInactiveOffset) == 0u;
+    const bool present = valid_main_ram_pointer(player, kPlayerInactiveOffset);
+    const bool hands_empty = present && psx_mod_read_byte(player + kPlayerInactiveOffset) != 0u;
+    return (present && !hands_empty) || disruptor::weapon_switching(hands_empty);
 }
 
 bool plausible_far_globals(uint32_t far_distance, int32_t fade_start) {

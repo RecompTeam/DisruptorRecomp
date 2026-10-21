@@ -137,6 +137,7 @@ void gpu_geometry_camera_projection_center_y_set(double center_y) {
 namespace {
 
 constexpr std::uint32_t kTestPlayer = 0x80010000u;
+constexpr std::uint32_t kWeaponLoad = 0x80071324u, kWantedWeapon = 0x80077627u, kHeldWeapon = 0x80071484u;
 constexpr std::uint32_t kTestProjectile = 0x80012000u;
 
 void reset_state() {
@@ -285,6 +286,29 @@ void test_gameplay_guards() {
     g_renderer_callback(&cpu, kRendererEntry);
     expect(!disruptor_vertical_camera_active(),
            "inactive player object suspends pitch");
+
+    seed_byte(kWeaponLoad, 1u);
+    g_renderer_callback(&cpu, kRendererEntry);
+    expect(disruptor_vertical_camera_active(), "a weapon's load keeps the pitch while the player is marked");
+    seed_word(kPlayerPointer, 0u);
+    g_renderer_callback(&cpu, kRendererEntry);
+    expect(disruptor_vertical_camera_active(), "a weapon's load keeps the pitch without the player pointer");
+    seed_word(kPlayerPointer, kTestPlayer);
+    seed_byte(kWeaponLoad, 2u);
+    g_renderer_callback(&cpu, kRendererEntry);
+    expect(!disruptor_vertical_camera_active(), "another load keeps the retail horizon");
+    seed_byte(kWeaponLoad, 0u);
+    seed_byte(kWantedWeapon, 3u);
+    seed_byte(kHeldWeapon, 1u);
+    g_renderer_callback(&cpu, kRendererEntry);
+    expect(disruptor_vertical_camera_active(), "empty hands with another weapon wanted are a switch before its load");
+    seed_byte(kWeaponLoad, 2u);
+    g_renderer_callback(&cpu, kRendererEntry);
+    expect(!disruptor_vertical_camera_active(), "not while another load runs");
+    seed_byte(kWeaponLoad, 0u);
+    seed_byte(kHeldWeapon, 3u);
+    g_renderer_callback(&cpu, kRendererEntry);
+    expect(!disruptor_vertical_camera_active(), "empty hands with the wanted weapon held are not");
 
     seed_byte(kTestPlayer + kPlayerInactiveOffset, 0u);
     g_netplay = true;
