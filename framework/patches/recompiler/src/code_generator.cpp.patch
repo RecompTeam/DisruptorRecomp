@@ -1,8 +1,8 @@
 diff --git a/recompiler/src/code_generator.cpp b/recompiler/src/code_generator.cpp
-index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..f234f4d614a7c4038bb6ce0bbc3895dae9ff48b2 100644
+index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..2ca141c50ee27ec1fa7e1e55f27bc42a88314cb1 100644
 --- a/recompiler/src/code_generator.cpp
 +++ b/recompiler/src/code_generator.cpp
-@@ -11,12 +11,305 @@
+@@ -11,12 +11,323 @@
  #include "../../runtime/include/psx_instr_cost.h"  /* single-source CPU cycle cost (shared with interp) */
  #include <fmt/format.h>
  #include <algorithm>
@@ -298,6 +298,24 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..f234f4d614a7c4038bb6ce0bbc3895da
 +    return nullptr;
 +}
 +
++static const DisruptorBackdropTileSite kDisruptorWeaponListSites[] = {
++    {0x8003D840u, 0x93840310u},
++    {0x8003E014u, 0x8C637670u},
++    {0x8003E098u, 0x8C427670u},
++    {0x8003E0F8u, 0x93830310u},
++    {0x8003E8C8u, 0x8FBF00DCu},
++    {0x8003E7B8u, 0x8C637670u},
++    {0x8003E84Cu, 0x8C427670u},
++};
++
++static const DisruptorBackdropTileSite *disruptor_weapon_list_site(
++        uint32_t address) {
++    for (const DisruptorBackdropTileSite &site : kDisruptorWeaponListSites) {
++        if (site.pc == address) return &site;
++    }
++    return nullptr;
++}
++
 +static const DisruptorBackdropTileSite *disruptor_backdrop_tile_site(
 +        uint32_t address) {
 +    for (const DisruptorBackdropTileSite &site : kDisruptorBackdropTileSites) {
@@ -308,7 +326,7 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..f234f4d614a7c4038bb6ce0bbc3895da
  
  static bool codegen_cycle_per_insn() {
      // DEFAULT ON for the faithful-timing (cycle-audit) branch: each instruction
-@@ -723,6 +1016,36 @@
+@@ -723,6 +1034,36 @@
      uint32_t opcode = (instr >> 26) & 0x3F;
      uint32_t rs = get_rs(instr);
      uint32_t rt = get_rt(instr);
@@ -345,7 +363,7 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..f234f4d614a7c4038bb6ce0bbc3895da
  
      // REGIMM branches. R3000A hardware decodes EVERY rt value here, not just
      // the four assembler mnemonics: the branch sense is rt bit 0 (0 = bltz,
-@@ -784,6 +1107,78 @@
+@@ -784,6 +1125,89 @@
  
      std::string code;
  
@@ -420,11 +438,22 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..f234f4d614a7c4038bb6ce0bbc3895da
 +        }
 +        intro_skip_site = nullptr;
 +    }
++    const DisruptorBackdropTileSite *weapon_list_site =
++        disruptor_weapon_list_site(addr);
++    if (weapon_list_site && instr != weapon_list_site->instruction) {
++        if (!config_.overlay_mode) {
++            throw std::runtime_error(fmt::format(
++                "Disruptor weapon-list site 0x{:08X} expected word "
++                "0x{:08X}, found 0x{:08X}",
++                addr, weapon_list_site->instruction, instr));
++        }
++        weapon_list_site = nullptr;
++    }
 +
      // Full-word-guarded terrain-frustum half-angle constants. Scaling the
      // tangent is the geometric counterpart of widening the horizontal
      // projection; adding screen pixels directly to 12-bit angle units is not.
-@@ -812,6 +1207,67 @@
+@@ -812,6 +1236,67 @@
              "{} = psx_ws_angle_widen({}u);"
              "  /* aspect-scaled terrain frustum half-angle */{}",
              reg_name(dst), (uint32_t)vanilla, comment);
@@ -492,7 +521,7 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..f234f4d614a7c4038bb6ce0bbc3895da
      }
  
      for (const auto& site : config_.ws_signed_x_bound_sites) {
-@@ -971,6 +1427,76 @@
+@@ -971,6 +1456,76 @@
      // same address holds different code across scene variants, so a mismatch is
      // expected — apply the transform only where the bytes match, else fall
      // through to the vanilla translation (see CodeGenConfig::overlay_mode).
@@ -569,7 +598,7 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..f234f4d614a7c4038bb6ce0bbc3895da
      if (config_.ws_cull_bias_sites.count(addr)) {
          if (opcode == 0x08 || opcode == 0x09) {  // addi / addiu
              uint32_t rs = get_rs(instr), rt = get_rt(instr);
-@@ -1217,11 +1743,15 @@
+@@ -1217,11 +1772,15 @@
          }
          // Overlay variant at the same address: leave nonmatching code unchanged.
      }
@@ -590,7 +619,7 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..f234f4d614a7c4038bb6ce0bbc3895da
      if (config_.ws_backdrop_x_sites.count(addr)) {
          if (opcode == 0x29) {  // sh
              uint32_t rs = get_rs(instr), rt = get_rt(instr);
-@@ -1232,9 +1762,16 @@
+@@ -1232,9 +1791,16 @@
                                     reg_name(rs), reg_name(rt), comment);
              return store_pc + fmt::format("psx_store_cycle_barrier(); cpu->write_half({} + {}, (uint16_t)psx_ws_backdrop_x((int16_t){}));{}",
                                 reg_name(rs), offset, reg_name(rt), comment);
@@ -608,7 +637,7 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..f234f4d614a7c4038bb6ce0bbc3895da
              std::exit(1);
          }
          // overlay variant: addr is different code here — fall through to vanilla.
-@@ -1486,11 +2023,26 @@
+@@ -1486,11 +2052,26 @@
                      const std::string gte_read = fmt::format(
                          "\n#ifdef PSX_ENABLE_BLOCK_CYCLES\n    psx_gte_read(cpu, {});\n#endif\n    ", rt);
                      if (cop_op == 0x00) { // MFC2 - move from COP2 data
@@ -637,7 +666,7 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..f234f4d614a7c4038bb6ce0bbc3895da
                      } else if (cop_op == 0x02) { // CFC2 - move from COP2 control
                          if (PSXRecompGTERegisters::ctrl_read_needs_helper(static_cast<uint8_t>(rd))) {
                              code = gte_read + fmt::format("{} = gte_read_ctrl(cpu, {});  /* cfc2 */", reg_name(rt), rd);
-@@ -1521,7 +2073,35 @@
+@@ -1521,7 +2102,35 @@
              case 0x20: code = translate_lb(instr); break;     // lb
              case 0x21: code = translate_lh(instr); break;     // lh
              case 0x22: code = translate_lwl(instr); break;    // lwl
@@ -674,7 +703,7 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..f234f4d614a7c4038bb6ce0bbc3895da
              case 0x24: code = translate_lbu(instr); break;    // lbu
              case 0x25: code = translate_lhu(instr); break;    // lhu
              case 0x26: code = translate_lwr(instr); break;    // lwr
-@@ -1533,7 +2113,69 @@
+@@ -1533,7 +2142,69 @@
              case 0x28: code = fmt::format("g_debug_last_store_pc = 0x{:08X}u; ", addr) + translate_sb(instr); break;     // sb
              case 0x29: code = fmt::format("g_debug_last_store_pc = 0x{:08X}u; ", addr) + translate_sh(instr); break;     // sh
              case 0x2A: code = fmt::format("g_debug_last_store_pc = 0x{:08X}u; ", addr) + translate_swl(instr); break;    // swl
@@ -745,7 +774,7 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..f234f4d614a7c4038bb6ce0bbc3895da
              case 0x2E: code = fmt::format("g_debug_last_store_pc = 0x{:08X}u; ", addr) + translate_swr(instr); break;    // swr
              case 0x2F:                                         // CACHE - cache op (no-op for static recomp)
                  code = "/* cache (no-op: static recompilation has no I/D cache) */";
-@@ -1592,7 +2234,285 @@
+@@ -1592,7 +2263,291 @@
          }
      }
  
@@ -782,6 +811,12 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..f234f4d614a7c4038bb6ce0bbc3895da
 +    if (intro_skip_site) {
 +        code += fmt::format(
 +            "\n{}disruptor_intro_skip_instruction_hook(cpu, "
++            "0x{:08X}u, 0x{:08X}u, 1);",
++            config_.indent, addr, instr);
++    }
++    if (weapon_list_site) {
++        code += fmt::format(
++            "\n{}disruptor_weapon_list_instruction_hook(cpu, "
 +            "0x{:08X}u, 0x{:08X}u, 1);",
 +            config_.indent, addr, instr);
 +    }
@@ -1031,7 +1066,7 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..f234f4d614a7c4038bb6ce0bbc3895da
  }
  
  std::string CodeGenerator::translate_basic_block(
-@@ -2269,7 +3189,15 @@
+@@ -2269,7 +3224,15 @@
          }
      }
  
@@ -1048,7 +1083,7 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..f234f4d614a7c4038bb6ce0bbc3895da
  }
  
  bool CodeGenerator::func_has_screen_extent_cull(const ControlFlowGraph& cfg) const {
-@@ -2984,6 +3912,12 @@
+@@ -2984,6 +3947,13 @@
      ss << "#endif\n";
      ss << "extern int  psx_datashard_enter(CPUState* cpu, uint32_t key);  /* data-shard replay/capture (data_shards.c) */\n";
      ss << "extern void psx_mod_function_entry(CPUState* cpu, uint32_t address);  /* trusted opt-in game-mod hook */\n";
@@ -1058,10 +1093,11 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..f234f4d614a7c4038bb6ce0bbc3895da
 +    ss << "extern void disruptor_backdrop_tiles_instruction_hook(CPUState* cpu, uint32_t address, uint32_t instruction, int phase);  /* version-pinned backdrop-tile seam */\n";
 +    ss << "extern void disruptor_sprite_depth_instruction_hook(CPUState* cpu, uint32_t address, uint32_t instruction, int phase);  /* version-pinned sprite-depth seam */\n";
 +    ss << "extern void disruptor_intro_skip_instruction_hook(CPUState* cpu, uint32_t address, uint32_t instruction, int phase);  /* version-pinned intro-skip seam */\n";
++    ss << "extern void disruptor_weapon_list_instruction_hook(CPUState* cpu, uint32_t address, uint32_t instruction, int phase);  /* version-pinned weapon-list seam */\n";
      ss << "extern void psx_datashard_ret(CPUState* cpu);                  /* data-shard capture finalize */\n";
      ss << "extern int  psx_vsync_query_hle_enter(CPUState* cpu, uint32_t func, uint32_t counter_addr, uint32_t gpustat_ptr_addr, uint32_t timer1_ptr_addr, uint32_t timer1_cache_addr);  /* load_accel.c */\n";
      ss << "extern void psx_ws_sprite_tag(CPUState* cpu);  /* widescreen prim tag (gpu.c) */\n";
-@@ -2993,6 +3927,9 @@
+@@ -2993,6 +3963,9 @@
      ss << "extern int  psx_ws_cull_sltiu(uint32_t sx, uint32_t imm);  /* ws auto screen-x cull (gpu.c) */\n";
      ss << "extern int  psx_ws_cull_slti(uint32_t sx, uint32_t imm);   /* ws cull signed right edge (gpu.c) */\n";
      ss << "extern int  psx_ws_cull_slti_lower(uint32_t sx, uint32_t imm); /* ws cull signed lower edge (gpu.c) */\n";
@@ -1071,7 +1107,7 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..f234f4d614a7c4038bb6ce0bbc3895da
      ss << "extern int  psx_ws_cull_bltz(uint32_t v);                  /* ws cull signed left edge (gpu.c) */\n";
      ss << "extern int  psx_ws_cull_vxrange(uint32_t x, uint32_t imm); /* ws masked-u16 X window */\n";
      ss << "extern int32_t psx_ws_depth_bound(int32_t imm);            /* ws aspect-scaled far bound */\n";
-@@ -3001,7 +3938,10 @@
+@@ -3001,7 +3974,10 @@
      ss << "extern uint32_t psx_ws_cull_keep_result(uint32_t vanilla, uint32_t forced); /* ws guarded keep compare (gpu.c) */\n";
      ss << "extern uint32_t psx_ws_aspect_cone_result(uint32_t site, uint32_t vanilla, uint32_t object, int32_t x, int32_t z, int32_t y); /* aspect-aware participation cone */\n";
      ss << "extern uint32_t psx_ws_angle_widen(uint32_t vanilla); /* aspect-scaled 12-bit terrain-frustum half-angle */\n";
@@ -1082,7 +1118,7 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..f234f4d614a7c4038bb6ce0bbc3895da
      ss << "extern int  psx_ws_bg2d_cols(int base);                    /* ws 2D bg tile-loop widen: col count (gpu.c) */\n";
      ss << "extern int  psx_ws_bg2d_startcol(int col, unsigned mask);  /* ws 2D bg tile-loop widen: start tile col (gpu.c) */\n";
      ss << "extern int  psx_ws_bg2d_startx(int x);                     /* ws 2D bg tile-loop widen: start screen-x (gpu.c) */\n";
-@@ -3013,6 +3953,11 @@
+@@ -3013,6 +3989,11 @@
      ss << "extern int  psx_game_option_store(uint32_t addr, int val);  /* persisted OPTION restore-at-init (game_options.c) */\n";
      ss << "extern uint32_t psx_ws_backdrop_value(uint32_t orig, int is_end, int window_cols);  /* ws backdrop preload (gpu.c) */\n";
      ss << "extern void gte_ws_set_suppress(int on);  /* widescreen far-backdrop un-squash (gte.cpp) */\n";

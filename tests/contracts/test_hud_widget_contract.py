@@ -81,8 +81,20 @@ require(
     and gpu.count("psx_ws_hud_widgets_list_end(") == 1
     and gpu.count("psx_ws_hud_widgets_node(") == 1
     and gpu.count("psx_ws_hud_widgets_frame(") == 1
-    and gpu.count("psx_ws_hud_widgets_take(") == 1,
+    and gpu.count("psx_ws_hud_widgets_take(") == 1
+    and gpu.count("psx_ws_hud_widgets_show(") == 1,
     "nothing else in the renderer may move the widgets' state",
+)
+weapon_list = read("src/game/input/weapon_list.cpp")
+require(
+    "void gpu_ws_hud_widget_shown(int index) { psx_ws_hud_widgets_show(&ws_hud, index); }" in gpu
+    and "void gpu_ws_hud_widget_shown(int index);" in header
+    and "constexpr uint32_t kListModes[2] = {2u, 3u};" in module
+    and "        if (mode == kListModes[panel]) gpu_ws_hud_widget_shown(panel);" in module
+    and "        disruptor_hud_widgets_mode(cpu->gpr[kModeRegister]);\n        return;\n" in weapon_list
+    and weapon_list.count("disruptor_hud_widgets_mode(") == 1,
+    "the HUD's read of its mode, after a number key's list, must tell the panel of an open list, whose name is printed "
+    "a frame before the panel is drawn",
 )
 
 rect = body(gpu, "static int ws_hud_widget_rect(")
@@ -234,7 +246,7 @@ require(
 require(
     "constexpr uint32_t kTablePointer = 0x80071490u;" in module
     and "constexpr int kHudLayers = 1;" in module
-    and "constexpr int32_t kPanels[2][6] = {{16, 10, 128, 196, 0, 0}, {232, 10, 298, 170, 320, 0}};" in module
+    and "constexpr int32_t kPanels[2][6] = {{16, 10, 128, 200, 0, 0}, {232, 10, 298, 170, 320, 0}};" in module
     and "    gpu_ws_set_hud_widgets(kTablePointer, kHudLayers, kPanels[0], 2);" in module
     and module.count("gpu_ws_set_hud_widgets(") == 1
     and "constexpr int kTextStrip = 128;" in module

@@ -62,10 +62,10 @@ void draw_capsules() {
         if (std::none_of(g_menu.capsules.begin(), g_menu.capsules.end(), [](const capsule::Stored &kept) { return kept.name == g_menu.capsule_film_of; })) drop_film();
     }
     ImGui::TextUnformatted("Replay capsules");
-    ImGui::TextDisabled("Ctrl+F12 starts a capsule and ends it, F12 loads the newest. Each is kept in a folder of its own: the newest is on top.");
-    ImGui::TextDisabled("The picture is a capsule's last. Hold the mouse over it to see the capsule play.");
+    ImGui::TextDisabled("Ctrl+F12 starts a capsule and ends it, F12 loads the newest\nEach is kept in a folder of its own: the newest is on top");
+    ImGui::TextDisabled("The picture is a capsule's last\nHold the mouse over it to see the capsule play");
     if (g_menu.capsules.empty()) {
-        ImGui::TextDisabled("None recorded yet.");
+        ImGui::TextDisabled("None recorded yet");
         return;
     }
     if (ImGui::Button("Open the folder")) {
@@ -74,7 +74,7 @@ void draw_capsules() {
 #else
         const bool opened = SDL_OpenURL(capsule::folder_url(all).c_str()) == 0;
 #endif
-        g_menu.capsule_note = opened ? std::string() : "The folder could not be opened.";
+        g_menu.capsule_note = opened ? std::string() : "The folder could not be opened";
     }
     if (!g_menu.capsule_note.empty()) {
         ImGui::SameLine();
@@ -112,14 +112,14 @@ void draw_capsules() {
         if (kept.name != recording && kept.frames != 0) {
             if (ImGui::SmallButton("Load")) {
                 if (capsule::load(kept.name)) set_menu_open(false);
-                else g_menu.capsule_note = "Could not load " + kept.name + ".";
+                else g_menu.capsule_note = "Could not load " + kept.name;
             }
-            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Puts the game where this recording began.");
+            if (ImGui::IsItemHovered()) ImGui::SetTooltip("Puts the game where this recording began");
             ImGui::SameLine();
         }
         if (kept.name != recording && ImGui::SmallButton(asked ? "Delete for good?" : "Delete")) {
             if (asked) {
-                g_menu.capsule_note = (capsule::discard(all, kept.name) ? "Deleted " : "Could not delete ") + kept.name + ".";
+                g_menu.capsule_note = (capsule::discard(all, kept.name) ? "Deleted " : "Could not delete ") + kept.name;
                 g_menu.capsules_read = -1.0;
             }
             g_menu.capsule_asked = asked ? std::string() : kept.name;
@@ -131,7 +131,7 @@ void draw_capsules() {
 }  // namespace
 
 void draw_debug_tab() {
-    ImGui::TextDisabled("Tools for a report of a fault.");
+    ImGui::TextDisabled("Tools for a report of a fault");
     ImGui::Spacing();
 
     bool detailed = disruptor_diagnostics_detailed() != 0;
@@ -139,15 +139,15 @@ void draw_debug_tab() {
         disruptor_diagnostics_set_detailed(detailed ? 1 : 0);
         mark_detailed_logging(detailed);
     }
-    if (detailed) ImGui::TextDisabled("Driver messages: %s.", driver_words[disruptor_diagnostics_driver_state()]);
+    if (detailed) ImGui::TextDisabled("Driver messages: %s", driver_words[disruptor_diagnostics_driver_state()]);
 
     ImGui::Separator();
     if (ImGui::Button("Record the screen") && !gl_renderer_recording_shown()) g_menu.record_shown = true;
     draw_status_badge("SESSION", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
     ImGui::TextDisabled(
         "For a report: two seconds of the pictures that reach the screen, with "
-        "their times. It starts a second after this menu closes.");
-    if (g_menu.record_shown) ImGui::TextDisabled("Armed. Close the menu and do what you want to show.");
+        "their times\nIt starts a second after this menu closes");
+    if (g_menu.record_shown) ImGui::TextDisabled("Armed\nClose the menu and do what you want to show");
     else if (!g_menu.shown_note.empty()) ImGui::TextDisabled("%s", g_menu.shown_note.c_str());
 
     ImGui::Separator();
@@ -159,15 +159,15 @@ void draw_debug_tab() {
     }
     draw_status_badge("SESSION", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
     ImGui::TextDisabled(
-        "Shows a layer of the renderer in the picture's place, for reports. A "
-        "replay capsule recorded with one on replays in it. Off again at the "
-        "next start.");
+        "Shows a layer of the renderer in the picture's place, for reports\nA "
+        "replay capsule recorded with one on replays in it\nOff again at the "
+        "next start");
 
     ImGui::Separator();
-    ImGui::TextDisabled("Vertical pitch asked for: %+.2f degrees, at most 30.94 either way.",
+    ImGui::TextDisabled("Vertical pitch asked for: %+.2f degrees, at most 30.94 either way",
                         disruptor_mouse_vertical_pitch() * (360.0 / 256.0));
-    ImGui::TextDisabled("Mouse captured before this menu opened: %s. The menu releases it while open and gives it "
-                        "back when closed.", g_menu.restore_mouse_capture ? "yes" : "no");
+    ImGui::TextDisabled("Mouse captured before this menu opened: %s\nThe menu releases it while open and gives it "
+                        "back when closed", g_menu.restore_mouse_capture ? "yes" : "no");
 
     ImGui::Separator();
     draw_capsules();

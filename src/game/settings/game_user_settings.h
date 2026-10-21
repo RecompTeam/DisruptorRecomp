@@ -12,6 +12,10 @@ struct GameUserSettings {
     bool has_modern_controls = false; bool modern_controls = false;
     bool has_selection_wheels = false; bool selection_wheels = false;
     bool has_number_keys = false; bool number_keys = false;
+    bool has_psionic_keys_use = false; bool psionic_keys_use = true;
+    // Two keys a weapon and a psionic power as written, pick_keys.h reads them. Empty without the file's lists.
+    bool has_pick_keys = false;
+    std::vector<std::string> weapon_keys, weapon_keys_second, psionic_keys, psionic_keys_second;
     bool has_horizontal_sensitivity = false; double horizontal_sensitivity = 0.1;
     bool has_invert_horizontal = false; bool invert_horizontal = false;
     bool has_vertical_look = false; bool vertical_look = false;
@@ -21,6 +25,8 @@ struct GameUserSettings {
     bool has_high_precision_camera = false; bool high_precision_camera = false;
     bool has_frame_unlock = false; bool frame_unlock = false;
     bool has_skip_intro = false; bool skip_intro = false;
+    bool has_mute_in_background = false; bool mute_in_background = false;
+    bool has_bass_cut = false; int bass_cut = 0;  // an index into kDisruptorBassCuts
     bool has_language_disc = false; std::string language_disc;  // image of another region's disc, "" for none
     bool has_language_discs = false; std::vector<std::string> language_discs;  // the ones named before, for a launcher to offer again
     bool has_hud_scale = false; int hud_scale = 100;
@@ -46,6 +52,8 @@ inline constexpr int kDisruptorSampleCounts[] = {0, 2, 4, 8, 16};
 inline constexpr int kDisruptorDrawDistances[] = {100, 125, 150, 200};
 inline constexpr const char* kDisruptorFogShapes[] = {"even", "soft", "late"};
 inline constexpr int kDisruptorFogShapeCount = 3;
+inline constexpr const char* kDisruptorBassCuts[] = {"original", "reduced", "tv_speaker"};
+inline constexpr int kDisruptorBassCutCount = 3;
 
 }  // namespace PSXRecompV4
 

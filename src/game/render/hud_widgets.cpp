@@ -23,6 +23,8 @@
  * with the HUD size about the screen's edge, and a weapon in the swing.
  */
 
+#include "game/render/hud_widgets.h"
+
 #include "gpu.h"
 #include "mod_plugins.h"
 
@@ -32,8 +34,9 @@ namespace {
 
 constexpr uint32_t kTablePointer = 0x80071490u;  /* gp + 0x344 */
 constexpr int kHudLayers = 1;
-/* x0, y0, x1, y1, pivot x, pivot y: the weapon list, then the psionics list. Left out: the ammunition box from column 12, the psionic charge from row 170. */
-constexpr int32_t kPanels[2][6] = {{16, 10, 128, 196, 0, 0}, {232, 10, 298, 170, 320, 0}};
+constexpr uint32_t kListModes[2] = {2u, 3u};  /* the HUD's mode with each panel open */
+/* x0, y0, x1, y1, pivot x, pivot y: the weapon list, then the psionics list. A full weapon list reaches row 198 with its name, five powers row 161. Left out: the ammunition box from column 12 and its digits from row 200, the psionic charge from row 170. */
+constexpr int32_t kPanels[2][6] = {{16, 10, 128, 200, 0, 0}, {232, 10, 298, 170, 320, 0}};
 constexpr int kHeldPage[2] = {15, 0};
 constexpr int kTextStrip = 128;  /* a printed line is one picture this wide: NO of the pause menu begins at column 169 and reaches 296 */
 
@@ -44,3 +47,8 @@ PSX_MOD_CONSTRUCTOR(register_disruptor_hud_widgets) {
 }
 
 }  // namespace
+
+extern "C" void disruptor_hud_widgets_mode(uint32_t mode) {
+    for (int panel = 0; panel < 2; ++panel)
+        if (mode == kListModes[panel]) gpu_ws_hud_widget_shown(panel);
+}

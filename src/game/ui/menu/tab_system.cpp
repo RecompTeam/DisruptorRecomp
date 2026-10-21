@@ -2,37 +2,12 @@
 
 namespace disruptor::menu {
 
-namespace {
-
-void draw_audio_controls() {
-    ImGui::SeparatorText("Audio output");
-    int volume = psx_host_audio_get_master_volume();
-    ImGui::SetNextItemWidth(260.0f);
-    if (option_slider("audio.master_volume", &volume) &&
-        psx_host_audio_set_master_volume(volume)) {
-        mark_master_volume(volume);
-    }
-    draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
-
-    bool muted = psx_host_audio_get_muted() != 0;
-    if (option_toggle("audio.muted", &muted) &&
-        psx_host_audio_set_muted(muted ? 1 : 0)) {
-        mark_audio_muted(muted);
-    }
-    ImGui::TextDisabled(
-        "Host-side output only: game audio state and saves are unchanged. "
-        "Unmuting restores the selected volume.");
-}
-
-}  // namespace
-
 void draw_system_tab() {
-    draw_audio_controls();
     ImGui::TextWrapped(
         "Live menu choices are merged into the runtime's user-owned "
-        "settings.toml. Writes use an atomic replacement, so a failed save "
-        "leaves the previous file intact. Explicit launch flags still win "
-        "for that run.");
+        "settings.toml\nWrites use an atomic replacement, so a failed save "
+        "leaves the previous file intact\nExplicit launch flags still win "
+        "for that run");
     ImGui::SeparatorText("Settings persistence");
     ImGui::TextWrapped("Path: %s",
         g_preferences.path.empty()
@@ -51,8 +26,8 @@ void draw_system_tab() {
         (void)flush_preferences();
     ImGui::TextDisabled(
         "Current vertical pitch, menu layout, "
-        "and mouse capture are not saved. Cheat controls start "
-        "off each launch.");
+        "and mouse capture are not saved\nCheat controls start "
+        "off each launch");
     ImGui::SeparatorText("Restart required");
     ImGui::BulletText("Renderer backend");
     ImGui::BulletText("Audio backend and buffer configuration");

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Version and source contract for the half steps of doors and lifts under 60 FPS gameplay."""
+"""Version and source contract for the half steps of doors, lifts, enemies and shots under 60 FPS gameplay."""
 
 import hashlib
 import re
@@ -62,6 +62,23 @@ RETAIL_INSTRUCTIONS = {
     0x80023934: 0x00451021,
     0x8002393C: 0xAEA20000,
     0x80023940: 0xAEA3000C,
+    # Shots and actors: the world loop's draws of a sector's shots and actors, their lists, coordinates and links.
+    0x800411B4: 0x0C00F000,
+    0x800411BC: 0x0C00F2CE,
+    0x8003C034: 0x3C018007,
+    0x8003C03C: 0x8C337BF4,
+    0x8003C8B4: 0x8E640004,
+    0x8003C8B8: 0x8E650008,
+    0x8003C8BC: 0x8E66000C,
+    0x8003CAF4: 0x8E730000,
+    0x8003CB6C: 0x3C018008,
+    0x8003CB74: 0x8C358004,
+    0x8003CCCC: 0x96A40016,
+    0x8003CCEC: 0x96A40018,
+    0x8003CD44: 0x96A5001A,
+    0x8003D4C8: 0x8EB50000,
+    0x80026C64: 0x90620038,
+    0x80026C8C: 0xAC238004,
 }
 # The mover routine, the vertex mover, and the sector renderer up to its vertex loop.
 RETAIL_CODE = {
@@ -83,12 +100,14 @@ def require(condition: bool, message: str) -> None:
 
 cmake = read("CMakeLists.txt")
 steps = read("src/game/render/mover_steps.h")
+objects = read("src/game/render/object_steps.h")
 motion = read("src/game/render/mover_motion.cpp")
 host = read("src/game/host.cpp")
 
 require(
     '    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/mover_motion.cpp"\n' in cmake
     and "    disruptor_unit_test(disruptor_mover_steps tests/unit/disruptor_mover_steps_test.cpp)\n" in cmake
+    and "    disruptor_unit_test(disruptor_object_steps tests/unit/disruptor_object_steps_test.cpp)\n" in cmake
     and "    disruptor_contract(mover_steps RETAIL)\n" in cmake,
     "the mover source, its unit test and this contract with its input must stay registered",
 )
@@ -124,19 +143,27 @@ require(
     and "void draw_world(CPUState *, uint32_t) {\n"
     "    Guest guest;\n"
     "    catch_up(guest, g_lifts);\n"
+    "    disruptor::objects::catch_up(guest, g_objects);\n"
     "    if (!wanted()) return;\n"
+    "    disruptor::objects::lag(guest, g_objects);\n"
     "    const uint32_t sector = guest.word(kSectors + 4u * guest.byte(kPlayerSector));\n"
     "    const uint32_t riding = sector != 0u ? guest.byte(sector + kSectorLift) : kNoSector;\n"
     "    lag(guest, g_lifts, guest.word(kLiftRecords), kCameraHeight, guest.word(kPlayerHeight) - guest.word(kPlayerStands), riding);\n"
     "}\n"
     in motion
     and "void frame_waits(CPUState *cpu, uint32_t) {\n    Guest guest;\n    take_back(guest, g_shifts);\n" in motion
-    and "    if (cpu && cpu->gpr[31] == kFrameWait) catch_up(guest, g_lifts);\n" in motion
+    and "    if (cpu && cpu->gpr[31] == kFrameWait) {\n"
+    "        catch_up(guest, g_lifts);\n"
+    "        disruptor::objects::catch_up(guest, g_objects);\n"
+    "    }\n"
+    in motion
     and "void tick_begins(CPUState *, uint32_t) {\n"
     "    Guest guest;\n"
     "    take_back(guest, g_shifts);\n"
     "    catch_up(guest, g_lifts);\n"
     "    note(guest, g_lifts, guest.word(kLiftRecords), guest.word(kLiftCount));\n"
+    "    disruptor::objects::catch_up(guest, g_objects);\n"
+    "    disruptor::objects::note(guest, g_objects);\n"
     "}\n"
     in motion
     and '    if (!psx_mod_register_function_entry_plugin("disruptor.mover_motion.drawn", kAfterSector, sector_drawn) ||\n'
@@ -152,15 +179,18 @@ require(
     and "constexpr uint32_t kLiftRecords = 0x8007173Cu;" in motion
     and "constexpr uint32_t kCameraHeight = 0x800775D0u;\nconstexpr uint32_t kPlayerHeight = 0x800775C4u;\n" in motion
     and "constexpr uint32_t kPlayerStands = 0x80077608u;" in motion
-    and motion.count("psx_mod_write") == 1
-    and "    void write(uint32_t address, uint32_t value) { psx_mod_write_word(address, value); }\n" in motion,
+    and motion.count("psx_mod_write") == 2
+    and "    void write(uint32_t address, uint32_t value) { psx_mod_write_word(address, value); }\n" in motion
+    and "    void write_half(uint32_t address, uint16_t value) { psx_mod_write_half(address, value); }\n" in motion,
     "a door's half step is taken back before a sector is drawn, after it, when the frame waits and before a tick, and given only in "
     "the world's loop of sectors after an odd tick. A lift's lag is given when the world's draw begins and taken back at the frame "
     "loop's wait after its last draw and before a tick, where the lifts' heights are noted. Both only under 60 FPS gameplay, outside a network game and "
-    "with every hook registered, and the module writes guest memory through one call",
+    "with every hook registered. An enemy's or a shot's lag is given and taken back where a lift's is, and the module writes "
+    "guest memory through one word and one halfword call",
 )
 require(
-    'extern "C" void disruptor_mover_motion_state_loaded(void) {\n    forget(g_shifts);\n    forget(g_lifts);\n}\n'
+    'extern "C" void disruptor_mover_motion_state_loaded(void) {\n    forget(g_shifts);\n    forget(g_lifts);\n'
+    '    disruptor::objects::forget(g_objects);\n}\n'
     in motion
     and "    disruptor_mover_motion_state_loaded();\n" in host,
     "a loaded state has no half step and no lag of this run to take back",
@@ -196,6 +226,20 @@ require(
     "vertex words are the only memory written, a half step is taken back only from words left as it wrote them, none "
     "is given over one still held, and never to the mover the player stands in",
 )
+require(
+    "inline constexpr uint32_t kSectorShots = 0x80077BF4u;" in objects
+    and "inline constexpr uint32_t kSectorActors = 0x80078004u;" in objects
+    and "inline constexpr uint32_t kSectorCount = 256u;" in objects
+    and "inline constexpr uint32_t kShotLife = 32u;" in objects
+    and "    return kind == Kind::shot ? record + 4u + 4u * static_cast<uint32_t>(axis) : record + 22u + 2u * static_cast<uint32_t>(axis);\n"
+    in objects
+    and "        if (read(memory, one.address, one.kind) == one.left) write(memory, one.address, one.kind, one.left + one.back);\n"
+    in objects
+    and "    if (steps.count != 0u) return;\n" in objects
+    and "psx_mod" not in objects,
+    "a sector's shots and actors are the lists the world's loop draws, a shot's coordinates are the words and an actor's the "
+    "halfwords those draws read, and a coordinate is given back only while it is what was left there",
+)
 
 mesh = read("psxrecomp/runtime/include/gpu_temporal_mesh.h")
 require(
@@ -227,7 +271,8 @@ require(
     in frontend
     and "void psx_game_state_saving(void);\n" in read("psxrecomp/runtime/include/game_host.h")
     and "void psx_game_state_saving(void) {\n    disruptor_mover_motion_state_saving();\n" in host
-    and 'extern "C" void disruptor_mover_motion_state_saving(void) {\n    Guest guest;\n    take_back(guest, g_shifts);\n    catch_up(guest, g_lifts);\n}\n'
+    and 'extern "C" void disruptor_mover_motion_state_saving(void) {\n    Guest guest;\n    take_back(guest, g_shifts);\n'
+    '    catch_up(guest, g_lifts);\n    disruptor::objects::catch_up(guest, g_objects);\n}\n'
     in motion,
     "a half step and a lag are taken out of memory before a state is written, so that no saved state holds one",
 )

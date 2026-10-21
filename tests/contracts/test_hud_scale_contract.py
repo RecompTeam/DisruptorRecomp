@@ -117,7 +117,7 @@ require(
     "        mark_hud_scale(hud_scale);"
     in menu
     and 'slider("disruptor.hud_scale", "HUD size", 100,' in options
-    and '"The weapon keeps its size.", 50, 100, Unit::percent,' in options,
+    and '"The weapon keeps its size", 50, 100, Unit::percent,' in options,
     "the settings menu must apply the size live and stage it for saving",
 )
 require(

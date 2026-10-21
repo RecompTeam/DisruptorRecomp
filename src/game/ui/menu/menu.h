@@ -10,6 +10,7 @@
 #ifndef DISRUPTOR_UI_MENU_H
 #define DISRUPTOR_UI_MENU_H
 
+#include "game/audio/bass_cut.h"
 #include "game/session/cheats.h"
 #include "game/render/billboard_aspect.h"
 #include "game/render/far_rendering.h"
@@ -174,6 +175,8 @@ void mark_supersampling(int value);
 void mark_fullscreen(int value);
 void mark_master_volume(int value);
 void mark_audio_muted(bool value);
+void mark_mute_in_background(bool value);
+void mark_bass_cut(int cut);
 void mark_skip_intro(bool value);
 void mark_language_disc(const std::string &path);
 void mark_hud_scale(int value);
@@ -206,6 +209,7 @@ void draw_status_badge(const char *label, const ImVec4 &colour);
 void draw_controls_tab();
 void draw_display_tab();
 void draw_enhancements_tab();
+void draw_audio_tab();
 void draw_experimental_tab();
 void draw_debug_tab();
 void draw_cheats_tab();

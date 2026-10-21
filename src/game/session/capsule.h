@@ -19,6 +19,7 @@ struct Frame {
     uint32_t byte2_at = 0;              /* a second write, e.g. weapon selection alongside mouse yaw */
     uint8_t byte2 = 0;
     float pitch = 0.0f;                 /* the vertical look, which lives outside the game */
+    uint8_t list = 0;                   /* the list a key showed: 1 the weapons', 2 the psionics' */
     uint64_t memory = 0;
 
     void note_byte(uint32_t address, uint8_t value) {
@@ -62,7 +63,7 @@ std::vector<Stored> stored(const std::filesystem::path &all);
 /* The newest capsule whose recording was finished, or nothing. */
 std::string newest(const std::vector<Stored> &kept);
 /* The vertical look a capsule begins with: false unless its note and its input are whole and of one length. */
-inline constexpr uintmax_t kInputBytes = 1u << 20; /* the longest recording, ten minutes, is 756 KB */
+inline constexpr uintmax_t kInputBytes = 1u << 20; /* the longest recording, ten minutes, is 972 KB */
 bool begins(const std::filesystem::path &folder, float &pitch);
 /* Removes one capsule's folder. A name that is no capsule's is refused, so nothing else under `all` or outside it can be named. */
 bool discard(const std::filesystem::path &all, std::string_view name);
@@ -95,6 +96,7 @@ void disruptor_capsule_before_input(void);
 /* Once per VBlank, after the pads are sampled: a replay puts the recorded frame in their place. */
 void disruptor_capsule_after_input(void);
 void disruptor_capsule_note_byte(uint32_t address, uint8_t value);
+void disruptor_capsule_note_list(uint8_t list);
 /* The frontend calls this when a save state has been loaded, before the game runs on. */
 void disruptor_capsule_state_loaded(void);
 /* A word to show for a second when a recording starts, ends or is refused, or null. A visible overlay holds the in-between frames off, so it is not shown longer. */

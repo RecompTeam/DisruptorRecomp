@@ -12,7 +12,7 @@ struct VelopackAsset {};
 namespace disruptor::launcher {
 
 Updater::Updater(std::string source, Activity& activity) : source_(std::move(source)), activity_(activity) {
-    view_.error = "This build was made without the updater.";
+    view_.error = "This build was made without the updater";
 }
 
 Updater::~Updater() = default;

@@ -9,7 +9,7 @@
 namespace disruptor::launcher {
 
 // Markdown as the player's guide and release notes write it, read into what the launcher draws.
-enum class Style { plain, bold, code, link };
+enum class Style { plain, bold, code, link, lead };  // lead: what a list item names before its colon, as a hint's choice
 
 struct Span {
     Style style = Style::plain;

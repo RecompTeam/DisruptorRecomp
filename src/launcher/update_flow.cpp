@@ -15,11 +15,11 @@ bool apply_update(Updater& updater, const fs::path& program, const fs::path& dat
                   bool restart) {
     try {
         if (user_folder::copy_of(program) == user_folder::Copy::plain) {
-            activity.add("The update was not started: the program is not in the folder the updater installed.");
+            activity.add("The update was not started: the program is not in the folder the updater installed");
             return false;
         }
         const fs::path copy = back_up_saves(data, installed_version(program), report_stamp());
-        if (!copy.empty()) activity.add("Your saves are copied to " + utf8(copy) + ".");
+        if (!copy.empty()) activity.add("Your saves are copied to " + utf8(copy));
         return updater.apply(silent, restart);
     } catch (const std::exception& error) {
         activity.add(std::string("The update was not started: ") + error.what());

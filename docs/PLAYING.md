@@ -98,7 +98,8 @@ Delete it once the repaired copy works.
 | Jump / menu cancel | Space |
 | Use | E |
 | Choose weapon / psionic | Q / R |
-| Select weapon directly | 1–9 / 0 or the keypad, when Number keys pick weapons is on |
+| Select weapon directly | 1–9 / 0 or the keypad, when Weapon and psionic keys is on |
+| Select psionic directly | The keys you give the powers, when Weapon and psionic keys is on |
 | Map / pause | Tab / P |
 | Settings | Backquote (`` ` ``). Escape closes |
 | Fullscreen | Alt+Enter |
@@ -124,8 +125,9 @@ the Controls page, experimental and off at first.
 - The psionic wheel opens once you have a psionic.
 - The game keeps running while a wheel is open.
 
-**Number keys pick weapons** is on the Controls page too, experimental and off
-at first, in either scheme.
+**Weapon and psionic keys** is on the Controls page too, off at first, in either
+scheme. Each weapon and each psionic power takes two keys. The
+weapons have these at first, the powers none:
 
 | Key | Weapon |
 | --- | --- |
@@ -140,11 +142,29 @@ at first, in either scheme.
 | 9 | Zodiac |
 | 0 | Plasma Lance |
 
-- The keypad works too. Each press picks once.
+- The second key is the same number on the keypad. Each press picks once.
+- A key that changes the weapon or the power shows the weapon list or the
+  psionics list for a second, as while its button is held. The key of the one
+  already in hand shows no list.
 - A baton you pick stays in hand. On its own the game takes a gun with
   ammunition instead.
-- Menus and the save-name screen keep the number keys for their own input.
-- A number key you bind to an action does only that action.
+- With the setting on, the Weapons and Psionics tables under it change them.
+  Click a key, then press the new one. Delete takes a key away. Default weapon
+  and psionic keys puts these back.
+- A key an action has cannot go to a weapon or a power, and theirs cannot go to an
+  action. The note says who has it, and Take it moves it: the one that had it gets
+  the other's old key, or none. Two weapons or powers swap their keys.
+- In the Modern scheme an arrow a weapon or a power has no longer walks.
+- The fixed keys, Shift, Ctrl, Alt and the system key never pick. While Alt is
+  held nothing is picked, so Alt+Enter stays the window's.
+- Menus and the save-name screen keep their keys for their own input.
+- A key that an action gets in another scheme does only that action. The table
+  shows it faint.
+- Blast's key still picks it once the game turns it into TeraBlast.
+- **Psionic keys use the power**, under the setting and on at first, makes a
+  power's key use the power too, as Psionic attack does. A power not in hand is
+  used the moment the game has it ready. Holding the key keeps using it. Switch
+  it off and the key only picks the power.
 
 ### Scheme and keys
 
@@ -158,7 +178,13 @@ settings, is Modern or Classic.
 
 The **Keys** table under it puts any action on another key: click the key,
 then press the new one. A key another action had moves over, and that action
-takes the old key. **Default keys** brings back the scheme's own keys.
+takes the old key. Delete takes an action's key away. **Default keys** brings
+back the scheme's own keys.
+
+**Profiles** keep two sets of keys: Save to 1 or 2 keeps every key of the page,
+the weapons' and the powers' too, and Load 1 or 2 brings one back. The scheme
+and the mouse settings stay out of a profile. The profiles are `keys-1.ini` and
+`keys-2.ini` beside `keybinds.ini`.
 
 These keys do the same in both schemes and cannot be changed:
 
@@ -216,9 +242,9 @@ Controls page and the game's Controls tab name the one connected.
 - In the launcher, under **Settings**: the pages **Display**,
   **Enhancements**, **Controls**, **Audio**, **Experimental** and
   **Troubleshooting**.
-- In the game, with Backquote: tabs of the same names. The sound is on its
-  **System** tab and **Detailed logging** on **Debug**. Keys and gamepad
-  buttons are changed in the launcher only.
+- In the game, with Backquote: tabs of the same names. **Detailed logging**
+  is on **Debug**. Keys and gamepad buttons are changed in the launcher
+  only.
 
 A change is saved to `settings.toml` in the folder of your files at once. A
 change in the launcher applies the next time the game starts. The launcher's
@@ -270,6 +296,19 @@ The page is in four groups, in the launcher and in the game alike.
 - **Skip the logos and the title movie** skips only the boot intro. The other
   movies play. Escape skips the logo or movie on screen while the settings
   menu is closed.
+
+### Audio
+
+- **Master volume** sets the loudness of everything the game plays.
+- **Bass** sets how much deep bass all of the game's sound keeps: effects,
+  music, voices and movies. Original plays it as the game does. Reduced
+  softens the deepest rumble, under 80 Hz. TV speaker plays it as a
+  television's own speakers did, with little under 160 Hz. The psionics and
+  explosions carry most of their sound down there, and headphones and
+  subwoofers play it in full.
+- **Mute in the background** silences the game while its window is not in
+  front. It is off at first.
+- **Mute all audio** silences the game and keeps the volume.
 
 ### Experimental
 

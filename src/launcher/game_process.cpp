@@ -33,13 +33,13 @@ std::unique_ptr<platform::Process> start_game(const fs::path& program, const fs:
     try {
         return std::make_unique<platform::Process>(launch);
     } catch (const std::system_error& error) {
-        throw std::runtime_error("The game could not be started: " + std::string(error.what()) + ".\n"
+        throw std::runtime_error("The game could not be started: " + std::string(error.what()) + "\n"
 #ifdef _WIN32
-                                 "Check that the game is installed whole and the Microsoft Visual C++ x64 Redistributable too.\n"
+                                 "Check that the game is installed whole and the Microsoft Visual C++ x64 Redistributable too\n"
 #else
-                                 "Check that the game is installed whole and the folder of your files can be written.\n"
+                                 "Check that the game is installed whole and the folder of your files can be written\n"
 #endif
-                                 "Help in the side bar has the steps.");
+                                 "Help in the side bar has the steps");
     }
 }
 
@@ -50,11 +50,11 @@ fs::path executable_directory() { return platform::executable_path().parent_path
 void check_package(const fs::path& program, const DiscProfile& profile) {
     for (const auto& name : {platform::game_executable(program).filename(), fs::path(profile.game_config), fs::path(L"bios/openbios.bin")}) {
         if (!fs::is_regular_file(program / name))
-            throw std::runtime_error("The game is incomplete.\n"
-                                     "Install it again: the launcher, the game, game.toml and the bios folder belong together.");
+            throw std::runtime_error("The game is incomplete\n"
+                                     "Install it again: the launcher, the game, game.toml and the bios folder belong together");
     }
     if (fs::file_size(program / "bios/openbios.bin") != 524288)
-        throw std::runtime_error("The bundled OpenBIOS is incomplete. Install the game again.");
+        throw std::runtime_error("The bundled OpenBIOS is incomplete\nInstall the game again");
 }
 
 GameProcess::GameProcess(const fs::path& program, const fs::path& data, const VerifiedDisc& disc)

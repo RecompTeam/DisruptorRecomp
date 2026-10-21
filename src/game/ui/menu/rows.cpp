@@ -12,6 +12,7 @@ bool prerequisite_on(const Option &option) {
     if (key == "disruptor.ambient_occlusion") return gl_renderer_ssao() != 0;
     if (key == "disruptor.smooth_fade") return gl_renderer_smooth_fade() != 0;
     if (key == "disruptor.vertical_look") return disruptor_mouse_vertical_look_enabled() != 0;
+    if (key == "disruptor.number_keys") return disruptor_number_keys_enabled() != 0;
     if (key == "disruptor.separate_vertical_speed")
         return disruptor_mouse_vertical_follows_horizontal() == 0;
     return false;

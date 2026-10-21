@@ -24,7 +24,7 @@ Updater::Updater(std::string source, Activity& activity) : source_(std::move(sou
     try {
         manager_ = open_manager(source_);
     } catch (const std::exception& error) {
-        activity_.add(std::string("Updates are off: the updater cannot open this copy (") + error.what() + ").");
+        activity_.add(std::string("Updates are off: the updater cannot open this copy (") + error.what() + ")");
         return;
     }
     view_.state = UpdateState::idle;
@@ -94,7 +94,7 @@ void Updater::check() {
                 view.state = pending_ ? UpdateState::ready : UpdateState::current;
                 view.latest = pending_ ? pending_->Version : view.installed;
             });
-            activity_.add(pending_ ? "The downloaded update is still the newest." : "This is the newest version.");
+            activity_.add(pending_ ? "The downloaded update is still the newest" : "This is the newest version");
             return;
         }
         found_ = std::make_unique<Velopack::UpdateInfo>(std::move(*found));
@@ -111,7 +111,7 @@ void Updater::check() {
             view.download_bytes = deltas.empty() ? target.Size : delta_bytes;
             view.full_bytes = target.Size;
         });
-        activity_.add(std::format("Version {} is available: about {} to download{}.", target.Version,
+        activity_.add(std::format("Version {} is available: about {} to download{}", target.Version,
                                   size_text(deltas.empty() ? target.Size : delta_bytes),
                                   deltas.empty() ? "" : std::format(" in {} delta package(s)", deltas.size())));
     });
@@ -136,7 +136,7 @@ void Updater::download() {
             view.state = UpdateState::ready;
             view.progress = 100;
         });
-        activity_.add("Downloaded, and each package matched its SHA256.\nPress Restart and update to install it.");
+        activity_.add("Downloaded, and each package matched its SHA256\nPress Restart and update to install it");
     });
 }
 

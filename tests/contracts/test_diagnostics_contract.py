@@ -54,7 +54,7 @@ require(
     and 'L"Experimental", L"Troubleshooting"};\n' in pages
     and '    {"disruptor.detailed_logging", Page::troubleshooting},\n' in pages
     and pages.count("Page::troubleshooting") == 1
-    and '    "Switch on, play until the problem shows, close the game, then press Report a problem.",\n};\n' in window
+    and '    "Switch on, play until the problem shows, close the game, then press Report a problem",\n};\n' in window
     and "    const char* note = page_notes[std::clamp(page_, 0, static_cast<int>(std::size(page_notes)) - 1)];\n"
     in window
     and window.count('    "",\n') == 5,
@@ -66,7 +66,7 @@ require(
     "        disruptor_diagnostics_set_detailed(detailed ? 1 : 0);\n"
     "        mark_detailed_logging(detailed);\n"
     "    }\n"
-    '    if (detailed) ImGui::TextDisabled("Driver messages: %s.", driver_words[disruptor_diagnostics_driver_state()]);\n'
+    '    if (detailed) ImGui::TextDisabled("Driver messages: %s", driver_words[disruptor_diagnostics_driver_state()]);\n'
     in debug_tab
     and 'constexpr const char *driver_words[] = {"off", "on", "from the next launch", "not offered by this driver"};\n'
     in debug_tab

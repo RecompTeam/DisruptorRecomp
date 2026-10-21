@@ -6,7 +6,7 @@ validation is incomplete.
 | Area | Current state |
 | --- | --- |
 | Platform and disc | Windows x64 and Linux x64 (an AppImage for glibc 2.35 and newer); Disruptor USA, SLUS-00224 only. On Linux the build and its tests pass. The AppImage's launcher imports the disc and starts the game, tested under WSLg on Ubuntu 22.04 up to the save-name screen. A level has not been played there yet. |
-| Gameplay | Boot, menus, FMVs, audio, and the first mission have been exercised on Windows. 60 FPS gameplay is on at first. Doors and a ridden lift move on every frame under it. |
+| Gameplay | Boot, menus, FMVs, audio, and the first mission have been exercised on Windows. 60 FPS gameplay is on at first. Doors, a ridden lift, enemies and shots move on every frame under it. |
 | Rendering | OpenGL supports 1x–8x resolution and widescreen up to 32:9, with 4x and 4:3 at first. Exact geometry, perspective textures, gap filling, a depth-sorted world and a smooth distance fade are on at first. Ambient occlusion and anti-aliasing (MSAA / SSAA) are optional. Movies show all 320 columns. Minor edge gaps and localized texture wobble can remain. |
 | Controls | Modern or Classic controls, smooth mouse turning (on at first), a gamepad beside the keyboard, keys and gamepad buttons rebound in the launcher, and keyboard save naming. Vertical look and weapon aim remain experimental. |
 | Settings | One settings table for the launcher (Display, Enhancements, Controls, Audio, Experimental, Troubleshooting) and the in-game menu (Display, Enhancements, Controls, Experimental, Language, System, Debug, Cheats). Each launcher settings page except Troubleshooting resets on its own. |
@@ -29,11 +29,11 @@ validation is incomplete.
   about 30 unique world/camera frames per second. In-between frames add
   presentation frames. Higher render resolution alone does not increase the
   game cadence.
-- The game steps doors and lifts on every second tick. Under 60 FPS gameplay a
-  door is drawn half a step ahead on the frames in between and a lift half a
-  step behind on the frames it steps, with the view of a player it carries, so
-  both move on every frame. Enemies and items on a moving lift, and the other
-  things the game updates at that rate, still step at 30.
+- The game steps doors, lifts, enemies and shots on every second tick. Under
+  60 FPS gameplay a door is drawn half a step ahead on the frames in between.
+  A lift, an enemy and a shot are drawn half a step behind on the frames they
+  step, a lift with the view of a player it carries. So all of them move on
+  every frame. The other things the game updates at that rate still step at 30.
 - Enemies and bodies sort a little nearer than the game sorts them, together
   with the items lying over them, so the floor under them does not cut them.
   A wall or a shut door standing in front of one keeps it behind, also where

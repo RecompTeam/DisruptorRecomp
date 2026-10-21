@@ -1,5 +1,7 @@
 #include "guide.h"
 
+#include "game/settings/hint_text.h"
+
 #include <algorithm>
 #include <cctype>
 #include <optional>
@@ -266,6 +268,12 @@ std::vector<Block> parse_markdown(std::string_view markdown) {
     const auto close = [&] {
         if (!open) return;
         open->text = parse_inline(pending);
+        Line& text = open->text;
+        const std::size_t name = text.empty() || text.front().style != Style::plain ? 0 : settings::choice_name(text.front().text);
+        if (open->kind != BlockKind::paragraph && name) {
+            text.insert(text.begin(), Span{Style::lead, text.front().text.substr(0, name), {}});
+            text[1].text.erase(0, name);
+        }
         blocks.push_back(std::move(*open));
         open.reset();
         pending.clear();

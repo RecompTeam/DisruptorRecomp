@@ -87,7 +87,7 @@ int main() {
         known(folder, "SLES_005.65", "German", true);
         known(folder, "SLPS_008.04", "Japanese", false);
         refused(folder);
-        require(describe({"German", true}) == L"German disc: menus, texts, movies, speech and hints." &&
+        require(describe({"German", true}) == L"German disc: menus, texts, movies, speech and hints" &&
                 describe({"Japanese", false}).find(L"Its menus are in English") != std::wstring::npos,
                 "the launcher must say what a disc gives");
         std::cout << "Region disc recognition, layout check and refusal tests passed\n";

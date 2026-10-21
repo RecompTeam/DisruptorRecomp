@@ -17,8 +17,8 @@ namespace disruptor::launcher {
 namespace {
 
 constexpr std::size_t kept_backups = 5;
-constexpr std::array<std::string_view, 10> earlier_entries = {
-    "settings.toml", "keybinds.ini", "input.ini", "launcher.ini", "mouse-aim.ini", "saves", "capsules", "mods",
+constexpr std::array<std::string_view, 12> earlier_entries = {
+    "settings.toml", "keybinds.ini", "keys-1.ini", "keys-2.ini", "input.ini", "launcher.ini", "mouse-aim.ini", "saves", "capsules", "mods",
     "input/Disruptor (USA).cue", "input/Disruptor (USA).bin"};
 
 std::string text(const fs::path& path) {
@@ -73,26 +73,26 @@ struct Copying {
 };
 
 void check(const Copying& copying) {
-    if (copying.cancelled) throw std::runtime_error("Cancelled. Nothing was brought over.");
+    if (copying.cancelled) throw std::runtime_error("Cancelled\nNothing was brought over");
 }
 
 void copy_file(const fs::path& from, const fs::path& to, Copying& copying) {
     std::ifstream input(from, std::ios::binary);
     std::ofstream output(to, std::ios::binary | std::ios::trunc);
-    if (!input || !output) throw std::runtime_error("Cannot copy " + text(from) + " to " + text(to) + ".");
+    if (!input || !output) throw std::runtime_error("Cannot copy " + text(from) + " to " + text(to));
     while (input) {
         check(copying);
         input.read(copying.buffer.data(), static_cast<std::streamsize>(copying.buffer.size()));
         const std::streamsize got = input.gcount();
         if (got <= 0) break;
         output.write(copying.buffer.data(), got);
-        if (!output) throw std::runtime_error("Cannot write " + text(to) + ". Is the disc full?");
+        if (!output) throw std::runtime_error("Cannot write " + text(to) + "\nIs the disc full?");
         copying.copied += static_cast<std::uintmax_t>(got);
         if (copying.progress) copying.progress(copying.copied, copying.total);
     }
-    if (input.bad()) throw std::runtime_error("Cannot read " + text(from) + ".");
+    if (input.bad()) throw std::runtime_error("Cannot read " + text(from));
     output.close();
-    if (output.fail()) throw std::runtime_error("Cannot write " + text(to) + ". Is the disc full?");
+    if (output.fail()) throw std::runtime_error("Cannot write " + text(to) + "\nIs the disc full?");
 }
 
 void copy_tree(const fs::path& from, const fs::path& to, Copying& copying) {
@@ -181,9 +181,9 @@ fs::path back_up_saves(const fs::path& data, std::string_view version, std::stri
 EarlierCopy look_at_copy(const fs::path& chosen, const fs::path& program, const fs::path& data) {
     EarlierCopy copy{fs::absolute(chosen).lexically_normal()};
     if (present(copy.folder / ".portable") && kind(copy.folder / "data") == fs::file_type::directory) copy.folder /= "data";
-    if (kind(copy.folder) != fs::file_type::directory) throw std::runtime_error(text(copy.folder) + " is not a folder.");
+    if (kind(copy.folder) != fs::file_type::directory) throw std::runtime_error(text(copy.folder) + " is not a folder");
     if (within(copy.folder, data) || within(data, copy.folder) || within(copy.folder, program) || within(program, copy.folder))
-        throw std::runtime_error("That is this copy's own folder. Choose the folder of the earlier copy.");
+        throw std::runtime_error("That is this copy's own folder\nChoose the folder of the earlier copy");
     const bool disc_here = !find_installed_disc(data).empty();
     std::vector<fs::path> names(earlier_entries.begin(), earlier_entries.end());
     for (const DiscProfile& profile : supported_discs())
@@ -201,7 +201,7 @@ EarlierCopy look_at_copy(const fs::path& chosen, const fs::path& program, const 
     }
     if (copy.entries.empty())
         throw std::runtime_error("There are no saves or settings in " + text(copy.folder) +
-                                 ". Choose the folder that holds the earlier copy's saves folder.");
+                                 "\nChoose the folder that holds the earlier copy's saves folder");
     return copy;
 }
 
@@ -225,8 +225,8 @@ Brought bring_over(const EarlierCopy& copy, const fs::path& data, std::string_vi
             brought.entries.push_back(entry);
         }
     } catch (const std::exception& error) {
-        throw std::runtime_error(std::string(error.what()) + ". What did not come over is in " + text(staging) +
-                                 (present(replaced) ? ", and the files it took the place of are in " + text(replaced) : std::string()) + ".");
+        throw std::runtime_error(std::string(error.what()) + "\nWhat did not come over is in " + text(staging) +
+                                 (present(replaced) ? ", and the files it took the place of are in " + text(replaced) : std::string()));
     }
     fs::remove_all(staging);
     if (present(replaced)) brought.replaced = replaced;

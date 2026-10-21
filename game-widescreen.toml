@@ -170,6 +170,19 @@ sites = [
     ["0x80048678", "0x30420940"],
 ]
 
+# A weapon or psionic key shows its list: the HUD's read of the mode, and each list's two reads of the buttons that move the choice.
+[[recompiler.instruction_hook]]
+callback = "disruptor_weapon_list_instruction_hook"
+sites = [
+    ["0x8003D840", "0x93840310"],
+    ["0x8003E014", "0x8C637670"],
+    ["0x8003E098", "0x8C427670"],
+    ["0x8003E0F8", "0x93830310"],
+    ["0x8003E8C8", "0x8FBF00DC"],
+    ["0x8003E7B8", "0x8C637670"],
+    ["0x8003E84C", "0x8C427670"],
+]
+
 [runtime]
 debug_port = 4624
 window_title = "Disruptor Recompiled"

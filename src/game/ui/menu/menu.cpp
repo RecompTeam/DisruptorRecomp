@@ -125,11 +125,11 @@ void start_shown_recording() {
     std::error_code failed;
     fs::create_directories(folder, failed);
     if (failed) {
-        g_menu.shown_note = "The folder for the pictures could not be made.";
+        g_menu.shown_note = "The folder for the pictures could not be made";
         return;
     }
     g_menu.shown_note = gl_renderer_record_shown(utf8(folder).c_str(), 120, 240, 960) ? "Last recording: " + utf8(folder)
-                                                                                      : "The recording could not start.";
+                                                                                      : "The recording could not start";
 }
 
 }  // namespace
@@ -186,9 +186,10 @@ void draw_menu() {
     if (ImGui::Begin("Disruptor Settings", &keep_open,
                      ImGuiWindowFlags_NoCollapse)) {
         ImGui::PushTextWrapPos(0.0f);  // a long note wraps at the window's edge, where it used to be cut off
-        ImGui::TextDisabled("Press ` to toggle; Escape closes the menu.");
+        ImGui::TextDisabled("Press ` to toggle");
+        ImGui::TextDisabled("Escape closes the menu");
         ImGui::TextColored(ImVec4(1.0f, 0.73f, 0.25f, 1.0f),
-                           "The game is not paused while this menu is open.");
+                           "The game is not paused while this menu is open");
 
         if (ImGui::BeginTabBar("DisruptorDevTabs")) {
             if (ImGui::BeginTabItem("Controls")) {
@@ -201,6 +202,10 @@ void draw_menu() {
             }
             if (ImGui::BeginTabItem("Enhancements")) {
                 draw_enhancements_tab();
+                ImGui::EndTabItem();
+            }
+            if (ImGui::BeginTabItem("Audio")) {
+                draw_audio_tab();
                 ImGui::EndTabItem();
             }
             if (ImGui::BeginTabItem("Experimental")) {

@@ -65,19 +65,19 @@ int diagnostic(int count, char** arguments, const fs::path& data) {
     const std::string_view mode = arguments[1];
     if (mode != "--verify" && mode != "--import" && mode != "--check") return -1;
     const bool needs_image = mode != "--check";
-    if (needs_image && count < 3) throw std::runtime_error("A disc image path is required.");
+    if (needs_image && count < 3) throw std::runtime_error("A disc image path is required");
     fs::path program = executable_directory();
     fs::path files = data;
     const int option = needs_image ? 3 : 2;
     if (count == option + 2 && std::string_view(arguments[option]) == "--root") program = files = fs::absolute(from_utf8(arguments[option + 1]));
-    else if (count != option) throw std::runtime_error("Unexpected launcher arguments.");
+    else if (count != option) throw std::runtime_error("Unexpected launcher arguments");
     std::atomic_bool cancelled{false};
     VerifiedDisc verified;
     if (mode == "--verify") verified = verify_disc(from_utf8(arguments[2]), cancelled);
     else if (mode == "--import") verified = import_disc(from_utf8(arguments[2]), files, cancelled);
     else {
         const auto installed = find_installed_disc(files);
-        if (installed.empty()) throw std::runtime_error("No supported disc image is installed.");
+        if (installed.empty()) throw std::runtime_error("No supported disc image is installed");
         verified = verify_disc(installed, cancelled);
         check_package(program, *verified.profile);
     }
@@ -450,8 +450,8 @@ int main(int count, char** values) {
         // One launcher for a folder of the player's files: two would write them at once.
         const platform::Instance single(data);
         if (!single.first()) {
-            if (count > 1) write_error("The launcher of this copy is already open.");
-            else fail_window("The launcher is already open.");
+            if (count > 1) write_error("The launcher of this copy is already open");
+            else fail_window("The launcher is already open");
             return 1;
         }
         const int result = diagnostic(count, values, data);

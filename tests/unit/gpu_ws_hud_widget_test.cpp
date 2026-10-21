@@ -225,6 +225,28 @@ void test_the_next_frame_starts_from_nothing() {
     expect(takes(hud, kName, true), "without a new drawing area a later frame still holds what an earlier one showed");
 }
 
+void test_the_game_says_a_list_opens() {
+    PsxWsHudWidgets hud = game();
+    psx_ws_hud_widgets_frame(&hud);
+    main_list(hud, kTable, kWorldNode, kHudNode, false);
+    psx_ws_hud_widgets_show(&hud, 0);
+    text_list(hud, kOtherTable);
+    expect(takes(hud, kName, true), "the name a list prints as it opens, before its panel is drawn, joins it when the game says so");
+    expect(!takes(hud, kName, false), "a polygon there still does not");
+    for (const Rect &other : kOthers) expect(!takes(hud, other, true), "nor a rectangle outside the box");
+    psx_ws_hud_widgets_list_end(&hud);
+    psx_ws_hud_widgets_frame(&hud);
+    text_list(hud, kTable);
+    expect(!takes(hud, kName, true), "the next drawing area forgets it");
+    psx_ws_hud_widgets_list_end(&hud);
+    psx_ws_hud_widgets_show(&hud, 1);
+    psx_ws_hud_widgets_show(&hud, -1);
+    psx_ws_hud_widgets_show(&hud, 31);
+    text_list(hud, kTable);
+    expect(!takes(hud, kName, true) && hud.shown == 0u, "a widget the game does not have is never shown");
+    psx_ws_hud_widgets_list_end(&hud);
+}
+
 void test_what_does_not_show_a_widget() {
     PsxWsHudWidgets hud = game();
     psx_ws_hud_widgets_frame(&hud);
@@ -376,6 +398,7 @@ int main() {
     test_the_hud_hangs_below_the_table();
     test_a_frame_with_the_list_open();
     test_the_next_frame_starts_from_nothing();
+    test_the_game_says_a_list_opens();
     test_what_does_not_show_a_widget();
     test_the_table_word_may_run_ahead();
     test_several_widgets_and_layers();

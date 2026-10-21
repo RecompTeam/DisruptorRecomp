@@ -31,15 +31,15 @@ constexpr DiscProfile discs[] = {
 };
 
 void check_cancel(const std::atomic_bool& cancelled) {
-    if (cancelled) throw std::runtime_error("Cancelled. Your original image has been kept.");
+    if (cancelled) throw std::runtime_error("Cancelled\nYour original image has been kept");
 }
 
 void report(const Progress& progress, const wchar_t* text, unsigned percent) {
     if (progress) progress(text, percent);
 }
 
-constexpr const char* cannot_create = "Cannot create game data. Extract the build into a writable folder with enough free space.";
-constexpr const char* cannot_open = "Cannot read the disc image. Check that it exists and is not being changed by another program.";
+constexpr const char* cannot_create = "Cannot create game data\nExtract the build into a writable folder with enough free space";
+constexpr const char* cannot_open = "Cannot read the disc image\nCheck that it exists and is not being changed by another program";
 
 #ifdef _WIN32
 // Opened for reading, the file shares reading only: no program can change it while it is held.
@@ -58,7 +58,7 @@ struct File {
     uint64_t size() const {
         LARGE_INTEGER result{};
         if (!GetFileSizeEx(handle, &result) || result.QuadPart < 0)
-            throw std::runtime_error("Cannot read the image size.");
+            throw std::runtime_error("Cannot read the image size");
         return static_cast<uint64_t>(result.QuadPart);
     }
     bool read(unsigned char* bytes, size_t size, size_t& got) {
@@ -89,7 +89,7 @@ struct File {
     File& operator=(const File&) = delete;
     uint64_t size() const {
         struct stat status{};
-        if (fstat(descriptor, &status) != 0 || status.st_size < 0) throw std::runtime_error("Cannot read the image size.");
+        if (fstat(descriptor, &status) != 0 || status.st_size < 0) throw std::runtime_error("Cannot read the image size");
         return static_cast<uint64_t>(status.st_size);
     }
     bool read(unsigned char* bytes, size_t size, size_t& got) {
@@ -132,17 +132,17 @@ struct Sha256 {
     std::vector<unsigned char> object;
     Sha256() {
         if (BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0) < 0)
-            throw std::runtime_error("Windows could not initialize SHA-256 verification.");
+            throw std::runtime_error("Windows could not initialize SHA-256 verification");
         DWORD size = 0, got = 0;
         if (BCryptGetProperty(algorithm, BCRYPT_OBJECT_LENGTH,
                 reinterpret_cast<PUCHAR>(&size), sizeof(size), &got, 0) < 0) {
             BCryptCloseAlgorithmProvider(algorithm, 0);
-            throw std::runtime_error("Windows could not initialize SHA-256 verification.");
+            throw std::runtime_error("Windows could not initialize SHA-256 verification");
         }
         object.resize(size);
         if (BCryptCreateHash(algorithm, &hash, object.data(), size, nullptr, 0, 0) < 0) {
             BCryptCloseAlgorithmProvider(algorithm, 0);
-            throw std::runtime_error("Windows could not initialize SHA-256 verification.");
+            throw std::runtime_error("Windows could not initialize SHA-256 verification");
         }
     }
     ~Sha256() {
@@ -151,12 +151,12 @@ struct Sha256 {
     }
     void add(unsigned char* bytes, size_t size) {
         if (BCryptHashData(hash, bytes, static_cast<ULONG>(size), 0) < 0)
-            throw std::runtime_error("SHA-256 verification failed.");
+            throw std::runtime_error("SHA-256 verification failed");
     }
     std::string finish() {
         std::array<unsigned char, 32> digest{};
         if (BCryptFinishHash(hash, digest.data(), static_cast<ULONG>(digest.size()), 0) < 0)
-            throw std::runtime_error("SHA-256 verification failed.");
+            throw std::runtime_error("SHA-256 verification failed");
         return hex_of(digest);
     }
 };
@@ -321,27 +321,27 @@ std::string hash_file(File& file, File* output, const std::atomic_bool& cancelle
         check_cancel(cancelled);
         size_t read = 0;
         if (!file.read(bytes.data(), bytes.size(), read))
-            throw std::runtime_error("Cannot read the complete image. Check your drive and try again.");
+            throw std::runtime_error("Cannot read the complete image\nCheck your drive and try again");
         if (!read) break;
         hash.add(bytes.data(), read);
         if (output && !output->write(bytes.data(), read))
-            throw std::runtime_error("Cannot copy the image. Check free space and folder permissions.");
+            throw std::runtime_error("Cannot copy the image\nCheck free space and folder permissions");
         done += read;
         report(progress, status, total ? static_cast<unsigned>(std::min<uint64_t>(100, done * 100 / total)) : 0);
     }
-    if (done != total) throw std::runtime_error("The image is incomplete.");
+    if (done != total) throw std::runtime_error("The image is incomplete");
     if (output && !output->flush())
-        throw std::runtime_error("Could not finish writing game data. Check your drive and free space.");
+        throw std::runtime_error("Could not finish writing game data\nCheck your drive and free space");
     return hash.finish();
 }
 
 const DiscProfile& match_size(uint64_t size, std::span<const DiscProfile> profiles) {
     for (const auto& disc : profiles) if (disc.size == size) return disc;
     throw std::runtime_error(
-        "Unsupported image size or format.\n"
-        "Use the USA SLUS-00224 raw MODE2/2352 dump of 636,350,064 bytes.\n"
-        "Cooked ISOs lose audio and video the game needs.\n"
-        "PAL and Japanese discs are not supported yet.");
+        "Unsupported image size or format\n"
+        "Use the USA SLUS-00224 raw MODE2/2352 dump of 636,350,064 bytes\n"
+        "Cooked ISOs lose audio and video the game needs\n"
+        "PAL and Japanese discs are not supported yet");
 }
 
 const DiscProfile& match_hash(uint64_t size, const std::string& hash,
@@ -349,10 +349,10 @@ const DiscProfile& match_hash(uint64_t size, const std::string& hash,
     for (const auto& disc : profiles)
         if (disc.size == size && disc.sha256 == hash) return disc;
     throw std::runtime_error(
-        "The full disc SHA-256 does not match a supported revision.\n"
-        "The image may be modified, damaged, or from another region.\n"
-        "Use an unmodified USA SLUS-00224 raw dump.\n"
-        "No game data was installed and the game was not started.");
+        "The full disc SHA-256 does not match a supported revision\n"
+        "The image may be modified, damaged, or from another region\n"
+        "Use an unmodified USA SLUS-00224 raw dump\n"
+        "No game data was installed and the game was not started");
 }
 
 fs::path unique_directory(const fs::path& parent, const std::string& prefix) {
@@ -360,7 +360,7 @@ fs::path unique_directory(const fs::path& parent, const std::string& prefix) {
         fs::path path = parent / (prefix + std::to_string(std::random_device{}()) + "-" + std::to_string(i));
         if (fs::create_directory(path)) return path;
     }
-    throw std::runtime_error("Could not create a staging folder for the disc image.");
+    throw std::runtime_error("Could not create a staging folder for the disc image");
 }
 
 struct Staging {
@@ -372,7 +372,7 @@ void write_cue(const fs::path& directory) {
     std::ofstream cue(directory / "disc.cue", std::ios::binary);
     cue << "FILE \"disc.bin\" BINARY\r\n  TRACK 01 MODE2/2352\r\n    INDEX 01 00:00:00\r\n";
     cue.close();
-    if (!cue) throw std::runtime_error("Cannot write the disc CUE. Check folder permissions.");
+    if (!cue) throw std::runtime_error("Cannot write the disc CUE\nCheck folder permissions");
 }
 } // namespace
 
@@ -383,13 +383,13 @@ fs::path resolve_image(const fs::path& selected) {
     const auto extension = upper(selected.extension().string());
     if (extension == ".BIN" || extension == ".ISO" || extension == ".IMG") return selected;
     if (extension != ".CUE")
-        throw std::runtime_error("Select a CUE, BIN, IMG, or raw ISO disc image.");
+        throw std::runtime_error("Select a CUE, BIN, IMG, or raw ISO disc image");
     File source(selected);
-    if (source.size() > 65536) throw std::runtime_error("The CUE is too large or invalid.");
+    if (source.size() > 65536) throw std::runtime_error("The CUE is too large or invalid");
     std::string text(static_cast<size_t>(source.size()), '\0');
     size_t got = 0;
     if (!source.read(reinterpret_cast<unsigned char*>(text.data()), text.size(), got) || got != text.size())
-        throw std::runtime_error("Cannot read the CUE file.");
+        throw std::runtime_error("Cannot read the CUE file");
     if (text.starts_with("\xef\xbb\xbf")) text.erase(0, 3);
     std::istringstream lines(text);
     std::string line, filename;
@@ -408,15 +408,15 @@ fs::path resolve_image(const fs::path& selected) {
         } else if (std::regex_match(line, track_re) && files == 1 && tracks == 0) ++tracks;
         else if (std::regex_match(line, index_re) && tracks == 1 && indices == 0) ++indices;
         else throw std::runtime_error(
-            "Unsupported CUE layout.\n"
-            "The supported USA dump has one BINARY file, one MODE2/2352 track, and INDEX 01 at 00:00:00.\n"
-            "Multi-track or offset images cannot be imported by this build.");
+            "Unsupported CUE layout\n"
+            "The supported USA dump has one BINARY file, one MODE2/2352 track, and INDEX 01 at 00:00:00\n"
+            "Multi-track or offset images cannot be imported by this build");
     }
     if (files != 1 || tracks != 1 || indices != 1)
-        throw std::runtime_error("The CUE is incomplete. It needs FILE, TRACK 01 MODE2/2352, and INDEX 01 00:00:00.");
+        throw std::runtime_error("The CUE is incomplete\nIt needs FILE, TRACK 01 MODE2/2352, and INDEX 01 00:00:00");
     const fs::path data = selected.parent_path() / cue_name(filename);
     if (!fs::is_regular_file(data))
-        throw std::runtime_error("The image named by the CUE is missing. Keep the CUE and its referenced BIN together.");
+        throw std::runtime_error("The image named by the CUE is missing\nKeep the CUE and its referenced BIN together");
     return data;
 }
 

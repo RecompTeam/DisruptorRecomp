@@ -52,9 +52,12 @@ public:
     void open_saves() const;
     void reset_page(Page page);
     void set(const Option& option, int value);
+    bool set_pick_keys(const settings::PickKeys& keys);
     // Player 1's keys in keybinds.ini, read again with load() before they are shown.
     KeyBindings& keys() { return keys_; }
     bool save_keys();
+    // The keys held now and `picks` together: a failed write of the picks puts `undo` back.
+    bool store_keys(const KeyLayout& undo, const settings::PickKeys& picks);
     PadBindings& pads() { return pads_; }
     bool save_pads();
     // True when the window may close now. A running task is cancelled first, and closed() turns true when it ends.

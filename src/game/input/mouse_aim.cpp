@@ -24,6 +24,7 @@
 #include "game/settings/user_folder.h"
 #include "game/input/baton_choice.h"
 #include "game/input/selection_wheel.h"
+#include "game/input/weapon_list.h"
 #include "../../../psxrecomp/runtime/include/gpu.h"
 
 #include <algorithm>
@@ -35,6 +36,7 @@
 #include <cstring>
 #include <fstream>
 #include <string>
+#include <utility>
 
 extern "C" void mod_register_frame_hook(void (*hook)(void));
 extern "C" uint8_t psx_read_byte(uint32_t address);
@@ -63,14 +65,26 @@ constexpr uint32_t kSceneModeAddress = 0x8007145Cu;
 /* Retail weapon IDs follow the HUD names: baton, 18mm Semi, 18mm Auto,
  * Phase Rifle, Phase Repeater, Lockon Cannon, AM Blaster, AM Cyclone,
  * Zodiac, Plasma Lance. The last slot is on 0, as in other PC shooters. */
-constexpr std::array<int, 20> kWeaponKeys = {
+constexpr int kWeapons = 10, kPsionics = 5, kPickRows = kWeapons + kPsionics;
+/* A row's first key, every weapon then every power, then the second keys alike. The powers have none at first. */
+constexpr std::array<int, 2 * kPickRows> kPickKeys = {
     SDL_SCANCODE_1, SDL_SCANCODE_2, SDL_SCANCODE_3, SDL_SCANCODE_4,
     SDL_SCANCODE_5, SDL_SCANCODE_6, SDL_SCANCODE_7, SDL_SCANCODE_8,
     SDL_SCANCODE_9, SDL_SCANCODE_0,
+    SDL_SCANCODE_UNKNOWN, SDL_SCANCODE_UNKNOWN, SDL_SCANCODE_UNKNOWN, SDL_SCANCODE_UNKNOWN, SDL_SCANCODE_UNKNOWN,
     SDL_SCANCODE_KP_1, SDL_SCANCODE_KP_2, SDL_SCANCODE_KP_3, SDL_SCANCODE_KP_4,
     SDL_SCANCODE_KP_5, SDL_SCANCODE_KP_6, SDL_SCANCODE_KP_7, SDL_SCANCODE_KP_8,
     SDL_SCANCODE_KP_9, SDL_SCANCODE_KP_0,
+    SDL_SCANCODE_UNKNOWN, SDL_SCANCODE_UNKNOWN, SDL_SCANCODE_UNKNOWN, SDL_SCANCODE_UNKNOWN, SDL_SCANCODE_UNKNOWN,
 };
+constexpr uint32_t kCurrentPsionicAddress = 0x80077629u;
+constexpr uint32_t kHeldPsionicAddress = 0x800715C0u;   // gp + 0x474: the power a change has reached
+constexpr uint32_t kPsionicHandAddress = 0x80071320u;   // gp + 0x1D4: zero while a power's pictures load
+constexpr uint32_t kPsionicOwnershipBase = 0x80077B5Cu;
+constexpr uint32_t kLoadKindAddress = 0x80071324u;      // gp + 0x1D8: 2 while a power's pictures load
+constexpr int kUseMargin = 2;     // frames Square stays down once the power is ready: one used Shock in the probe
+constexpr int kUsePatience = 90;  // frames a key waits for its power: a change took 21, one behind another twice that
+constexpr uint8_t kBlast = 4u, kTeraBlast = 5u, kNoPsionic = 0xFFu;  // the game holds Blast as 5 once it raises it
 constexpr double kDefaultHorizontalSensitivity = 0.080;
 constexpr double kDefaultVerticalSensitivity = 0.080;
 constexpr double kMinimumSensitivity = 0.005;
@@ -111,8 +125,15 @@ struct MouseAimState {
     bool left_was_down = false;
     bool middle_was_down = false;
     bool escape_was_down = false;
-    std::array<bool, kWeaponKeys.size()> weapon_was_down{};
-    int pending_weapon = -1;  // picked while the game was still changing weapons
+    std::array<int, kPickKeys.size()> pick_keys = kPickKeys;
+    std::array<bool, kPickKeys.size()> pick_was_down{};
+    std::array<bool, kPickKeys.size()> pick_held{};  // down where it may pick: not an action's key
+    int pending_weapon = -1;   // picked while the game was still changing weapons
+    int pending_psionic = -1;  // and a power picked while it changed powers
+    bool psionic_keys_use = true;
+    int using_power = -1;      // a power's key asked to use it
+    int use_waited = 0;
+    int use_ready = 0;         // frames that power has been ready
     bool invert_horizontal = false;
     bool invert_vertical = false;
     double horizontal_sensitivity = kDefaultHorizontalSensitivity;
@@ -362,30 +383,91 @@ void set_capture(bool captured, const char *reason) {
 
 bool key_bound(int scancode) { return disruptor_key_bound(scancode) != 0; }
 
+// Where select_weapon may write: play, not netplay, live gameplay.
+bool weapon_pick_possible() {
+    return !psx_netplay_active() && disruptor_vertical_camera_input_allowed() && psx_read_byte(kSceneModeAddress) == 0u;
+}
+
+// A key a weapon takes where it can be taken: elsewhere, in the pause and the game's lists, it stays what it was.
+bool weapon_key(int scancode) {
+    return g_mouse.number_keys_enabled && weapon_pick_possible() &&
+           std::find(g_mouse.pick_keys.begin(), g_mouse.pick_keys.end(), scancode) != g_mouse.pick_keys.end();
+}
+
 bool key_down(const Uint8 *keys, int scancode) {
     return keys && scancode >= 0 && keys[scancode] != 0;
 }
 
 /* Track raw keys even when typing, unfocused, or in a menu. A held key must
  * be released before it can select after gameplay resumes. */
+// The row a key picks this frame: a weapon below kWeapons, a power from there.
 int sample_weapon_keys(const Uint8 *keys, const Uint8 *pad_keys) {
     int requested = -1;
-    for (size_t i = 0; i < kWeaponKeys.size(); ++i) {
-        const int key = kWeaponKeys[i];
-        const bool down = key_down(keys, key);
-        if (requested < 0 && down && !g_mouse.weapon_was_down[i] &&
-            key_down(pad_keys, key) && !key_bound(key))
-            requested = static_cast<int>(i % 10);
-        g_mouse.weapon_was_down[i] = down;
+    // Alt+Enter and Alt+Tab are the window's.
+    const bool alt = key_down(keys, SDL_SCANCODE_LALT) || key_down(keys, SDL_SCANCODE_RALT);
+    for (size_t i = 0; i < g_mouse.pick_keys.size(); ++i) {
+        const int key = g_mouse.pick_keys[i];
+        const bool down = key != SDL_SCANCODE_UNKNOWN && key_down(keys, key);
+        const bool picks = down && key_down(pad_keys, key) && !key_bound(key);
+        if (requested < 0 && picks && !alt && !g_mouse.pick_was_down[i])
+            requested = static_cast<int>(i % kPickRows);
+        g_mouse.pick_was_down[i] = down;
+        g_mouse.pick_held[i] = picks;
     }
     return requested;
 }
 
-void select_weapon(int weapon) {
-    if (weapon < 0 || weapon >= 10 || psx_netplay_active() ||
-        !disruptor_vertical_camera_input_allowed() ||
-        psx_read_byte(kSceneModeAddress) != 0u)
+uint8_t power_of(uint8_t id) { return id == kTeraBlast ? kBlast : id; }
+
+void forget_picks() { g_mouse.pending_weapon = g_mouse.pending_psionic = g_mouse.using_power = -1; }
+
+bool power_key_down(int power) {
+    return g_mouse.pick_held[kWeapons + power] || g_mouse.pick_held[kPickRows + kWeapons + power];
+}
+
+/* Psionic attack from the change's start: the game holds it through the load and uses the power on its last frame
+ * (probe of 2026-10-21). Before the change it could use the old power. */
+void press_psionic_use() {
+    const int power = g_mouse.using_power;
+    if (power < 0) return;
+    const bool taken = power_of(psx_read_byte(kHeldPsionicAddress)) == power &&
+                       power_of(psx_read_byte(kCurrentPsionicAddress)) == power;
+    const bool ready = taken && psx_read_byte(kLoadKindAddress) != 2u && psx_read_word(kPsionicHandAddress) != 0u;
+    g_mouse.use_ready = ready ? g_mouse.use_ready + 1 : 0;
+    if ((g_mouse.use_ready > kUseMargin && !power_key_down(power)) || (!ready && ++g_mouse.use_waited > kUsePatience)) {
+        g_mouse.using_power = -1;
         return;
+    }
+    if (taken) sio_set_pad_state_slot(0, static_cast<uint16_t>(sio_get_pad_buttons_slot(0) & ~kPadSquare));
+}
+
+/* As the psionics list's own move (0x8003E820), the ID alone: the power update sees it differ from the held one and
+ * owns the change. Returns whether it wrote. */
+bool select_psionic(int power) {
+    if (power < 0 || power >= kPsionics || !weapon_pick_possible()) return false;
+    const uint8_t current = psx_read_byte(kCurrentPsionicAddress);
+    if ((current > kTeraBlast && current != kNoPsionic) ||
+        psx_read_word(kPsionicOwnershipBase + static_cast<uint32_t>(power) * 4u) == 0u)
+        return false;
+    if (power_of(current) == static_cast<uint8_t>(power)) {
+        g_mouse.pending_psionic = -1;
+        return false;
+    }
+    disruptor_psionic_list_show();
+    if (current != kNoPsionic && (power_of(current) != power_of(psx_read_byte(kHeldPsionicAddress)) ||
+                                  psx_read_word(kPsionicHandAddress) == 0u)) {
+        g_mouse.pending_psionic = power;
+        return false;
+    }
+    g_mouse.pending_psionic = -1;
+    psx_write_byte(kCurrentPsionicAddress, static_cast<uint8_t>(power));
+    disruptor_capsule_note_byte(kCurrentPsionicAddress, static_cast<uint8_t>(power));
+    return true;
+}
+
+// Returns whether it wrote.
+bool select_weapon(int weapon) {
+    if (weapon < 0 || weapon >= kWeapons || !weapon_pick_possible()) return false;
 
     /* The retail selector at 0x80039920 checks this same ownership word,
      * then stores only the selected ID. The normal weapon update notices
@@ -393,19 +475,23 @@ void select_weapon(int weapon) {
     const uint8_t current = psx_read_byte(kCurrentWeaponAddress);
     if ((current >= 10u && current != 0xFFu) ||
         psx_read_word(kWeaponOwnershipBase + static_cast<uint32_t>(weapon) * 4u) != 1u)
-        return;
+        return false;
     if (current == static_cast<uint8_t>(weapon)) {
         g_mouse.pending_weapon = -1;
-        if (weapon != 0) return;
-    } else if (current < 10u && current != psx_read_byte(kHeldWeaponAddress)) {
+        if (weapon != 0) return false;
+    } else {
+        disruptor_weapon_list_show();
         // The game's own selector waits too: a pick mid-change turns the old weapon back up.
-        g_mouse.pending_weapon = weapon;
-        return;
+        if (current < 10u && current != psx_read_byte(kHeldWeaponAddress)) {
+            g_mouse.pending_weapon = weapon;
+            return false;
+        }
     }
     g_mouse.pending_weapon = -1;
     psx_write_byte(kCurrentWeaponAddress, static_cast<uint8_t>(weapon));
     disruptor_capsule_note_byte(kCurrentWeaponAddress, static_cast<uint8_t>(weapon));
     disruptor_weapon_chosen(static_cast<uint8_t>(weapon));
+    return true;
 }
 
 /* Merge host controls into the already sampled port-1 pad word.  This runs
@@ -417,9 +503,22 @@ void apply_number_keys(const Uint8 *keys, bool focused) {
     std::array<Uint8, 512> pad_keys{};  /* SDL's scancode count, in 2 and 3 alike */
     if (keys && g_mouse.number_keys_enabled)
         disruptor_name_entry_keys_for_pad(keys, pad_keys.data(), static_cast<int>(pad_keys.size()));
-    const int weapon = sample_weapon_keys(keys, g_mouse.number_keys_enabled && keys ? pad_keys.data() : nullptr);
-    if (!g_mouse.number_keys_enabled) g_mouse.pending_weapon = -1;
-    if (focused) select_weapon(weapon >= 0 ? weapon : g_mouse.pending_weapon);
+    const int row = sample_weapon_keys(keys, g_mouse.number_keys_enabled && keys ? pad_keys.data() : nullptr);
+    // A waiting pick lives only while one could be made: focus, the setting, play.
+    const bool possible = g_mouse.number_keys_enabled && focused && weapon_pick_possible();
+    if (!possible) forget_picks();
+    if (!focused) return;
+    // One pick a frame: a capsule's frame holds two bytes, and a weapon's pick takes both.
+    const bool wrote = select_weapon(row >= 0 && row < kWeapons ? row : g_mouse.pending_weapon);
+    if (!wrote) select_psionic(row >= kWeapons ? row - kWeapons : g_mouse.pending_psionic);
+    else if (row >= kWeapons) g_mouse.pending_psionic = row - kWeapons;
+    const int power = row - kWeapons;
+    if (possible && power >= 0 && g_mouse.psionic_keys_use &&
+        (power_of(psx_read_byte(kCurrentPsionicAddress)) == power || g_mouse.pending_psionic == power)) {
+        g_mouse.using_power = power;
+        g_mouse.use_waited = g_mouse.use_ready = 0;
+    }
+    press_psionic_use();
 }
 
 void apply_modern_controls(const Uint8 *keys, uint32_t mouse_buttons) {
@@ -433,8 +532,8 @@ void apply_modern_controls(const Uint8 *keys, uint32_t mouse_buttons) {
 
     /* keybinds.ini holds the keys. The arrows also walk forward and back where the player left them free. */
     uint16_t press = 0;
-    if (key_down(keys, SDL_SCANCODE_UP) && !key_bound(SDL_SCANCODE_UP)) press |= kPadUp;
-    if (key_down(keys, SDL_SCANCODE_DOWN) && !key_bound(SDL_SCANCODE_DOWN)) press |= kPadDown;
+    for (const auto [arrow, button] : {std::pair{SDL_SCANCODE_UP, kPadUp}, std::pair{SDL_SCANCODE_DOWN, kPadDown}})
+        if (key_down(keys, arrow) && !key_bound(arrow) && !weapon_key(arrow)) press |= button;
 
     if (g_mouse.captured) {
         if ((mouse_buttons & SDL_BUTTON_LMASK) != 0)  press |= kPadCross;
@@ -617,6 +716,7 @@ void mouse_aim_frame() {
     if (disruptor_selection_wheel_frame()) {
         const Uint8 *keys = SDL_GetKeyboardState(nullptr);
         sample_weapon_keys(keys, nullptr);
+        forget_picks();
         g_mouse.escape_was_down = key_down(keys, SDL_SCANCODE_ESCAPE);
         const uint32_t buttons = get_mouse_buttons();
         g_mouse.middle_was_down = (buttons & SDL_BUTTON_MMASK) != 0;
@@ -644,6 +744,7 @@ void mouse_aim_frame() {
     if (psx_host_ui_game_input_captured()) {
         const Uint8 *keys = SDL_GetKeyboardState(nullptr);
         sample_weapon_keys(keys, nullptr);
+        forget_picks();
         const uint32_t buttons = get_mouse_buttons();
         g_mouse.escape_was_down =
             keys && keys[SDL_SCANCODE_ESCAPE] != 0;
@@ -873,7 +974,14 @@ extern "C" void disruptor_modern_controls_set_enabled(int enabled) {
                                     : "settings-modern-controls-off");
 }
 
-extern "C" void disruptor_weapon_keys_state_loaded(void) { g_mouse.pending_weapon = -1; }
+extern "C" void disruptor_weapon_keys_state_loaded(void) { forget_picks(); }
+
+extern "C" void disruptor_pick_keys_set(const int *scancodes, int count) {
+    for (size_t i = 0; i < g_mouse.pick_keys.size(); ++i)
+        g_mouse.pick_keys[i] = scancodes && i < static_cast<size_t>(count) ? scancodes[i] : kPickKeys[i];
+    forget_picks();
+    sample_weapon_keys(SDL_GetKeyboardState(nullptr), nullptr);
+}
 
 extern "C" int disruptor_number_keys_enabled(void) {
     return g_mouse.number_keys_enabled ? 1 : 0;
@@ -884,6 +992,13 @@ extern "C" void disruptor_number_keys_set_enabled(int enabled) {
     g_mouse.number_keys_enabled = enabled != 0;
     sample_weapon_keys(SDL_GetKeyboardState(nullptr), nullptr);
     refresh_live_control_state(enabled ? "settings-number-keys-on" : "settings-number-keys-off");
+}
+
+extern "C" int disruptor_psionic_keys_use_enabled(void) { return g_mouse.psionic_keys_use ? 1 : 0; }
+
+extern "C" void disruptor_psionic_keys_use_set_enabled(int enabled) {
+    g_mouse.psionic_keys_use = enabled != 0;
+    if (!g_mouse.psionic_keys_use) g_mouse.using_power = -1;
 }
 
 extern "C" int disruptor_high_precision_camera_enabled(void) {

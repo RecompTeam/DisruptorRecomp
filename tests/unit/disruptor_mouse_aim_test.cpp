@@ -63,6 +63,10 @@ void mod_register_frame_hook(void (*hook)(void)) {
 
 int g_chosen_weapon = -1;
 void disruptor_weapon_chosen(std::uint8_t weapon) { g_chosen_weapon = weapon; }
+int g_list_shows = 0;
+void disruptor_weapon_list_show(void) { ++g_list_shows; }
+int g_psionic_list_shows = 0;
+void disruptor_psionic_list_show(void) { ++g_psionic_list_shows; }
 
 void disruptor_capsule_note_byte(std::uint32_t address, std::uint8_t value) {
     g_noted_at = address;
@@ -690,6 +694,7 @@ void prepare_weapon_input() {
     for (unsigned weapon = 0; weapon < 10; ++weapon)
         psx_write_byte(kWeaponOwnershipBase + weapon * 4, 1u);
     psx_write_byte(kCurrentWeaponAddress, 0xFFu);
+    g_list_shows = 0;
 }
 
 void test_direct_weapon_mapping() {
@@ -711,8 +716,9 @@ void test_direct_weapon_mapping() {
         expect(std::equal(g_ram.begin(), g_ram.end(), expected.begin()),
                "selection changes no ammunition, inventory or other game memory");
         expect(g_pad_buttons == 0xFFFFu, "direct selection does not press any controller buttons");
+        expect(g_list_shows == 1, "a number key shows the game's weapon list");
         mouse_aim_frame();
-        expect(g_notes == 1, "holding a digit does not keep selecting");
+        expect(g_notes == 1 && g_list_shows == 1, "holding a digit does not keep selecting");
     }
 }
 
@@ -734,23 +740,23 @@ void test_weapon_selection_guards() {
         g_keys[SDL_SCANCODE_1] = 1;
         const std::vector<Uint8> before(g_ram.begin(), g_ram.end());
         mouse_aim_frame();
-        expect(std::equal(g_ram.begin(), g_ram.end(), before.begin()) && g_notes == 0,
-               "unowned weapons, invalid state, menus, netplay and lost focus block selection");
+        expect(std::equal(g_ram.begin(), g_ram.end(), before.begin()) && g_notes == 0 && g_list_shows == 0,
+               "unowned weapons, invalid state, menus, netplay and lost focus block selection and the list");
     }
 
     prepare_weapon_input();
     psx_write_byte(kCurrentWeaponAddress, 1u);
     g_keys[SDL_SCANCODE_2] = 1;
     mouse_aim_frame();
-    expect(g_notes == 0, "selecting the equipped weapon is a no-op");
+    expect(g_notes == 0 && g_list_shows == 0, "selecting the equipped weapon changes nothing and shows no list");
 
     prepare_weapon_input();
     psx_write_byte(kCurrentWeaponAddress, 0u);
     g_chosen_weapon = -1;
     g_keys[SDL_SCANCODE_1] = 1;
     mouse_aim_frame();
-    expect(g_chosen_weapon == 0 && g_notes == 1 && g_noted_at == kCurrentWeaponAddress && g_noted == 0,
-           "the baton already in hand still takes the player's choice, and a capsule records it");
+    expect(g_chosen_weapon == 0 && g_notes == 1 && g_noted_at == kCurrentWeaponAddress && g_noted == 0 && g_list_shows == 0,
+           "the baton already in hand still takes the player's choice, a capsule records it, no list shows");
 
     prepare_weapon_input();
     psx_write_byte(kCurrentWeaponAddress, 1u);
@@ -758,7 +764,8 @@ void test_weapon_selection_guards() {
     g_keys[SDL_SCANCODE_3] = 1;
     mouse_aim_frame();
     mouse_aim_frame();
-    expect(psx_read_byte(kCurrentWeaponAddress) == 1u && g_notes == 0, "a pick while the game still changes weapons waits");
+    expect(psx_read_byte(kCurrentWeaponAddress) == 1u && g_notes == 0 && g_list_shows == 2,
+           "a pick while the game still changes weapons waits, with the list shown");
     g_keys[SDL_SCANCODE_3] = 0;
     mouse_aim_frame();
     g_keys[SDL_SCANCODE_4] = 1;
@@ -837,7 +844,7 @@ void test_weapon_selection_guards() {
     g_mouse.number_keys_enabled = false;
     g_keys[SDL_SCANCODE_2] = 1;
     mouse_aim_frame();
-    expect(g_notes == 0, "number keys pick nothing while their setting is off");
+    expect(g_notes == 0 && g_list_shows == 0, "number keys pick nothing and show nothing while their setting is off");
     disruptor_number_keys_set_enabled(1);
     mouse_aim_frame();
     expect(g_notes == 0, "a number held while the setting comes on does not pick");
@@ -1021,6 +1028,22 @@ void test_modern_keyboard_mapping_and_merge() {
     expect_pressed(kPadDown, "the other arrow still walks");
 
     reset_state();
+    g_mouse.modern_controls_enabled = g_mouse.number_keys_enabled = true;
+    g_mouse.pick_keys[3] = SDL_SCANCODE_UP;
+    g_keys[SDL_SCANCODE_UP] = 1;
+    g_keys[SDL_SCANCODE_DOWN] = 1;
+    apply_modern_controls(g_keys.data(), 0);
+    expect_released(kPadUp, "an arrow a weapon has does not walk");
+    expect_pressed(kPadDown, "while the other arrow still does");
+    psx_write_byte(kSceneModeAddress, 4u);
+    apply_modern_controls(g_keys.data(), 0);
+    expect_pressed(kPadUp, "in the pause, where no weapon is picked, the arrow keeps its input");
+    psx_write_byte(kSceneModeAddress, 0u);
+    g_mouse.number_keys_enabled = false;
+    apply_modern_controls(g_keys.data(), 0);
+    expect_pressed(kPadUp, "with weapon keys off the arrow walks again");
+
+    reset_state();
     g_mouse.modern_controls_enabled = true;
     g_typed_with[SDL_SCANCODE_DOWN] = true;
     g_keys[SDL_SCANCODE_DOWN] = 1;
@@ -1120,6 +1143,192 @@ void test_the_click_that_takes_the_mouse_is_no_shot() {
     frame(0);
     expect(g_mouse.captured && g_relative_mode, "and switching a feature on again takes it, with no click");
 }
+
+void test_rebound_weapon_keys() {
+    prepare_weapon_input();
+    std::array<int, 30> keys{};
+    keys[2] = SDL_SCANCODE_Z;             // the 18mm Auto's first key
+    keys[15 + 4] = SDL_SCANCODE_KP_PLUS;  // the Phase Repeater's second
+    disruptor_pick_keys_set(keys.data(), static_cast<int>(keys.size()));
+    g_keys[SDL_SCANCODE_1] = 1;
+    mouse_aim_frame();
+    expect(psx_read_byte(kCurrentWeaponAddress) == 0xFFu && g_notes == 0, "a number no weapon has picks nothing");
+    g_keys[SDL_SCANCODE_1] = 0;
+    g_keys[SDL_SCANCODE_Z] = 1;
+    mouse_aim_frame();
+    expect(psx_read_byte(kCurrentWeaponAddress) == 2u, "a key set for a weapon picks it");
+    g_keys[SDL_SCANCODE_Z] = 0;
+    psx_write_byte(kHeldWeaponAddress, 2u);
+    g_keys[SDL_SCANCODE_KP_PLUS] = 1;
+    mouse_aim_frame();
+    expect(psx_read_byte(kCurrentWeaponAddress) == 4u, "and so does its second key");
+    g_keys[SDL_SCANCODE_KP_PLUS] = 0;
+    psx_write_byte(kHeldWeaponAddress, 4u);
+    g_keys[SDL_SCANCODE_LALT] = 1;
+    g_keys[SDL_SCANCODE_Z] = 1;
+    mouse_aim_frame();
+    expect(psx_read_byte(kCurrentWeaponAddress) == 4u, "with Alt held no key picks a weapon");
+    g_keys[SDL_SCANCODE_LALT] = 0;
+    mouse_aim_frame();
+    expect(psx_read_byte(kCurrentWeaponAddress) == 4u, "nor the key held while Alt is let go");
+    g_keys[SDL_SCANCODE_Z] = 0;
+    disruptor_pick_keys_set(nullptr, 0);
+    g_keys[SDL_SCANCODE_KP_6] = 1;
+    mouse_aim_frame();
+    expect(psx_read_byte(kCurrentWeaponAddress) == 5u, "no table gives the number row and the keypad back");
+}
+
+void test_psionic_keys() {
+    prepare_weapon_input();
+    g_psionic_list_shows = 0;
+    std::array<int, 30> keys{};
+    keys[10 + 2] = SDL_SCANCODE_Z;            // Heal's first key
+    keys[15 + 10 + 4] = SDL_SCANCODE_KP_PLUS; // Blast's second
+    keys[10 + 1] = SDL_SCANCODE_W;            // Drain's first, not owned
+    disruptor_pick_keys_set(keys.data(), static_cast<int>(keys.size()));
+    psx_write_byte(kCurrentPsionicAddress, 0u);
+    psx_write_byte(kHeldPsionicAddress, 0u);
+    psx_write_byte(kPsionicHandAddress, 1u);
+    for (const unsigned power : {0u, 2u, 4u}) psx_write_byte(kPsionicOwnershipBase + power * 4u, 1u);
+    g_keys[SDL_SCANCODE_W] = 1;
+    mouse_aim_frame();
+    expect(psx_read_byte(kCurrentPsionicAddress) == 0u && g_psionic_list_shows == 0 && g_notes == 0,
+           "a power the player lacks is not picked");
+    g_keys[SDL_SCANCODE_W] = 0;
+    g_keys[SDL_SCANCODE_Z] = 1;
+    mouse_aim_frame();
+    expect(psx_read_byte(kCurrentPsionicAddress) == 2u && g_noted_at == kCurrentPsionicAddress && g_noted == 2u &&
+               g_psionic_list_shows == 1 && g_list_shows == 0,
+           "a power's key picks it, a capsule records it and the psionics list shows");
+    g_keys[SDL_SCANCODE_Z] = 0;
+    g_keys[SDL_SCANCODE_KP_PLUS] = 1;
+    mouse_aim_frame();
+    expect(psx_read_byte(kCurrentPsionicAddress) == 2u && g_psionic_list_shows == 2,
+           "while the power changes a pick waits, with the list shown");
+    g_keys[SDL_SCANCODE_KP_PLUS] = 0;
+    psx_write_byte(kHeldPsionicAddress, 2u);
+    mouse_aim_frame();
+    expect(psx_read_byte(kCurrentPsionicAddress) == 4u, "and is made once the change is done");
+    psx_write_byte(kHeldPsionicAddress, 5u);
+    const int notes = g_notes, shows = g_psionic_list_shows;
+    g_keys[SDL_SCANCODE_KP_PLUS] = 1;
+    mouse_aim_frame();
+    expect(psx_read_byte(kCurrentPsionicAddress) == 4u && g_notes == notes && g_psionic_list_shows == shows,
+           "Blast held as TeraBlast is Blast, and the power in hand shows no list");
+    g_keys[SDL_SCANCODE_KP_PLUS] = 0;
+    psx_write_byte(kHeldPsionicAddress, 4u);
+    psx_write_byte(kPsionicHandAddress, 0u);
+    g_keys[SDL_SCANCODE_Z] = 1;
+    mouse_aim_frame();
+    expect(psx_read_byte(kCurrentPsionicAddress) == 4u, "while a power's pictures load a pick waits");
+    g_keys[SDL_SCANCODE_Z] = 0;
+    g_window_flags = 0;
+    mouse_aim_frame();
+    g_window_flags = SDL_WINDOW_INPUT_FOCUS;
+    psx_write_byte(kPsionicHandAddress, 1u);
+    mouse_aim_frame();
+    expect(psx_read_byte(kCurrentPsionicAddress) == 4u, "a waiting power is forgotten when focus goes");
+    psx_write_byte(kSceneModeAddress, 3u);
+    g_keys[SDL_SCANCODE_Z] = 1;
+    mouse_aim_frame();
+    expect(psx_read_byte(kCurrentPsionicAddress) == 4u, "in the game's own lists no power is picked");
+}
+
+void test_psionic_use() {
+    prepare_weapon_input();
+    std::array<int, 30> keys{};
+    keys[10 + 0] = SDL_SCANCODE_Z;  // Shock's first key
+    keys[10 + 2] = SDL_SCANCODE_W;  // Heal's first
+    disruptor_pick_keys_set(keys.data(), static_cast<int>(keys.size()));
+    for (const unsigned power : {0u, 2u}) psx_write_byte(kPsionicOwnershipBase + power * 4u, 1u);
+    psx_write_byte(kCurrentPsionicAddress, 0u);
+    psx_write_byte(kHeldPsionicAddress, 0u);
+    psx_write_byte(kPsionicHandAddress, 1u);
+    const auto used = [] {
+        g_pad_buttons = 0xFFFFu;
+        mouse_aim_frame();
+        return (g_pad_buttons & kPadSquare) == 0;
+    };
+    g_keys[SDL_SCANCODE_Z] = 1;
+    expect(used(), "the key of the power in hand uses it at once");
+    expect(used() && used(), "and keeps using it while held");
+    g_keys[SDL_SCANCODE_Z] = 0;
+    expect(!used(), "a released key lets go once the power had its frames");
+    keys[15 + 10 + 0] = SDL_SCANCODE_UP;  // Shock's second, an action's in another scheme
+    disruptor_pick_keys_set(keys.data(), static_cast<int>(keys.size()));
+    g_bound[SDL_SCANCODE_UP] = true;
+    g_keys[SDL_SCANCODE_UP] = 1;
+    used();
+    g_keys[SDL_SCANCODE_Z] = 1;
+    used();
+    g_keys[SDL_SCANCODE_Z] = 0;
+    used();
+    used();
+    expect(!used(), "a second key an action holds keeps no power in use");
+    g_keys[SDL_SCANCODE_UP] = 0;
+    g_bound[SDL_SCANCODE_UP] = false;
+
+    g_keys[SDL_SCANCODE_W] = 1;
+    expect(!used() && psx_read_byte(kCurrentPsionicAddress) == 2u, "a change starts with the old power left alone");
+    g_keys[SDL_SCANCODE_W] = 0;
+    psx_write_byte(kHeldPsionicAddress, 2u);
+    psx_write_byte(kLoadKindAddress, 2u);
+    psx_write_byte(kPsionicHandAddress, 0u);
+    expect(used(), "once the game takes the change the power is used through its load");
+    psx_write_byte(kLoadKindAddress, 0u);
+    psx_write_byte(kPsionicHandAddress, 1u);
+    expect(used() && used(), "a tap still has the power used on its first ready frames");
+    expect(!used(), "and then lets go");
+
+    psx_write_byte(kCurrentPsionicAddress, 0u);
+    psx_write_byte(kHeldPsionicAddress, 0u);
+    psx_write_byte(kPsionicHandAddress, 0u);
+    g_keys[SDL_SCANCODE_W] = 1;
+    used();
+    g_keys[SDL_SCANCODE_W] = 0;
+    for (int frame = 0; frame < kUsePatience + 1; ++frame) used();
+    psx_write_byte(kPsionicHandAddress, 1u);
+    used();
+    psx_write_byte(kHeldPsionicAddress, 2u);
+    expect(psx_read_byte(kCurrentPsionicAddress) == 2u && !used(), "a key that waited too long for its power uses nothing");
+
+    g_keys[SDL_SCANCODE_W] = 1;
+    used();
+    psx_write_byte(kSceneModeAddress, 4u);
+    expect(!used(), "the pause lets the power go");
+    g_keys[SDL_SCANCODE_W] = 0;
+    psx_write_byte(kSceneModeAddress, 0u);
+    used();
+    disruptor_psionic_keys_use_set_enabled(0);
+    g_keys[SDL_SCANCODE_W] = 1;
+    expect(!used() && disruptor_psionic_keys_use_enabled() == 0, "with the setting off a power's key only picks it");
+    disruptor_psionic_keys_use_set_enabled(1);
+}
+
+void test_waiting_pick_forgotten() {
+    prepare_weapon_input();
+    psx_write_byte(kCurrentWeaponAddress, 3u);
+    psx_write_byte(kHeldWeaponAddress, 6u);
+    g_keys[SDL_SCANCODE_5] = 1;
+    mouse_aim_frame();
+    expect(psx_read_byte(kCurrentWeaponAddress) == 3u && g_notes == 0, "a pick while the weapon changes waits");
+    g_keys[SDL_SCANCODE_5] = 0;
+    g_window_flags = 0;
+    mouse_aim_frame();
+    g_window_flags = SDL_WINDOW_INPUT_FOCUS;
+    psx_write_byte(kHeldWeaponAddress, 3u);
+    mouse_aim_frame();
+    expect(psx_read_byte(kCurrentWeaponAddress) == 3u && g_notes == 0, "a waiting pick is forgotten when focus goes");
+    psx_write_byte(kHeldWeaponAddress, 6u);
+    g_keys[SDL_SCANCODE_5] = 1;
+    mouse_aim_frame();
+    g_keys[SDL_SCANCODE_5] = 0;
+    psx_write_byte(kSceneModeAddress, 4u);
+    mouse_aim_frame();
+    psx_write_byte(kSceneModeAddress, 0u);
+    psx_write_byte(kHeldWeaponAddress, 3u);
+    mouse_aim_frame();
+    expect(psx_read_byte(kCurrentWeaponAddress) == 3u && g_notes == 0, "and when the game pauses or opens its own list");}
 
 void test_live_settings_api() {
     reset_state();
@@ -1351,7 +1560,11 @@ int main(int argc, char **argv) {
         test_wheel_consumes_camera_and_keyboard_input();
         test_modern_mouse_buttons_require_capture();
         test_the_click_that_takes_the_mouse_is_no_shot();
-        test_live_settings_api();
+        test_rebound_weapon_keys();
+    test_waiting_pick_forgotten();
+    test_psionic_keys();
+    test_psionic_use();
+    test_live_settings_api();
         test_vertical_only_capture();
         test_host_ui_blocks_polled_mod_input();
         test_host_ui_escape_close_restores_capture();

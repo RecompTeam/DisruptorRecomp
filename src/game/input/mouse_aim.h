@@ -18,7 +18,12 @@ int  disruptor_modern_controls_enabled(void);
 void disruptor_modern_controls_set_enabled(int enabled);
 int  disruptor_number_keys_enabled(void);
 void disruptor_number_keys_set_enabled(int enabled);
+int  disruptor_psionic_keys_use_enabled(void);
+void disruptor_psionic_keys_use_set_enabled(int enabled);
 void disruptor_weapon_keys_state_loaded(void);
+/* Fifteen first keys, ten weapons then five psionic powers, then the fifteen second, SDL scancodes, 0 for none.
+ * Null or short gives the number row and the keypad to the weapons, nothing to the powers. */
+void disruptor_pick_keys_set(const int *scancodes, int count);
 
 int  disruptor_high_precision_camera_enabled(void);
 void disruptor_high_precision_camera_set_enabled(int enabled);

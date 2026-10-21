@@ -78,10 +78,11 @@
 | | Draw distance | Original | Longer distances come in a later release |
 | | Ambient occlusion | Off | Shaded corners and floors under things |
 | **Controls** | Control scheme | Modern | WASD and the mouse, or the original keys |
-| | Number keys pick weapons | Off | 1 to 9 and 0 pick a weapon you own, experimental |
+| | Weapon and psionic keys | Off | Two keys a weapon or power, 1 to 9 and 0 at first |
+| | Psionic keys use the power | On | A power's key uses the power too, once it is in hand |
 | | Weapon and psionic wheels | Off | Choose a weapon or a psionic on a wheel instead of the game's list, experimental |
 | | Vertical mouse look | Off | Looks up and down with the mouse, which the original cannot, experimental |
-| **And more** | | | HUD size, VSync, mouse sensitivity, gamepad buttons, a skip of the intro and others, all in the [player's guide](docs/PLAYING.md#settings) |
+| **And more** | | | HUD size, VSync, mouse sensitivity, gamepad buttons, the bass of the sound, a skip of the intro and others, all in the [player's guide](docs/PLAYING.md#settings) |
 
 ---
 

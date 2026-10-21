@@ -4,30 +4,30 @@ What changed in each release. The launcher shows the section of its own version 
 
 ## v0.5.0
 
-Released on 2026-10-21.
+Released on 2026-10-21
 
 ### Changes
 
-- Translate the game's code anew. The launcher carries save states of 0.4.x over
-- Stop loading capsules of 0.4.x
-- Run every setting the settings file does not name as the launcher shows it, also without the launcher
-- Ship no settings file
-- Call Fog shape's one choice Original instead of Even
-- Run the game's processor eight times faster inside a frame with 60 FPS gameplay, instead of four
+- Game code: translated anew, the launcher carries save states of 0.4.x over
+- Capsules: those of 0.4.x no longer load
+- Settings: one the settings file does not name plays as the launcher shows it, also without the launcher
+- Settings file: none ships with the game
+- Fog shape: its one choice is called Original instead of Even
+- 60 FPS gameplay: the game's processor runs eight times faster inside a frame, instead of four
 
 ### Enhancements
 
-- Offer Draw distance 1.25x again
-- Take about 20% less processor time a frame for the emulation
+- Draw distance: 1.25x is offered again
+- Emulation: about 20% less processor time a frame
 
 ### Bug fixes
 
-- Show the far fogged shapes again under Smooth distance fade, up to where the game stops drawing
-- Hold 60 FPS and higher in a big fight far out on an open level with 60 FPS gameplay
+- Smooth distance fade: the far fogged shapes show again, up to where the game stops drawing
+- Big fights: 60 FPS and higher hold far out on an open level with 60 FPS gameplay
 
 ## v0.4.0
 
-Released on 2026-10-19.
+Released on 2026-10-19
 
 ### Changes
 
@@ -49,7 +49,7 @@ Released on 2026-10-19.
 
 ## v0.3.1
 
-Released on 2026-10-17.
+Released on 2026-10-17
 
 ### Changes
 
@@ -70,7 +70,7 @@ Released on 2026-10-17.
 
 ## v0.3.0-alpha.1
 
-Released on 2026-10-17.
+Released on 2026-10-17
 
 ### Changes
 
@@ -90,7 +90,7 @@ Released on 2026-10-17.
 
 ## v0.2.0-alpha.1
 
-Released on 2026-10-16.
+Released on 2026-10-16
 
 ### Changes
 
@@ -139,7 +139,7 @@ Released on 2026-10-16.
 
 ## v0.1.0-alpha.5
 
-Released on 2026-10-13.
+Released on 2026-10-13
 
 ### Enhancements
 
@@ -163,7 +163,7 @@ Released on 2026-10-13.
 
 ## v0.1.0-alpha.4
 
-Released on 2026-10-12.
+Released on 2026-10-12
 
 ### Enhancements
 
@@ -191,7 +191,7 @@ Released on 2026-10-12.
 
 ## v0.1.0-alpha.3
 
-Released on 2026-10-10.
+Released on 2026-10-10
 
 ### Enhancements
 
@@ -217,7 +217,7 @@ Released on 2026-10-10.
 
 ## v0.1.0-alpha.2
 
-Released on 2026-10-08.
+Released on 2026-10-08
 
 ### Enhancements
 
@@ -235,7 +235,7 @@ Released on 2026-10-08.
 
 ## v0.1.0-alpha.1
 
-Released on 2026-10-06.
+Released on 2026-10-06
 
 ### Enhancements
 

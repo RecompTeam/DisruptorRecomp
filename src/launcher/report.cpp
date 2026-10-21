@@ -54,7 +54,7 @@ std::string end_of(const fs::path& file) {
 void write(const fs::path& file, std::string_view text) {
     std::ofstream output(file, std::ios::binary);
     output.write(text.data(), static_cast<std::streamsize>(text.size()));
-    if (!output) throw std::runtime_error("Cannot write the report. Check that the folder of your files can be written.");
+    if (!output) throw std::runtime_error("Cannot write the report\nCheck that the folder of your files can be written");
 }
 
 std::uint32_t crc32(std::string_view bytes) {

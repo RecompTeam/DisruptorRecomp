@@ -66,6 +66,11 @@ static inline void psx_ws_hud_widgets_frame(PsxWsHudWidgets *hud) {
     hud->in_hud_layer = 0;
 }
 
+/* The game says it shows widget `index` this frame, for text it prints before the widget's own primitives are drawn. */
+static inline void psx_ws_hud_widgets_show(PsxWsHudWidgets *hud, int index) {
+    if (index >= 0 && index < hud->count) hud->shown |= 1u << (unsigned)index;
+}
+
 /* A linked list begins. `table` is the table word's, or 0 when widgets do not apply. A double-buffered game can move the
  * word on before its list is drawn, so the last two tables it named are both the game's. */
 static inline void psx_ws_hud_widgets_list(PsxWsHudWidgets *hud, uint32_t table) {

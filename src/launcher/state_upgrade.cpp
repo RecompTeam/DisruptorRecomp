@@ -203,7 +203,7 @@ StateUpgrade upgrade_states(const fs::path& program, const fs::path& data, const
             if (!state.language.empty() && language_disc.empty()) {
                 ++result.untried;
                 result.lines.push_back(slot_name(state) + " was not tried: the " + state.language +
-                                       " disc is not in the launcher's list.");
+                                       " disc is not in the launcher's list");
                 continue;
             }
             fs::remove_all(trial / "saves");
@@ -214,7 +214,7 @@ StateUpgrade upgrade_states(const fs::path& program, const fs::path& data, const
             if (carried.empty() || !keep_original(saves, waiting) || !trial_settings.choose_language_disc(language_disc) ||
                 !write_whole(slots / state_name(state.entry, 0), carried)) {
                 ++result.untried;
-                result.lines.push_back(slot_name(state) + " was not tried: its copies could not be written.");
+                result.lines.push_back(slot_name(state) + " was not tried: its copies could not be written");
                 continue;
             }
             const TrialRun run = run_trial(program, trial, disc, cancelled);
@@ -226,12 +226,12 @@ StateUpgrade upgrade_states(const fs::path& program, const fs::path& data, const
                 if (read_whole(state.path) == waiting.bytes && write_whole(written, carried)) {
                     fs::rename(written, state.path);
                     ++result.carried;
-                    result.lines.push_back(slot_name(state) + " now loads on this version.");
+                    result.lines.push_back(slot_name(state) + " now loads on this version");
                     continue;
                 }
                 fs::remove(written, failed);
                 ++result.untried;
-                result.lines.push_back(slot_name(state) + " changed while it was tried: it is tried again next time.");
+                result.lines.push_back(slot_name(state) + " changed while it was tried: it is tried again next time");
                 continue;
             }
             if (cancelled) break;
@@ -239,17 +239,17 @@ StateUpgrade upgrade_states(const fs::path& program, const fs::path& data, const
                 ++result.refused;
                 note_tried(saves, tried_line(saves, state, waiting.bytes));
                 result.lines.push_back(slot_name(state) + " does not run on this version (" + run.why +
-                                       "). It stays as it was, and a copy is in saves\\old-states.");
+                                       ")\nIt stays as it was, and a copy is in saves\\old-states");
             } else {
                 ++result.untried;
-                result.lines.push_back(slot_name(state) + " could not be tried (" + run.why + "): it is tried again next time.");
+                result.lines.push_back(slot_name(state) + " could not be tried (" + run.why + "): it is tried again next time");
             }
         } catch (const std::exception& error) {
             ++result.untried;
             result.lines.push_back(slot_name(state) + " could not be tried: " + error.what());
         }
     }
-    if (stuck) result.lines.push_back("A trial run of the game did not stop: " + utf8(trial) + " is left as it is.");
+    if (stuck) result.lines.push_back("A trial run of the game did not stop: " + utf8(trial) + " is left as it is");
     else fs::remove_all(trial, failed);
     return result;
 }

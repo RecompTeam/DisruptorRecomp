@@ -47,6 +47,15 @@ inline std::string folded_key(std::string_view name) {
     return folded;
 }
 
+// Keys the game keeps for itself: the menu, save states, capsules and fast-forward.
+inline bool reserved_key(std::string_view name) {
+    const std::string folded = folded_key(name);
+    if (folded == "escape" || folded == "`" || folded == "b") return true;
+    for (int number = 1; number <= 12; ++number)
+        if (folded == "f" + std::to_string(number)) return true;
+    return false;
+}
+
 inline bool same_layout(const KeyLayout& layout, const std::array<const char*, key_count>& names) {
     for (std::size_t index = 0; index < key_count; ++index)
         if (folded_key(layout[index]) != folded_key(names[index])) return false;

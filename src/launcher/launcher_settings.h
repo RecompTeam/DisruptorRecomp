@@ -1,6 +1,7 @@
 #pragma once
 
 #include "game/settings/options.h"
+#include "game/settings/pick_keys.h"
 
 #include <filesystem>
 #include <span>
@@ -66,6 +67,11 @@ public:
     std::vector<std::string> language_discs() const;
     bool choose_language_disc(const std::string& path);
     bool forget_language_disc(const std::string& path);
+    // The weapons' and the psionic powers' keys as the file lists them, empty where it has none.
+    settings::PickLists pick_lists() const {
+        return {settings_.weapon_keys, settings_.weapon_keys_second, settings_.psionic_keys, settings_.psionic_keys_second};
+    }
+    bool set_pick_keys(const settings::PickKeys& keys);
 
     std::filesystem::path saves_folder() const;
 

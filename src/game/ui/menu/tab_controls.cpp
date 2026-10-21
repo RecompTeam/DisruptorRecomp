@@ -16,7 +16,14 @@ void draw_controls_tab() {
         disruptor_number_keys_set_enabled(number_keys ? 1 : 0);
         mark("disruptor.number_keys", number_keys ? 1 : 0);
     }
-    draw_status_badge("EXPERIMENTAL", ImVec4(1.0f, 0.73f, 0.25f, 1.0f));
+    const bool picking = applies("disruptor.psionic_keys_use");
+    if (!picking) ImGui::BeginDisabled();
+    bool use = disruptor_psionic_keys_use_enabled() != 0;
+    if (option_toggle("disruptor.psionic_keys_use", &use)) {
+        disruptor_psionic_keys_use_set_enabled(use ? 1 : 0);
+        mark("disruptor.psionic_keys_use", use ? 1 : 0);
+    }
+    if (!picking) ImGui::EndDisabled();
 
     bool wheels = disruptor_selection_wheels_enabled() != 0;
     if (option_toggle("disruptor.selection_wheels", &wheels)) {
@@ -24,7 +31,7 @@ void draw_controls_tab() {
         mark("disruptor.selection_wheels", wheels ? 1 : 0);
     }
     draw_status_badge("EXPERIMENTAL", ImVec4(1.0f, 0.73f, 0.25f, 1.0f));
-    ImGui::TextDisabled("Change single keys in the launcher, on its Controls page.");
+    ImGui::TextDisabled("Change single keys in the launcher, on its Controls page");
 
     ImGui::SeparatorText("Mouse");
     bool mouse_aim = disruptor_mouse_aim_enabled() != 0;
@@ -107,7 +114,7 @@ void draw_controls_tab() {
 
     ImGui::SeparatorText("Gamepad");
     if (const char* pad = psx_input_pad_name(0)) ImGui::TextColored(ImVec4(0.35f, 0.90f, 0.45f, 1.0f), "Gamepad in use: %s", pad);
-    else ImGui::TextDisabled("No gamepad in use.");
+    else ImGui::TextDisabled("No gamepad in use");
     int deadzone = static_cast<int>(std::lround(psx_input_deadzone() * 100.0 / 32767.0));
     ImGui::SetNextItemWidth(260.0f);
     if (option_slider("controller.deadzone", &deadzone)) set_deadzone_live(deadzone);
@@ -133,7 +140,7 @@ void draw_controls_tab() {
             }
             ImGui::EndTable();
         }
-        ImGui::TextDisabled("The launcher's Controls page changes them.");
+        ImGui::TextDisabled("The launcher's Controls page changes them");
         ImGui::TreePop();
     }
 }

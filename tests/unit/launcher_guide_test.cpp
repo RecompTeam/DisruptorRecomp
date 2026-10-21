@@ -27,6 +27,17 @@ bool spans(const Line& line, std::initializer_list<Span> expected) {
     return true;
 }
 
+void test_lead_in() {
+    const auto list = parse_markdown("- Draw distance: 1.25x is offered again\n- Plain item, no name: here\n1. Fog: one\n\nWord: no list");
+    require(list.size() == 4 && spans(list[0].text, {{Style::lead, "Draw distance:"}, {Style::plain, " 1.25x is offered again"}}),
+            "a list item's name before its colon is its lead");
+    require(spans(list[1].text, {{Style::plain, "Plain item, no name: here"}}), "a comma before the colon makes no lead");
+    require(spans(list[2].text, {{Style::lead, "Fog:"}, {Style::plain, " one"}}), "a numbered item has one too");
+    require(spans(list[3].text, {{Style::plain, "Word: no list"}}), "a paragraph has none");
+    const auto marked = parse_markdown("- **Bold**: stays bold");
+    require(spans(marked[0].text, {{Style::bold, "Bold"}, {Style::plain, ": stays bold"}}), "an item that marks its start keeps its marks");
+}
+
 void test_inline_marks() {
     require(spans(parse_inline("Press **Play** now"), {{Style::plain, "Press "}, {Style::bold, "Play"}, {Style::plain, " now"}}),
             "bold is read and its marks are left out");
@@ -252,6 +263,7 @@ void test_the_players_guide() {
 int main() {
     try {
         test_inline_marks();
+        test_lead_in();
         test_markup_lines();
         test_blocks();
         test_anchors();

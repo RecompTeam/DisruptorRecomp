@@ -112,6 +112,9 @@ int psx_host_audio_get_master_volume(void);
 int psx_host_audio_set_master_volume(int percent);
 int psx_host_audio_get_muted(void);
 int psx_host_audio_set_muted(int muted);
+/* Silences the output while the window is out of focus, apart from the player's own mute. */
+int psx_host_audio_get_mute_in_background(void);
+int psx_host_audio_set_mute_in_background(int enabled);
 
 int psx_host_ui_handle_event(const SDL_Event *event);
 int psx_host_ui_gl_visible(void);

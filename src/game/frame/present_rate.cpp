@@ -35,7 +35,7 @@ int disruptor_present_rate_switch(const char *label, const char *hint, int avail
         changed = 1;
     }
     if (locked) ImGui::EndDisabled();
-    if (locked) ImGui::TextDisabled("Enable exact geometry before in-between frames.");
+    if (locked) ImGui::TextDisabled("Enable exact geometry before in-between frames");
     return changed;
 }
 
@@ -64,15 +64,15 @@ int disruptor_present_rate_control(const char *label, const char *hint, int *acc
     }
     if (!enabled) ImGui::EndDisabled();
     if (!enabled)
-        ImGui::TextDisabled("In-between frames are off.");
+        ImGui::TextDisabled("In-between frames are off");
     else if (const char *launcher = std::getenv("PSX_FRAME_INTERPOLATION_FPS");
              launcher && disruptor_present_rate_accepted(std::atoi(launcher)))
         ImGui::TextDisabled(
-            "Pictures shown per second. Applied now and saved, but "
-            "PSX_FRAME_INTERPOLATION_FPS of the launcher replaces it at the next start.");
+            "Pictures shown per second\nApplied now and saved, but "
+            "PSX_FRAME_INTERPOLATION_FPS of the launcher replaces it at the next start");
     else
         ImGui::TextDisabled(
-            "Pictures shown per second. The top is the display's refresh rate, rounded, or 320 when "
-            "that rate is lower, not known or outside the host's range. Applied now and saved.");
+            "Pictures shown per second\nThe top is the display's refresh rate, rounded, or 320 when "
+            "that rate is lower, not known or outside the host's range\nApplied now and saved");
     return changed;
 }

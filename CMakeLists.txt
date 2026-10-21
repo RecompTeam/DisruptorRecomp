@@ -41,6 +41,7 @@ set(DISRUPTOR_EXTRA_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/far_rendering.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/frame/frame_rate.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/host.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/audio/bass_cut.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings/saved.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings/user_folder.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/intro_skip.cpp"
@@ -55,6 +56,7 @@ set(DISRUPTOR_EXTRA_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/mouse_aim.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/name_entry.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/selection_wheel.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/weapon_list.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/precision_routes.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/render_arena.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/grown_quad.cpp"
@@ -117,6 +119,7 @@ if(DISRUPTOR_DEV_MENU)
         "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/tab_controls.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/tab_display.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/tab_enhancements.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/tab_audio.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/tab_experimental.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/tab_debug.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/tab_cheats.cpp"
@@ -366,7 +369,10 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
 disruptor_unit_test(disruptor_baton_choice tests/unit/disruptor_baton_choice_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_backdrop_tiles tests/unit/disruptor_backdrop_tiles_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_intro_skip tests/unit/disruptor_intro_skip_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_weapon_list tests/unit/disruptor_weapon_list_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_frame_rate tests/unit/disruptor_frame_rate_test.cpp RUNTIME_HEADERS)
+disruptor_unit_test(disruptor_bass_cut tests/unit/disruptor_bass_cut_test.cpp
+    SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/game/audio/bass_cut.cpp")
     disruptor_unit_test(psx_cyc_overclock tests/unit/psx_cyc_overclock_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(psx_cyc_run tests/unit/psx_cyc_run_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_language tests/unit/disruptor_language_test.cpp RUNTIME_HEADERS)
@@ -389,6 +395,7 @@ disruptor_unit_test(disruptor_baton_choice tests/unit/disruptor_baton_choice_tes
         INCLUDES "${CMAKE_CURRENT_SOURCE_DIR}/tests/support/present_rate_fakes")
     disruptor_unit_test(disruptor_grown_quad tests/unit/disruptor_grown_quad_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_mover_steps tests/unit/disruptor_mover_steps_test.cpp)
+    disruptor_unit_test(disruptor_object_steps tests/unit/disruptor_object_steps_test.cpp)
     disruptor_unit_test(disruptor_sprite_depth tests/unit/disruptor_sprite_depth_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_billboard_aspect tests/unit/disruptor_billboard_aspect_test.cpp RUNTIME_HEADERS)
 

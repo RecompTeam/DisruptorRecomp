@@ -1,4 +1,5 @@
 #include "game/render/mover_steps.h"
+#include "game/render/object_steps.h"
 
 #include "cpu_state.h"
 #include "game/frame/frame_rate.h"
@@ -34,11 +35,14 @@ constexpr uint32_t kPlayerSector = 0x80077630u;
 struct Guest {
     uint32_t word(uint32_t address) const { return psx_mod_read_word(address); }
     uint32_t byte(uint32_t address) const { return psx_mod_read_byte(address); }
+    uint32_t half(uint32_t address) const { return psx_mod_read_half(address); }
     void write(uint32_t address, uint32_t value) { psx_mod_write_word(address, value); }
+    void write_half(uint32_t address, uint16_t value) { psx_mod_write_half(address, value); }
 };
 
 Shifts g_shifts;
 Lifts g_lifts;
+disruptor::objects::Steps g_objects;
 bool g_off = false;
 
 bool wanted() { return !g_off && disruptor_frame_rate_unlocked() && !psx_netplay_active(); }
@@ -46,7 +50,9 @@ bool wanted() { return !g_off && disruptor_frame_rate_unlocked() && !psx_netplay
 void draw_world(CPUState *, uint32_t) {
     Guest guest;
     catch_up(guest, g_lifts);
+    disruptor::objects::catch_up(guest, g_objects);
     if (!wanted()) return;
+    disruptor::objects::lag(guest, g_objects);
     const uint32_t sector = guest.word(kSectors + 4u * guest.byte(kPlayerSector));
     const uint32_t riding = sector != 0u ? guest.byte(sector + kSectorLift) : kNoSector;
     lag(guest, g_lifts, guest.word(kLiftRecords), kCameraHeight, guest.word(kPlayerHeight) - guest.word(kPlayerStands), riding);
@@ -68,7 +74,10 @@ void frame_waits(CPUState *cpu, uint32_t) {
     Guest guest;
     take_back(guest, g_shifts);
     /* VSync is asked inside the draw too: by the library, and by the frame loop while it waits at 0x80043BA0. */
-    if (cpu && cpu->gpr[31] == kFrameWait) catch_up(guest, g_lifts);
+    if (cpu && cpu->gpr[31] == kFrameWait) {
+        catch_up(guest, g_lifts);
+        disruptor::objects::catch_up(guest, g_objects);
+    }
 }
 
 void tick_begins(CPUState *, uint32_t) {
@@ -76,6 +85,8 @@ void tick_begins(CPUState *, uint32_t) {
     take_back(guest, g_shifts);
     catch_up(guest, g_lifts);
     note(guest, g_lifts, guest.word(kLiftRecords), guest.word(kLiftCount));
+    disruptor::objects::catch_up(guest, g_objects);
+    disruptor::objects::note(guest, g_objects);
 }
 
 PSX_MOD_CONSTRUCTOR(register_disruptor_mover_motion) {
@@ -96,10 +107,12 @@ PSX_MOD_CONSTRUCTOR(register_disruptor_mover_motion) {
 extern "C" void disruptor_mover_motion_state_loaded(void) {
     forget(g_shifts);
     forget(g_lifts);
+    disruptor::objects::forget(g_objects);
 }
 
 extern "C" void disruptor_mover_motion_state_saving(void) {
     Guest guest;
     take_back(guest, g_shifts);
     catch_up(guest, g_lifts);
+    disruptor::objects::catch_up(guest, g_objects);
 }

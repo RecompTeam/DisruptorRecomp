@@ -18,12 +18,12 @@ void draw_fullscreen_controls() {
     if (g_menu.fullscreen_apply_failed) {
         ImGui::TextColored(
             ImVec4(1.0f, 0.35f, 0.25f, 1.0f),
-            "The runtime rejected the requested display mode.");
+            "The runtime rejected the requested display mode");
     }
     ImGui::TextDisabled(
-        "Menu selections apply immediately and are saved. Alt+Enter remains "
+        "Menu selections apply immediately and are saved\nAlt+Enter remains "
         "a transient window/fullscreen toggle and does not overwrite the "
-        "saved mode.");
+        "saved mode");
 }
 
 void draw_aspect_controls() {
@@ -97,12 +97,12 @@ void draw_aspect_controls() {
     if (g_menu.aspect_apply_failed) {
         ImGui::TextColored(
             ImVec4(1.0f, 0.35f, 0.25f, 1.0f),
-            "The runtime rejected the requested display aspect.");
+            "The runtime rejected the requested display aspect");
     }
     ImGui::TextDisabled(
-        "4:3 disables widescreen. Fixed 16:9, 21:9 and 32:9 choices or "
+        "4:3 disables widescreen\nFixed 16:9, 21:9 and 32:9 choices or "
         "live window matching (capped at 32:9) apply after the current "
-        "frame and are saved.");
+        "frame and are saved");
 
     int hud_scale = gpu_ws_hud_scale();
     ImGui::SetNextItemWidth(260.0f);
@@ -130,12 +130,12 @@ void draw_internal_resolution_controls() {
     if (g_menu.internal_scale_apply_failed) {
         ImGui::TextColored(
             ImVec4(1.0f, 0.35f, 0.25f, 1.0f),
-            "The renderer could not allocate that internal resolution.");
+            "The renderer could not allocate that internal resolution");
     }
     ImGui::TextDisabled(
-        "Supersamples geometry and shading before presentation. GPU fill and "
+        "Supersamples geometry and shading before presentation\nGPU fill and "
         "memory cost grow roughly with the square of this value; changes "
-        "apply immediately and are saved.");
+        "apply immediately and are saved");
 }
 
 void draw_sync_controls() {

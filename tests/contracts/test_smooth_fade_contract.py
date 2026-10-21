@@ -99,7 +99,7 @@ require(
     "    toggle<&Settings::has_smooth_fade, &Settings::smooth_fade>(\n"
     '        "disruptor.smooth_fade", "Smooth distance fade", 1,\n'
     in options
-    and "The world's far edge dissolves instead of appearing in squares.\", needs_geometry),\n" in options
+    and "The world's far edge dissolves instead of appearing in squares\", needs_geometry),\n" in options
     and '        if (d.contains("smooth_fade")) try_get([&]{\n            s.smooth_fade = toml::find<bool>(d, "smooth_fade");\n            s.has_smooth_fade = true;\n'
     in saved
     and '        if (s.has_smooth_fade)\n            f << "smooth_fade = " << (s.smooth_fade ? "true" : "false") << "\\n";\n'

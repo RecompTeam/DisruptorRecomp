@@ -35,7 +35,7 @@ Session::~Session() {
 void Session::open(double display_rate) {
     settings_.set_display_rate(display_rate);
     settings_.load();
-    activity_.add("Your saves and settings are in " + utf8(data_) + ".");
+    activity_.add("Your saves and settings are in " + utf8(data_));
     if (!settings_.readable()) say(settings_error());
     check_installed_disc();
     look();
@@ -48,9 +48,9 @@ void Session::check_installed_disc() {
             bool legacy = installed != installed_cue(data_, supported_discs().front());
             begin(legacy ? Task::import : Task::verify, installed, false);
         } else if (settings_.readable()) {
-            say(L"No game data installed. Choose your disc image to get started.\n"
-                L"It is copied and verified, and your original files are kept.\n"
-                L"Played an earlier copy? Bring saves brings its saves, settings and disc here.");
+            say(L"No game data installed\nChoose your disc image to get started\n"
+                L"It is copied and verified, and your original files are kept\n"
+                L"Played an earlier copy? Bring saves brings its saves, settings and disc here");
         }
     } catch (const std::exception& error) { say(error_text(error)); }
 }
@@ -172,7 +172,7 @@ void Session::finish_upgrade(StateUpgrade& upgrade) {
     progress_ = 0;
     for (const std::string& line : upgrade.lines) activity_.add(line);
     if (cancelled_) {
-        say(L"Trying the save states was cancelled: they are tried again next time. Press Play to start.");
+        say(L"Trying the save states was cancelled: they are tried again next time\nPress Play to start");
         return;
     }
     if (upgrade.carried + upgrade.refused + upgrade.untried == 0) return;
@@ -181,7 +181,7 @@ void Session::finish_upgrade(StateUpgrade& upgrade) {
     if (upgrade.refused > 0)
         text += std::format("{} do not: they stay as they were, and their originals are in saves\\old-states. ", upgrade.refused);
     if (upgrade.untried > 0) text += std::format("{} could not be tried and are tried again next time. ", upgrade.untried);
-    say(wide(text + "Activity says which. Press Play to start."));
+    say(wide(text + "Activity says which\nPress Play to start"));
 }
 
 void Session::begin_earlier(std::function<Earlier()> work) {
@@ -226,7 +226,7 @@ void Session::bring_earlier() {
 
 void Session::keep_earlier() {
     earlier_.reset();
-    say(L"Nothing was brought over.");
+    say(L"Nothing was brought over");
 }
 
 void Session::finish_earlier(Earlier& earlier) {
@@ -244,16 +244,16 @@ void Session::finish_earlier(Earlier& earlier) {
     }
     if (earlier.copy) {
         earlier_ = std::move(earlier.copy);
-        say(L"Found the files of an earlier copy. Bring them here?");
+        say(L"Found the files of an earlier copy\nBring them here?");
         return;
     }
     if (!earlier.brought) return;
-    for (const fs::path& entry : earlier.brought->entries) activity_.add("Brought over: " + utf8(entry) + ".");
+    for (const fs::path& entry : earlier.brought->entries) activity_.add("Brought over: " + utf8(entry));
     if (!earlier.brought->replaced.empty())
-        activity_.add("The files they took the place of are in " + utf8(earlier.brought->replaced) + ".");
+        activity_.add("The files they took the place of are in " + utf8(earlier.brought->replaced));
     settings_.load();
     upgraded_ = false;
-    say(L"Your files came over from the earlier copy.");
+    say(L"Your files came over from the earlier copy");
     check_installed_disc();
 }
 
@@ -272,13 +272,13 @@ void Session::game_ended(unsigned long code) {
     settings_.load(); // the in-game menu writes the same file
     if (code == 0) {
         show({});
-        activity_.add("Game closed.");
+        activity_.add("Game closed");
     } else {
         wchar_t heading[160];
-        swprintf(heading, 160, L"The game exited with an error (code 0x%08lX).\n"
-                 L"If a runtime DLL is missing, install the Visual C++ x64 Redistributable.", code);
+        swprintf(heading, 160, L"The game exited with an error (code 0x%08lX)\n"
+                 L"If a runtime DLL is missing, install the Visual C++ x64 Redistributable", code);
         const std::wstring tail = log_tail(data_ / "startup.log", log_lines);
-        say(tail.empty() ? std::wstring(heading) + L"\nHelp in the side bar has the troubleshooting steps."
+        say(tail.empty() ? std::wstring(heading) + L"\nHelp in the side bar has the troubleshooting steps"
                          : std::wstring(heading) + L"\nThe end of startup.log:\n" + tail);
     }
     note_exit(data_ / "startup.log", code, seconds);
@@ -296,20 +296,20 @@ void Session::take_image(const fs::path& image) {
 void Session::add_language_disc(const fs::path& image) {
     if (busy_ || game_) return;
     if (verified_.profile) begin(Task::language, image, false);
-    else say(L"Install the USA disc first: it is the game, and the other disc gives it a language.");
+    else say(L"Install the USA disc first: it is the game, and the other disc gives it a language");
 }
 
 void Session::choose_language(std::size_t index) {
     if (!editable()) return;
     const auto discs = settings_.language_discs();
     if (index == 0) {
-        saved(settings_.choose_language_disc({}), L"The game is in English.");
+        saved(settings_.choose_language_disc({}), L"The game is in English");
     } else if (index > discs.size()) {
         return;
     } else if (verified_.profile) {
         begin(Task::language, from_utf8(discs[index - 1]), false);
     } else {
-        say(L"Install the USA disc first: it is the game, and the other disc gives it a language.");
+        say(L"Install the USA disc first: it is the game, and the other disc gives it a language");
     }
 }
 
@@ -317,7 +317,7 @@ void Session::remove_language(std::size_t index) {
     if (!editable()) return;
     const auto discs = settings_.language_discs();
     if (index > 0 && index <= discs.size())
-        saved(settings_.forget_language_disc(discs[index - 1]), L"The disc is off the list. Its file is left as it is.");
+        saved(settings_.forget_language_disc(discs[index - 1]), L"The disc is off the list\nIts file is left as it is");
 }
 
 void Session::play() {
@@ -335,9 +335,9 @@ void Session::make_problem_report() {
         const Report report = make_report(data_, system_note(), report_stamp());
         platform::show_file(report.path);
         say((report.archived ? L"Report saved as " : L"Report saved in the folder ") + report.path.wstring() +
-            L".\nAttach it to a bug report at github.com/RecompTeam/DisruptorRecomp/issues with the level and the steps.\n"
-            L"It holds the game's logs, your settings and a note of the system, with user names cut out of paths.\n"
-            L"Your disc image, BIOS and saves are never included.");
+            L"\nAttach it to a bug report at github.com/RecompTeam/DisruptorRecomp/issues with the level and the steps\n"
+            L"It holds the game's logs, your settings and a note of the system, with user names cut out of paths\n"
+            L"Your disc image, BIOS and saves are never included");
     } catch (const std::exception& error) {
         say(wide(error.what()));
     }
@@ -346,7 +346,7 @@ void Session::make_problem_report() {
 void Session::open_saves() const { platform::open_folder(settings_.saves_folder()); }
 
 void Session::reset_page(Page page) {
-    if (editable()) saved(settings_.reset(page), L"The settings on this page are those of a new installation again.");
+    if (editable()) saved(settings_.reset(page), L"The settings on this page are those of a new installation again");
 }
 
 void Session::set(const Option& option, int value) {
@@ -361,17 +361,32 @@ void Session::set(const Option& option, int value) {
     save_keys();
 }
 
+bool Session::set_pick_keys(const settings::PickKeys& keys) {
+    if (!editable()) return false;
+    const bool written = settings_.set_pick_keys(keys);
+    saved(written);
+    return written;
+}
+
 // A file that could not be written is read again, so the page shows what the game will use.
 bool Session::save_keys() {
     if (keys_.save()) return true;
-    say(L"Cannot write keybinds.ini.\nCheck that the folder of your saves and settings can be written.");
+    say(L"Cannot write keybinds.ini\nCheck that the folder of your saves and settings can be written");
     keys_.load();
+    return false;
+}
+
+bool Session::store_keys(const KeyLayout& undo, const settings::PickKeys& picks) {
+    if (!save_keys()) return false;
+    if (set_pick_keys(picks)) return true;
+    keys_.use(undo);
+    save_keys();
     return false;
 }
 
 bool Session::save_pads() {
     if (pads_.save()) return true;
-    say(L"Cannot write input.ini.\nCheck that the folder of your saves and settings can be written.");
+    say(L"Cannot write input.ini\nCheck that the folder of your saves and settings can be written");
     pads_.load();
     return false;
 }
@@ -385,8 +400,8 @@ bool Session::close() {
 }
 
 std::wstring Session::disc_text() const {
-    return verified_.profile ? std::wstring(verified_.profile->label) + L", verified."
-                             : L"Not installed. Browse to your USA disc image (SLUS-00224) or drop it on this window.";
+    return verified_.profile ? std::wstring(verified_.profile->label) + L", verified"
+                             : L"Not installed\nBrowse to your USA disc image (SLUS-00224) or drop it on this window";
 }
 
 LanguageList Session::languages() const {
@@ -409,8 +424,8 @@ void Session::saved(bool written, const std::wstring& done) {
 
 const wchar_t* Session::settings_error() const {
     return settings_.readable()
-        ? L"Cannot write settings.toml. Check that the folder of your saves and settings can be written."
-        : L"settings.toml is not valid TOML, so it is left as it is. Fix or delete it, then reopen the launcher.";
+        ? L"Cannot write settings.toml\nCheck that the folder of your saves and settings can be written"
+        : L"settings.toml is not valid TOML, so it is left as it is\nFix or delete it, then reopen the launcher";
 }
 
 } // namespace disruptor::launcher

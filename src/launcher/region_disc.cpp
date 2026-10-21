@@ -29,21 +29,21 @@ std::optional<RegionDisc> region_disc(const fs::path& selected) {
 RegionDisc check_region_disc(const fs::path& home_data, const fs::path& selected) {
     RawImage home(home_data), other(resolve_image(selected));
     if (!other.sectors())
-        throw std::runtime_error("The image is not a raw disc image of 2352-byte sectors.");
+        throw std::runtime_error("The image is not a raw disc image of 2352-byte sectors");
     KnownDisc known{};
     if (!known_disc(other, known))
-        throw std::runtime_error("The image is not a Disruptor disc of another region that this build knows.");
+        throw std::runtime_error("The image is not a Disruptor disc of another region that this build knows");
     LanguageDisc laid_out;
     std::string why;
     if (!laid_out.build(home, other, why))
-        throw std::runtime_error(std::string("The ") + known.language + " disc does not fit the US disc: " + why + ".");
+        throw std::runtime_error(std::string("The ") + known.language + " disc does not fit the US disc: " + why);
     return {known.language, known.words};
 }
 
 std::wstring describe(const RegionDisc& disc) {
     return wide(disc.language) + (disc.words
-        ? L" disc: menus, texts, movies, speech and hints."
-        : L" disc: movies, speech and hints. Its menus are in English on the disc itself.");
+        ? L" disc: menus, texts, movies, speech and hints"
+        : L" disc: movies, speech and hints\nIts menus are in English on the disc itself");
 }
 
 } // namespace disruptor::launcher

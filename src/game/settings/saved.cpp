@@ -9,6 +9,7 @@
 #include <limits>
 #include <ostream>
 #include <string>
+#include <utility>
 #include <vector>
 
 // Defined as the framework's reader defines it: toml11's inline code must be one in a program.
@@ -37,6 +38,16 @@ void read_game_user_settings(const toml::value& doc, UserSettings& s) {
             s.number_keys = toml::find<bool>(d, "number_keys");
             s.has_number_keys = true;
         });
+        if (d.contains("psionic_keys_use")) try_get([&]{
+            s.psionic_keys_use = toml::find<bool>(d, "psionic_keys_use");
+            s.has_psionic_keys_use = true;
+        });
+        for (const auto& entry : {std::pair{"weapon_keys", &s.weapon_keys}, std::pair{"weapon_keys_second", &s.weapon_keys_second},
+                                  std::pair{"psionic_keys", &s.psionic_keys}, std::pair{"psionic_keys_second", &s.psionic_keys_second}})
+            if (d.contains(entry.first)) try_get([&]{
+                *entry.second = toml::find<std::vector<std::string>>(d, entry.first);
+                s.has_pick_keys = true;
+            });
         if (d.contains("horizontal_sensitivity")) try_get([&]{
             double n = 0.0;
             try {
@@ -98,6 +109,19 @@ void read_game_user_settings(const toml::value& doc, UserSettings& s) {
         if (d.contains("skip_intro")) try_get([&]{
             s.skip_intro = toml::find<bool>(d, "skip_intro");
             s.has_skip_intro = true;
+        });
+        if (d.contains("mute_in_background")) try_get([&]{
+            s.mute_in_background = toml::find<bool>(d, "mute_in_background");
+            s.has_mute_in_background = true;
+        });
+        if (d.contains("bass_cut")) try_get([&]{
+            const std::string cut = toml::find<std::string>(d, "bass_cut");
+            for (int index = 0; index < kDisruptorBassCutCount; ++index) {
+                if (cut == kDisruptorBassCuts[index]) {
+                    s.bass_cut = index;
+                    s.has_bass_cut = true;
+                }
+            }
         });
         if (d.contains("language_disc")) try_get([&]{
             s.language_disc = toml::find<std::string>(d, "language_disc");
@@ -211,7 +235,8 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
         return out + "\"";
     };
 
-    if (s.has_mouse_aim || s.has_modern_controls || s.has_selection_wheels || s.has_number_keys ||
+    if (s.has_mouse_aim || s.has_modern_controls || s.has_selection_wheels || s.has_number_keys || s.has_pick_keys ||
+        s.has_psionic_keys_use ||
         s.has_horizontal_sensitivity || s.has_invert_horizontal ||
         s.has_vertical_look || s.has_vertical_sensitivity ||
         s.has_invert_vertical || s.has_separate_vertical_speed ||
@@ -220,7 +245,7 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
         s.has_ambient_occlusion || s.has_occlusion_reach || s.has_occlusion_strength || s.has_smooth_fade ||
         s.has_multisampling || s.has_sample_shading || s.has_downscale_averaging || s.has_edge_smoothing ||
         s.has_gap_filling || s.has_depth_sorted_world || s.has_draw_distance || s.has_fog_shape || s.has_diagnostic_view || s.has_detailed_logging ||
-        s.has_language_discs ||
+        s.has_language_discs || s.has_mute_in_background || s.has_bass_cut ||
         s.has_language_disc || s.has_skip_intro ||
         s.has_hud_scale) {
         f << "\n[disruptor]\n";
@@ -232,6 +257,16 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
             f << "selection_wheels = " << (s.selection_wheels ? "true" : "false") << "\n";
         if (s.has_number_keys)
             f << "number_keys = " << (s.number_keys ? "true" : "false") << "\n";
+        if (s.has_psionic_keys_use)
+            f << "psionic_keys_use = " << (s.psionic_keys_use ? "true" : "false") << "\n";
+        if (s.has_pick_keys) {
+            for (const auto& [name, list] : {std::pair{"weapon_keys", &s.weapon_keys}, std::pair{"weapon_keys_second", &s.weapon_keys_second},
+                                             std::pair{"psionic_keys", &s.psionic_keys}, std::pair{"psionic_keys_second", &s.psionic_keys_second}}) {
+                f << name << " = [";
+                for (size_t index = 0; index < list->size(); ++index) f << (index ? ", " : "") << quoted((*list)[index]);
+                f << "]\n";
+            }
+        }
         if (s.has_horizontal_sensitivity &&
             std::isfinite(s.horizontal_sensitivity) &&
             s.horizontal_sensitivity >= 0.005 &&
@@ -266,6 +301,10 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
             f << "frame_unlock = " << (s.frame_unlock ? "true" : "false") << "\n";
         if (s.has_skip_intro)
             f << "skip_intro = " << (s.skip_intro ? "true" : "false") << "\n";
+        if (s.has_mute_in_background)
+            f << "mute_in_background = " << (s.mute_in_background ? "true" : "false") << "\n";
+        if (s.has_bass_cut && s.bass_cut >= 0 && s.bass_cut < kDisruptorBassCutCount)
+            f << "bass_cut = " << quoted(kDisruptorBassCuts[s.bass_cut]) << "\n";
         if (s.has_language_disc)
             f << "language_disc = " << quoted(s.language_disc) << "\n";
         if (s.has_language_discs) {

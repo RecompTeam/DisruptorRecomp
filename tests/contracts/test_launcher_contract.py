@@ -74,7 +74,7 @@ ROW = r'\b(toggle|choice|slider)(?:<[^>]*>)?\(\s*"([\w.]+)", "([^"]+)", (-?\d+)'
 rows = re.findall(ROW, options)
 keys = [key for _, key, _, _ in rows]
 initial = {key: int(value) for _, key, _, value in rows}
-require(len(rows) == 35 and len(set(keys)) == 35, "the shared table must hold its 35 options, each key once")
+require(len(rows) == 38 and len(set(keys)) == 38, "the shared table must hold its 38 options, each key once")
 placed = re.findall(r'^    \{"([\w.]+)", Page::\w+(?:, (?:"[\w ]+"|nullptr)(?:, true)?)?\},$', table, re.MULTILINE)
 require(
     sorted(placed) == sorted(keys)
@@ -212,7 +212,7 @@ require(
     "the window must do each thing a step names, and write no settings of its own before the game starts",
 )
 require(
-    '    if (code == 0) {\n        show({});\n        activity_.add("Game closed.");\n    } else {\n' in window
+    '    if (code == 0) {\n        show({});\n        activity_.add("Game closed");\n    } else {\n' in window
     and '    status_ = shown_status(text, settings_.readable() ? L"" : settings_error());\n' in window
     and "Press Play to start again" not in window,
     "a game closed as usual clears the status line and leaves its line in the activity only",
@@ -293,7 +293,7 @@ require(
     and "        WriteFile(output.get(), launch.heading.data(), static_cast<DWORD>(launch.heading.size()), &written, nullptr);\n"
     in read("src/launcher/platform_windows.cpp")
     and "write(output, launch.heading.data(), launch.heading.size())" in read("src/launcher/platform_posix.cpp")
-    and '    if (small(icon::bug, "Report a problem", true, "Saves the game\'s logs, your settings and a note of the system for a bug report."))\n'
+    and '    if (small(icon::bug, "Report a problem", true, "Saves the game\'s logs, your settings and a note of the system for a bug report"))\n'
     "        session_.make_problem_report();\n"
     in window
     and "void Session::make_problem_report() {\n    try {\n"

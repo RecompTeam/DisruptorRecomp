@@ -32,8 +32,8 @@ void draw_enhancements_tab() {
     DisruptorFrameRateWindow window{};
     if (disruptor_frame_rate_last_window(&window) && window.vblanks != 0u) {
         ImGui::TextDisabled(
-            "Game frames: %.1f per second. Frame work: %.2f VBlank average, "
-            "%.2f peak, %u of %u frames over one VBlank.",
+            "Game frames: %.1f per second\nFrame work: %.2f VBlank average, "
+            "%.2f peak, %u of %u frames over one VBlank",
             59.94 * window.frames / window.vblanks,
             window.average_work_permille / 1000.0,
             window.peak_work_permille / 1000.0,
@@ -73,7 +73,7 @@ void draw_enhancements_tab() {
     if (!textures_apply) ImGui::EndDisabled();
     draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
     if (!textures_apply)
-        ImGui::TextDisabled("Enable exact geometry before perspective textures.");
+        ImGui::TextDisabled("Enable exact geometry before perspective textures");
 
     bool gaps = gl_renderer_gap_fill() != 0;
     const bool gaps_apply = applies("disruptor.gap_filling");
@@ -117,7 +117,7 @@ void draw_enhancements_tab() {
         mark_draw_distance(distance);
     if (netplay) ImGui::EndDisabled();
     draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
-    if (netplay) ImGui::TextDisabled("Netplay keeps the original draw distance.");
+    if (netplay) ImGui::TextDisabled("Netplay keeps the original draw distance");
 
     bool by_depth = gl_renderer_world_depth() != 0;
     const bool depth_applies = applies("disruptor.depth_sorted_world");

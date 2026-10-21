@@ -103,6 +103,7 @@ require(
         "tab_controls.cpp",
         "tab_display.cpp",
         "tab_enhancements.cpp",
+        "tab_audio.cpp",
         "tab_experimental.cpp",
         "tab_debug.cpp",
         "tab_cheats.cpp",
@@ -124,7 +125,7 @@ for name in menu_files[1:]:
         and "#include" not in source[10:],
         f"{name} must hold its definitions in the menu's namespace, behind the menu's one header",
     )
-for tab in ("controls", "enhancements", "experimental", "debug", "cheats", "system", "language"):
+for tab in ("controls", "enhancements", "audio", "experimental", "debug", "cheats", "system", "language"):
     source = read(f"src/game/ui/menu/tab_{tab}.cpp")
     require(
         f"\nvoid draw_{tab}_tab() {{\n" in source
@@ -365,6 +366,7 @@ for token in (
     'BeginTabItem("Controls")',
     'BeginTabItem("Enhancements")',
     'BeginTabItem("Cheats")',
+    'BeginTabItem("Audio")',
     'BeginTabItem("System")',
     "gpu_geometry_correction_set",
     "gpu_texture_correction_set",
@@ -649,7 +651,7 @@ for token in (
     "runtime rejected the requested display mode",
     "Alt+Enter remains",
     "does not overwrite the ",
-    "saved mode.",
+    "saved mode",
 ):
     require(token in fullscreen_controls, f"live fullscreen controls are missing {token}")
 require(
@@ -673,25 +675,37 @@ require(
     "menu event handling must not persist transient fullscreen hotkeys",
 )
 
-audio_controls = function_body(menu, "draw_audio_controls")
+audio_controls = function_body(menu, "draw_audio_tab")
 for token in (
     'SeparatorText("Audio output")',
     'option_slider("audio.master_volume", &volume)',
+    'option_list("disruptor.bass_cut", &bass)',
+    "disruptor_bass_cut_set(bass);",
+    "mark_bass_cut(bass);",
+    'option_toggle("disruptor.mute_in_background", &in_background)',
     'option_toggle("audio.muted", &muted)',
     "psx_host_audio_get_master_volume",
     "psx_host_audio_set_master_volume",
+    "psx_host_audio_get_mute_in_background",
+    "psx_host_audio_set_mute_in_background",
     "psx_host_audio_get_muted",
     "psx_host_audio_set_muted",
     "mark_master_volume",
+    "mark_mute_in_background",
     "mark_audio_muted",
     'draw_status_badge("LIVE"',
     "game audio state and saves are unchanged",
 ):
     require(token in audio_controls, f"live host-audio controls are missing {token}")
+require(
+    "psx_host_audio" not in function_body(menu, "draw_system_tab"),
+    "the sound is on its own Audio tab, as on the launcher's Audio page",
+)
 merge_preferences = function_body(menu, "merge_dirty_preferences")
 require(
     'void mark_master_volume(int value) { mark("audio.master_volume", value); }\n' in menu
     and 'void mark_audio_muted(bool value) { mark("audio.muted", value); }\n' in menu
+    and 'void mark_mute_in_background(bool value) { mark("disruptor.mute_in_background", value); }\n' in menu
     and MERGED in merge_preferences
     and "write<&Settings::has_master_volume, &Settings::master_volume>)" in options
     and '    toggle<&Settings::has_audio_muted, &Settings::audio_muted>("audio.muted",' in options,
@@ -702,7 +716,9 @@ require(
     'changed("audio.master_volume")' in pending_preferences
     and "psx_host_audio_set_master_volume" in pending_preferences
     and 'changed("audio.muted")' in pending_preferences
-    and "psx_host_audio_set_muted" in pending_preferences,
+    and "psx_host_audio_set_muted" in pending_preferences
+    and 'changed("disruptor.mute_in_background")' in pending_preferences
+    and "psx_host_audio_set_mute_in_background" in pending_preferences,
     "pending host-audio settings must survive a soft runtime session",
 )
 saved_preferences = function_body(menu, "apply_saved_preferences")
@@ -710,7 +726,9 @@ require(
     "settings.has_master_volume" in saved_preferences
     and "psx_host_audio_set_master_volume" in saved_preferences
     and "settings.has_audio_muted" in saved_preferences
-    and "psx_host_audio_set_muted" in saved_preferences,
+    and "psx_host_audio_set_muted" in saved_preferences
+    and "settings.has_mute_in_background" in saved_preferences
+    and "psx_host_audio_set_mute_in_background" in saved_preferences,
     "saved host-audio settings must restore for a soft runtime session",
 )
 
@@ -726,10 +744,26 @@ require(
     "muted != 0" in mute_setter and "muted != 1" in mute_setter and "g_audio_master_muted.store" in mute_setter,
     "mute API must validate and publish a boolean latch",
 )
+background_setter = function_body(main_cpp, "psx_host_audio_set_mute_in_background")
+focus = function_body(main_cpp, "sdl_audio_track_window_focus")
+require(
+    "enabled != 0" in background_setter
+    and "enabled != 1" in background_setter
+    and "g_audio_mute_in_background.store" in background_setter
+    and "SDL_WINDOW_INPUT_FOCUS" in focus
+    and "g_audio_window_in_background.store" in focus
+    and main_cpp.index("psx_game_after_input();") < main_cpp.index("    sdl_audio_track_window_focus();\n")
+    and "(void)psx_host_audio_set_mute_in_background(settings.has_mute_in_background && settings.mute_in_background);"
+    in function_body(read("src/game/host.cpp"), "psx_game_settings_loaded"),
+    "mute in the background is its own latch beside the player's mute, the window's focus is read once a frame "
+    "outside netplay's gate, and the saved choice applies at start in a build without the menu too",
+)
 master_gain = function_body(main_cpp, "sdl_audio_apply_master_gain")
 for token in (
     "g_audio_master_volume_percent.load",
     "g_audio_master_muted.load",
+    "g_audio_mute_in_background.load",
+    "g_audio_window_in_background.load",
     "muted ? 0.0f",
     "sdl_audio_gain_ramp",
 ):
@@ -757,6 +791,24 @@ require(
     main_cpp.index("us.has_master_volume") < main_cpp.index("psx_sdl_audio_open")
     and main_cpp.index("us.has_audio_muted") < main_cpp.index("psx_sdl_audio_open"),
     "persisted host-audio controls must load before the audio device opens",
+)
+host = read("src/game/host.cpp")
+require(
+    main_cpp.count("psx_game_audio_output(") == 2
+    and "psx_game_audio_output" not in drc_callback
+    and audio_pump.index("spu_render(sdl_audio_buf, frames);")
+    < audio_pump.index("g_turbo_audio_sink_frames += (uint64_t)frames;")
+    < audio_pump.index("psx_game_audio_output(sdl_audio_buf, frames, 44100);")
+    < audio_pump.index("if (sdl_audio_fadein_left > 0)")
+    < audio_pump.index("sdl_audio_apply_master_gain")
+    and audio_update.index("spu_render(sdl_audio_buf, tail);")
+    < audio_update.index("psx_game_audio_output(sdl_audio_buf, tail, 44100);")
+    < audio_update.index("sdl_audio_gain_ramp(sdl_audio_buf, tail, g0, 0.0f);")
+    and "disruptor::audio::shape_output(stereo, frames, rate);" in function_body(host, "psx_game_audio_output")
+    and "disruptor_bass_cut_set(settings.has_bass_cut ? settings.bass_cut : 0);"
+    in function_body(host, "psx_game_settings_loaded"),
+    "the bass cut shapes the SPU's output where it is rendered, before every fade, gain and the bridge, so a mute "
+    "or a fade to silence ends in silence, and the saved cut applies at start in a build without the menu too",
 )
 
 for function_name in ("on_runtime_ready", "on_runtime_shutdown"):
@@ -844,7 +896,7 @@ staged_keys = set(re.findall(r'\bmark\("([\w.]+)"', menu)) | set(
 )
 applied_keys = set(re.findall(r'\bchanged\("([\w.]+)"\)', function_body(menu, "apply_pending_preferences")))
 require(
-    len(shared_keys) == 35
+    len(shared_keys) == 38
     and staged_keys == shared_keys
     and applied_keys == shared_keys
     and set(re.findall(r'\bfind_option\("([\w.]+)"', menu)) <= shared_keys,
@@ -940,7 +992,7 @@ present = read("src/game/frame/present_rate.cpp")
 require(
     HELPERS in menu
     and "bool option_list(const char *key, int *index, size_t skipped = 0);\n" in menu
-    and len(shared_labels) == 35
+    and len(shared_labels) == 38
     and drawn_keys == shared_keys
     and not [text for text in [*shared_labels, *shared_choices] if f'"{text}"' in menu + present]
     and "    static constexpr int kScaleCount = 8;\n" in menu
@@ -948,9 +1000,9 @@ require(
     and '{"4:3", "16:9", "21:9", "32:9", "Match window (up to 32:9)"}' in options
     and '{"Windowed", "Borderless fullscreen", "Exclusive fullscreen"}' in options
     and '{"Adaptive", "Immediate", "Synchronised"}' in options
-    and '"How far the view turns for a movement of the mouse.", 5, 2000, Unit::thousandths,' in options
-    and '"How far the view tilts for a movement of the mouse.", 5, 2000, Unit::thousandths,' in options
-    and '"The loudness of everything the game plays.", 0, 100, Unit::percent,' in options,
+    and '"How far the view turns for a movement of the mouse", 5, 2000, Unit::thousandths,' in options
+    and '"How far the view tilts for a movement of the mouse", 5, 2000, Unit::thousandths,' in options
+    and '"The loudness of everything the game plays", 0, 100, Unit::percent,' in options,
     "the menu must draw every shared option by its key, with the table's label, bounds and choices and none of its own",
 )
 
@@ -971,6 +1023,7 @@ LIVE = (
     '    if (key == "disruptor.ambient_occlusion") return gl_renderer_ssao() != 0;\n'
     '    if (key == "disruptor.smooth_fade") return gl_renderer_smooth_fade() != 0;\n'
     '    if (key == "disruptor.vertical_look") return disruptor_mouse_vertical_look_enabled() != 0;\n'
+    '    if (key == "disruptor.number_keys") return disruptor_number_keys_enabled() != 0;\n'
     '    if (key == "disruptor.separate_vertical_speed")\n'
     "        return disruptor_mouse_vertical_follows_horizontal() == 0;\n"
     "    return false;\n"
@@ -1001,7 +1054,7 @@ told = set(re.findall(r'key == "([\w.]+)"', function_body(menu, "prerequisite_on
 require(
     RULE in options
     and LIVE in menu
-    and len(needing) == 15
+    and len(needing) == 16
     and needing["disruptor.high_precision_camera"] == ["disruptor.mouse_aim", "disruptor.geometry_correction"]
     and asked == set(needing) - {"video.frame_interpolation_fps"}
     and told == {key for keys in needing.values() for key in keys} - {"video.frame_interpolation"}
@@ -1031,7 +1084,7 @@ def greyed_by_own_rule(source: str, key: str) -> bool:
 
 greyed = asked - {"video.frame_interpolation"}
 require(
-    len(greyed) == 13
+    len(greyed) == 14
     and all(greyed_by_own_rule(menu, key) for key in greyed)
     and not greyed_by_own_rule(
         menu.replace("    if (!textures_apply) ImGui::BeginDisabled();\n", "    if (false) ImGui::BeginDisabled();\n"),
@@ -1077,10 +1130,10 @@ shared_hints = [
 written = "".join(re.findall(LITERAL, menu + present))
 require(
     HINT in read("src/game/ui/hint.h")
-    and len(shared_hints) == 35
+    and len(shared_hints) == 38
     and all(20 <= len(text) <= 240 for text in shared_hints)
     and not [text for text in shared_hints if text[:32] in written]
-    and "Needs mouse aim and exact geometry."
+    and "Needs mouse aim and exact geometry"
     in shared_hints[
         [key for key in re.findall(r'\b(?:toggle(?:<[^>]*>)?|choice|slider)\(\s*"([\w.]+)"', options)].index(
             "disruptor.high_precision_camera"

@@ -154,7 +154,7 @@ bool Process::stop() {
 fs::path executable_path() {
     std::wstring buffer(32768, L'\0');
     const auto size = GetModuleFileNameW(nullptr, buffer.data(), static_cast<DWORD>(buffer.size()));
-    if (!size || size >= buffer.size()) throw std::runtime_error("Cannot find the launcher's folder.");
+    if (!size || size >= buffer.size()) throw std::runtime_error("Cannot find the launcher's folder");
     buffer.resize(size);
     return fs::path(buffer);
 }

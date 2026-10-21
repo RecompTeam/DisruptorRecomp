@@ -94,6 +94,18 @@ private:
     void settings();
     void rows();
     void key_table();
+    // Two keys a row for count rows from first, under the keyboard's: a key an action also has is faint, the action wins.
+    void pick_table(const char* heading, std::size_t first, std::size_t count, const KeyLayout& pad);
+    settings::PickKeys pick_keys() const;
+    // The tables under the setting that turns them on, with their own note, hints and default.
+    void pick_section();
+    // Take it on a note: a taken key moves where it was asked for, the owner gets the other's old key or none.
+    void take_offer();
+    // The offer's key is still where its note says.
+    bool offer_holds() const;
+    // Two saved sets of keys under the Keys table.
+    void profiles();
+    void take_pick_key(const std::string& field, const std::string& name);
     void tag(const char* text, unsigned hex);
     void hint_lines(std::string_view text, float width);
     void pad_status();
@@ -109,11 +121,10 @@ private:
     void blocks(const std::vector<Block>& list, float width, bool compact = false);
     bool news(const UpdateView& update);
     // A line of the guide wrapped to `width`: its links open, its code spans copy themselves.
-    void rich(const Line& line, float width, bool strong = false, bool faint = false, float leading = 1.5f);
+    void rich(const Line& line, float width, bool strong = false, bool faint = false, float leading = 1.5f, unsigned tint = 0);
     void about();
     void details_popup();
     void earlier_popup();
-    void notes(const std::string& markdown, std::size_t most_lines = 0);
     void pick(Wanted wanted);
     void take_picked();
     void load_art();
@@ -144,6 +155,14 @@ private:
     bool redraw_ = false;
     std::string listening_;
     std::string key_note_;
+    std::string pick_note_;
+    bool key_note_good_ = false;  // the note says something was done, not refused
+    struct Offer {
+        std::string key;
+        std::string target;  // where the key was asked for: a pick's field or an action's
+        std::string owner;   // the field the note names
+    };
+    std::optional<Offer> offer_;
     bool keys_read_ = false;
     bool pads_tried_ = false;
     std::string listening_pad_;
@@ -163,6 +182,8 @@ private:
     std::optional<ReleaseNotes> this_notes_;
     std::string news_source_;
     std::vector<Block> news_blocks_;
+    std::string notes_source_;  // the Updates window's release notes
+    std::vector<Block> notes_blocks_;
     int section_ = 0;
     bool section_changed_ = true;
     std::string copied_;

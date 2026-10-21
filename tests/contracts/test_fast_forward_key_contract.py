@@ -57,7 +57,7 @@ sources = {
     "header": read("psxrecomp/runtime/include/game_host.h"),
     "host": read("src/game/host.cpp"),
     "entry": read("src/game/input/name_entry.cpp"),
-    "keys": read("src/launcher/key_bindings.cpp"),
+    "keys": read("src/launcher/key_bindings.cpp") + read("src/game/settings/key_layouts.h"),
     "guide": read("docs/PLAYING.md"),
 }
 said = faults(sources)

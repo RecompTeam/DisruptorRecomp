@@ -16,6 +16,7 @@
 #include <SDL3/SDL_dialog.h>
 
 #include <algorithm>
+#include <charconv>
 #include <array>
 #include <cctype>
 #include <cfloat>
@@ -63,7 +64,7 @@ constexpr const char* page_notes[] = {
     "",
     "",
     "",
-    "Switch on, play until the problem shows, close the game, then press Report a problem.",
+    "Switch on, play until the problem shows, close the game, then press Report a problem",
 };
 constexpr const char* page_icons[] = {icon::monitor, icon::sparkles, icon::gamepad_2, icon::volume_2, icon::flask_conical,
                                       icon::wrench};
@@ -168,23 +169,23 @@ UpdateLook update_look(const UpdateView& update) {
     switch (update.state) {
     case UpdateState::unavailable:
         return {icon::info, kMuted, "This copy updates by hand",
-                "It was unzipped rather than installed by the updater.\nNew releases are on the Releases page."};
+                "It was unzipped rather than installed by the updater\nNew releases are on the Releases page"};
     case UpdateState::idle:
-        return {icon::refresh_cw, kMuted, "Updates not checked yet", "Check now, or let the launcher check when it starts."};
-    case UpdateState::checking: return {icon::loader_circle, kAmber, "Checking for updates...", "Asking GitHub for the newest release."};
+        return {icon::refresh_cw, kMuted, "Updates not checked yet", "Check now, or let the launcher check when it starts"};
+    case UpdateState::checking: return {icon::loader_circle, kAmber, "Checking for updates...", "Asking GitHub for the newest release"};
     case UpdateState::current: return {icon::circle_check, kGreen, "You have the newest version", version_text(update.installed)};
     case UpdateState::available:
         return {icon::download, kRed, "Version " + update.latest + " is available",
                 "About " + size_text(update.download_bytes) + " to download" +
-                    (update.delta ? ", only what changed.\nIf that cannot be applied, the whole release: " + size_text(update.full_bytes) + "."
-                                  : ".")};
+                    (update.delta ? ", only what changed\nIf that cannot be applied, the whole release: " + size_text(update.full_bytes)
+                                  : "")};
     case UpdateState::downloading: return {icon::download, kRed, "Downloading version " + update.latest, ""};
     case UpdateState::ready:
         return {icon::circle_check, kGreen, "Version " + update.latest + " is ready to install",
-                "Downloaded, each package checked.\nThe launcher closes, installs it and opens again."};
+                "Downloaded, each package checked\nThe launcher closes, installs it and opens again"};
     case UpdateState::failed:
         return {icon::circle_alert, 0xff7b72, "The update could not be completed",
-                update.error.empty() ? std::string("The launcher's activity, under Details, says why.") : "Why: " + first_line(update.error)};
+                update.error.empty() ? std::string("The launcher's activity, under Details, says why") : "Why: " + first_line(update.error)};
     }
     return {icon::info, kMuted, "", ""};
 }
@@ -196,23 +197,6 @@ std::string slider_format(const Option& option, int value) {
     return format;
 }
 
-// Release notes are Markdown: emphasis marks and link targets are left out, the text stays.
-std::string plain(std::string_view text) {
-    std::string out;
-    for (std::size_t i = 0; i < text.size(); ++i) {
-        if (text.substr(i, 2) == "**" || text.substr(i, 2) == "__") {
-            ++i;
-        } else if (text[i] == '`') {
-        } else if (text[i] == ']' && i + 1 < text.size() && text[i + 1] == '(') {
-            const auto close = text.find(')', i);
-            if (close == std::string_view::npos) break;
-            i = close;
-        } else if (text[i] != '[') {
-            out += text[i];
-        }
-    }
-    return out;
-}
 
 // A bordered panel of the raised colour, as tall as its contents when `height` is 0.
 void card_begin(const char* id, float width, float height = 0.0f) {
@@ -598,15 +582,15 @@ void View::sidebar(const UpdateView& update) {
         ImGui::PopID();
         return clicked && enabled;
     };
-    if (small(icon::folder_open, "Saves folder", true, ("Your saves and settings are in " + utf8(session_.data()) + ".").c_str()))
+    if (small(icon::folder_open, "Saves folder", true, ("Your saves and settings are in " + utf8(session_.data())).c_str()))
         session_.open_saves();
     if (small(icon::folder_input, "Bring saves...", free && !dialog_open,
-              "Brings the saves, settings, key bindings and disc of an earlier copy here, such as an unzipped release."))
+              "Brings the saves, settings, key bindings and disc of an earlier copy here, such as an unzipped release"))
         pick(Wanted::earlier);
     // A report can be made at any time, an import or a running game included.
-    if (small(icon::bug, "Report a problem", true, "Saves the game's logs, your settings and a note of the system for a bug report."))
+    if (small(icon::bug, "Report a problem", true, "Saves the game's logs, your settings and a note of the system for a bug report"))
         session_.make_problem_report();
-    if (small(icon::circle_help, "Help", true, "The guide to setting up and playing. F1 opens it too.", screen_ == Screen::help))
+    if (small(icon::circle_help, "Help", true, "The guide to setting up and playing\nF1 opens it too", screen_ == Screen::help))
         screen_ = Screen::help;
     if (small(icon::info, "About", true, nullptr, screen_ == Screen::about)) screen_ = Screen::about;
     ImGui::PushStyleColor(ImGuiCol_Text, rgb(kFaint));
@@ -616,13 +600,13 @@ void View::sidebar(const UpdateView& update) {
         ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 14.0f * scale_);
         if (ImGui::TextLink(shown_version(DISRUPTOR_BUILD_VERSION).c_str())) updates_open_ = true;
         hand_when_hovered();
-        tooltip("Updates: this version, the newest one and the release notes.");
+        tooltip("Updates: this version, the newest one and the release notes");
     }
     ImGui::PopStyleColor(2);
     // Another page hides the home page's update card: the foot of the side bar says one is waiting.
     if (waiting) {
         ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 14.0f * scale_);
-        ImGui::PushStyleColor(ImGuiCol_TextLink, rgb(kRedText));
+        ImGui::PushStyleColor(ImGuiCol_TextLink, rgb(kGreen));
         if (ImGui::TextLink(update.state == UpdateState::ready ? "Update ready to install" : "Update available")) screen_ = Screen::home;
         hand_when_hovered();
         ImGui::PopStyleColor();
@@ -768,7 +752,7 @@ void View::banner(float height, bool dialog_open) {
         if (playable) hand_when_hovered();
         ImGui::EndDisabled();
         if (!playable)
-            tooltip(running ? "The game is running." : busy ? "Wait for the task to finish." : "Add your game disc first.");
+            tooltip(running ? "The game is running" : busy ? "Wait for the task to finish" : "Add your game disc first");
         const unsigned fill = !playable ? 0x232b24 : held ? kRedPressed : hovered ? kRedHover : kRed;
         const ImU32 ink = colour(playable ? 0xffffff : 0x66736a);
         draw->AddRectFilled(play_at, play_at + play_size, colour(fill), 10.0f * scale_);
@@ -814,7 +798,7 @@ void View::first_run(bool dialog_open) {
     };
     centred(body_, 30.0f * scale_, dragging_ ? kRed : 0x9fb39f, icon::disc_3, 22.0f * scale_);
     centred(bold_, 17.0f * scale_, kText, dragging_ ? "Drop it to import" : "Drop your Disruptor (USA) disc image here", 66.0f * scale_);
-    centred(body_, kSmallSize * scale_, kMuted, "BIN/CUE, ISO or IMG. It is copied and checked, your file stays where it is.",
+    centred(body_, kSmallSize * scale_, kMuted, "BIN/CUE, ISO or IMG\nIt is copied and checked, your file stays where it is",
             94.0f * scale_);
     const std::string choose = std::string(icon::upload) + "  Choose file...";
     const char* earlier = "Played an earlier copy? Bring its saves";
@@ -904,7 +888,7 @@ void View::cards(bool dialog_open) {
     if (languages.selected > 0) {
         ImGui::SameLine();
         if (ImGui::Button(icon::x)) session_.remove_language(static_cast<std::size_t>(languages.selected));
-        tooltip("Takes this disc off the list. Its file is left as it is.");
+        tooltip("Takes this disc off the list\nIts file is left as it is");
     }
     ImGui::EndDisabled();
     ImGui::PushFont(nullptr, kFontSize * 0.85f);
@@ -1025,7 +1009,7 @@ bool View::update_action(const UpdateView& update) {
     const bool pressed = ImGui::Button(label.c_str());
     if (primary) ImGui::PopStyleColor(4);
     ImGui::EndDisabled();
-    if (blocked) tooltip("Close the game and wait for the task to finish first.");
+    if (blocked) tooltip("Close the game and wait for the task to finish first");
     if (!pressed) return false;
     switch (update.state) {
     case UpdateState::unavailable: SDL_OpenURL(kReleasesPage); break;
@@ -1125,8 +1109,8 @@ void View::earlier_popup() {
         ImGui::TextUnformatted(("From " + utf8(copy->folder) + ", " + size_text(copy->bytes) + ":").c_str());
         for (const fs::path& entry : copy->entries) ImGui::BulletText("%s", utf8(entry).c_str());
         ImGui::Spacing();
-        ImGui::TextUnformatted("They are copied, and the earlier copy stays as it is.");
-        ImGui::TextUnformatted("A file here that one of them replaces is kept in the backups folder first.");
+        ImGui::TextUnformatted("They are copied, and the earlier copy stays as it is");
+        ImGui::TextUnformatted("A file here that one of them replaces is kept in the backups folder first");
         ImGui::Spacing();
         if (button(icon::check, "Bring them", true)) {
             session_.bring_earlier();
@@ -1177,11 +1161,11 @@ void View::settings() {
     ImGui::TextUnformatted(text_of(labels[static_cast<std::size_t>(page_)]).c_str());
     ImGui::PopFont();
     if (session_.game_running()) {
-        muted("The game is running: change settings in its menu, or close it first.", kAmber);
+        muted("The game is running: change settings in its menu, or close it first", kAmber);
     } else if (!session_.settings().readable()) {
-        muted("settings.toml is not valid TOML, so it is left as it is.", kAmber);
+        muted("settings.toml is not valid TOML, so it is left as it is", kAmber);
     } else {
-        muted("Changes are saved at once and apply the next time the game starts.");
+        muted("Changes are saved at once and apply the next time the game starts");
     }
     ImGui::Spacing();
     ImGui::PushStyleColor(ImGuiCol_ChildBg, rgb(kSurface));
@@ -1201,7 +1185,7 @@ void View::settings() {
     if (page == Page::troubleshooting) {
         if (button(icon::bug, "Report a problem")) session_.make_problem_report();
         hand_when_hovered();
-        tooltip("Saves the game's logs, your settings and a note of the system for a bug report.");
+        tooltip("Saves the game's logs, your settings and a note of the system for a bug report");
     } else {
         ImGui::Dummy(ImVec2(0.0f, 10.0f * scale_));
         ImGui::BeginDisabled(!editable);
@@ -1222,7 +1206,7 @@ void View::settings() {
     ImGui::PopStyleVar();
     if (open) {
         ImGui::TextUnformatted("Put the settings on this page back to what a new installation has?");
-        ImGui::TextUnformatted("Other pages, the language, the key bindings and your saves stay as they are.");
+        ImGui::TextUnformatted("Other pages, the language, the key bindings and your saves stay as they are");
         ImGui::Spacing();
         ImGui::BeginDisabled(!session_.editable());
         if (button(icon::rotate_ccw, "Reset", true)) {
@@ -1247,10 +1231,263 @@ void View::group_heading(const char* name, bool first) {
     ImGui::PopFont();
 }
 
+namespace {
+
+constexpr std::string_view kPickField = "pick.";
+
+std::string pick_field(std::size_t row, std::size_t which) {
+    return std::string(kPickField) + std::to_string(row) + "." + std::to_string(which);
+}
+
+bool parse_pick_field(std::string_view field, std::size_t& row, std::size_t& which) {
+    if (!field.starts_with(kPickField)) return false;
+    const char* end = field.data() + field.size();
+    const auto parsed = std::from_chars(field.data() + kPickField.size(), end, row);
+    if (parsed.ec != std::errc() || parsed.ptr == end || *parsed.ptr != '.') return false;
+    return std::from_chars(parsed.ptr + 1, end, which).ec == std::errc() && row < settings::pick_count && which < 2;
+}
+// The fields of the Controls page's actions, which name a key's owner before the fields it does not show.
+std::vector<std::size_t> shown_fields() {
+    std::vector<std::size_t> fields;
+    for (const KeyAction& action : key_actions())
+        fields.push_back(static_cast<std::size_t>(
+            std::find(settings::key_fields.begin(), settings::key_fields.end(), std::string_view(action.field)) -
+            settings::key_fields.begin()));
+    return fields;
+}
+
+std::string field_label(std::size_t field) {
+    const std::string_view name = settings::key_fields[field];
+    for (const KeyAction& action : key_actions())
+        if (name == action.field) return action.label;
+    constexpr std::pair<std::string_view, const char*> unshown[] = {
+        {"l3", "L3"}, {"r3", "R3"}, {"ls_up", "Left stick up"}, {"ls_down", "Left stick down"}, {"ls_left", "Left stick left"},
+        {"ls_right", "Left stick right"}, {"rs_up", "Right stick up"}, {"rs_down", "Right stick down"},
+        {"rs_left", "Right stick left"}, {"rs_right", "Right stick right"}};
+    for (const auto& [unshown_field, label] : unshown)
+        if (name == unshown_field) return label;
+    return std::string(name);
+}
+
+bool shown_on_page(std::size_t field) {
+    const std::vector<std::size_t> fields = shown_fields();
+    return std::find(fields.begin(), fields.end(), field) != fields.end();
+}
+
+} // namespace
+
+settings::PickKeys View::pick_keys() const {
+    return settings::pick_keys_from(session_.settings().pick_lists(), [](std::string_view name) {
+        return SDL_GetScancodeFromName(std::string(name).c_str()) != SDL_SCANCODE_UNKNOWN;
+    });
+}
+
+void View::pick_table(const char* heading, std::size_t first, std::size_t count, const KeyLayout& pad) {
+    const settings::PickKeys keys = pick_keys();
+    const std::vector<std::size_t> shown = shown_fields();
+    ImGui::Dummy(ImVec2(0.0f, 4.0f * scale_));
+    ImGui::PushFont(bold_, kFontSize);
+    ImGui::TextUnformatted(heading);
+    ImGui::PopFont();
+    float label_width = 0.0f;
+    for (std::size_t row = first; row < first + count; ++row)
+        label_width = std::max(label_width, ImGui::CalcTextSize(settings::pick_names[row]).x);
+    // A key's column is as wide as its longest text needs. Both halves side by side only where they fit.
+    const float padding = 2.0f * ImGui::GetStyle().FramePadding.x + 4.0f * scale_;
+    float key_width = ImGui::CalcTextSize("Press a key").x + padding;
+    for (const auto& pair : keys)
+        for (const std::string& name : pair) key_width = std::max(key_width, ImGui::CalcTextSize(name.c_str()).x + padding);
+    const ImVec2 cells(4.0f * scale_, ImGui::GetStyle().CellPadding.y);
+    const float gap = 8.0f * scale_, between = 16.0f * scale_;
+    const float side_width = label_width + gap + 2.0f * key_width + 6.0f * cells.x;
+    const bool two_sides = 2.0f * side_width + between + 4.0f * cells.x <= ImGui::GetContentRegionAvail().x;
+    constexpr ImGuiTableFlags flags = ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_PadOuterX;
+    ImGui::PushID(heading);
+    ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, cells);
+    const bool table = ImGui::BeginTable("picks", two_sides ? 7 : 3, flags);
+    ImGui::PopStyleVar();
+    if (!table) {
+        ImGui::PopID();
+        return;
+    }
+    for (int side = 0; side < (two_sides ? 2 : 1); ++side) {
+        ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthFixed, label_width + gap);
+        ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthFixed, key_width);
+        ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthFixed, key_width);
+        if (side == 0 && two_sides) ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthFixed, between);
+    }
+    const std::size_t rows = two_sides ? (count + 1) / 2 : count;
+    for (std::size_t line = 0; line < rows; ++line) {
+        ImGui::TableNextRow();
+        for (const std::size_t at : {line, line + rows}) {
+            if (at >= count) continue;
+            const std::size_t row = first + at;
+            const int base = at == line ? 0 : 4;
+            ImGui::TableSetColumnIndex(base);
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted(settings::pick_names[row]);
+            for (std::size_t which = 0; which < 2; ++which) {
+                ImGui::TableSetColumnIndex(base + 1 + static_cast<int>(which));
+                const std::string field = pick_field(row, which);
+                const std::string& name = keys[row][which];
+                const bool waiting = listening_ == field;
+                const auto owner = waiting ? std::nullopt : settings::field_with(pad, name, shown);
+                const std::string label = waiting ? std::string("Press a key") : settings::no_key(name) ? std::string("-") : name;
+                ImGui::PushID(field.c_str());
+                if (waiting) ImGui::PushStyleColor(ImGuiCol_Border, rgb(kRed));
+                if (owner) ImGui::PushStyleColor(ImGuiCol_Text, rgb(kFaint));
+                if (ImGui::Button(label.c_str(), ImVec2(-FLT_MIN, 0.0f))) {
+                    listening_ = waiting ? std::string() : field;
+                    stop_pad_capture();
+                    key_note_.clear();
+                    pick_note_.clear();
+                    offer_.reset();
+                }
+                if (owner) ImGui::PopStyleColor();
+                if (waiting) ImGui::PopStyleColor();
+                hand_when_hovered();
+                if (owner) tooltip((name + " is on " + field_label(*owner) + "\nOnly that action takes it").c_str());
+                ImGui::PopID();
+            }
+        }
+    }
+    ImGui::EndTable();
+    ImGui::PopID();
+}
+
+void View::pick_section() {
+    const bool modern = session_.settings().shown(*find_option("disruptor.modern_controls")) == 1;
+    const KeyLayout pad = settings::layout_for_scheme(session_.keys().layout(), modern);
+    ImGui::BeginDisabled(!session_.editable());
+    ImGui::Indent(14.0f * scale_);
+    pick_table("Weapons", 0, settings::weapon_count, pad);
+    pick_table("Psionics", settings::weapon_count, settings::psionic_count, pad);
+    ImGui::PushFont(nullptr, kSmallSize);
+    if (!pick_note_.empty()) {
+        ImGui::PushStyleColor(ImGuiCol_Text, rgb(kAmber));
+        wrapped(pick_note_);
+        ImGui::PopStyleColor();
+        if (offer_ && offer_->target.starts_with(kPickField) && link("Take it")) take_offer();
+    }
+    ImGui::Dummy(ImVec2(0.0f, 2.0f * scale_));
+    hint_lines("To change a key: click it, then press the new one\nEscape cancels\nDelete takes the key away",
+               ImGui::GetContentRegionAvail().x);
+    ImGui::PopFont();
+    ImGui::Dummy(ImVec2(0.0f, 4.0f * scale_));
+    if (button(icon::rotate_ccw, "Default weapon and psionic keys")) {
+        session_.set_pick_keys(settings::default_pick_keys());
+        pick_note_.clear();
+    }
+    ImGui::Unindent(14.0f * scale_);
+    ImGui::EndDisabled();
+    ImGui::Dummy(ImVec2(0.0f, 6.0f * scale_));
+}
+
+bool View::offer_holds() const {
+    const SettingsFile& file = session_.settings();
+    if (!offer_ || file.shown(*find_option("disruptor.number_keys")) != 1) return false;
+    const bool modern = file.shown(*find_option("disruptor.modern_controls")) == 1;
+    const auto field = settings::field_with(settings::layout_for_scheme(session_.keys().layout(), modern), offer_->key,
+                                            shown_fields());
+    if (!offer_->owner.starts_with(kPickField)) return field && settings::key_fields[*field] == offer_->owner;
+    const auto pick = settings::pick_with(pick_keys(), offer_->key);
+    return !field && pick && pick_field(pick->row, pick->which) == offer_->owner;
+}
+
+void View::take_offer() {
+    const bool holds = offer_holds();
+    const Offer offer = *std::exchange(offer_, std::nullopt);
+    key_note_.clear();
+    pick_note_.clear();
+    if (!holds) return;
+    KeyBindings& keys = session_.keys();
+    const bool modern = session_.settings().shown(*find_option("disruptor.modern_controls")) == 1;
+    const KeyLayout before = settings::layout_for_scheme(keys.layout(), modern);
+    keys.use(before);
+    settings::PickKeys picks = pick_keys();
+    std::size_t row = 0, which = 0;
+    if (parse_pick_field(offer.target, row, which)) give_to_pick(keys, picks, row, which, offer.owner);
+    else give_to_action(keys, picks, offer.target, offer.key);
+    session_.store_keys(before, picks);
+}
+
+void View::profiles() {
+    const auto file = [this](int slot) { return session_.data() / ("keys-" + std::to_string(slot) + ".ini"); };
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextUnformatted("Profiles");
+    for (int slot = 1; slot <= 2; ++slot) {
+        ImGui::PushID(slot);
+        ImGui::SameLine(0.0f, slot == 1 ? 10.0f * scale_ : 18.0f * scale_);
+        const std::string number = std::to_string(slot);
+        if (ImGui::Button(("Save to " + number).c_str())) {
+            const bool modern = session_.settings().shown(*find_option("disruptor.modern_controls")) == 1;
+            const KeyProfile profile{settings::layout_for_scheme(session_.keys().layout(), modern), pick_keys()};
+            const bool saved = save_profile(file(slot), profile);
+            key_note_ = saved ? "The keys are in profile " + number : "Profile " + number + " could not be written";
+            key_note_good_ = saved;
+            offer_.reset();
+        }
+        hand_when_hovered();
+        tooltip("Keeps every key of this page, the weapons' and the powers' too\nThe scheme and the mouse stay out");
+        ImGui::SameLine(0.0f, 6.0f * scale_);
+        std::error_code missing;
+        const bool there = std::filesystem::exists(file(slot), missing);
+        ImGui::BeginDisabled(!there);
+        if (ImGui::Button(("Load " + number).c_str())) {
+            const auto profile = load_profile(file(slot), [](std::string_view name) {
+                return SDL_GetScancodeFromName(std::string(name).c_str()) != SDL_SCANCODE_UNKNOWN;
+            });
+            bool used = false;
+            if (profile) {
+                const KeyLayout undo = session_.keys().layout();
+                session_.keys().use(profile->layout);
+                used = session_.store_keys(undo, profile->picks);
+            }
+            key_note_good_ = used;
+            key_note_ = "Profile " + number + (used ? " is in use" : profile ? " could not be used" : " could not be read");
+            offer_.reset();
+        }
+        if (there) hand_when_hovered();
+        ImGui::EndDisabled();
+        ImGui::PopID();
+    }
+}
+
+void View::take_pick_key(const std::string& field, const std::string& name) {
+    using Kind = settings::PickKeyChange::Kind;
+    std::size_t row = 0, which = 0;
+    if (!parse_pick_field(field, row, which)) return;
+    const bool modern = session_.settings().shown(*find_option("disruptor.modern_controls")) == 1;
+    const KeyLayout pad = settings::layout_for_scheme(session_.keys().layout(), modern);
+    settings::PickKeys keys = pick_keys();
+    const settings::PickKeyChange change = settings::change_pick_key(keys, row, which, name, pad, shown_fields());
+    switch (change.kind) {
+    case Kind::fixed: pick_note_ = name + " is one of the fixed keys under Keys"; return;
+    case Kind::modifier: pick_note_ = "Shift, Ctrl, Alt and the system key pick nothing"; return;
+    case Kind::taken:
+        pick_note_ = name + " is on " + field_label(change.field);
+        offer_ = Offer{name, field, settings::key_fields[change.field]};
+        return;
+    case Kind::unchanged: return;
+    case Kind::cleared:
+    case Kind::assigned: break;
+    }
+    if (!session_.set_pick_keys(keys) || !change.swapped) return;
+    pick_note_ = name + " was on " + settings::pick_names[change.swapped->row] + ", which now has " +
+                (settings::no_key(change.given) ? std::string("no key") : change.given);
+}
+
 void View::key_table() {
     const SettingsFile& file = session_.settings();
     const bool modern = file.shown(*find_option("disruptor.modern_controls")) == 1;
+    const bool weapons = file.shown(*find_option("disruptor.number_keys")) == 1;
     const bool editable = session_.editable();
+    if (!weapons && listening_.starts_with(kPickField)) listening_.clear();
+    if (offer_ && !offer_holds()) {
+        offer_.reset();
+        key_note_.clear();
+        pick_note_.clear();
+    }
     // The game may change the keys while it runs: they are read again once the page can be edited.
     if (!editable) {
         listening_.clear();
@@ -1270,11 +1507,14 @@ void View::key_table() {
     const float small = kSmallSize;
     const float mouse_width = modern ? body_->CalcTextSizeA(small, FLT_MAX, 0.0f, "Right click").x + 8.0f * scale_ : 0.0f;
     const int columns = modern ? 3 : 2;
+    const float padding = 2.0f * ImGui::GetStyle().FramePadding.x + 10.0f * scale_;
+    float key_width = std::max(110.0f * scale_, ImGui::CalcTextSize("Press a key").x + padding);
+    for (const std::string& name : shown) key_width = std::max(key_width, ImGui::CalcTextSize(name.c_str()).x + padding);
     constexpr ImGuiTableFlags flags = ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_PadOuterX;
     if (ImGui::BeginTable("keys", columns * 2 + 1, flags)) {
         for (int pair = 0; pair < 2; ++pair) {
             ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthFixed, label_width + 12.0f * scale_);
-            ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthFixed, 110.0f * scale_);
+            ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthFixed, key_width);
             if (modern) ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthFixed, mouse_width);
             if (pair == 0) ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthFixed, 28.0f * scale_);
         }
@@ -1301,6 +1541,8 @@ void View::key_table() {
                     listening_ = waiting ? std::string() : std::string(action.field);
                     stop_pad_capture();
                     key_note_.clear();
+                    pick_note_.clear();
+                    offer_.reset();
                 }
                 if (waiting) ImGui::PopStyleColor();
                 hand_when_hovered();
@@ -1322,21 +1564,22 @@ void View::key_table() {
     }
     ImGui::PushFont(nullptr, kSmallSize);
     if (!key_note_.empty()) {
-        ImGui::PushStyleColor(ImGuiCol_Text, rgb(kAmber));
+        ImGui::PushStyleColor(ImGuiCol_Text, rgb(key_note_good_ ? kGreen : kAmber));
         wrapped(key_note_);
         ImGui::PopStyleColor();
+        if (offer_ && !offer_->target.starts_with(kPickField) && link("Take it")) take_offer();
     }
     ImGui::Dummy(ImVec2(0.0f, 2.0f * scale_));
     const float width = ImGui::GetContentRegionAvail().x;
-    hint_lines(modern ? "Arrows: Up and Down also walk while no action has them."
-                      : "Mouse: only turns the view.",
-               width);
-    hint_lines("To change a key: click it, then press the new one. Escape cancels.\n"
-               "Fixed keys: these do the same in both schemes and cannot be changed.",
+    const char* arrows = weapons ? "Arrows: Up and Down also walk while no action, weapon or power has them"
+                                 : "Arrows: Up and Down also walk while no action has them";
+    hint_lines(modern ? arrows : "Mouse: only turns the view", width);
+    hint_lines("To change a key: click it, then press the new one\nEscape cancels\nDelete takes the key away\n"
+               "Fixed keys: these do the same in both schemes and cannot be changed",
                width);
     ImGui::Indent(16.0f * scale_);
     std::string fixed;
-    for (const FixedKey& key : fixed_keys()) fixed += std::string(fixed.empty() ? "" : "\n") + key.keys + ": " + key.does + ".";
+    for (const FixedKey& key : fixed_keys()) fixed += std::string(fixed.empty() ? "" : "\n") + key.keys + ": " + key.does;
     hint_lines(fixed, width - 16.0f * scale_);
     ImGui::Unindent(16.0f * scale_);
     ImGui::PopFont();
@@ -1346,6 +1589,8 @@ void View::key_table() {
         session_.save_keys();
         key_note_.clear();
     }
+    ImGui::SameLine(0.0f, 24.0f * scale_);
+    profiles();
     ImGui::EndDisabled();
     ImGui::Dummy(ImVec2(0.0f, 4.0f * scale_));
 }
@@ -1368,11 +1613,11 @@ void View::pad_status() {
     std::string device = session_.settings().player_device();
     for (char& letter : device) letter = static_cast<char>(std::tolower(static_cast<unsigned char>(letter)));
     const bool beside = device.empty() || device == "keyboard+gamepad";
-    std::string status = count ? "Connected: " + names + "." : std::string("No gamepad connected.");
-    if (beside) status += count > 1 ? "\nThe first plays beside the keyboard and mouse."
-                                    : count ? "\nIt plays beside the keyboard and mouse."
-                                            : "\nOne plugged in plays beside the keyboard and mouse.";
-    else status += "\nsettings.toml gives Player 1 the device \"" + session_.settings().player_device() + "\".";
+    std::string status = count ? "Connected: " + names : std::string("No gamepad connected");
+    if (beside) status += count > 1 ? "\nThe first plays beside the keyboard and mouse"
+                                    : count ? "\nIt plays beside the keyboard and mouse"
+                                            : "\nOne plugged in plays beside the keyboard and mouse";
+    else status += "\nsettings.toml gives Player 1 the device \"" + session_.settings().player_device() + "\"";
     ImGui::Dummy(ImVec2(0.0f, 2.0f * scale_));
     ImGui::PushStyleColor(ImGuiCol_Text, rgb(count && beside ? kGreen : kMuted));
     wrapped(status);
@@ -1410,10 +1655,11 @@ void View::pad_buttons() {
     ImGui::Dummy(ImVec2(0.0f, 4.0f * scale_));
     ImGui::BeginDisabled(!editable);
     constexpr ImGuiTableFlags flags = ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_PadOuterX;
+    const float key_width = std::max(110.0f * scale_, ImGui::CalcTextSize("Press a button").x + 2.0f * ImGui::GetStyle().FramePadding.x + 10.0f * scale_);
     if (ImGui::BeginTable("pad buttons", 5, flags)) {
         for (int pair = 0; pair < 2; ++pair) {
             ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthFixed, label_width + 12.0f * scale_);
-            ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthFixed, 110.0f * scale_);
+            ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthFixed, key_width);
             if (pair == 0) ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthFixed, 28.0f * scale_);
         }
         const std::size_t half = (actions.size() + 1) / 2;
@@ -1467,9 +1713,9 @@ void View::pad_buttons() {
     }
     ImGui::Dummy(ImVec2(0.0f, 2.0f * scale_));
     const float width = ImGui::GetContentRegionAvail().x;
-    hint_lines("Move and turn: the left stick or the D-pad, always.", width);
-    hint_lines(count ? "To change a button: click it, then press the new one on the gamepad. Escape cancels."
-                     : "To change a button: connect a gamepad, click the button, then press the new one.",
+    hint_lines("Move and turn: the left stick or the D-pad, always", width);
+    hint_lines(count ? "To change a button: click it, then press the new one on the gamepad\nEscape cancels"
+                     : "To change a button: connect a gamepad, click the button, then press the new one",
                width);
     ImGui::PopFont();
     ImGui::Dummy(ImVec2(0.0f, 4.0f * scale_));
@@ -1505,8 +1751,8 @@ void View::take_pad_button(int button) {
     case SDL_GAMEPAD_BUTTON_DPAD_UP:
     case SDL_GAMEPAD_BUTTON_DPAD_DOWN:
     case SDL_GAMEPAD_BUTTON_DPAD_LEFT:
-    case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: pad_note_ = "The D-pad stays on moving and turning."; return;
-    default: pad_note_ = "The game does not read that button."; return;
+    case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: pad_note_ = "The D-pad stays on moving and turning"; return;
+    default: pad_note_ = "The game does not read that button"; return;
     }
 }
 
@@ -1539,7 +1785,7 @@ void View::finish_pad(const std::string& source) {
             if (of == action.field) return std::string(action.action);
         return std::string(of);
     };
-    pad_note_ = pad_name(source) + " was on " + action_of(*swapped) + ", which now has " + pad_name(previous) + ".";
+    pad_note_ = pad_name(source) + " was on " + action_of(*swapped) + ", which now has " + pad_name(previous);
 }
 
 void View::hint_lines(std::string_view text, float width) {
@@ -1577,14 +1823,34 @@ void View::tag(const char* text, unsigned hex) {
 void View::take_key(const char* name) {
     const std::string field = std::exchange(listening_, std::string());
     if (field.empty() || !name || !*name || settings::folded_key(name) == "escape") return;
+    if (field.starts_with(kPickField)) {
+        take_pick_key(field, name);
+        return;
+    }
+    key_note_good_ = false;
     if (reserved_key(name)) {
-        key_note_ = std::string(name) + " cannot be changed: it is one of the fixed keys below.";
+        key_note_ = std::string(name) + " cannot be changed: it is one of the fixed keys below";
         return;
     }
     const SettingsFile& file = session_.settings();
     const bool modern = file.shown(*find_option("disruptor.modern_controls")) == 1;
     KeyBindings& keys = session_.keys();
+    if (settings::folded_key(name) == "delete") {
+        keys.use(settings::layout_for_scheme(keys.layout(), modern));
+        keys.clear(field);
+        key_note_.clear();
+        session_.save_keys();
+        return;
+    }
     keys.use(settings::layout_for_scheme(keys.layout(), modern));
+    // A pick's key an action also has is idle there: the actions swap as usual.
+    if (file.shown(*find_option("disruptor.number_keys")) == 1 && !settings::field_with(keys.layout(), name)) {
+        if (const auto pick = settings::pick_with(pick_keys(), name)) {
+            key_note_ = std::string(name) + " is on " + settings::pick_names[pick->row];
+            offer_ = Offer{name, field, pick_field(pick->row, pick->which)};
+            return;
+        }
+    }
     const std::string previous = keys.key(field);
     const auto swapped = keys.assign(field, name);
     key_note_.clear();
@@ -1595,7 +1861,7 @@ void View::take_key(const char* name) {
         return std::string(of);
     };
     key_note_ = std::string(name) + " was on " + label_of(*swapped) + ", which now has " +
-                (previous == "None" ? std::string("no key") : previous) + ".";
+                (previous == "None" ? std::string("no key") : previous);
 }
 
 bool View::toggle(const char* id, bool* value) {
@@ -1666,10 +1932,11 @@ void View::rows() {
         if (static_cast<int>(placement.page) != page_) continue;
         ImGui::PushID(option.key);
         if (placement.group) {
-            const bool pad = std::string_view(placement.group) == "Gamepad";
-            if (pad) key_table();
+            // The keyboard's keys follow the scheme that sets them, before the group of the weapons' and powers' keys.
+            const std::string_view group(placement.group);
+            if (group == "Weapons and psionics") key_table();
             group_heading(placement.group, first);
-            if (pad) pad_status();
+            if (group == "Gamepad") pad_status();
         } else if (!first && !placement.child) {
             const ImVec2 at = ImGui::GetCursorScreenPos();
             ImGui::GetWindowDrawList()->AddLine(at, at + ImVec2(ImGui::GetContentRegionAvail().x, 0.0f), colour(kBorder));
@@ -1717,7 +1984,7 @@ void View::rows() {
                 needs += other ? other->label : option.needs[index];
             }
             ImGui::PushStyleColor(ImGuiCol_Text, rgb(kAmber));
-            ImGui::TextUnformatted((needs + ".").c_str());
+            ImGui::TextUnformatted(needs.c_str());
             ImGui::PopStyleColor();
         }
         ImGui::PopStyleColor();
@@ -1771,6 +2038,8 @@ void View::rows() {
         ImGui::EndDisabled();
         ImGui::SetCursorPosY(std::max(bottom, ImGui::GetCursorPosY()));
         ImGui::Dummy(ImVec2(0.0f, 4.0f * scale_));
+        if (std::string_view(option.key) == "disruptor.psionic_keys_use" && file.shown(*find_option("disruptor.number_keys")) == 1)
+            pick_section();
         ImGui::PopID();
     }
 }
@@ -1827,7 +2096,7 @@ bool View::updates_popup(const UpdateView& update) {
         ImGui::TextUnformatted("Check at start");
         ImGui::PopFont();
         ImGui::PushFont(nullptr, kSmallSize);
-        hint_lines("Looks for a newer release at every start.\nOnly what changed is downloaded when it can be.",
+        hint_lines("Looks for a newer release at every start\nOnly what changed is downloaded when it can be",
                    ImGui::GetContentRegionAvail().x - toggle_width - 16.0f * scale_);
         ImGui::PopFont();
         ImGui::EndGroup();
@@ -1836,7 +2105,7 @@ bool View::updates_popup(const UpdateView& update) {
         if (toggle("##automatic", &automatic)) {
             choices_.check_for_updates = automatic;
             if (!write_choices(choices_file_, choices_))
-                activity_.add("launcher.ini cannot be written, so the choice holds until the launcher closes.");
+                activity_.add("launcher.ini cannot be written, so the choice holds until the launcher closes");
         }
     };
     const auto copy_column = [&] {
@@ -1897,13 +2166,17 @@ bool View::updates_popup(const UpdateView& update) {
     ImGui::Dummy(ImVec2(0.0f, 2.0f * scale_));
     if (update.notes.empty()) {
         ImGui::PushFont(nullptr, kSmallSize);
-        muted("The notes of a newer release appear here once a check finds one.");
+        muted("The notes of a newer release appear here once a check finds one");
         ImGui::PopFont();
     } else {
         ImGui::PushStyleColor(ImGuiCol_ChildBg, rgb(kSurface));
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(16.0f * scale_, 14.0f * scale_));
         ImGui::BeginChild("notes", ImVec2(0.0f, 150.0f * scale_), ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding);
-        notes(update.notes);
+        if (update.notes != notes_source_) {
+            notes_source_ = update.notes;
+            notes_blocks_ = parse_markdown(notes_source_);
+        }
+        blocks(notes_blocks_, ImGui::GetContentRegionAvail().x, true);
         ImGui::EndChild();
         ImGui::PopStyleVar();
         ImGui::PopStyleColor();
@@ -1926,10 +2199,10 @@ void View::help() {
                          std::max(0.0f, ImGui::GetContentRegionAvail().x - bold_->CalcTextSizeA(ImGui::GetFontSize(), FLT_MAX, 0.0f, online).x));
     ImGui::AlignTextToFramePadding();
     if (link(online)) SDL_OpenURL(kGuidePage);
-    muted("The guide that comes with this copy. It is also in the program's folder as GETTING_STARTED.md.");
+    muted("The guide that comes with this copy\nIt is also in the program's folder as GETTING_STARTED.md");
     ImGui::Spacing();
     if (guide_.sections.empty()) {
-        muted("This copy has no guide built in.", kAmber);
+        muted("This copy has no guide built in", kAmber);
         return;
     }
     section_ = std::clamp(section_, 0, static_cast<int>(guide_.sections.size()) - 1);
@@ -1990,10 +2263,11 @@ void View::blocks(const std::vector<Block>& list, float width, bool compact) {
             if (!compact) ImGui::Dummy(ImVec2(0.0f, 6.0f * scale_));
             else if (index > 0) ImGui::SetCursorPosY(ImGui::GetCursorPosY() + 4.0f * scale_);
             ImGui::PushFont(bold_, kFontSize * (block.level <= 2 ? 1.2f : 1.08f));
-            rich(block.text, width, true);
+            rich(block.text, width, true, false, 1.5f, kRedText);
             ImGui::PopFont();
             break;
-        case BlockKind::paragraph: rich(block.text, width); break;
+        // A release's notes open with its date.
+        case BlockKind::paragraph: rich(block.text, width, false, compact && index == 0); break;
         case BlockKind::bullet:
         case BlockKind::numbered: {
             const float indent = (24.0f + 18.0f * static_cast<float>(block.depth)) * scale_;
@@ -2056,10 +2330,10 @@ void View::blocks(const std::vector<Block>& list, float width, bool compact) {
     }
 }
 
-void View::rich(const Line& line, float width, bool strong, bool faint, float leading) {
+void View::rich(const Line& line, float width, bool strong, bool faint, float leading, unsigned tint) {
     const float size = ImGui::GetFontSize();
     const float pad = std::round(4.0f * scale_);
-    const auto font_of = [&](Style style) { return strong || style == Style::bold || style == Style::link ? bold_ : body_; };
+    const auto font_of = [&](Style style) { return strong || style == Style::bold || style == Style::link || style == Style::lead ? bold_ : body_; };
     const auto measure = [&](const std::string& text, Style style) {
         return font_of(style)->CalcTextSizeA(size, FLT_MAX, 0.0f, text.c_str()).x + (style == Style::code ? pad * 2.0f : 0.0f);
     };
@@ -2118,7 +2392,10 @@ void View::rich(const Line& line, float width, bool strong, bool faint, float le
         } else if (span.style == Style::link) {
             draw->AddText(bold_, size, at, colour(on ? 0xc4f0c9 : kLink), piece.text.c_str());
         } else {
-            const unsigned ink = faint ? (span.style == Style::bold ? kGreen : kMuted) : strong || span.style == Style::bold ? 0xffffff : kText;
+            const unsigned ink = span.style == Style::lead ? kGreen
+                               : tint                       ? tint
+                               : faint ? (span.style == Style::bold ? kGreen : kMuted)
+                               : strong || span.style == Style::bold ? 0xffffff : kText;
             draw->AddText(font_of(span.style), size, at, colour(ink), piece.text.c_str());
         }
         if (on) draw->AddLine(at + ImVec2(0.0f, size + 1.0f), at + ImVec2(piece.width, size + 1.0f), colour(0xc4f0c9), std::max(1.0f, scale_));
@@ -2133,8 +2410,8 @@ void View::about() {
     ImGui::PopFont();
     ImGui::TextDisabled("Version %s", DISRUPTOR_BUILD_VERSION);
     ImGui::Spacing();
-    wrapped("A native PC static recompilation of Disruptor (USA, SLUS-00224), built on PSXRecomp.\n"
-            "No game data is included: the game runs from your own disc.");
+    wrapped("A native PC static recompilation of Disruptor (USA, SLUS-00224), built on PSXRecomp\n"
+            "No game data is included: the game runs from your own disc");
     ImGui::Spacing();
     ImGui::TextLinkOpenURL("Project page", kProjectPage);
     ImGui::SameLine();
@@ -2177,40 +2454,6 @@ void View::about() {
         folder("Your saves and settings", session_.data(), "data");
         folder("Program", session_.program(), "program");
         ImGui::EndTable();
-    }
-}
-
-void View::notes(const std::string& markdown, std::size_t most_lines) {
-    std::istringstream lines(markdown);
-    std::string line;
-    std::size_t shown = 0;
-    while (std::getline(lines, line) && (most_lines == 0 || shown < most_lines)) {
-        if (!line.empty() && line.back() == '\r') line.pop_back();
-        std::string_view text(line);
-        std::size_t level = 0;
-        while (level < text.size() && text[level] == '#') ++level;
-        if (level > 0 && level < text.size() && text[level] == ' ') {
-            if (most_lines) continue;
-            const float scale = level == 1 ? 1.5f : level == 2 ? 1.25f : 1.1f;
-            ImGui::Spacing();
-            ImGui::PushFont(bold_, kFontSize * scale);
-            ImGui::PushStyleColor(ImGuiCol_Text, level == 1 ? rgb(kLink) : rgb(kText));
-            wrapped(plain(text.substr(level + 1)));
-            ImGui::PopStyleColor();
-            ImGui::PopFont();
-        } else if (text.starts_with("- ") || text.starts_with("* ")) {
-            ImGui::Bullet();
-            ImGui::SameLine();
-            ImGui::BeginGroup();
-            wrapped(plain(text.substr(2)));
-            ImGui::EndGroup();
-            ++shown;
-        } else if (text.find_first_not_of(" \t") == std::string_view::npos) {
-            if (!most_lines) ImGui::Spacing();
-        } else {
-            wrapped(plain(text));
-            ++shown;
-        }
     }
 }
 

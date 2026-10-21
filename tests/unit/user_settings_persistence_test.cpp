@@ -96,6 +96,10 @@ int main() {
         written.frame_unlock = true;
         written.has_skip_intro = true;
         written.skip_intro = true;
+        written.has_mute_in_background = true;
+        written.mute_in_background = true;
+        written.has_bass_cut = true;
+        written.bass_cut = 2;
         written.has_language_disc = true;
         written.language_disc = "C:\\Games \"old\"\\Disruptor (France).cue";
         written.has_language_discs = true;
@@ -178,6 +182,8 @@ int main() {
                     loaded.perspective_textures &&
                     loaded.has_frame_unlock && loaded.frame_unlock &&
                     loaded.has_skip_intro && loaded.skip_intro &&
+                    loaded.has_mute_in_background && loaded.mute_in_background &&
+                    loaded.has_bass_cut && loaded.bass_cut == 2 &&
                     loaded.has_language_disc && loaded.language_disc == "C:\\Games \"old\"\\Disruptor (France).cue" &&
                     loaded.has_language_discs && loaded.language_discs == written.language_discs &&
                     loaded.has_hud_scale && loaded.hud_scale == 70 &&

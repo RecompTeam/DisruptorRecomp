@@ -38,7 +38,8 @@ constexpr Placement placed[] = {
     {"disruptor.occlusion_strength", Page::enhancements, nullptr, true},
     {"disruptor.skip_intro", Page::enhancements, "Startup"},
     {"disruptor.modern_controls", Page::controls, "Scheme"},
-    {"disruptor.number_keys", Page::controls},
+    {"disruptor.number_keys", Page::controls, "Weapons and psionics"},
+    {"disruptor.psionic_keys_use", Page::controls, nullptr, true},
     {"disruptor.selection_wheels", Page::controls},
     {"disruptor.mouse_aim", Page::controls, "Mouse"},
     {"disruptor.high_precision_camera", Page::controls, nullptr, true},
@@ -50,6 +51,8 @@ constexpr Placement placed[] = {
     {"disruptor.vertical_sensitivity", Page::controls, nullptr, true},
     {"controller.deadzone", Page::controls, "Gamepad"},
     {"audio.master_volume", Page::audio},
+    {"disruptor.bass_cut", Page::audio},
+    {"disruptor.mute_in_background", Page::audio},
     {"audio.muted", Page::audio},
     {"disruptor.multisampling", Page::experimental},
     {"disruptor.detailed_logging", Page::troubleshooting},
@@ -205,7 +208,7 @@ bool SettingsFile::reset(Page page) {
 
 bool experimental(const Option& option) {
     const std::string_view key = option.key;
-    return key == "disruptor.vertical_look" || key == "disruptor.number_keys" || key == "disruptor.selection_wheels";
+    return key == "disruptor.vertical_look" || key == "disruptor.selection_wheels";
 }
 
 std::vector<std::string> SettingsFile::language_discs() const {
@@ -237,6 +240,16 @@ bool SettingsFile::forget_language_disc(const std::string& path) {
     });
 }
 
+bool SettingsFile::set_pick_keys(const settings::PickKeys& keys) {
+    using settings::pick_key_list, settings::psionic_count, settings::weapon_count;
+    return change([&](Settings& settings) {
+        settings.has_pick_keys = true;
+        settings.weapon_keys = pick_key_list(keys, 0, 0, weapon_count);
+        settings.weapon_keys_second = pick_key_list(keys, 1, 0, weapon_count);
+        settings.psionic_keys = pick_key_list(keys, 0, weapon_count, psionic_count);
+        settings.psionic_keys_second = pick_key_list(keys, 1, weapon_count, psionic_count);
+    });
+}
 // As the game decides: the settings' folder, else game.toml's, else the build folder itself.
 fs::path SettingsFile::saves_folder() const {
     const fs::path beside = path_.parent_path();

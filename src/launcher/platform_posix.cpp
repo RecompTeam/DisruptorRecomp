@@ -204,7 +204,7 @@ bool Process::stop() {
 fs::path executable_path() {
     std::error_code failed;
     const fs::path path = fs::read_symlink("/proc/self/exe", failed);
-    if (failed) throw std::runtime_error("Cannot find the launcher's folder.");
+    if (failed) throw std::runtime_error("Cannot find the launcher's folder");
     return path;
 }
 

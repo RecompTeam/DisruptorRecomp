@@ -13,8 +13,8 @@ void draw_language_tab() {
         quit.type = SDL_QUIT;
         SDL_PushEvent(&quit);
     }
-    ImGui::TextDisabled("Movies, speech and words come from that disc at the next start. The French, German and Japanese discs are known.");
-    ImGui::TextDisabled("The Japanese disc gives movies, speech and hints: its menus are in English on the disc itself.");
+    ImGui::TextDisabled("Movies, speech and words come from that disc at the next start\nThe French, German and Japanese discs are known");
+    ImGui::TextDisabled("The Japanese disc gives movies, speech and hints: its menus are in English on the disc itself");
 }
 
 }  // namespace disruptor::menu

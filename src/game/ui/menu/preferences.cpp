@@ -117,6 +117,10 @@ void mark_master_volume(int value) { mark("audio.master_volume", value); }
 
 void mark_audio_muted(bool value) { mark("audio.muted", value); }
 
+void mark_mute_in_background(bool value) { mark("disruptor.mute_in_background", value); }
+
+void mark_bass_cut(int cut) { mark("disruptor.bass_cut", cut); }
+
 void mark_skip_intro(bool value) { mark("disruptor.skip_intro", value); }
 
 void mark_language_disc(const std::string &path) {
@@ -200,7 +204,7 @@ bool flush_preferences() {
     if (!g_preferences.dirty()) return true;
     if (g_preferences.path.empty()) {
         g_preferences.save_failed = true;
-        g_preferences.status = "Runtime settings path is unavailable.";
+        g_preferences.status = "Runtime settings path is unavailable";
         return false;
     }
 
@@ -209,14 +213,14 @@ bool flush_preferences() {
     if (settings.parse_error) {
         g_preferences.save_failed = true;
         g_preferences.status =
-            "settings.toml is invalid; it was left untouched.";
+            "settings.toml is invalid; it was left untouched";
         return false;
     }
     merge_dirty_preferences(settings);
     if (!PSXRecompV4::save_user_settings(g_preferences.path, settings)) {
         g_preferences.save_failed = true;
         g_preferences.status =
-            "Could not save settings; the previous file is intact.";
+            "Could not save settings; the previous file is intact";
         return false;
     }
 
@@ -224,7 +228,7 @@ bool flush_preferences() {
         disruptor_diagnostics_note("setting %s = %d", option->key, option->get(g_preferences.pending));
     g_preferences.clean();
     g_preferences.save_failed = false;
-    g_preferences.status = "Settings saved.";
+    g_preferences.status = "Settings saved";
     std::fprintf(stdout, "disruptor: saved in-game settings to %s\n",
                  utf8(g_preferences.path).c_str());
     return true;
@@ -247,6 +251,7 @@ void apply_saved_preferences(const PSXRecompV4::UserSettings &settings) {
         set_modern_controls_live(settings.modern_controls);
     disruptor_selection_wheels_set_enabled(settings.has_selection_wheels && settings.selection_wheels);
     disruptor_number_keys_set_enabled(settings.has_number_keys && settings.number_keys);
+    disruptor_psionic_keys_use_set_enabled(stored(settings, *find_option("disruptor.psionic_keys_use")) != 0);
     if (settings.has_horizontal_sensitivity &&
         !env_override_present("PSX_DISRUPTOR_MOUSE_SENSITIVITY"))
         (void)disruptor_mouse_set_horizontal_sensitivity(
@@ -296,6 +301,9 @@ void apply_saved_preferences(const PSXRecompV4::UserSettings &settings) {
         (void)psx_host_audio_set_master_volume(settings.master_volume);
     if (settings.has_audio_muted)
         (void)psx_host_audio_set_muted(settings.audio_muted ? 1 : 0);
+    if (settings.has_mute_in_background)
+        (void)psx_host_audio_set_mute_in_background(settings.mute_in_background ? 1 : 0);
+    disruptor_bass_cut_set(stored(settings, *find_option("disruptor.bass_cut")));
     if (settings.has_hud_scale) gpu_ws_set_hud_scale(settings.hud_scale);
     if (!env_override_present("PSX_DISRUPTOR_FRAME_UNLOCK"))
         disruptor_frame_rate_set_unlocked(stored(settings, *find_option("disruptor.frame_unlock")));
@@ -345,6 +353,8 @@ void apply_pending_preferences() {
         disruptor_selection_wheels_set_enabled(pending.selection_wheels);
     if (changed("disruptor.number_keys"))
         disruptor_number_keys_set_enabled(pending.number_keys);
+    if (changed("disruptor.psionic_keys_use"))
+        disruptor_psionic_keys_use_set_enabled(pending.psionic_keys_use);
     if (changed("disruptor.horizontal_sensitivity"))
         (void)disruptor_mouse_set_horizontal_sensitivity(
             pending.horizontal_sensitivity);
@@ -389,6 +399,10 @@ void apply_pending_preferences() {
         (void)psx_host_audio_set_master_volume(pending.master_volume);
     if (changed("audio.muted"))
         (void)psx_host_audio_set_muted(pending.audio_muted ? 1 : 0);
+    if (changed("disruptor.mute_in_background"))
+        (void)psx_host_audio_set_mute_in_background(pending.mute_in_background ? 1 : 0);
+    if (changed("disruptor.bass_cut"))
+        disruptor_bass_cut_set(stored(pending, *find_option("disruptor.bass_cut")));
     if (changed("disruptor.hud_scale"))
         gpu_ws_set_hud_scale(pending.hud_scale);
     if (changed("disruptor.frame_unlock"))
@@ -434,7 +448,7 @@ void load_preferences_for_session() {
     const char *path = psx_host_user_settings_path();
     if (!path || !path[0]) {
         g_preferences.loaded = false;
-        g_preferences.status = "Runtime settings path is unavailable.";
+        g_preferences.status = "Runtime settings path is unavailable";
         return;
     }
     const std::string_view text(path);
@@ -444,7 +458,7 @@ void load_preferences_for_session() {
     if (settings.parse_error) {
         g_preferences.loaded = false;
         g_preferences.status =
-            "settings.toml is invalid; saved menu values were not applied.";
+            "settings.toml is invalid; saved menu values were not applied";
         std::printf("disruptor: settings at start: the settings file is invalid and was not applied\n");
         return;
     }
@@ -458,7 +472,7 @@ void load_preferences_for_session() {
     }
     g_preferences.loaded = true;
     if (!g_preferences.save_failed)
-        g_preferences.status = "Settings loaded.";
+        g_preferences.status = "Settings loaded";
 }
 
 }  // namespace disruptor::menu

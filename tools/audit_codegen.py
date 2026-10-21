@@ -224,6 +224,16 @@ INTRO_SKIP_SITES = {
     0x80048678: 0x30420940,
 }
 
+WEAPON_LIST_SITES = {
+    0x8003D840: 0x93840310,
+    0x8003E014: 0x8C637670,
+    0x8003E098: 0x8C427670,
+    0x8003E0F8: 0x93830310,
+    0x8003E8C8: 0x8FBF00DC,
+    0x8003E7B8: 0x8C637670,
+    0x8003E84C: 0x8C427670,
+}
+
 BILLBOARD_ASPECT_SITES = {
     0x8003BB88: 0xA6030016,
     0x8003BFB0: 0xA6030016,
@@ -241,6 +251,7 @@ INTERPRETED_HOOKS = {
     "disruptor_backdrop_tiles_instruction_hook": BACKDROP_TILE_SITES,
     "disruptor_sprite_depth_instruction_hook": SPRITE_DEPTH_SITES,
     "disruptor_intro_skip_instruction_hook": INTRO_SKIP_SITES,
+    "disruptor_weapon_list_instruction_hook": WEAPON_LIST_SITES,
 }
 INTERPRETED_CASE = re.compile(
     r"    case 0x([0-9A-F]{8})u:\n((?:        if \(instruction == 0x[0-9A-F]{8}u\) \w+\(cpu, address, instruction, 1\);\n)+)"
@@ -710,6 +721,19 @@ def main() -> int:
             + str(INTRO_SKIP_SITES)
             + ", found "
             + str(generated_intro_skip_sites)
+        )
+
+    weapon_list_matches = re.findall(
+        r"disruptor_weapon_list_instruction_hook\(cpu, 0x([0-9A-F]{8})u, 0x([0-9A-F]{8})u, 1\)",
+        shard_text,
+    )
+    generated_weapon_list_sites = {int(address, 16): int(word, 16) for address, word in weapon_list_matches}
+    if generated_weapon_list_sites != WEAPON_LIST_SITES or len(weapon_list_matches) != len(WEAPON_LIST_SITES):
+        failures.append(
+            "reviewed weapon-list hooks differ: expected "
+            + str(WEAPON_LIST_SITES)
+            + ", found "
+            + str(generated_weapon_list_sites)
         )
 
     precision_mfc2_matches = re.findall(

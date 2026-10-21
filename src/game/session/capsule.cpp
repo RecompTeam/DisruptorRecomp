@@ -4,6 +4,7 @@
 /* Measured: a loaded state takes its interrupts a few instructions apart, so one frame in four differs in a few bytes, nine in a row at most. */
 #include "game/session/capsule.h"
 #include "game/input/baton_choice.h"
+#include "game/input/weapon_list.h"
 
 #include <algorithm>
 #include <chrono>
@@ -40,9 +41,18 @@ extern "C" int gl_renderer_snap_taken(unsigned char *rgb, int room, int *width, 
 namespace disruptor::capsule {
 namespace {
 
-constexpr char kMagic[8] = {'D', 'C', 'A', 'P', 'S', 'U', 'L', '2'};
-constexpr char kLegacyMagic[8] = {'D', 'C', 'A', 'P', 'S', 'U', 'L', '1'};
-constexpr size_t kFrameBytes = 26, kLegacyFrameBytes = 21, kHeadBytes = sizeof(kMagic) + 4 + 8;
+constexpr char kMagic[8] = {'D', 'C', 'A', 'P', 'S', 'U', 'L', '3'};
+constexpr size_t kFrameBytes = 27, kHeadBytes = sizeof(kMagic) + 4 + 8;
+
+/* A frame of version 1 has no second byte write, one of version 2 no weapon list. */
+size_t frame_bytes_of(char version) {
+    switch (version) {
+    case '1': return 21;
+    case '2': return 26;
+    case '3': return kFrameBytes;
+    default: return 0;
+    }
+}
 
 void put(std::string &out, uint64_t value, int bytes) {
     for (int at = 0; at < bytes; ++at) out.push_back(static_cast<char>(value >> (8 * at)));
@@ -71,6 +81,7 @@ std::string encode(const std::vector<Frame> &frames, uint64_t first_cycle) {
         put(out, frame.memory, 8);
         put(out, frame.byte2_at, 4);
         put(out, frame.byte2, 1);
+        put(out, frame.list, 1);
     }
     return out;
 }
@@ -78,10 +89,9 @@ std::string encode(const std::vector<Frame> &frames, uint64_t first_cycle) {
 bool decode(std::string_view bytes, std::vector<Frame> &frames, uint64_t &first_cycle) {
     frames.clear();
     first_cycle = 0;
-    if (bytes.size() < kHeadBytes) return false;
-    const bool legacy = std::memcmp(bytes.data(), kLegacyMagic, sizeof(kLegacyMagic)) == 0;
-    if (!legacy && std::memcmp(bytes.data(), kMagic, sizeof(kMagic)) != 0) return false;
-    const size_t frame_bytes = legacy ? kLegacyFrameBytes : kFrameBytes;
+    if (bytes.size() < kHeadBytes || std::memcmp(bytes.data(), kMagic, sizeof(kMagic) - 1) != 0) return false;
+    const size_t frame_bytes = frame_bytes_of(bytes[sizeof(kMagic) - 1]);
+    if (frame_bytes == 0) return false;
     const uint64_t count = take(bytes, sizeof(kMagic), 4);
     if (bytes.size() != kHeadBytes + count * frame_bytes) return false;
     first_cycle = take(bytes, sizeof(kMagic) + 4, 8);
@@ -96,10 +106,11 @@ bool decode(std::string_view bytes, std::vector<Frame> &frames, uint64_t &first_
         frame.byte = static_cast<uint8_t>(take(bytes, at + 8, 1));
         std::memcpy(&frame.pitch, &pitch, sizeof(pitch));
         frame.memory = take(bytes, at + 13, 8);
-        if (!legacy) {
+        if (frame_bytes > 21) {
             frame.byte2_at = static_cast<uint32_t>(take(bytes, at + 21, 4));
             frame.byte2 = static_cast<uint8_t>(take(bytes, at + 25, 1));
         }
+        if (frame_bytes > 26) frame.list = static_cast<uint8_t>(take(bytes, at + 26, 1));
     }
     return true;
 }
@@ -393,6 +404,7 @@ void close_frame() {
     capsule.open.byte = capsule.notes.byte;
     capsule.open.byte2_at = capsule.notes.byte2_at;
     capsule.open.byte2 = capsule.notes.byte2;
+    capsule.open.list = capsule.notes.list;
     capsule.open.pitch = static_cast<float>(disruptor_mouse_vertical_pitch());
     capsule.recorded.push_back(capsule.open);
     capsule.notes = Frame{};
@@ -528,6 +540,8 @@ void replay_frame() {
         disruptor_capsule_note_byte(frame.byte2_at, frame.byte2);
         if (frame.byte2_at == kWeaponInHand) disruptor_weapon_chosen(frame.byte2);
     }
+    if (frame.list == 1) disruptor_weapon_list_show();
+    else if (frame.list == 2) disruptor_psionic_list_show();
     disruptor_mouse_set_vertical_pitch(static_cast<double>(frame.pitch));
 }
 
@@ -574,6 +588,8 @@ extern "C" const char *disruptor_capsule_notice(void) {
 extern "C" void disruptor_capsule_note_byte(uint32_t address, uint8_t value) {
     g_capsule.notes.note_byte(address, value);
 }
+
+extern "C" void disruptor_capsule_note_list(uint8_t list) { g_capsule.notes.list = list; }
 
 extern "C" void disruptor_capsule_state_loaded(void) {
     if (!g_capsule.loading.empty()) g_capsule.load_done = true;
@@ -661,6 +677,7 @@ extern "C" void disruptor_capsule_before_input(void) {
         capsule.first_cycle = psx_get_cycle_count();
         open_frame();
         if (disruptor_baton_held_by_choice()) disruptor_capsule_note_byte(kWeaponInHand, 0u);  /* the state forgets the choice */
+        disruptor_weapon_list_state_loaded();  /* and the list a key showed, which its replay cannot know */
         break;
     case Recording::kOn:
         if (capsule.end_asked) {

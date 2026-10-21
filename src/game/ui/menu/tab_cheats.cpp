@@ -9,13 +9,13 @@ const char *cheat_result_message(int result, const char *success) {
         case DISRUPTOR_CHEAT_OK:
             return success;
         case DISRUPTOR_CHEAT_GAME_NOT_READY:
-            return "Enter live gameplay before using this cheat.";
+            return "Enter live gameplay before using this cheat";
         case DISRUPTOR_CHEAT_NETPLAY_BLOCKED:
-            return "Cheats are disabled during netplay.";
+            return "Cheats are disabled during netplay";
         case DISRUPTOR_CHEAT_UNVERIFIED_STATE:
-            return "The game state did not match the verified USA executable; no changes were made.";
+            return "The game state did not match the verified USA executable; no changes were made";
         default:
-            return "The cheat request was rejected.";
+            return "The cheat request was rejected";
     }
 }
 
@@ -27,13 +27,13 @@ void draw_cheats_tab() {
 
     ImGui::TextWrapped(
         "These are version-pinned gameplay cheats for testing and casual "
-        "play. They are never saved as port settings and start off on every "
-        "launch.");
+        "play\nThey are never saved as port settings and start off on every "
+        "launch");
     if (netplay) {
         ImGui::TextColored(ImVec4(1.0f, 0.35f, 0.25f, 1.0f),
-                           "Cheats are unavailable while netplay is active.");
+                           "Cheats are unavailable while netplay is active");
     } else if (!gameplay_ready) {
-        ImGui::TextDisabled("Enter live gameplay to enable cheats.");
+        ImGui::TextDisabled("Enter live gameplay to enable cheats");
     }
 
     ImGui::SeparatorText("Player");
@@ -43,15 +43,15 @@ void draw_cheats_tab() {
     if (ImGui::Checkbox("God mode", &god_mode)) {
         const int result = disruptor_cheats_set_god_mode(god_mode ? 1 : 0);
         g_menu.cheat_status = cheat_result_message(
-            result, god_mode ? "God mode enabled for this session."
-                             : "God mode disabled.");
+            result, god_mode ? "God mode enabled for this session"
+                             : "God mode disabled");
     }
     if (disable_god_control) ImGui::EndDisabled();
     draw_status_badge("SESSION", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
     ImGui::TextDisabled(
         "Neutralises player damage at the game's central damage routine. "
         "A light hit cue remains, but saved health is not altered and the "
-        "game is not marked as cheated.");
+        "game is not marked as cheated");
 
     ImGui::SeparatorText("Inventory");
     if (netplay || !gameplay_ready) ImGui::BeginDisabled();
@@ -61,10 +61,10 @@ void draw_cheats_tab() {
     ImGui::TextWrapped(
         "This reproduces the retail All Weapons cheat: all weapons and "
         "psionics are unlocked, ammunition and psionic energy are refilled, "
-        "and the current game is marked as cheated.");
+        "and the current game is marked as cheated");
     ImGui::TextColored(ImVec4(1.0f, 0.73f, 0.25f, 1.0f),
         "Important: the cheated marker affects the ending and is carried into "
-        "memory-card/password saves.");
+        "memory-card/password saves");
 
     bool popup_open = true;
     if (ImGui::BeginPopupModal("Confirm All Weapons", &popup_open,
@@ -75,7 +75,7 @@ void draw_cheats_tab() {
         if (ImGui::Button("Grant and mark cheated")) {
             const int result = disruptor_cheats_grant_all_weapons();
             g_menu.cheat_status = cheat_result_message(
-                result, "All weapons, psionics and resources granted. Game marked as cheated.");
+                result, "All weapons, psionics and resources granted\nGame marked as cheated");
             ImGui::CloseCurrentPopup();
         }
         ImGui::SameLine();

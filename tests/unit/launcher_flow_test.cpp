@@ -125,7 +125,7 @@ void test_play_checks_the_language_disc_again() {
     Shelf cancelled;
     cancelled.cancel_in_import = true;
     outcome = cancelled.run({Task::import, kImage, true, {}, kGerman, {}});
-    require(starts(outcome.error, L"Cancelled.") && !outcome.disc.profile && cancelled.asked({"import " + utf8(kImage), "package"}),
+    require(starts(outcome.error, L"Cancelled\n") && !outcome.disc.profile && cancelled.asked({"import " + utf8(kImage), "package"}),
             "a cancelled import gives no disc and reads no language disc");
 }
 
@@ -139,7 +139,7 @@ void test_an_image_is_taken_for_what_it_is() {
     Shelf early;
     early.kind = RegionDisc{"French", true};
     outcome = early.run({Task::take, kImage, false, {}, "", {}});
-    require(outcome.task == Task::take && starts(outcome.error, L"That is a disc of another region.") && early.asked({"look " + utf8(kImage)}),
+    require(outcome.task == Task::take && starts(outcome.error, L"That is a disc of another region\n") && early.asked({"look " + utf8(kImage)}),
             "a language disc before the game disc is refused and is not laid out");
 
     Shelf language;
@@ -188,12 +188,12 @@ void test_the_window_acts_on_an_outcome() {
     Step step = after(made(Task::look), false);
     require(same(step, DiscAfter::kept, false, false, false) && step.status.empty(), "a look changes nothing and says nothing");
     step = after(made(Task::look), true);
-    require(same(step, DiscAfter::kept, false, false, false) && step.status == L"Cancelled.", "a cancelled look says so");
+    require(same(step, DiscAfter::kept, false, false, false) && step.status == L"Cancelled", "a cancelled look says so");
 
     step = after(made(Task::take, true), false);
     require(same(step, DiscAfter::kept, true, false, false) && step.status.empty(), "an image that is no language disc goes on to the import");
     step = after(made(Task::take, true), true);
-    require(same(step, DiscAfter::kept, false, false, false) && step.status == L"Cancelled.", "unless the look was cancelled");
+    require(same(step, DiscAfter::kept, false, false, false) && step.status == L"Cancelled", "unless the look was cancelled");
     step = after(made(Task::take, true, L"Install the USA disc first."), false);
     require(same(step, DiscAfter::kept, false, false, false) && step.status == L"Install the USA disc first.",
             "a refused image keeps the installed disc and is not imported");
@@ -202,10 +202,10 @@ void test_the_window_acts_on_an_outcome() {
     language.language = RegionDisc{"German", true};
     step = after(language, false);
     require(same(step, DiscAfter::kept, false, true, false) && starts(step.status, L"German disc: ") &&
-                ends(step.status, L"\nThe image is used where it is, so keep it there."),
+                ends(step.status, L"\nThe image is used where it is, so keep it there"),
             "a checked language disc is named in the settings and described");
     step = after(language, true);
-    require(same(step, DiscAfter::kept, false, false, false) && step.status == L"Cancelled. The language is as it was.",
+    require(same(step, DiscAfter::kept, false, false, false) && step.status == L"Cancelled\nThe language is as it was",
             "a cancelled check changes nothing");
     step = after(made(Task::language), false);
     require(same(step, DiscAfter::kept, false, false, false), "an outcome without a disc names none");
@@ -215,7 +215,7 @@ void test_the_window_acts_on_an_outcome() {
     step = after(made(Task::verify, true, L"The image is damaged."), false);
     require(same(step, DiscAfter::cleared, false, false, false) && step.status == L"The image is damaged.", "a failed check forgets the disc");
     step = after(made(Task::import, true), false);
-    require(same(step, DiscAfter::taken, false, false, true) && step.status == L"Game data is installed and ready. Press Play to start.",
+    require(same(step, DiscAfter::taken, false, false, true) && step.status == L"Game data is installed and ready\nPress Play to start",
             "a verified disc is taken and the game is started when that was asked");
     step = after(made(Task::verify, false), false);
     require(same(step, DiscAfter::taken, false, false, false), "and is not started when it was not");
@@ -223,13 +223,13 @@ void test_the_window_acts_on_an_outcome() {
     require(same(step, DiscAfter::taken, false, false, false), "nor after Cancel");
     step = after(made(Task::verify, true, L"", L"The language disc cannot be used."), false);
     require(same(step, DiscAfter::taken, false, false, false) &&
-                step.status == L"The language disc cannot be used.\nChoose English or another disc, then press Play.",
+                step.status == L"The language disc cannot be used.\nChoose English or another disc, then press Play",
             "a language disc that no longer fits keeps the game from starting");
 }
 
 void test_the_running_status() {
     const std::wstring plain = running_text(L"");
-    require(plain == L"Disruptor is running. You can close this launcher and keep playing.", "a plain start says the game runs");
+    require(plain == L"Disruptor is running\nYou can close this launcher and keep playing", "a plain start says the game runs");
     const std::wstring overriding = running_text(L"PSX_VSYNC");
     require(starts(overriding, plain.c_str()) && ends(overriding, L"run: PSX_VSYNC") && plain.find(L"PSX_") == std::wstring::npos,
             "the variables that replace settings are named, and only when there are some");
@@ -255,7 +255,7 @@ void test_the_language_box() {
     require(list.labels == std::vector<std::wstring>{L"English (the US disc alone)", L"Disc image (Disruptor (Germany).cue)",
                                                      L"French (Disruptor (France).cue)", L"Unknown or missing (gone.cue)"},
             "a disc is listed by its language and file name, one not looked at yet as a disc image");
-    require(list.selected == 2 && starts(list.note, L"French disc: ") && ends(list.note, L" The image is used where it is."),
+    require(list.selected == 2 && starts(list.note, L"French disc: ") && ends(list.note, L"\nThe image is used where it is"),
             "the disc in use is selected and described");
     list = language_list({kGerman, french, missing}, regions, missing);
     require(list.selected == 3 && starts(list.note, L"This image is missing"), "a missing disc in use is called missing");

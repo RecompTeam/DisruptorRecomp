@@ -19,8 +19,8 @@ Outcome run(Request request, const Discs& discs, const std::atomic_bool& cancell
     try {
         if (request.task == Task::take && discs.look(request.source)) {
             if (request.home.empty())
-                throw std::runtime_error("That is a disc of another region.\n"
-                                         "Install the USA disc first: it is the game, and the other disc gives it a language.");
+                throw std::runtime_error("That is a disc of another region\n"
+                                         "Install the USA disc first: it is the game, and the other disc gives it a language");
             outcome.task = Task::language;
         }
         if (outcome.task == Task::language) {
@@ -31,7 +31,7 @@ Outcome run(Request request, const Discs& discs, const std::atomic_bool& cancell
             discs.check_package(outcome.disc);
             if (cancelled) {
                 outcome.disc = {};
-                outcome.error = L"Cancelled. A finished import is kept.\nReopen the launcher to check it again.";
+                outcome.error = L"Cancelled\nA finished import is kept\nReopen the launcher to check it again";
             } else if (request.launch && !request.spoken.empty()) {
                 if (discs.report) discs.report(L"Checking the language disc...", 100);
                 try {
@@ -63,15 +63,15 @@ Step after(const Outcome& outcome, bool cancelled) {
     const bool failed = !outcome.error.empty();
     if (outcome.task == Task::look || (outcome.task == Task::take && !failed)) {
         step.import_next = outcome.task == Task::take && !cancelled;
-        if (cancelled) step.status = L"Cancelled.";
+        if (cancelled) step.status = L"Cancelled";
     } else if (outcome.task == Task::language || outcome.task == Task::take) {
         if (failed) {
             step.status = outcome.error;
         } else if (cancelled || !outcome.language) {
-            step.status = L"Cancelled. The language is as it was.";
+            step.status = L"Cancelled\nThe language is as it was";
         } else {
             step.save_language = true;
-            step.status = describe(*outcome.language) + L"\nThe image is used where it is, so keep it there.";
+            step.status = describe(*outcome.language) + L"\nThe image is used where it is, so keep it there";
         }
     } else if (failed) {
         // A cancel can leave an installation already committed: browsing again or reopening checks it afresh.
@@ -80,9 +80,9 @@ Step after(const Outcome& outcome, bool cancelled) {
     } else {
         step.disc = DiscAfter::taken;
         if (!outcome.language_error.empty()) {
-            step.status = outcome.language_error + L"\nChoose English or another disc, then press Play.";
+            step.status = outcome.language_error + L"\nChoose English or another disc, then press Play";
         } else {
-            step.status = L"Game data is installed and ready. Press Play to start.";
+            step.status = L"Game data is installed and ready\nPress Play to start";
             step.launch = outcome.launch && !cancelled;
         }
     }
@@ -96,7 +96,7 @@ std::wstring shown_status(std::wstring_view said, std::wstring_view problem) {
 }
 
 std::wstring running_text(const std::wstring& overriding) {
-    std::wstring text = L"Disruptor is running. You can close this launcher and keep playing.";
+    std::wstring text = L"Disruptor is running\nYou can close this launcher and keep playing";
     if (!overriding.empty())
         text += L"\nPSX_ environment variables are set, and the game lets some of them replace settings for this "
                 L"run: " + overriding;
@@ -104,7 +104,7 @@ std::wstring running_text(const std::wstring& overriding) {
 }
 
 LanguageList language_list(const std::vector<std::string>& discs, const Regions& regions, const std::string& spoken) {
-    LanguageList list{{L"English (the US disc alone)"}, 0, L"Add a French, German or Japanese disc image to play in that language."};
+    LanguageList list{{L"English (the US disc alone)"}, 0, L"Add a French, German or Japanese disc image to play in that language"};
     for (size_t index = 0; index < discs.size(); ++index) {
         const auto looked = regions.find(discs[index]);
         const RegionDisc* disc = looked != regions.end() && looked->second ? &*looked->second : nullptr;
@@ -113,9 +113,9 @@ LanguageList language_list(const std::vector<std::string>& discs, const Regions&
         list.labels.push_back(kind + L" (" + from_utf8(discs[index]).filename().wstring() + L")");
         if (discs[index] != spoken) continue;
         list.selected = static_cast<int>(index) + 1;
-        list.note = disc ? describe(*disc) + L" The image is used where it is."
+        list.note = disc ? describe(*disc) + L"\nThe image is used where it is"
             : looked == regions.end() ? L""
-            : L"This image is missing or is not a known disc. Choose another one or English.";
+            : L"This image is missing or is not a known disc\nChoose another one or English";
     }
     return list;
 }

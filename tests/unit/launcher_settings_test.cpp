@@ -205,7 +205,7 @@ void draw_distance_list() {
     odd.has_draw_distance = true;
     odd.draw_distance = 110;
     require(list.get(odd) == -1, "a percent the list does not have is no choice");
-    require(list.highest == 1 && list.notice && std::string_view(list.notice) == "Longer distances come in a later release.",
+    require(list.highest == 1 && list.notice && std::string_view(list.notice) == "Longer distances come in a later release",
             "the original distance and 1.25x are offered for now, and the notice says why");
     Settings quarter;
     list.set(quarter, 1);
@@ -225,7 +225,7 @@ void fog_shape_list() {
         list.set(chosen, index);
         require(chosen.has_fog_shape && chosen.fog_shape == index && list.get(chosen) == index, "each shape is written as its index");
     }
-    require(list.highest == 0 && list.notice && std::string_view(list.notice) == "Other shapes come in a later release.",
+    require(list.highest == 0 && list.notice && std::string_view(list.notice) == "Other shapes come in a later release",
             "only the original fog is offered for now, and the notice says why");
     Settings late;
     list.set(late, 2);
@@ -283,9 +283,13 @@ void described() {
     const Option& numbers = *find_option("disruptor.number_keys");
     require(numbers.kind == Kind::toggle && numbers.initial == 0 && stored(settings, numbers) == 0,
             "the number keys pick no weapon until their option is on");
-    require(experimental(wheels) && experimental(numbers) && experimental(*find_option("disruptor.vertical_look")) &&
+    const Option& use = *find_option("disruptor.psionic_keys_use");
+    require(use.kind == Kind::toggle && use.initial == 1 && stored(settings, use) == 1 && use.needs.size() == 1 &&
+                std::string_view(use.needs[0]) == "disruptor.number_keys" && !experimental(use),
+            "a power's key uses the power at first, and only under the weapon and psionic keys");
+    require(experimental(wheels) && !experimental(numbers) && experimental(*find_option("disruptor.vertical_look")) &&
                 !experimental(*find_option("disruptor.modern_controls")),
-            "the wheels, the number keys and the vertical look carry the experimental tag, the scheme does not");
+            "the wheels and the vertical look carry the experimental tag, the number keys and the scheme do not");
     require(logging.kind == Kind::toggle && logging.initial == 0 && stored(settings, logging) == 0 && stored(settings, volume) == 100,
             "an option the file does not name has a fresh installation's value, and the detailed log starts off");
     logging.set(settings, 1);
@@ -387,6 +391,28 @@ void one_change(const fs::path& folder) {
     fs::remove(file);
 }
 
+void pick_keys_saved(const fs::path& folder) {
+    const fs::path file = folder / "settings.toml";
+    SettingsFile settings(file);
+    require(settings.load() && settings.pick_lists().weapons.empty() && settings.pick_lists().psionics_second.empty(),
+            "a new file lists no keys");
+    disruptor::settings::PickKeys keys = disruptor::settings::default_pick_keys();
+    keys[0][0] = "Z";
+    keys[9][1] = "None";
+    keys[12][0] = "H";
+    require(settings.set_pick_keys(keys), "the keys must be written");
+    SettingsFile again(file);
+    require(again.load(), "the file must load again");
+    const disruptor::settings::PickLists lists = again.pick_lists();
+    require(lists.weapons.size() == 10 && lists.weapons[0] == "Z" && lists.weapons_second[9] == "None" &&
+                lists.weapons_second[0] == "Keypad 1" && lists.psionics.size() == 5 && lists.psionics[2] == "H" &&
+                lists.psionics_second.size() == 5 && lists.psionics_second[0] == "None",
+            "and read back as written, the powers' lists and no key included");
+    require(again.set(option("disruptor.number_keys"), 1) && again.pick_lists().weapons[0] == "Z" &&
+                again.pick_lists().psionics[2] == "H",
+            "another setting keeps them");
+    fs::remove(file);
+}
 void round_trip(const fs::path& folder) {
     const fs::path file = folder / "settings.toml";
     for (const auto& one : options()) {
@@ -742,6 +768,7 @@ int main() {
         one_change(folder);
         saves_beside_game(folder);
         round_trip(folder);
+    pick_keys_saved(folder);
         whole_range(folder);
         dependants(folder);
         reset_to_new(folder);

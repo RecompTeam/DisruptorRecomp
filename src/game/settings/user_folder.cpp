@@ -111,7 +111,7 @@ fs::path folder_for(const fs::path& program, const fs::path& chosen, const fs::p
     }
     switch (copy_of(program)) {
     case Copy::installed:
-        if (local.empty()) throw std::runtime_error("The system did not say where this user's application data is.");
+        if (local.empty()) throw std::runtime_error("The system did not say where this user's application data is");
         return (local / kInstalledName).lexically_normal();
     case Copy::portable: return (folder_of(program).parent_path() / "data").lexically_normal();
     case Copy::plain: break;
