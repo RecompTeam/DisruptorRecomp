@@ -50,7 +50,7 @@
     <td valign="top">
       <img src="docs/images/controls.png" alt="The Controls page" width="100%"><br>
       <b>Controls</b><br>
-      Keys for weapons and psionic powers, the mouse, a gamepad
+      Weapon and psionic keys, mouse, gamepad
     </td>
     <td valign="top">
       <img src="docs/images/keys.png" alt="The key and gamepad tables" width="100%"><br>
