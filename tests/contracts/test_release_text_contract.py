@@ -53,6 +53,42 @@ with tempfile.TemporaryDirectory() as folder:
         package_release.release_text("v0.1.0-alpha.5", root) == "Released on 2026-10-13.\n\n- Two\n",
         "a version without a page of its own still takes its section",
     )
+    page.write_text(
+        "| [Slowdowns](#slowdowns) | Less |\n| [Draw distance 1.25x](#draw-distance-125x) | Further |\n\n"
+        "## Slowdowns\n\nOne\n\n## Draw distance 1.25x ##\n\nTwo\n\n## Settings\n\nSee [Install](#install)\n",
+        encoding="utf-8",
+    )
+    require(
+        package_release.release_text(newest, root)
+        == "| [Slowdowns](#user-content-slowdowns) | Less |\n"
+        "| [Draw distance 1.25x](#user-content-draw-distance-125x) | Further |\n\n"
+        '<a id="slowdowns"></a>\n## Slowdowns\n\nOne\n\n'
+        '<a id="draw-distance-125x"></a>\n## Draw distance 1.25x ##\n\nTwo\n\n'
+        "## Settings\n\nSee [Install](#user-content-install)\n"
+        and '<a id="install"></a>\n## Install\n' in package_release.release_body("Banner\n"),
+        "each linked heading gets its anchor on the line before it, the links name it as GitHub prefixes it, "
+        "a heading nothing links to gets none, and the Install section the packager adds has its own",
+    )
+    reworded = '| [Draw](#user-content-draw) | Far |\n\n<a id="draw"></a>\n## Draw, fixed in 0.4.0\n\nOne\n'
+    page.write_text(reworded, encoding="utf-8")
+    require(
+        package_release.release_text(newest, root) == reworded,
+        "an anchored text is kept as it is, and a heading reworded after its anchor gets no second one",
+    )
+    fenced = "[Slowdowns](#slowdowns)\n\n```markdown\n## Slowdowns\n[Here](#here)\n```\n\n## Slowdowns\n"
+    page.write_text(fenced, encoding="utf-8")
+    require(
+        package_release.release_text(newest, root)
+        == "[Slowdowns](#user-content-slowdowns)\n\n```markdown\n## Slowdowns\n[Here](#here)\n```\n\n"
+        '<a id="slowdowns"></a>\n## Slowdowns\n',
+        "a code block is left as written, and the anchor goes to the heading outside it",
+    )
+    for unknown in ("| [Gone](#gone) | Away |\n\n## Here\n", "[Here][here]\n\n[here]: #here\n\n## Here\n"):
+        page.write_text(unknown, encoding="utf-8")
+        require(
+            refused(lambda: package_release.release_text(newest, root)),
+            "a link to a heading the text lacks, or one by reference, stops the release",
+        )
     for heading in ("## Install", "## Install  ", "## Install ##", "   ## Install", "# install"):
         page.write_text(f"Banner\n\n{heading}\n\nMine\n", encoding="utf-8")
         require(refused(lambda: package_release.release_text(newest, root)), f"a page with '{heading}' is refused")
@@ -109,7 +145,9 @@ require(
 body = package_release.release_body("Banner\n")
 windows, linux = package_release.PLATFORMS["windows"], package_release.PLATFORMS["linux"]
 require(
-    body.startswith("Banner\n\n## Install\n") and body.endswith(windows.install) and "Verify" not in body,
+    body.startswith('Banner\n\n<a id="install"></a>\n## Install\n')
+    and body.endswith(windows.install)
+    and "Verify" not in body,
     "Windows publishes the release's text, then the Install section with its own lines, and no Verify section",
 )
 both = package_release.with_install(body, linux)

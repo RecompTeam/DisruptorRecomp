@@ -273,7 +273,8 @@ require(slots == ["precision_hash(physical)"] * 4 and gte.count("s_precision_pro
         "every slot is the hash of the one address whose tag it reads, and its projection is the tag's own")
 
 game_dispatch = ROOT / "generated" / "SLUS_002.24.code_dispatch.c"
-if game_dispatch.is_file():
+# A build without the game leaves an empty file here (build.sh).
+if game_dispatch.is_file() and game_dispatch.stat().st_size:
     text = game_dispatch.read_text(encoding="utf-8")
     rows = [row for row in text.split("k_psx_game_dispatch[] = {", 1)[1].split("};", 1)[0].split("\n") if row.strip()]
     keys = [re.fullmatch(r"    \{0x([0-9A-F]{8})u, [^{}]*\},", row) for row in rows]

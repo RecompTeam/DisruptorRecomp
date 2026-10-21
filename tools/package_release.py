@@ -3,7 +3,7 @@ packages the launcher updates from.
 
 The program's files come from an explicit list and exclude game data. The packages carry the release's section of
 CHANGELOG.md as their notes. The GitHub release's text is release/notes/<version>.md when it is written, else that
-section. The previous release on GitHub, when there is one, gives the update a delta package. Nothing is
+section, with explicit anchors for its links to its own headings. The previous release on GitHub, when there is one, gives the update a delta package. Nothing is
 published unless --publish is given. The players' files are signed with Sigstore first: a browser opens to sign in as
 the organisation's account, and each gets a bundle and a line of SLSA provenance. Windows comes first and makes
 the release as a draft, Linux adds its files and publishes it, so players never see a release without them.
@@ -91,18 +91,61 @@ def release_notes(version: str, root: Path = ROOT) -> str:
     return match.group(1).strip() + "\n"
 
 
+HEADING = re.compile(r"^ {0,3}#{1,6}[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$")
+HEADING_LINK = re.compile(r"\]\(#(?:user-content-)?([^)\s]+)")
+REFERENCE_LINK = re.compile(r"^ {0,3}\[[^\]]+\]:[ \t]*#")
+ANCHOR = re.compile(r'^<a id="([^"]+)"></a>$')
+FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+INSTALL_ANCHOR = "install"
+
+
+def heading_slug(heading: str) -> str:
+    """The id GitHub gives a heading elsewhere: its words in lower case without punctuation, joined by hyphens."""
+    return re.sub(r"[^\w\- ]", "", heading.strip().lower()).replace(" ", "-")
+
+
+def with_anchors(text: str) -> str:
+    """`text` whose links to its own headings work on a release page, which gives headings no ids: each linked
+    heading gets an `<a id>` on the line before it, which GitHub prefixes with `user-content-`, and the links name
+    that. An anchor already in the text is kept, so a heading reworded after its anchor still has it. Fenced code is
+    left alone, `#install` is the section the packager adds, and a link it cannot tie to a heading stops the
+    release."""
+    lines = text.split("\n")
+    prose, fence = [], ""
+    for line in lines:
+        mark = FENCE.match(line)
+        prose.append(not fence and not mark)
+        if mark and (not fence or mark.group(1)[0] == fence[0] and len(mark.group(1)) >= len(fence)):
+            fence = "" if fence else mark.group(1)
+    shown = [line for line, words in zip(lines, prose, strict=True) if words]
+    if any(REFERENCE_LINK.match(line) for line in shown):
+        raise SystemExit("The release text links to a heading by reference: write it as [text](#heading)")
+    wanted = {slug for line in shown for slug in HEADING_LINK.findall(line)}
+    anchored = {INSTALL_ANCHOR} | {match.group(1) for line in shown if (match := ANCHOR.match(line))}
+    out = []
+    for line, words in zip(lines, prose, strict=True):
+        heading = HEADING.match(line) if words else None
+        if heading and (slug := heading_slug(heading.group(1))) in wanted - anchored:
+            out.append(f'<a id="{slug}"></a>')
+            anchored.add(slug)
+        out.append(HEADING_LINK.sub(r"](#user-content-\1", line) if words else line)
+    if missing := sorted(wanted - anchored):
+        raise SystemExit(f"The release text links to headings it does not have: {', '.join(missing)}")
+    return "\n".join(out)
+
+
 def release_text(version: str, root: Path = ROOT) -> str:
     """The GitHub release's text above Install: release/notes/<version>.md when it is written, else the
-    version's section of CHANGELOG.md."""
+    version's section of CHANGELOG.md, with anchors for its links to its own headings."""
     page = root / "release" / "notes" / f"{version}.md"
     if not page.is_file():
-        return release_notes(version, root)
+        return with_anchors(release_notes(version, root))
     text = page.read_text(encoding="utf-8").replace("\r\n", "\n").strip()
     if not text:
         raise SystemExit(f"{page.name} is empty: write the release's text or remove the file")
     if re.search(r"^ {0,3}#{1,2}[ \t]+Install(?:[ \t]+#*)?[ \t]*$", text, re.MULTILINE | re.IGNORECASE):
         raise SystemExit(f"{page.name} has an Install heading of its own: the packager writes that section")
-    return text + "\n"
+    return with_anchors(text) + "\n"
 
 
 def published_names(channel: str, players: list[str], packed: tuple[str, ...], signed: list[str]) -> set[str]:
@@ -112,7 +155,7 @@ def published_names(channel: str, players: list[str], packed: tuple[str, ...], s
     return {*players, f"releases.{channel}.json", *packed, *signed}
 
 
-INSTALL = "## Install\n\nYour own Disruptor (USA, SLUS-00224) disc image is needed\n"
+INSTALL = f'<a id="{INSTALL_ANCHOR}"></a>\n## Install\n\nYour own Disruptor (USA, SLUS-00224) disc image is needed\n'
 
 
 def release_body(text: str) -> str:

@@ -60,7 +60,8 @@ python tools/package_release.py --version v0.3.1 --build build --zstd-license <z
   becomes the package's notes, which the launcher shows.
 - The GitHub release's text is `release/notes/v0.3.1.md` when it is
   written, else that section. The folder is kept out of git. The packager
-  adds the Install section below it.
+  adds the Install section below it. A release page gives its headings no
+  ids, so a link to one of them gets an explicit anchor from the packager.
 - The .NET SDK runs the pinned Velopack packer, the version of the C library
   the launcher links.
 - The previous release's package is fetched from GitHub when there is one,
