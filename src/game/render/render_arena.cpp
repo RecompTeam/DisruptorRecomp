@@ -24,6 +24,7 @@ extern "C" void gl_renderer_set_ssao_fade(float from, float to);
 extern "C" void gl_renderer_set_palette_fade(int rows, float start, float step, float side);
 extern "C" void gl_renderer_set_palette_fade_power(int power);
 extern "C" void gl_renderer_set_edge_sky(int sky);
+extern "C" void gl_renderer_set_edge_depth(float depth);
 extern "C" int disruptor_backdrop_tiles_sky_behind(uint32_t vblanks);
 
 namespace {
@@ -32,6 +33,7 @@ constexpr uint32_t kVBlanks = 0x8005B920u;  /* libetc's VBlank count */
 constexpr uint32_t kScreen = 0x8007145Cu;  /* gp + 0x310, the renderer skips the world at 0x800410E0 when it is 1 */
 constexpr uint8_t kMapScreen = 1u;
 constexpr float kDepthUnit = 4.0f;  /* camera depth the renderer gets for one unit of the game's range */
+constexpr uint32_t kCullReach = 160u;  /* the mesh renderer drops a polygon with a vertex deeper than far + 160 */
 constexpr uint32_t kContexts[2] = {0x80074458u, 0x80074E50u};
 constexpr uint32_t kOriginalRoots[2] = {0x800776BCu, 0x800776C0u};
 constexpr uint32_t kArenaOffset = 0x70u;
@@ -51,6 +53,7 @@ extern "C" void disruptor_render_arena_publish_fades(void) {
     disruptor_far_rendering_fog_ramp(&ramp_start, &ramp_length, &ramp_power);
     gl_renderer_set_palette_fade(12, 8.0f * static_cast<float>(ramp_start), 8.0f * static_cast<float>(ramp_length) / 12.0f, 0.375f);
     gl_renderer_set_palette_fade_power(ramp_power);
+    gl_renderer_set_edge_depth(8.0f * static_cast<float>(far_distance + kCullReach));
     gl_renderer_set_edge_sky(disruptor_backdrop_tiles_sky_behind(psx_mod_read_word(kVBlanks)));
 }
 

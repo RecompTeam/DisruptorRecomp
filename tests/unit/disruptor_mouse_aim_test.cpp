@@ -157,6 +157,7 @@ std::uint32_t gpu_texture_correction_hits() {
     return 0;
 }
 
+int gpu_geometry_diagnostics_detail(void) { return 1; }
 void gpu_geometry_correction_stats_detailed(
         GpuGeometryCorrectionStats *stats, std::uint32_t out_size) {
     if (!stats || out_size == 0) return;

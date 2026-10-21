@@ -1,5 +1,5 @@
 diff --git a/runtime/src/psx_cycles.c b/runtime/src/psx_cycles.c
-index 72cbe9b496991cbb84b10afb8813c5282c7dd0cf..49ec3f7e36baf158fbf8b5116862252561a5af8f 100644
+index 72cbe9b496991cbb84b10afb8813c5282c7dd0cf..9d0a58e56b12e83e1e79b381314fb9122b6238d7 100644
 --- a/runtime/src/psx_cycles.c
 +++ b/runtime/src/psx_cycles.c
 @@ -1,6 +1,7 @@
@@ -37,3 +37,67 @@ index 72cbe9b496991cbb84b10afb8813c5282c7dd0cf..49ec3f7e36baf158fbf8b51168622525
  }
  
  void psx_gte_stall(CPUState* cpu) {
+@@ -680,3 +683,63 @@
+         psx_advance_cycles((uint32_t)(cpu->gte_ts_done - psx_cycle_count));
+     }
+ }
++
++#if !defined(PSX_OVERLAY_DLL_BUILD)
++#include "psx_cyc.h"
++
++void psx_cyc_step(CPUState* cpu, uint32_t reg_mask) {
++    psx_cyc_step_inline(cpu, reg_mask);
++}
++
++void psx_cyc_step2(CPUState* cpu, uint32_t m1, uint32_t m2) {
++    const uint32_t masks[2] = {m1, m2};
++    psx_cyc_run_inline(cpu, masks, 2u);
++}
++
++void psx_cyc_step3(CPUState* cpu, uint32_t m1, uint32_t m2, uint32_t m3) {
++    const uint32_t masks[3] = {m1, m2, m3};
++    psx_cyc_run_inline(cpu, masks, 3u);
++}
++
++void psx_cyc_step4(CPUState* cpu, uint32_t m1, uint32_t m2, uint32_t m3, uint32_t m4) {
++    const uint32_t masks[4] = {m1, m2, m3, m4};
++    psx_cyc_run_inline(cpu, masks, 4u);
++}
++
++/* psx_cyc_charge from after the overclock on, as it was before its batch add was split out for inlining. */
++void psx_cyc_charge_slow(uint32_t cycles) {
++    if (g_ls_replay_active || g_event_step_conservative) {
++        psx_advance_cycles(cycles);
++        return;
++    }
++    if (psx_in_device_service) {
++        psx_cycle_count += (uint64_t)cycles;
++        return;
++    }
++#if !defined(PSX_COSIM)
++    {
++        uint32_t prior = g_psx_cyc_batch;
++        uint32_t sum = prior + cycles;
++        if (sum >= prior) { /* no uint32 wrap */
++            if (g_psx_cyc_bb_defer > 0) {
++                g_psx_cyc_batch = sum;
++                return;
++            }
++            if (prior == 0u) {
++                uint64_t room = 0u;
++                if (psx_next_service_cycle > psx_cycle_count)
++                    room = psx_next_service_cycle - psx_cycle_count;
++                g_psx_cyc_batch_limit = room == 0u ? 1u :
++                    (room < (uint64_t)PSX_CYC_BATCH_SOFT
++                        ? (uint32_t)room : (uint32_t)PSX_CYC_BATCH_SOFT);
++            }
++            if (sum < g_psx_cyc_batch_limit) {
++                g_psx_cyc_batch = sum;
++                return;
++            }
++        }
++    }
++#endif
++    psx_advance_cycles(cycles); /* publishes any pending batch first */
++}
++#endif

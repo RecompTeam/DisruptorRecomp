@@ -1090,12 +1090,19 @@ void test_edge_margin_under_the_smooth_fade() {
     seed_word(kFadeStart, 1032u);
     enter(&cpu);
     expect(load_word(kFarDistance) == 3688u && load_word(kFadeStart) == 2664u,
-           "a lengthened far plane near the ordering table's limit gives the whole margin its room, the fade start moves with it");
+           "near the ordering table's limit the margin gives way to 256 before the far seen does, the fade start moves with it");
     invoke_load(&cpu, kDistanceLoadSites[1], 0x800411ACu);
     expect(cpu.gpr[3] == 3432u, "objects stop where the fog now ends");
     std::int32_t far_start = 0, far_length = 0;
     disruptor_far_rendering_fog_ramp(&far_start, &far_length, &power);
     expect(far_start == 1032 && far_length == 2400, "and so does the fog");
+    exit_renderer(&cpu);
+    seed_word(kFarDistance, 1650u);
+    seed_word(kFadeStart, 882u);
+    enter(&cpu);
+    invoke_load(&cpu, kDistanceLoadSites[1], 0x800411ACu);
+    expect(load_word(kFarDistance) == 3688u && load_word(kFadeStart) == 2532u && cpu.gpr[3] == 3300u,
+           "short of the least margin's room the far seen stays whole, the margin takes what the limit leaves");
     exit_renderer(&cpu);
     disruptor_far_rendering_set_preset(DISRUPTOR_FAR_RENDERING_RETAIL);
     seed_word(kFarDistance, 3600u);

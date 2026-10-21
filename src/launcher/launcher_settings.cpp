@@ -55,12 +55,6 @@ constexpr Placement placed[] = {
     {"disruptor.detailed_logging", Page::troubleshooting},
 };
 
-
-constexpr const char* shipped_keys[] = {
-    "disruptor.mouse_aim", "disruptor.modern_controls", "disruptor.vertical_look", "disruptor.geometry_correction",
-    "disruptor.perspective_textures", "disruptor.smooth_fade", "disruptor.depth_sorted_world", "disruptor.frame_unlock",
-    "disruptor.high_precision_camera", "video.frame_interpolation"};
-
 bool listed(const std::vector<std::string>& discs, const std::string& path) {
     return std::find(discs.begin(), discs.end(), path) != discs.end();
 }
@@ -212,21 +206,6 @@ bool SettingsFile::reset(Page page) {
 bool experimental(const Option& option) {
     const std::string_view key = option.key;
     return key == "disruptor.vertical_look" || key == "disruptor.number_keys" || key == "disruptor.selection_wheels";
-}
-
-bool shipped(const Option& option) {
-    const auto same = [&](const char* key) { return std::string_view(key) == option.key; };
-    return std::any_of(std::begin(shipped_keys), std::end(shipped_keys), same);
-}
-
-bool SettingsFile::complete() {
-    if (!load()) return false;
-    const auto whole = [this](const Option& option) { return !shipped(option) || option.saved(settings_); };
-    if (std::all_of(options().begin(), options().end(), whole)) return true;
-    return change([](Settings& settings) {
-        for (const auto& option : options())
-            if (shipped(option) && !option.saved(settings)) option.set(settings, option.initial);
-    });
 }
 
 std::vector<std::string> SettingsFile::language_discs() const {

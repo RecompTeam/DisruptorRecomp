@@ -71,7 +71,8 @@ python tools/package_release.py --version v0.3.1 --build build --zstd-license <z
   players and the packages the launcher updates from.
   Setup installs the Visual C++ x64 Redistributable when it is missing, the ZIP
   does not. `--publish` creates the
-  GitHub release with them, a regular release and the latest one.
+  GitHub release with them as a draft, which players do not see yet. It
+  stops when the version already has a release or a draft.
 - `--publish`, or `--sign` alone, signs the players' files with Sigstore
   first. A browser opens: sign in with the organisation's Google account,
   `recomp.team@gmail.com`. Each gets a `.sigstore.json` bundle and a line of
@@ -94,9 +95,11 @@ python tools/package_release.py --platform linux --version v0.3.1 `
 The Linux build folder must hold a `SOURCE_COMMIT` file with the commit it was
 built from, and the script stops unless that is the checkout's. It makes
 `DisruptorRecomp.AppImage` and the packages the launcher updates from in
-`build/releases/<version>/linux/packages`. With `--publish` they go to the release the Windows run made, which must
-come first and from the same commit, the release text gets the Linux
-install lines.
+`build/releases/<version>/linux/packages`. With `--publish` they go to the draft the Windows run made, which must
+come first and from the same commit. The release text gets the Linux
+install lines, and the draft is published as a regular release and the
+latest one. A release without Linux files is published by hand with
+`gh release edit <version> --draft=false --latest`.
 
 The launcher and the game find the player's files by one rule,
 `src/game/settings/user_folder.cpp`. A copy the updater installed keeps them in
@@ -107,8 +110,10 @@ folder included, beside the executable. A whole path in `PSX_USER_DIR` names ano
 The framework's `main.cpp` asks `psx_game_user_folder` for it before anything
 else and writes settings, bindings, memory cards, caches, mods and the notes of
 a run there. Program files are still found beside the executable. The shipped
-`settings.toml` and `keybinds.ini` are copied into a new folder of the player's
-files.
+`keybinds.ini` is copied into a new folder of the player's files. No
+`settings.toml` is shipped: a setting the file does not name runs with the
+initial value of the shared table in `src/game/settings/options.cpp`, the one
+the launcher shows.
 
 For launcher-only iteration after configuration:
 

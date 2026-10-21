@@ -83,8 +83,6 @@ void Session::poll() {
 
 void Session::begin(Task task, fs::path source, bool launch) {
     if (worker_.joinable()) worker_.join();
-    // The game reads the file, not what this window last saw or shows of it.
-    if (launch) unwritten_ = !settings_.complete() && settings_.readable();
     Request request{task, std::move(source), launch, verified_.data, settings_.language_disc(), settings_.language_discs()};
     if (task == Task::import || task == Task::verify) verified_ = {}; // release previous read locks before replacing data
     cancelled_ = false;
@@ -262,7 +260,7 @@ void Session::finish_earlier(Earlier& earlier) {
 void Session::launch() {
     try {
         game_ = std::make_unique<GameProcess>(program_, data_, verified_);
-        say(running_text(environment_overrides(), unwritten_));
+        say(running_text(environment_overrides()));
     } catch (const std::exception& error) {
         say(error_text(error));
     }

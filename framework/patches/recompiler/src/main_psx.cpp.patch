@@ -1,5 +1,5 @@
 diff --git a/recompiler/src/main_psx.cpp b/recompiler/src/main_psx.cpp
-index 9979abe18ed351391f95e5009189c84ce7cbec7e..d378dbf2093e54ec916d5f697479f2821b42f464 100644
+index 9979abe18ed351391f95e5009189c84ce7cbec7e..5e723c6094b83a8568de83005e8323900be52b42 100644
 --- a/recompiler/src/main_psx.cpp
 +++ b/recompiler/src/main_psx.cpp
 @@ -169,6 +169,10 @@
@@ -113,7 +113,60 @@ index 9979abe18ed351391f95e5009189c84ce7cbec7e..d378dbf2093e54ec916d5f697479f282
      codegen_config.ws_aspect_cone = ws_aspect_cone;
      codegen_config.ws_cull_w_imms      = ws_cull_w_imms;
      codegen_config.ws_cull_h_imms      = ws_cull_h_imms;
-@@ -1584,6 +1625,33 @@
+@@ -1515,7 +1556,27 @@
+         }
+         ds << "};\n";
+         ds << fmt::format("#define PSX_GAME_DISPATCH_COUNT {}u\n\n", records.size());
+-        ds << "static const PsxGameDispatchEntry* psx_game_find_entry(uint32_t addr) {\n";
++        // The framework's WO-6 word index of the immutable resident keys: it resolves, validity is still checked on every call.
++        const uint32_t lookup_lo = records.empty() ? 0u : records.front().addr;
++        const uint32_t lookup_hi = records.empty() ? 0u : records.back().addr;
++        bool indexed_lookup = !records.empty() && lookup_hi - lookup_lo < 0x200000u;
++        for (size_t i = 0; i < records.size(); ++i)
++            if ((records[i].addr & 3u) || (i && records[i].addr <= records[i - 1].addr)) indexed_lookup = false;
++        if (indexed_lookup) {
++            std::vector<uint32_t> index((lookup_hi - lookup_lo) / 4u + 1u, 0u);
++            for (size_t i = 0; i < records.size(); ++i)
++                index[(records[i].addr - lookup_lo) / 4u] = static_cast<uint32_t>(i) + 1u;
++            ds << "/* Immutable word index of the resident keys; zero is a miss. */\n";
++            ds << "static const " << (records.size() <= 65535u ? "uint16_t" : "uint32_t")
++               << " k_psx_game_dispatch_index[] = {\n";
++            for (size_t i = 0; i < index.size(); ++i) {
++                if ((i & 15u) == 0) ds << "    ";
++                ds << index[i] << "u,";
++                ds << (((i & 15u) == 15u || i + 1 == index.size()) ? "\n" : " ");
++            }
++            ds << "};\n\n";
++        }
++        ds << "static const PsxGameDispatchEntry* psx_game_find_entry_by_search(uint32_t addr) {\n";
+         ds << "    uint32_t lo = 0, hi = PSX_GAME_DISPATCH_COUNT;\n";
+         ds << "    while (lo < hi) {\n";
+         ds << "        uint32_t mid = lo + (hi - lo) / 2;\n";
+@@ -1525,6 +1586,23 @@
+         ds << "        else return &k_psx_game_dispatch[mid];\n";
+         ds << "    }\n";
+         ds << "    return 0;\n";
++        ds << "}\n\n";
++        ds << "static const PsxGameDispatchEntry* psx_game_find_entry(uint32_t addr) {\n";
++        if (indexed_lookup) {
++            ds << fmt::format("    const uint32_t offset = addr - 0x{:08X}u;\n", lookup_lo);
++            ds << fmt::format("    if ((addr & 3u) || offset > 0x{:X}u) return 0;\n", lookup_hi - lookup_lo);
++            ds << "    const uint32_t index = k_psx_game_dispatch_index[offset >> 2];\n";
++            ds << "    return index ? &k_psx_game_dispatch[index - 1u] : 0;\n";
++        } else {
++            ds << "    return psx_game_find_entry_by_search(addr);\n";
++        }
++        ds << "}\n\n";
++        ds << "/* Addresses around the resident keys where the lookup and the binary search disagree: zero is the proof. */\n";
++        ds << "unsigned psx_game_dispatch_lookup_mismatches(void) {\n";
++        ds << "    unsigned mismatches = 0;\n";
++        ds << fmt::format("    for (uint32_t addr = 0x{:08X}u - 64u; addr != 0x{:08X}u + 64u; ++addr)\n", lookup_lo, lookup_hi);
++        ds << "        mismatches += psx_game_find_entry(addr) != psx_game_find_entry_by_search(addr);\n";
++        ds << "    return mismatches;\n";
+         ds << "}\n\n";
+ 
+         ds << "/* Exact static-code validity for this entry's emitted CFG ranges. */\n";
+@@ -1584,6 +1662,33 @@
              ds << "#endif\n";
          }
  

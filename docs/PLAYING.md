@@ -251,7 +251,7 @@ The page is in four groups, in the launcher and in the game alike.
 | Frame rate | **60 FPS gameplay** | On |
 | Frame rate | **In-between frames** and their rate | Off |
 | Picture | **Exact-provenance geometry**, **Perspective-correct world textures**, **Gap filling**, **Smooth distance fade**, **Depth-sorted world** | On |
-| Picture | **Fog shape** and **Draw distance** | Even, Original |
+| Picture | **Fog shape** and **Draw distance** | Original |
 | Shading | **Ambient occlusion**, its reach and strength | Off |
 | Startup | **Skip the logos and the title movie** | Off |
 
@@ -261,9 +261,9 @@ The page is in four groups, in the launcher and in the game alike.
 - **Smooth distance fade** fades walls and floors evenly into the distance,
   where the game steps through twelve shades. Distant walls and floors fade in
   instead of appearing in blocks.
-- **Fog shape** under it and **Draw distance** offer only the game's own Even
-  fog and Original distance in this release. The other shapes and longer
-  distances come in a later release.
+- **Fog shape** under it offers only the game's own fog, Original, in this
+  release. **Draw distance** offers Original and 1.25x, a quarter further. The
+  other shapes and longer distances come in a later release.
 - **Depth-sorted world** draws world polygons by their depth where the game's
   own order puts a far one over a near one.
 - **Ambient occlusion** shades corners and the floor under things.

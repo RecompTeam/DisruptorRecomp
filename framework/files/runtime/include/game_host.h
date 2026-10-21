@@ -16,6 +16,8 @@ namespace PSXRecompV4 { struct UserSettings; }
 /* Called first in main: the folder of the player's files for the program in `program`, made and ready. Empty, with
  * `problem` saying why, stops the start. */
 std::filesystem::path psx_game_user_folder(const std::filesystem::path &program, std::string &problem);
+/* Called as the user's settings are read, before anything uses them: the game's defaults for what the file does not name. */
+void psx_game_settings_defaults(PSXRecompV4::UserSettings &settings);
 /* Called when the user's settings are read, before the drive first reads the disc. True asks for a boot without the BIOS animation. */
 bool psx_game_settings_loaded(const PSXRecompV4::UserSettings &settings);
 extern "C" {

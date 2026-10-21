@@ -1,5 +1,5 @@
 diff --git a/runtime/src/psx_icache.c b/runtime/src/psx_icache.c
-index 5ba898a343a368b10f6436ccbb286881355f122e..3055b4ec199a0e88cbefe7d9d898e669f57edd44 100644
+index 5ba898a343a368b10f6436ccbb286881355f122e..6ca8780c4e328b0445d242b00de7f38012e2b420 100644
 --- a/runtime/src/psx_icache.c
 +++ b/runtime/src/psx_icache.c
 @@ -8,6 +8,7 @@
@@ -19,7 +19,7 @@ index 5ba898a343a368b10f6436ccbb286881355f122e..3055b4ec199a0e88cbefe7d9d898e669
          return;
      }
  
-@@ -100,7 +101,7 @@
+@@ -100,17 +101,13 @@
          g_psx_icache_tv[bidx + i] &= ~0x2u;
          cost++;
      }
@@ -28,3 +28,13 @@ index 5ba898a343a368b10f6436ccbb286881355f122e..3055b4ec199a0e88cbefe7d9d898e669
  #else
      (void)cpu;
      (void)addr;
+ #endif
+ }
+ 
+-void psx_icache_fetch(CPUState* cpu, uint32_t addr) {
+-    psx_icache_fetch_miss(cpu, addr);
+-}
+-
+ void psx_icache_fetch_fn(CPUState* cpu, uint32_t addr) {
+     psx_icache_fetch(cpu, addr);
+ }

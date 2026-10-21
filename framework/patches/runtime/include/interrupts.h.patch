@@ -1,5 +1,5 @@
 diff --git a/runtime/include/interrupts.h b/runtime/include/interrupts.h
-index 362664c2f735191220b6da3fe283eca20b94a6c0..8cfb608cffe6bbae1a9fff1e3d3487822a0cf455 100644
+index 362664c2f735191220b6da3fe283eca20b94a6c0..c937c8fcbd263bb80dd41a0c51fef07121fdca4d 100644
 --- a/runtime/include/interrupts.h
 +++ b/runtime/include/interrupts.h
 @@ -23,6 +23,8 @@
@@ -11,3 +11,17 @@ index 362664c2f735191220b6da3fe283eca20b94a6c0..8cfb608cffe6bbae1a9fff1e3d348782
  
  /* Central IRQ-raise choke point: sets the I_STAT bit AND records the raise edge
   * into the always-on device-event ring (device_trace) with the guest cycle.
+@@ -45,7 +47,13 @@
+                                  uint64_t *skip_cooldown, uint64_t *skip_nested);
+ /* Interrupt check with the compiled guest PC to resume if a game-installed
+  * handler later RFEs to the sentinel outside the synchronous host window. */
++#if defined(PSX_OVERLAY_DLL_BUILD)
+ void psx_check_interrupts_at(struct CPUState* cpu, uint32_t resume_pc);
++#endif
++/* Everything of psx_check_interrupts_at past the common edge, which cpu_state.h inlines. */
++void psx_check_interrupts_at_slow(struct CPUState* cpu, uint32_t resume_pc);
++/* psx_check_interrupts past taking the mark and flushing: save_point is the mark it took. */
++void psx_check_interrupts_flushed(struct CPUState* cpu, int save_point);
+ int psx_interrupts_checked_at_current_cycle(uint32_t resume_pc);
+ /* Dispatch-entry check for re-enterable compiled PCs. De-dupes an immediately
+  * preceding check at the same guest PC/cycle so generated transfers can keep

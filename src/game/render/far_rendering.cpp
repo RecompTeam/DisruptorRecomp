@@ -32,6 +32,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <mutex>
 #include <unordered_map>
@@ -86,8 +87,10 @@ constexpr uint32_t kMinimumPlausibleFar = 64u;
 constexpr uint32_t kMaximumPlausibleSourceFar = 8192u;
 /* The mesh emitter at 0x80046D64 indexes its 512-entry ordering table by (depth + up to 240) / 8, depth up to far + 160. */
 constexpr uint32_t kMaximumSafeEffectiveFar = 3688u;
-/* Far units of mesh kept past the fog's end: the deepest polygon of six levels, 345, less the game's own 160, with room to spare. */
-constexpr uint32_t kEdgeMargin = 256u;
+/* Far units of mesh kept past the game's own cull at far + 160, where the world has dissolved: more than the deepest polygon of six levels, 345. */
+constexpr uint32_t kEdgeMargin = 512u;
+/* Near the ordering table's limit the margin gives way down to this before the far seen does. */
+constexpr uint32_t kLeastEdgeMargin = 256u;
 constexpr uint32_t kPortalFarLoad = 0x8003A914u;
 constexpr int64_t kMaximumSafeFade = 32767;
 constexpr size_t kTimingHistory = 256u;
@@ -489,9 +492,9 @@ bool edge_margin_active() {
            !comparator_active() && !psx_netplay_active();
 }
 
-/* Caller owns g_mutex.  Near the ordering table's limit a far plane the preset lengthened gives the margin its room, the game's own never shrinks. */
+/* Caller owns g_mutex.  Near the ordering table's limit a far plane the preset lengthened gives the least margin its room, the game's own never shrinks. */
 void make_room_for_margin(uint32_t source_far, uint32_t *effective_far, int32_t *effective_fade) {
-    constexpr uint32_t kRoom = kMaximumSafeEffectiveFar - kEdgeMargin;
+    constexpr uint32_t kRoom = kMaximumSafeEffectiveFar - kLeastEdgeMargin;
     if (!edge_margin_active() || *effective_far <= kRoom) return;
     const uint32_t visual = std::max(source_far, kRoom);
     *effective_fade -= static_cast<int32_t>(*effective_far - visual);
@@ -1059,6 +1062,14 @@ PSX_MOD_CONSTRUCTOR(register_disruptor_far_rendering) {
 }
 
 }  // namespace
+
+extern "C" void disruptor_far_rendering_force_from_environment(void) {
+    const char *forced = std::getenv("PSX_DISRUPTOR_DRAW_DISTANCE");
+    if (!forced) return;
+    constexpr std::array<int, DISRUPTOR_FAR_RENDERING_PRESET_COUNT> kPercents = {100, 125, 150, 200};
+    const auto found = std::find(kPercents.begin(), kPercents.end(), std::atoi(forced));
+    if (found != kPercents.end()) (void)disruptor_far_rendering_set_preset(static_cast<int>(found - kPercents.begin()));
+}
 
 extern "C" int disruptor_far_rendering_set_preset(int preset) {
     if (preset < DISRUPTOR_FAR_RENDERING_RETAIL ||

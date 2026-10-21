@@ -1,11 +1,12 @@
 diff --git a/runtime/include/psx_cyc.h b/runtime/include/psx_cyc.h
-index a7e79f81c443083143768c02fcc5ea201a0fc8c7..30ef6723fcd47aa8c7d74ba0a802e22f4f6f747c 100644
+index a7e79f81c443083143768c02fcc5ea201a0fc8c7..5574ead7af98b394e7b4cfcc038559bfc7d4ba59 100644
 --- a/runtime/include/psx_cyc.h
 +++ b/runtime/include/psx_cyc.h
-@@ -66,11 +66,25 @@
+@@ -66,53 +66,55 @@
  }
  #endif
  
+-static inline void psx_cyc_charge(uint32_t cycles) {
 +#if !defined(PSX_OVERLAY_DLL_BUILD)
 +/* Enhancement-only guest CPU overclock: instruction cycles are charged at
 + * 1 / (1 << shift). Zero keeps the faithful cost. */
@@ -13,18 +14,177 @@ index a7e79f81c443083143768c02fcc5ea201a0fc8c7..30ef6723fcd47aa8c7d74ba0a802e22f
 +extern uint32_t g_psx_cyc_overclock_carry;
 +#endif
 +
- static inline void psx_cyc_charge(uint32_t cycles) {
++#if defined(_MSC_VER)
++#define PSX_CYC_HOT static __forceinline
++#elif defined(__GNUC__) || defined(__clang__)
++#define PSX_CYC_HOT static inline __attribute__((always_inline))
++#else
++#define PSX_CYC_HOT static inline
++#endif
++
++#if !defined(PSX_OVERLAY_DLL_BUILD)
++/* Everything of a charge after the overclock but the common batch add: replay, device service, a new batch, publication. */
++void psx_cyc_charge_slow(uint32_t cycles);
++#endif
++
++/* Inlined into the one out-of-line psx_cyc_step and the load helpers: the batch add only, the rest is a call. */
++PSX_CYC_HOT void psx_cyc_charge(uint32_t cycles) {
      if (cycles == 0u) return;
  #if defined(PSX_OVERLAY_DLL_BUILD)
      psx_advance_cycles(cycles);
  #else
+-#if defined(__GNUC__) || defined(__clang__)
+-    if (__builtin_expect(g_ls_replay_active | g_event_step_conservative, 0)) {
+-#else
+-    if (g_ls_replay_active || g_event_step_conservative) {
+-#endif
+-        psx_advance_cycles(cycles);
+-        return;
+-    }
+-    if (psx_in_device_service) {
+-        psx_cycle_count += (uint64_t)cycles;
+-        return;
 +    if (g_psx_cyc_overclock_shift) {
 +        const uint32_t total = g_psx_cyc_overclock_carry + cycles;
 +        g_psx_cyc_overclock_carry =
 +            total & ((1u << g_psx_cyc_overclock_shift) - 1u);
 +        cycles = total >> g_psx_cyc_overclock_shift;
 +        if (cycles == 0u) return;
+     }
+ #if !defined(PSX_COSIM)
+-    {
+-        uint32_t prior = g_psx_cyc_batch;
+-        uint32_t sum = prior + cycles;
+-        if (sum >= prior) { /* no uint32 wrap */
+-            if (g_psx_cyc_bb_defer > 0) {
+-                g_psx_cyc_batch = sum;
+-                return;
+-            }
+-            if (prior == 0u) {
+-                uint64_t room = 0u;
+-                if (psx_next_service_cycle > psx_cycle_count)
+-                    room = psx_next_service_cycle - psx_cycle_count;
+-                g_psx_cyc_batch_limit = room == 0u ? 1u :
+-                    (room < (uint64_t)PSX_CYC_BATCH_SOFT
+-                        ? (uint32_t)room : (uint32_t)PSX_CYC_BATCH_SOFT);
+-            }
+-            if (sum < g_psx_cyc_batch_limit) {
+-                g_psx_cyc_batch = sum;
+-                return;
+-            }
++    if (!(g_ls_replay_active | g_event_step_conservative | psx_in_device_service)) {
++        const uint32_t prior = g_psx_cyc_batch;
++        const uint32_t sum = prior + cycles;
++        if (sum >= prior && (g_psx_cyc_bb_defer > 0 || (prior != 0u && sum < g_psx_cyc_batch_limit))) {
++            g_psx_cyc_batch = sum;
++            return;
+         }
+     }
+ #endif
+-    psx_advance_cycles(cycles); /* publishes any pending batch first */
++    psx_cyc_charge_slow(cycles);
+ #endif
+ }
+ 
+ /* §1 base (Beetle cpu.cpp:795-798). */
+-static inline void psx_cyc_base(CPUState* cpu) {
++PSX_CYC_HOT void psx_cyc_base(CPUState* cpu) {
+     uint8_t w = cpu->read_absorb_which;
+     if (cpu->read_absorb[w]) cpu->read_absorb[w]--;
+     else                     psx_cyc_charge(1u);
+@@ -121,7 +123,7 @@
+ /* GPR_DEPRES (Beetle cpu.cpp:702-705): zero ReadAbsorb[n] for every source/dest
+  * GPR of this instruction, preserving ReadAbsorb[0] (skipping bit 0 == Beetle's
+  * save/restore of ReadAbsorb[0]). */
+-static inline void psx_cyc_deps(CPUState* cpu, uint32_t reg_mask) {
++PSX_CYC_HOT void psx_cyc_deps(CPUState* cpu, uint32_t reg_mask) {
+     reg_mask &= 0xFFFFFFFEu;   /* never touch ReadAbsorb[0] */
+     if (reg_mask && (reg_mask & (reg_mask - 1u)) == 0u) {
+ #if defined(_MSC_VER)
+@@ -148,7 +150,7 @@
+ 
+ /* DO_LDS timing-commit (Beetle cpu.cpp:800). LDWhich==0x20 (no pending) writes the
+  * dummy slot read_absorb[32] and sets read_fudge=0x20 (=> next load gets +2 fudge). */
+-static inline void psx_cyc_lds(CPUState* cpu) {
++PSX_CYC_HOT void psx_cyc_lds(CPUState* cpu) {
+     uint8_t lw = cpu->ld_which_t;
+     cpu->read_absorb[lw]    = (uint8_t)cpu->ld_absorb;
+     cpu->read_fudge         = lw;
+@@ -160,11 +162,76 @@
+  * branch, jump, store, COP control, LWC2/SWC2 pre-step, mult/div, mfhi/mflo, ...).
+  * reg_mask from psx_cyc_dep_res_mask(). MUST be emitted BEFORE the instruction
+  * body so §1 precedes any muldiv/GTE deadline stall in the body (Beetle order). */
+-static inline void psx_cyc_step(CPUState* cpu, uint32_t reg_mask) {
++PSX_CYC_HOT void psx_cyc_step_inline(CPUState* cpu, uint32_t reg_mask) {
+     psx_cyc_base(cpu);
+     psx_cyc_deps(cpu, reg_mask);
+     psx_cyc_lds(cpu);
+ }
++/* As many psx_cyc_charge(1u) calls in a row: one batch add when none of them would leave the fast path. */
++PSX_CYC_HOT void psx_cyc_charge_ones(uint32_t count) {
++#if !defined(PSX_OVERLAY_DLL_BUILD) && !defined(PSX_COSIM)
++    if (count == 0u) return;
++    if (!(g_psx_cyc_overclock_shift | (uint32_t)g_ls_replay_active | (uint32_t)g_event_step_conservative |
++          (uint32_t)psx_in_device_service)) {
++        const uint32_t prior = g_psx_cyc_batch;
++        const uint32_t sum = prior + count;
++        if (sum >= prior && (g_psx_cyc_bb_defer > 0 || (prior != 0u && sum < g_psx_cyc_batch_limit))) {
++            g_psx_cyc_batch = sum;
++            return;
++        }
 +    }
- #if defined(__GNUC__) || defined(__clang__)
-     if (__builtin_expect(g_ls_replay_active | g_event_step_conservative, 0)) {
- #else
++#endif
++    while (count--) psx_cyc_charge(1u);
++}
++
++/* psx_cyc_step_inline for each mask in turn, for instructions with no timing between them. After the first DO_LDS
++ * the slot is 0x20 and ReadAbsorbWhich is fixed, so the rest only count down, clear and charge the one slot. */
++PSX_CYC_HOT void psx_cyc_run_inline(CPUState* cpu, const uint32_t* masks, unsigned count) {
++    uint32_t charges = 0u;
++    uint8_t which = cpu->read_absorb_which;
++    if (cpu->read_absorb[which]) cpu->read_absorb[which]--;
++    else                         charges = 1u;
++    psx_cyc_deps(cpu, masks[0]);
++    psx_cyc_lds(cpu);
++    which = cpu->read_absorb_which;
++    uint8_t absorb = cpu->read_absorb[which];
++    uint32_t cleared = 0u;
++    for (unsigned k = 1u; k < count; ++k) {
++        if (absorb) absorb--;
++        else        charges++;
++        const uint32_t mask = masks[k] & 0xFFFFFFFEu;
++        if ((mask >> which) & 1u) absorb = 0u;
++        cleared |= mask;
++    }
++    psx_cyc_deps(cpu, cleared);
++    cpu->read_absorb[which] = absorb;
++    cpu->read_absorb[32] = (uint8_t)cpu->ld_absorb;
++    cpu->read_fudge = 0x20u;
++    psx_cyc_charge_ones(charges);
++}
++
++#if defined(PSX_OVERLAY_DLL_BUILD)
++static inline void psx_cyc_step(CPUState* cpu, uint32_t reg_mask) { psx_cyc_step_inline(cpu, reg_mask); }
++static inline void psx_cyc_step2(CPUState* cpu, uint32_t m1, uint32_t m2) {
++    psx_cyc_step(cpu, m1);
++    psx_cyc_step(cpu, m2);
++}
++static inline void psx_cyc_step3(CPUState* cpu, uint32_t m1, uint32_t m2, uint32_t m3) {
++    psx_cyc_step2(cpu, m1, m2);
++    psx_cyc_step(cpu, m3);
++}
++static inline void psx_cyc_step4(CPUState* cpu, uint32_t m1, uint32_t m2, uint32_t m3, uint32_t m4) {
++    psx_cyc_step3(cpu, m1, m2, m3);
++    psx_cyc_step(cpu, m4);
++}
++#else
++/* One shared copy with every helper inlined: inlining it into each instruction of the generated code made the game slower. */
++void psx_cyc_step(CPUState* cpu, uint32_t reg_mask);
++/* The steps of 2 to 4 instructions in a row whose bodies touch only general registers (the generator's fusion). */
++void psx_cyc_step2(CPUState* cpu, uint32_t m1, uint32_t m2);
++void psx_cyc_step3(CPUState* cpu, uint32_t m1, uint32_t m2, uint32_t m3);
++void psx_cyc_step4(CPUState* cpu, uint32_t m1, uint32_t m2, uint32_t m3, uint32_t m4);
++#endif
+ 
+ /* The GPR dep+res bitmask used by psx_cyc_step lives in psx_instr_cost.h
+  * (psx_cyc_dep_res_mask) — a standalone pure function shared by the emitters

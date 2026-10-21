@@ -886,7 +886,7 @@ table_rows = re.split(r"\n    (?=toggle[<(]|choice\(|slider\()", options[options
 needing = {}
 for row in table_rows:
     row = row.split("\n};")[0]
-    ending = re.search(r"\b(needs_\w+)(?:, offered_now,\s*\"[^\"]*\")?\),?\s*$", row)
+    ending = re.search(r"\b(needs_\w+)(?:, \w+_offered,\s*\"[^\"]*\")?\),?\s*$", row)
     if ending:
         needing[re.search(r'"([\w.]+)"', row)[1]] = needs_lists[ending[1]]
 asked = set(re.findall(r'\bapplies\("([\w.]+)"\)', menu))

@@ -107,7 +107,7 @@ private:
     SettingsFile settings_;
     std::thread worker_;
     std::atomic_bool cancelled_{false};
-    bool busy_ = false, closing_ = false, closed_ = false, unwritten_ = false, upgraded_ = false;
+    bool busy_ = false, closing_ = false, closed_ = false, upgraded_ = false;
     std::unique_ptr<GameProcess> game_;
     VerifiedDisc verified_;
     Regions regions_; // filled by the worker only: an image on a share that is gone must not stall the window

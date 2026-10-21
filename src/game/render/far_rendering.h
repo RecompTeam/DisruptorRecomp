@@ -117,6 +117,8 @@ typedef struct DisruptorFarRenderingDiagnostics {
 } DisruptorFarRenderingDiagnostics;
 
 int disruptor_far_rendering_set_preset(int preset);
+/* PSX_DISRUPTOR_DRAW_DISTANCE=125, 150 or 200 sets that preset for a developer's measure, past what the menu offers. */
+void disruptor_far_rendering_force_from_environment(void);
 int disruptor_far_rendering_get_preset(void);
 int disruptor_far_rendering_set_depth_fade_mode(int mode);
 int disruptor_far_rendering_get_depth_fade_mode(void);

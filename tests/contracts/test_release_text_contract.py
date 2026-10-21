@@ -84,14 +84,27 @@ require(
 body = Path("body.md")
 created = package_release.create_command("v0.3.0-alpha.1", "RecompTeam/DisruptorRecomp", "abc123", body, ["a.exe"])
 require(
-    "--latest" in created
-    and "--draft" not in created
+    "--draft" in created
+    and "--latest" not in created
     and "--prerelease" not in created
     and created[created.index("--target") + 1] == "abc123"
     and created[created.index("--title") + 1] == "0.3.0-alpha.1"
     and created[-1] == "a.exe",
-    "Windows makes a regular latest release at once, not a draft or a pre-release, at the build's commit, titled by the "
-    "version alone, with its files",
+    "Windows makes a draft, not a pre-release, at the build's commit, titled by the version alone, with its files",
+)
+finished = package_release.finish_command("v0.3.0-alpha.1", "RecompTeam/DisruptorRecomp", body, draft=True)
+kept = package_release.finish_command("v0.3.0-alpha.1", "RecompTeam/DisruptorRecomp", body, draft=False)
+require(
+    finished[:4] == ["gh", "release", "edit", "v0.3.0-alpha.1"]
+    and finished[finished.index("--notes-file") + 1] == str(body)
+    and "--draft=false" in finished
+    and "--latest" in finished
+    and "--prerelease" not in finished,
+    "Linux publishes the draft with its text, a regular release and the latest",
+)
+require(
+    kept == finished[: finished.index("--draft=false")] and "--latest" not in kept,
+    "a release already published only gets its text, it is not made the latest again",
 )
 body = package_release.release_body("Banner\n")
 windows, linux = package_release.PLATFORMS["windows"], package_release.PLATFORMS["linux"]

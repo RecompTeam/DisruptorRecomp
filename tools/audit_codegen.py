@@ -11,9 +11,10 @@ ROOT = Path(__file__).resolve().parent.parent
 GENERATED = ROOT / "generated"
 CODE_START = 0x80011200
 CODE_END = 0x80056938
-EXPECTED_SHARDS = 22
+EXPECTED_SHARDS = 23
 EXPECTED_FUNCTIONS = 579
 EXPECTED_DISPATCH_ENTRIES = 12_797
+EXPECTED_FUSED_STEPS = 17_133
 FINITE_SKYLINE_RENDERER = 0x8003A0F0
 
 FUNCTION_DEFINITION = re.compile(
@@ -337,6 +338,112 @@ def generated_function_body(source: str, address: int) -> str | None:
     return source[start_match.start():end]
 
 
+FUSED_HEAD = re.compile(r"^    psx_cyc_step([234])\(cpu, ((?:0x[0-9A-F]+u, )*0x[0-9A-F]+u)\);$")
+SINGLE_STEP = re.compile(r"^    psx_cyc_step\(cpu, (0x[0-9A-F]+u)\);$")
+REGISTER_ASSIGNMENT = re.compile(
+    r"^(?:(?:uint32_t|int) )?(cpu->gpr\[\d+\]|_jt_[0-9A-F]{8}|_bc_[0-9A-F]{8}) = ([^;{}\"']*);$")
+GENERAL_REGISTER = re.compile(r"cpu->gpr\[(\d+)\]")
+CAST_TYPES = {"uint32_t", "int32_t", "uint16_t", "int16_t", "uint8_t", "int8_t", "uint64_t", "int64_t"}
+REGISTER_MARKS = set(" ()+-<>|^~!=?:&_@")
+
+
+def plain_register(digits: str) -> bool:
+    return digits == str(int(digits)) and int(digits) <= 31
+
+
+def closes_cast(before: str) -> bool:
+    """Whether the text, ending in a closing parenthesis, ends with a cast to an integer type."""
+    return before[before.rfind("(") + 1 : -1].strip() in CAST_TYPES
+
+
+def register_only(line: str) -> bool:
+    """A line that writes a general register or a branch latch from general registers, constants and casts alone."""
+    if not line.isascii():
+        return False
+    text = re.sub(r"/\*.*?\*/", "", line).strip()
+    if "/*" in text or "*/" in text:
+        return False
+    if not text:
+        return True
+    match = REGISTER_ASSIGNMENT.match(text)
+    if match is None or "@" in match.group(2):
+        return False
+    target = GENERAL_REGISTER.fullmatch(match.group(1))
+    if target is not None and not plain_register(target.group(1)):
+        return False
+    value = match.group(2)
+    if value.count("cpu->gpr[") != len(GENERAL_REGISTER.findall(value)):
+        return False
+    if not all(plain_register(digits) for digits in GENERAL_REGISTER.findall(value)):
+        return False
+    value = GENERAL_REGISTER.sub("@", value)
+    if any(not (c.isalnum() or c in REGISTER_MARKS) for c in value) or "->" in value:
+        return False
+    for found in re.finditer(r"\(", value):
+        before = value[: found.start()].rstrip()
+        if before and (before[-1].isalnum() or before[-1] in "_@"):
+            return False
+        if before.endswith(")") and not closes_cast(before):
+            return False
+    for found in re.finditer(r"(?<!&)&(?!&)", value):
+        before = value[: found.start()].rstrip()
+        if not before or not (before[-1].isalnum() or before[-1] in "_@)"):
+            return False
+        if before.endswith(")") and closes_cast(before):
+            return False
+    return set(re.findall(r"\b[A-Za-z_]\w*", value)) <= CAST_TYPES
+
+
+def fused_step_violations(shard_text: str) -> tuple[int, list[str]]:
+    """Every psx_cyc_stepN of the step fusion against the per-instruction steps it stands for, read back from the output."""
+    lines = shard_text.split("\n")
+    heads = 0
+    members_seen = 0
+    members_owed = 0
+    violations: list[str] = []
+    for index, line in enumerate(lines):
+        if line == "#if defined(PSX_ENABLE_BLOCK_CYCLES) && defined(PSX_COSIM)":
+            members_seen += 1
+        head = FUSED_HEAD.match(line)
+        if head is None:
+            continue
+        heads += 1
+        masks = head.group(2).split(", ")
+        where = f"fused step at shard line {index + 1}"
+        if int(head.group(1)) != len(masks):
+            violations.append(f"{where}: psx_cyc_step{head.group(1)} with {len(masks)} masks")
+            continue
+        single = SINGLE_STEP.match(lines[index + 2]) if index + 3 < len(lines) else None
+        if (lines[index - 1] != "#if defined(PSX_ENABLE_BLOCK_CYCLES) && !defined(PSX_COSIM)" or
+                lines[index + 1] != "#elif defined(PSX_ENABLE_BLOCK_CYCLES)" or single is None or
+                single.group(1) != masks[0] or lines[index + 3] != "#endif"):
+            violations.append(f"{where}: the co-simulation build does not keep the first step")
+            continue
+        members_owed += len(masks) - 1
+        cursor = index + 4
+        for mask in masks[1:]:
+            while cursor < len(lines) and lines[cursor] != "#if defined(PSX_ENABLE_BLOCK_CYCLES) && defined(PSX_COSIM)":
+                if (lines[cursor] == "#ifdef PSX_COSIM" and cursor + 2 < len(lines) and
+                        lines[cursor + 1].startswith("    cosim_instr(") and lines[cursor + 2] == "#endif"):
+                    cursor += 3
+                    continue
+                if not register_only(lines[cursor]):
+                    violations.append(f"{where}: {lines[cursor].strip()[:60]!r} lies between its steps")
+                    break
+                cursor += 1
+            else:
+                member = SINGLE_STEP.match(lines[cursor + 1]) if cursor + 2 < len(lines) else None
+                if member is None or member.group(1) != mask or lines[cursor + 2] != "#endif":
+                    violations.append(f"{where}: its step {mask} is not the next one the block takes")
+                    break
+                cursor += 3
+                continue
+            break
+    if members_seen != members_owed:
+        violations.append(f"{members_seen} co-simulation steps stand for {members_owed} fused ones")
+    return heads, violations
+
+
 def main() -> int:
     shards = sorted(GENERATED.glob("SLUS_002.24.code_full_*.c"))
     dispatch_path = GENERATED / "SLUS_002.24.code_dispatch.c"
@@ -355,6 +462,11 @@ def main() -> int:
 
     shard_text = "\n".join(path.read_text(encoding="utf-8") for path in shards)
     dispatch_text = dispatch_path.read_text(encoding="utf-8")
+
+    fused_heads, fusion_violations = fused_step_violations(shard_text)
+    failures.extend(fusion_violations[:10])
+    if fused_heads != EXPECTED_FUSED_STEPS:
+        failures.append(f"expected {EXPECTED_FUSED_STEPS} fused step runs, found {fused_heads}")
 
     skyline_body = generated_function_body(
         shard_text, FINITE_SKYLINE_RENDERER)
@@ -795,6 +907,7 @@ def main() -> int:
     print(f"Compiled functions:     {len(definitions)}")
     print(f"Dispatch addresses:     {len(dispatch_addresses)}")
     print(f"Static resident targets:{len(resident_targets):6d}")
+    print(f"Fused step runs:        {fused_heads}")
     if failures:
         for failure in failures:
             print(f"error: {failure}")

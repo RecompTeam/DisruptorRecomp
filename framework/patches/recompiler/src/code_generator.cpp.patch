@@ -1,11 +1,20 @@
 diff --git a/recompiler/src/code_generator.cpp b/recompiler/src/code_generator.cpp
-index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..f54752e2a15f4535694ca6c2fc2e2651490102e0 100644
+index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..f234f4d614a7c4038bb6ce0bbc3895dae9ff48b2 100644
 --- a/recompiler/src/code_generator.cpp
 +++ b/recompiler/src/code_generator.cpp
-@@ -18,6 +18,297 @@
+@@ -11,12 +11,305 @@
+ #include "../../runtime/include/psx_instr_cost.h"  /* single-source CPU cycle cost (shared with interp) */
+ #include <fmt/format.h>
+ #include <algorithm>
++#include <cctype>
+ #include <cstdlib>
+ #include <set>
+ #include <stdexcept>
++#include <string_view>
+ #include <vector>
  
  namespace PSXRecomp {
- 
++
 +/* Disruptor's resident geometry builders read SXY2 with MFC2 and later use an
 + * ordinary SW. Keep these hooks deliberately narrower than the general code
 + * generator: the runtime also checks the game serial, PC and raw instruction.
@@ -296,11 +305,10 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..f54752e2a15f4535694ca6c2fc2e2651
 +    }
 +    return nullptr;
 +}
-+
+ 
  static bool codegen_cycle_per_insn() {
      // DEFAULT ON for the faithful-timing (cycle-audit) branch: each instruction
-     // charges its cost at its own site, so the running cycle count is correct
-@@ -723,6 +1014,36 @@
+@@ -723,6 +1016,36 @@
      uint32_t opcode = (instr >> 26) & 0x3F;
      uint32_t rs = get_rs(instr);
      uint32_t rt = get_rt(instr);
@@ -337,7 +345,7 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..f54752e2a15f4535694ca6c2fc2e2651
  
      // REGIMM branches. R3000A hardware decodes EVERY rt value here, not just
      // the four assembler mnemonics: the branch sense is rt bit 0 (0 = bltz,
-@@ -784,6 +1105,78 @@
+@@ -784,6 +1107,78 @@
  
      std::string code;
  
@@ -416,7 +424,7 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..f54752e2a15f4535694ca6c2fc2e2651
      // Full-word-guarded terrain-frustum half-angle constants. Scaling the
      // tangent is the geometric counterpart of widening the horizontal
      // projection; adding screen pixels directly to 12-bit angle units is not.
-@@ -812,6 +1205,67 @@
+@@ -812,6 +1207,67 @@
              "{} = psx_ws_angle_widen({}u);"
              "  /* aspect-scaled terrain frustum half-angle */{}",
              reg_name(dst), (uint32_t)vanilla, comment);
@@ -484,7 +492,7 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..f54752e2a15f4535694ca6c2fc2e2651
      }
  
      for (const auto& site : config_.ws_signed_x_bound_sites) {
-@@ -971,6 +1425,76 @@
+@@ -971,6 +1427,76 @@
      // same address holds different code across scene variants, so a mismatch is
      // expected — apply the transform only where the bytes match, else fall
      // through to the vanilla translation (see CodeGenConfig::overlay_mode).
@@ -561,7 +569,7 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..f54752e2a15f4535694ca6c2fc2e2651
      if (config_.ws_cull_bias_sites.count(addr)) {
          if (opcode == 0x08 || opcode == 0x09) {  // addi / addiu
              uint32_t rs = get_rs(instr), rt = get_rt(instr);
-@@ -1217,11 +1741,15 @@
+@@ -1217,11 +1743,15 @@
          }
          // Overlay variant at the same address: leave nonmatching code unchanged.
      }
@@ -582,7 +590,7 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..f54752e2a15f4535694ca6c2fc2e2651
      if (config_.ws_backdrop_x_sites.count(addr)) {
          if (opcode == 0x29) {  // sh
              uint32_t rs = get_rs(instr), rt = get_rt(instr);
-@@ -1232,9 +1760,16 @@
+@@ -1232,9 +1762,16 @@
                                     reg_name(rs), reg_name(rt), comment);
              return store_pc + fmt::format("psx_store_cycle_barrier(); cpu->write_half({} + {}, (uint16_t)psx_ws_backdrop_x((int16_t){}));{}",
                                 reg_name(rs), offset, reg_name(rt), comment);
@@ -600,7 +608,7 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..f54752e2a15f4535694ca6c2fc2e2651
              std::exit(1);
          }
          // overlay variant: addr is different code here — fall through to vanilla.
-@@ -1486,11 +2021,26 @@
+@@ -1486,11 +2023,26 @@
                      const std::string gte_read = fmt::format(
                          "\n#ifdef PSX_ENABLE_BLOCK_CYCLES\n    psx_gte_read(cpu, {});\n#endif\n    ", rt);
                      if (cop_op == 0x00) { // MFC2 - move from COP2 data
@@ -629,7 +637,7 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..f54752e2a15f4535694ca6c2fc2e2651
                      } else if (cop_op == 0x02) { // CFC2 - move from COP2 control
                          if (PSXRecompGTERegisters::ctrl_read_needs_helper(static_cast<uint8_t>(rd))) {
                              code = gte_read + fmt::format("{} = gte_read_ctrl(cpu, {});  /* cfc2 */", reg_name(rt), rd);
-@@ -1521,7 +2071,35 @@
+@@ -1521,7 +2073,35 @@
              case 0x20: code = translate_lb(instr); break;     // lb
              case 0x21: code = translate_lh(instr); break;     // lh
              case 0x22: code = translate_lwl(instr); break;    // lwl
@@ -666,7 +674,7 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..f54752e2a15f4535694ca6c2fc2e2651
              case 0x24: code = translate_lbu(instr); break;    // lbu
              case 0x25: code = translate_lhu(instr); break;    // lhu
              case 0x26: code = translate_lwr(instr); break;    // lwr
-@@ -1533,7 +2111,69 @@
+@@ -1533,7 +2113,69 @@
              case 0x28: code = fmt::format("g_debug_last_store_pc = 0x{:08X}u; ", addr) + translate_sb(instr); break;     // sb
              case 0x29: code = fmt::format("g_debug_last_store_pc = 0x{:08X}u; ", addr) + translate_sh(instr); break;     // sh
              case 0x2A: code = fmt::format("g_debug_last_store_pc = 0x{:08X}u; ", addr) + translate_swl(instr); break;    // swl
@@ -737,12 +745,10 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..f54752e2a15f4535694ca6c2fc2e2651
              case 0x2E: code = fmt::format("g_debug_last_store_pc = 0x{:08X}u; ", addr) + translate_swr(instr); break;    // swr
              case 0x2F:                                         // CACHE - cache op (no-op for static recomp)
                  code = "/* cache (no-op: static recompilation has no I/D cache) */";
-@@ -1590,6 +2230,43 @@
-             default:
-                 code = fmt::format("/* TODO: opcode=0x{:02X} */", opcode);
+@@ -1592,7 +2234,285 @@
          }
-+    }
-+
+     }
+ 
 +    if (vertical_camera_site) {
 +        code += fmt::format(
 +            " disruptor_vertical_camera_instruction_hook(cpu, "
@@ -778,10 +784,271 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..f54752e2a15f4535694ca6c2fc2e2651
 +            "\n{}disruptor_intro_skip_instruction_hook(cpu, "
 +            "0x{:08X}u, 0x{:08X}u, 1);",
 +            config_.indent, addr, instr);
++    }
++
+     return config_.indent + code + comment;
++}
++
++static constexpr std::size_t kFusedStepsMax = 4;
++
++static std::string_view trim_blank(std::string_view text) {
++    while (!text.empty() && (text.front() == ' ' || text.front() == '\t')) text.remove_prefix(1);
++    while (!text.empty() && (text.back() == ' ' || text.back() == '\t' || text.back() == '\r')) text.remove_suffix(1);
++    return text;
++}
++
++static bool is_word_char(char c) {
++    return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
++}
++
++static const std::set<std::string_view> kCastTypes = {
++    "uint32_t", "int32_t", "uint16_t", "int16_t", "uint8_t", "int8_t", "uint64_t", "int64_t"};
++
++/* The end of a general-register reference cpu->gpr[N] at `at`, N written plainly from 0 to 31, or npos. */
++static std::size_t general_register_end(std::string_view text, std::size_t at) {
++    if (!text.substr(at).starts_with("cpu->gpr[")) return std::string_view::npos;
++    std::size_t end = at + 9;
++    while (end < text.size() && std::isdigit(static_cast<unsigned char>(text[end]))) ++end;
++    const std::string_view digits = text.substr(at + 9, end - at - 9);
++    if (digits.empty() || digits.size() > 2 || (digits.size() == 2 && digits[0] == '0') || end >= text.size() ||
++        text[end] != ']')
++        return std::string_view::npos;
++    const int index = digits.size() == 1 ? digits[0] - '0' : (digits[0] - '0') * 10 + (digits[1] - '0');
++    return index <= 31 ? end + 1 : std::string_view::npos;
++}
++
++/* Whether the parenthesis closed at `close` opened a cast to an integer type. */
++static bool closes_cast(std::string_view text, std::size_t close) {
++    const std::size_t opening = text.rfind('(', close);
++    return opening != std::string_view::npos && kCastTypes.count(trim_blank(text.substr(opening + 1, close - opening - 1)));
++}
++
++/* The last character before `at` that is not a space, or 0. */
++static char operand_before(std::string_view text, std::size_t at, std::size_t& where) {
++    where = at;
++    while (where > 0 && text[where - 1] == ' ') --where;
++    return where == 0 ? '\0' : text[--where];
++}
++
++/* A line that writes only general registers or branch latches and reads only general registers, constants and casts. */
++static bool is_register_only_line(std::string_view line) {
++    std::string code;
++    for (std::size_t at = 0; at < line.size();) {
++        const std::size_t open = line.find("/*", at);
++        if (open == std::string_view::npos) {
++            code.append(line.substr(at));
++            break;
++        }
++        code.append(line.substr(at, open - at));
++        const std::size_t close = line.find("*/", open + 2);
++        if (close == std::string_view::npos) return false;
++        at = close + 2;
++    }
++    std::string_view text = trim_blank(code);
++    if (text.empty()) return true;
++    if (text.starts_with("uint32_t ")) text.remove_prefix(9);
++    else if (text.starts_with("int ")) text.remove_prefix(4);
++    std::size_t target_end = 0;
++    if (text.starts_with("cpu->gpr[")) {
++        target_end = general_register_end(text, 0);
++        if (target_end == std::string_view::npos) return false;
++    } else if (text.starts_with("_jt_") || text.starts_with("_bc_")) {
++        target_end = 4;
++        while (target_end < text.size() && std::isxdigit(static_cast<unsigned char>(text[target_end]))) ++target_end;
++        if (target_end != 12) return false;
++    } else {
++        return false;
++    }
++    const std::string_view rest = text.substr(target_end);
++    if (!rest.starts_with(" = ") || !rest.ends_with(';')) return false;
++    const std::string_view value = rest.substr(3, rest.size() - 4);
++    if (value.find('@') != std::string_view::npos) return false;
++    std::string reduced;
++    for (std::size_t at = 0; at < value.size();) {
++        if (value.substr(at).starts_with("cpu->gpr[")) {
++            const std::size_t end = general_register_end(value, at);
++            if (end == std::string_view::npos) return false;
++            reduced += '@';
++            at = end;
++            continue;
++        }
++        reduced += value[at++];
++    }
++    static constexpr std::string_view kAllowedMarks = " ()+-<>|^~!=?:&_@";
++    for (std::size_t at = 0; at < reduced.size(); ++at) {
++        const char c = reduced[at];
++        if (!std::isalnum(static_cast<unsigned char>(c)) && kAllowedMarks.find(c) == std::string_view::npos) return false;
++        if (c == '-' && at + 1 < reduced.size() && reduced[at + 1] == '>') return false;
++        std::size_t where = 0;
++        if (c == '(') {
++            const char before = operand_before(reduced, at, where);
++            if (is_word_char(before) || before == '@') return false;
++            if (before == ')' && !closes_cast(reduced, where)) return false;
++        }
++        if (c == '&' && (at == 0 || reduced[at - 1] != '&') && (at + 1 >= reduced.size() || reduced[at + 1] != '&')) {
++            const char before = operand_before(reduced, at, where);
++            if (!(is_word_char(before) || before == '@' || before == ')')) return false;
++            if (before == ')' && closes_cast(reduced, where)) return false;
++        }
++        if (!(std::isalpha(static_cast<unsigned char>(c)) || c == '_')) continue;
++        if (at > 0 && is_word_char(reduced[at - 1])) continue;
++        std::size_t end = at;
++        while (end < reduced.size() && is_word_char(reduced[end])) ++end;
++        if (!kCastTypes.count(std::string_view(reduced).substr(at, end - at))) return false;
++        at = end - 1;
++    }
++    return true;
++}
++
++/* The per-instruction steps fuse_cycle_steps joined, put back from the co-simulation copies it keeps: the generator
++ * requires this to give back the block it was handed, so no step can be lost or changed on the way. */
++static std::string restore_cycle_steps(const std::string& fused, const std::string& indent) {
++    std::vector<std::string_view> lines;
++    for (std::size_t at = 0; at < fused.size();) {
++        const std::size_t end = fused.find('\n', at);
++        if (end == std::string::npos) {
++            lines.emplace_back(fused.data() + at, fused.size() - at);
++            break;
++        }
++        lines.emplace_back(fused.data() + at, end - at);
++        at = end + 1;
++    }
++    const std::string single = indent + "psx_cyc_step(cpu, ";
++    std::string out;
++    out.reserve(fused.size());
++    for (std::size_t at = 0; at < lines.size();) {
++        if (lines[at] == "#if defined(PSX_ENABLE_BLOCK_CYCLES) && !defined(PSX_COSIM)" && at + 4 < lines.size() &&
++            lines[at + 2] == "#elif defined(PSX_ENABLE_BLOCK_CYCLES)" && lines[at + 3].starts_with(single) &&
++            lines[at + 4] == "#endif") {
++            out += "#ifdef PSX_ENABLE_BLOCK_CYCLES\n";
++            out.append(lines[at + 3]).push_back('\n');
++            out += "#endif\n";
++            at += 5;
++        } else if (lines[at] == "#if defined(PSX_ENABLE_BLOCK_CYCLES) && defined(PSX_COSIM)" && at + 2 < lines.size() &&
++                   lines[at + 1].starts_with(single) && lines[at + 2] == "#endif") {
++            out += "#ifdef PSX_ENABLE_BLOCK_CYCLES\n";
++            out.append(lines[at + 1]).push_back('\n');
++            out += "#endif\n";
++            at += 3;
++        } else {
++            out.append(lines[at]).push_back('\n');
++            ++at;
++        }
++    }
++    if (!fused.ends_with('\n') && !out.empty()) out.pop_back();
++    return out;
++}
++
++/* Steps of a block joined into one psx_cyc_stepN call where only register-only lines lie between them: those lines
++ * read no timing state, so charging the later steps first leaves the same state, and psx_cyc_stepN repeats the steps
++ * exactly. The co-simulation build keeps one call an instruction. */
++static std::string fuse_cycle_steps(const std::string& block, const std::string& indent) {
++    std::vector<std::string_view> lines;
++    for (std::size_t at = 0; at < block.size();) {
++        const std::size_t end = block.find('\n', at);
++        if (end == std::string::npos) {
++            lines.emplace_back(block.data() + at, block.size() - at);
++            break;
++        }
++        lines.emplace_back(block.data() + at, end - at);
++        at = end + 1;
++    }
++    const std::string step_prefix = indent + "psx_cyc_step(cpu, ";
++    auto step_mask = [&](std::size_t at) -> std::string_view {
++        if (at + 2 >= lines.size() || lines[at] != "#ifdef PSX_ENABLE_BLOCK_CYCLES" || lines[at + 2] != "#endif")
++            return {};
++        const std::string_view call = lines[at + 1];
++        if (!call.starts_with(step_prefix) || !call.ends_with(");")) return {};
++        return call.substr(step_prefix.size(), call.size() - step_prefix.size() - 2);
++    };
++    auto is_cosim_note = [&](std::size_t at) {
++        return at + 2 < lines.size() && lines[at] == "#ifdef PSX_COSIM" &&
++               lines[at + 1].starts_with(indent + "cosim_instr(") && lines[at + 2] == "#endif";
++    };
++
++    std::string out;
++    out.reserve(block.size() + block.size() / 8);
++    std::size_t at = 0;
++    while (at < lines.size()) {
++        const std::string_view head = step_mask(at);
++        if (head.empty()) {
++            out.append(lines[at]).push_back('\n');
++            ++at;
++            continue;
++        }
++        std::vector<std::size_t> members{at};
++        std::vector<std::string_view> masks{head};
++        std::size_t cursor = at + 3;
++        while (masks.size() < kFusedStepsMax) {
++            std::size_t probe = cursor;
++            while (probe < lines.size()) {
++                if (is_cosim_note(probe)) {
++                    probe += 3;
++                } else if (is_register_only_line(lines[probe])) {
++                    ++probe;
++                } else {
++                    break;
++                }
++            }
++            const std::string_view mask = step_mask(probe);
++            if (mask.empty()) break;
++            members.push_back(probe);
++            masks.push_back(mask);
++            cursor = probe + 3;
++        }
++        if (members.size() == 1) {
++            for (std::size_t line = at; line < at + 3; ++line) out.append(lines[line]).push_back('\n');
++            at += 3;
++            continue;
++        }
++        std::string joined;
++        for (const std::string_view mask : masks) {
++            if (!joined.empty()) joined += ", ";
++            joined += mask;
++        }
++        out += "#if defined(PSX_ENABLE_BLOCK_CYCLES) && !defined(PSX_COSIM)\n";
++        out += fmt::format("{}psx_cyc_step{}(cpu, {});\n", indent, masks.size(), joined);
++        out += "#elif defined(PSX_ENABLE_BLOCK_CYCLES)\n";
++        out.append(lines[at + 1]).push_back('\n');
++        out += "#endif\n";
++        std::size_t member = 1;
++        for (std::size_t line = at + 3; line < cursor;) {
++            if (member < members.size() && line == members[member]) {
++                out += "#if defined(PSX_ENABLE_BLOCK_CYCLES) && defined(PSX_COSIM)\n";
++                out.append(lines[line + 1]).push_back('\n');
++                out += "#endif\n";
++                line += 3;
++                ++member;
++            } else {
++                out.append(lines[line]).push_back('\n');
++                ++line;
++            }
++        }
++        at = cursor;
++    }
++    if (!block.ends_with('\n') && !out.empty()) out.pop_back();
++    return out;
+ }
+ 
+ std::string CodeGenerator::translate_basic_block(
+@@ -2269,7 +3189,15 @@
+         }
      }
  
-     return config_.indent + code + comment;
-@@ -2984,6 +3661,12 @@
+-    return ss.str();
++    if (!cycle_per_insn) return ss.str();
++    const std::string block_text = ss.str();
++    std::string fused = fuse_cycle_steps(block_text, config_.indent);
++    if (restore_cycle_steps(fused, config_.indent) != block_text) {
++        const std::string refusal = fmt::format("block 0x{:08X}: the fused steps do not give back the block", block.start_addr);
++        fmt::print(stderr, "error: {}\n", refusal);
++        throw std::runtime_error(refusal);
++    }
++    return fused;
+ }
+ 
+ bool CodeGenerator::func_has_screen_extent_cull(const ControlFlowGraph& cfg) const {
+@@ -2984,6 +3912,12 @@
      ss << "#endif\n";
      ss << "extern int  psx_datashard_enter(CPUState* cpu, uint32_t key);  /* data-shard replay/capture (data_shards.c) */\n";
      ss << "extern void psx_mod_function_entry(CPUState* cpu, uint32_t address);  /* trusted opt-in game-mod hook */\n";
@@ -794,7 +1061,7 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..f54752e2a15f4535694ca6c2fc2e2651
      ss << "extern void psx_datashard_ret(CPUState* cpu);                  /* data-shard capture finalize */\n";
      ss << "extern int  psx_vsync_query_hle_enter(CPUState* cpu, uint32_t func, uint32_t counter_addr, uint32_t gpustat_ptr_addr, uint32_t timer1_ptr_addr, uint32_t timer1_cache_addr);  /* load_accel.c */\n";
      ss << "extern void psx_ws_sprite_tag(CPUState* cpu);  /* widescreen prim tag (gpu.c) */\n";
-@@ -2993,6 +3676,9 @@
+@@ -2993,6 +3927,9 @@
      ss << "extern int  psx_ws_cull_sltiu(uint32_t sx, uint32_t imm);  /* ws auto screen-x cull (gpu.c) */\n";
      ss << "extern int  psx_ws_cull_slti(uint32_t sx, uint32_t imm);   /* ws cull signed right edge (gpu.c) */\n";
      ss << "extern int  psx_ws_cull_slti_lower(uint32_t sx, uint32_t imm); /* ws cull signed lower edge (gpu.c) */\n";
@@ -804,7 +1071,7 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..f54752e2a15f4535694ca6c2fc2e2651
      ss << "extern int  psx_ws_cull_bltz(uint32_t v);                  /* ws cull signed left edge (gpu.c) */\n";
      ss << "extern int  psx_ws_cull_vxrange(uint32_t x, uint32_t imm); /* ws masked-u16 X window */\n";
      ss << "extern int32_t psx_ws_depth_bound(int32_t imm);            /* ws aspect-scaled far bound */\n";
-@@ -3001,7 +3687,10 @@
+@@ -3001,7 +3938,10 @@
      ss << "extern uint32_t psx_ws_cull_keep_result(uint32_t vanilla, uint32_t forced); /* ws guarded keep compare (gpu.c) */\n";
      ss << "extern uint32_t psx_ws_aspect_cone_result(uint32_t site, uint32_t vanilla, uint32_t object, int32_t x, int32_t z, int32_t y); /* aspect-aware participation cone */\n";
      ss << "extern uint32_t psx_ws_angle_widen(uint32_t vanilla); /* aspect-scaled 12-bit terrain-frustum half-angle */\n";
@@ -815,7 +1082,7 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..f54752e2a15f4535694ca6c2fc2e2651
      ss << "extern int  psx_ws_bg2d_cols(int base);                    /* ws 2D bg tile-loop widen: col count (gpu.c) */\n";
      ss << "extern int  psx_ws_bg2d_startcol(int col, unsigned mask);  /* ws 2D bg tile-loop widen: start tile col (gpu.c) */\n";
      ss << "extern int  psx_ws_bg2d_startx(int x);                     /* ws 2D bg tile-loop widen: start screen-x (gpu.c) */\n";
-@@ -3013,6 +3702,11 @@
+@@ -3013,6 +3953,11 @@
      ss << "extern int  psx_game_option_store(uint32_t addr, int val);  /* persisted OPTION restore-at-init (game_options.c) */\n";
      ss << "extern uint32_t psx_ws_backdrop_value(uint32_t orig, int is_end, int window_cols);  /* ws backdrop preload (gpu.c) */\n";
      ss << "extern void gte_ws_set_suppress(int on);  /* widescreen far-backdrop un-squash (gte.cpp) */\n";

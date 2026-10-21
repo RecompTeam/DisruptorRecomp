@@ -147,10 +147,22 @@ require(drawn == set(keys), f"the in-game menu must draw every row by its key: {
 for kind, key, label, _ in rows:
     require(f'"{label}"' not in menu, f"the in-game menu must take the name of {key} from the shared table")
 
-shipped = plain_values(read("release/windows/settings.toml"))
+main_cpp = read("psxrecomp/runtime/src/main.cpp")
 require(
-    not set(shipped) - set(keys),
-    f"the shipped settings.toml sets keys the launcher does not show: {sorted(set(shipped) - set(keys))}",
+    not (ROOT / "release/windows/settings.toml").exists()
+    and "settings.toml" not in read("cmake/stage_launcher.cmake")
+    and '"settings.toml": ROOT' not in read("tools/package_release.py")
+    and 'shipped = {"keybinds.ini"};' in read("src/game/settings/user_folder.cpp"),
+    "no settings.toml is shipped or staged: the table's initial values are the defaults",
+)
+require(
+    "        PSXRecompV4::UserSettings us =\n            PSXRecompV4::load_user_settings(settings_path);\n"
+    "#ifdef PSX_HAS_GAME_HOST\n        psx_game_settings_defaults(us);\n#endif\n        if (us.parse_error) {"
+    in main_cpp
+    and "    settings = disruptor::settings::with_defaults(settings);" in read("src/game/host.cpp")
+    and "    apply_saved_preferences(disruptor::settings::with_defaults(settings));"
+    in read("src/game/ui/menu/preferences.cpp"),
+    "the runtime and the menu must both run with the table's defaults where the file names none",
 )
 mouse = read("src/game/input/mouse_aim.cpp")
 require(
@@ -195,9 +207,9 @@ require(
     "    if (!step.status.empty()) say(step.status);\n"
     "    if (step.launch) launch();\n"
     in window
-    and "    if (launch) unwritten_ = !settings_.complete() && settings_.readable();\n" in window
-    and "        say(running_text(environment_overrides(), unwritten_));" in window,
-    "the window must do each thing a step names, and say when the settings file could not be completed",
+    and "        say(running_text(environment_overrides()));" in window
+    and "complete()" not in window,
+    "the window must do each thing a step names, and write no settings of its own before the game starts",
 )
 require(
     '    if (code == 0) {\n        show({});\n        activity_.add("Game closed.");\n    } else {\n' in window

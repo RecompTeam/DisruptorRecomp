@@ -55,6 +55,8 @@ void disruptor_far_rendering_fog_ramp(int32_t *start, int32_t *length, int *powe
 void gl_renderer_set_palette_fade_power(int power) { published_power = power; }
 int sky_behind = 0, edge_sky = -1;
 void gl_renderer_set_edge_sky(int sky) { edge_sky = sky; }
+float edge_depth = -1.0f;
+void gl_renderer_set_edge_depth(float depth) { edge_depth = depth; }
 int disruptor_backdrop_tiles_sky_behind(uint32_t) { return sky_behind; }
 void disruptor_far_rendering_drawn_distances(uint32_t *far_distance, int32_t *fade_start) {
     *far_distance = drawn_far;
@@ -221,6 +223,7 @@ int main() {
     renderer_entry(&cpu, kRendererEntry);
     require(palette_start == 8.0f * 832.0f && ssao_from == 4.0f * 832.0f && ssao_to == 4.0f * 1600.0f,
             "the fades did not follow the distances the renderer draws with");
+    require(edge_depth == 8.0f * (1600.0f + 160.0f), "the world dissolves short of where the game drops polygons beyond the drawn far");
     drawn_fade = -64;
     ramp_start = -64;
     renderer_entry(&cpu, kRendererEntry);

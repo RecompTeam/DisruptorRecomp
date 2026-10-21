@@ -1,0 +1,52 @@
+diff --git a/runtime/include/cpu_state.h b/runtime/include/cpu_state.h
+index f010238d5b5ff344d5d991710bf4bc8e6376fec8..fb8f0b50ed6e525e733c0207c0bfd9abd193824c 100644
+--- a/runtime/include/cpu_state.h
++++ b/runtime/include/cpu_state.h
+@@ -1,4 +1,4 @@
+-﻿/* ============================================================================
++/* ============================================================================
+  * cpu_state.h  —  Phase 2 runtime version
+  * ----------------------------------------------------------------------------
+  * This is the RUNTIME version of the CPUState header. It has the same struct
+@@ -301,6 +301,41 @@
+  * runtime TU that includes cpu_state.h. */
+ #include "psx_cyc.h"
+ 
++#if !defined(PSX_OVERLAY_DLL_BUILD)
++#ifdef __cplusplus
++extern "C" {
++#endif
++extern int psx_irq_in_exception, psx_irq_defer_switch_pending, psx_irq_save_poll_owed, psx_irq_resume_pc_given;
++extern uint32_t psx_irq_fast_maintenance, psx_irq_compiled_resume_pc;
++extern uint32_t i_stat, i_mask;
++void psx_check_interrupts_at_slow(struct CPUState* cpu, uint32_t resume_pc);
++void psx_check_interrupts_flushed(struct CPUState* cpu, int save_point);
++/* psx_check_interrupts_at_slow step by step: the resume PC and the taken mark stand before the flush, and an edge with
++ * nothing to deliver, no save to poll and no maintenance due returns where psx_check_interrupts' fast path would. */
++static inline void psx_check_interrupts_at(struct CPUState* cpu, uint32_t resume_pc) {
++#if !defined(PSX_COSIM)
++    const uint32_t outer = psx_irq_compiled_resume_pc;
++    psx_irq_compiled_resume_pc = resume_pc;
++    psx_irq_resume_pc_given = 0;
++    psx_cyc_batch_flush();
++    if (!psx_irq_in_exception && !psx_irq_defer_switch_pending && g_idle_skip_enabled == 0 && (i_stat & i_mask) == 0 &&
++        (cpu->cop0[13] & cpu->cop0[12] & 0x0300u) == 0 && !psx_irq_save_poll_owed &&
++        ((psx_irq_fast_maintenance + 1u) & 0x3FFFu) != 0u) {
++        ++psx_irq_fast_maintenance;
++        psx_irq_compiled_resume_pc = outer;
++        return;
++    }
++    psx_check_interrupts_flushed(cpu, 1);
++    psx_irq_compiled_resume_pc = outer;
++#else
++    psx_check_interrupts_at_slow(cpu, resume_pc);
++#endif
++}
++#ifdef __cplusplus
++}
++#endif
++#endif
++
+ /* Release call-entry stamp — inlined into every generated BIOS/game TU that
+  * includes this header (MotK VLC entry tax). Debug builds use the out-of-line
+  * ring path in debug_server.c. */

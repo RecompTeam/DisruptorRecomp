@@ -205,8 +205,11 @@ void draw_distance_list() {
     odd.has_draw_distance = true;
     odd.draw_distance = 110;
     require(list.get(odd) == -1, "a percent the list does not have is no choice");
-    require(list.highest == 0 && list.notice && std::string_view(list.notice) == "Longer distances come in a later release.",
-            "only the original distance is offered for now, and the notice says why");
+    require(list.highest == 1 && list.notice && std::string_view(list.notice) == "Longer distances come in a later release.",
+            "the original distance and 1.25x are offered for now, and the notice says why");
+    Settings quarter;
+    list.set(quarter, 1);
+    require(stored(quarter, list) == 1, "1.25x is kept as chosen");
     Settings farther;
     list.set(farther, 2);
     require(stored(farther, list) == 0, "a longer distance saved by an older build starts at the original");
@@ -215,18 +218,18 @@ void draw_distance_list() {
 void fog_shape_list() {
     const Option& list = option("disruptor.fog_shape");
     require(list.kind == Kind::choice && list.initial == 0 && list.choices.size() == 3 && list.needs.size() == 1 &&
-                std::string_view(list.needs[0]) == "disruptor.smooth_fade" && std::string_view(list.choices[0]) == "Even",
-            "the fog shape is a list of three that starts even and needs the smooth fade");
+                std::string_view(list.needs[0]) == "disruptor.smooth_fade" && std::string_view(list.choices[0]) == "Original",
+            "the fog shape is a list of three that starts at the original and needs the smooth fade");
     for (int index = 0; index < 3; ++index) {
         Settings chosen;
         list.set(chosen, index);
         require(chosen.has_fog_shape && chosen.fog_shape == index && list.get(chosen) == index, "each shape is written as its index");
     }
     require(list.highest == 0 && list.notice && std::string_view(list.notice) == "Other shapes come in a later release.",
-            "only the even fog is offered for now, and the notice says why");
+            "only the original fog is offered for now, and the notice says why");
     Settings late;
     list.set(late, 2);
-    require(stored(late, list) == 0, "another shape saved by an older build starts even");
+    require(stored(late, list) == 0, "another shape saved by a test build starts at the original");
 }
 
 void antialiasing_list() {
@@ -658,64 +661,44 @@ void log(const fs::path& folder) {
     fs::remove(file);
 }
 
-void completed(const fs::path& folder) {
-    const fs::path file = folder / "complete.toml";
-    for (const char* start : {"", "# nothing named\n", "[video]\n\n[disruptor]\n"}) {
-        fs::remove(file);
-        if (*start) write(file, start);
-        SettingsFile fresh(file);
-        require(fresh.complete() && fs::exists(file), "Play must write the shipped rows a missing or empty file does not name");
-        const Settings written = PSXRecompV4::load_user_settings(file);
-        for (const auto& one : options()) {
-            require(one.saved(written) == shipped(one), "only the rows a release ships are written, the others stay the game's");
-            require(!shipped(one) || one.get(written) == one.initial, "a shipped row is written with the value a release has");
-            if (std::string_view(one.key) != "video.frame_interpolation_fps")
-                require(fresh.shown(one) == one.initial, "and the window shows every row as before");
-        }
-    }
-
-    const std::string before = read(file);
-    fs::permissions(file, fs::perms::owner_write | fs::perms::group_write | fs::perms::others_write, fs::perm_options::remove);
-    SettingsFile whole(file);
-    require(whole.complete() && read(file) == before, "a file that names every shipped row is not written again");
-    fs::permissions(file, fs::perms::owner_write, fs::perm_options::add);
-
-    write(file, "[disruptor]\nmouse_aim = false\nhud_scale = 70\nfuture_key = 3\n\n[video]\nsupersampling = 2\n");
-    SettingsFile partly(file);
-    require(partly.complete(), "a file that names some rows is completed");
-    const Settings kept = PSXRecompV4::load_user_settings(file);
-    require(!kept.mouse_aim && kept.hud_scale == 70 && kept.supersampling == 2, "what the file named stays as it was");
+// The game fills in each of its own options the file does not name, and the window shows what it runs with.
+void defaults_filled(const fs::path& folder) {
+    const Settings filled = disruptor::settings::with_defaults(Settings{});
     for (const auto& one : options()) {
-        const std::string_view key = one.key;
-        const bool named = key == "disruptor.mouse_aim" || key == "disruptor.hud_scale" || key == "video.supersampling";
-        require(one.saved(kept) == (named || shipped(one)), "the absent shipped rows are named, and no other row is added");
-        if (shipped(one) && !named) require(one.get(kept) == one.initial, "each with the value a release has");
+        const bool ours = std::string_view(one.key).starts_with("disruptor.");
+        require(one.saved(filled) == ours, "only the game's own options are filled in, the runtime's keep game.toml's");
+        if (ours) require(one.get(filled) == one.initial, "a filled option holds its initial value");
     }
-    require(partly.shown(option("disruptor.mouse_aim")) == 0 && partly.shown(option("disruptor.geometry_correction")) == 1,
-            "the window shows the completed file");
+    Settings chosen;
+    option("disruptor.smooth_fade").set(chosen, 0);
+    option("disruptor.horizontal_sensitivity").set(chosen, 300);
+    const Settings kept = disruptor::settings::with_defaults(chosen);
+    require(stored(kept, option("disruptor.smooth_fade")) == 0 && stored(kept, option("disruptor.horizontal_sensitivity")) == 300,
+            "what the file names stays as it was");
 
-    write(file, "[disruptor]\nmouse_aim = true\nmodern_controls = true\nvertical_look = false\ngeometry_correction = false\n"
-                "perspective_textures = true\nsmooth_fade = true\ndepth_sorted_world = true\nframe_unlock = false\n"
-                "high_precision_camera = false\n\n"
-                "[video]\nframe_interpolation = false\n");
-    const std::string chosen = read(file);
-    SettingsFile theirs(file);
-    require(theirs.complete() && read(file) == chosen && theirs.shown(option("disruptor.geometry_correction")) == 0,
-            "a shipped row the player turned off is left off");
-
-    write(file, "[video\nbroken");
-    SettingsFile broken(file);
-    require(!broken.complete() && read(file) == "[video\nbroken", "a file that is not TOML is left as it is");
+    const fs::path file = folder / "defaults.toml";
     fs::remove(file);
+    SettingsFile fresh(file);
+    require(fresh.load(), "a missing file is read as empty");
+    for (const auto& one : options())
+        if (std::string_view(one.key).starts_with("disruptor."))
+            require(fresh.shown(one) == one.get(filled), "the window shows each of the game's rows as the game runs it");
+    require(!fs::exists(file), "and nothing is written for it");
+
+    Settings shading;
+    shading.has_sample_shading = shading.sample_shading = true;
+    const Settings half = disruptor::settings::with_defaults(shading);
+    require(!half.has_multisampling && half.multisampling == 0 && half.sample_shading,
+            "a file naming one half of anti-aliasing keeps it, the other half is off as the list starts");
 }
 
-// The game reads its saves folder from game.toml when settings.toml names none, as a release ships them.
+// The game reads its saves folder from game.toml when settings.toml names none.
 void saves_beside_game(const fs::path& folder) {
     const fs::path source = DISRUPTOR_SOURCE_DIR;
     const fs::path package = folder / "package";
     fs::create_directories(package);
     fs::copy_file(source / "game.toml", package / "game.toml", fs::copy_options::overwrite_existing);
-    fs::copy_file(source / "release/windows/settings.toml", package / "settings.toml", fs::copy_options::overwrite_existing);
+    write(package / "settings.toml", "");
     SettingsFile settings(package / "settings.toml");
     require(settings.load() && settings.saves_folder() == package / "saves", "the saves are where game.toml puts them");
     write(package / "settings.toml", "[memcard]\ndir = \"cards\"\n");
@@ -723,26 +706,17 @@ void saves_beside_game(const fs::path& folder) {
     fs::remove_all(package);
 }
 
-// The game's own readers say what a new installation runs with: the table must start from the same values.
-void shipped_values() {
+// The runtime's own keys are not filled in: game.toml must give the game the values the table starts from.
+void runtime_defaults() {
     const fs::path source = DISRUPTOR_SOURCE_DIR;
-    const Settings file = PSXRecompV4::load_user_settings(source / "release/windows/settings.toml");
-    require(!file.parse_error, "the shipped settings.toml must be readable");
-    size_t named = 0;
-    for (const auto& one : options()) {
-        require(one.saved(file) == shipped(one), "the rows Play restores are not the rows the shipped settings.toml names");
-        if (!one.saved(file)) continue;
-        ++named;
-        require(one.get(file) == one.initial, "a row starts from another value than the shipped settings.toml gives it");
-    }
-    require(named == 10, "the shipped settings.toml names ten rows");
     const auto game = PSXRecompV4::load_game_config(source / "game.toml");
     Settings as_game;
-    as_game.has_supersampling = as_game.has_aspect_ratio = true;
+    as_game.has_supersampling = as_game.has_aspect_ratio = as_game.has_frame_interpolation = true;
     as_game.supersampling = game.runtime.video_supersampling;
     as_game.aspect_num = game.runtime.video_aspect_num;
     as_game.aspect_den = game.runtime.video_aspect_den;
-    for (const char* key : {"video.supersampling", "video.aspect_ratio"})
+    as_game.frame_interpolation = game.runtime.video_frame_interpolation;
+    for (const char* key : {"video.supersampling", "video.aspect_ratio", "video.frame_interpolation"})
         require(option(key).get(as_game) == option(key).initial, "a row starts from another value than game.toml gives the game");
 }
 } // namespace
@@ -777,8 +751,8 @@ int main() {
         overrides();
         languages(folder);
         log(folder);
-        completed(folder);
-        shipped_values();
+        defaults_filled(folder);
+        runtime_defaults();
         std::cout << "Launcher settings, reset, language discs and log tail tests passed\n";
     } catch (const std::exception& error) {
         std::cerr << "FAILED: " << error.what() << "\n";

@@ -1,0 +1,14 @@
+diff --git a/runtime/src/card_data_writes.c b/runtime/src/card_data_writes.c
+index 38a2c4c6516d880b566dad4674b5644ff8ce83f0..4b6c34ffb453faf7c4db0fdd8ebf5040129f0a32 100644
+--- a/runtime/src/card_data_writes.c
++++ b/runtime/src/card_data_writes.c
+@@ -9,7 +9,8 @@
+ 
+ /* "Armed" byte from the most recent SIO_RX_DATA read inside a card
+  * data phase. The next matching RAM write captures it. */
+-static volatile int      s_armed = 0;
++volatile int g_card_data_writes_armed = 0;  /* read by memory.c before each store's call */
++#define s_armed g_card_data_writes_armed
+ static uint8_t           s_armed_value = 0;
+ static uint16_t          s_armed_state = 0;
+ static uint8_t           s_armed_idx   = 0;

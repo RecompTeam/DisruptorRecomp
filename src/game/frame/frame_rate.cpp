@@ -40,7 +40,7 @@ constexpr uint8_t kSingleStepPlayerState = 5u;
 constexpr uint32_t kVBlankCycles = 564480u;  /* VBLANK_CYCLES in interrupts.c */
 constexpr uint32_t kRetailFloorVBlanks = 2u;
 constexpr uint32_t kWindowVBlanks = 60u;
-constexpr uint32_t kDefaultCpuShift = 2u;
+constexpr uint32_t kDefaultCpuShift = 3u;  /* 4x left a crowd on the lake at 1.25x 1.03 to 1.18 VBlank a frame, 8x 0.46 */
 constexpr uint32_t kMaximumCpuShift = 3u;
 constexpr int kLastFrameVBlankRegister = 22;  /* $s6 in func_80043404 */
 

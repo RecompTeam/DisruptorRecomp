@@ -2,6 +2,29 @@
 
 What changed in each release. The launcher shows the section of its own version on its home page.
 
+## v0.5.0
+
+Released on 2026-10-21.
+
+### Changes
+
+- Translate the game's code anew. The launcher carries save states of 0.4.x over
+- Stop loading capsules of 0.4.x
+- Run every setting the settings file does not name as the launcher shows it, also without the launcher
+- Ship no settings file
+- Call Fog shape's one choice Original instead of Even
+- Run the game's processor eight times faster inside a frame with 60 FPS gameplay, instead of four
+
+### Enhancements
+
+- Offer Draw distance 1.25x again
+- Take about 20% less processor time a frame for the emulation
+
+### Bug fixes
+
+- Show the far fogged shapes again under Smooth distance fade, up to where the game stops drawing
+- Hold 60 FPS and higher in a big fight far out on an open level with 60 FPS gameplay
+
 ## v0.4.0
 
 Released on 2026-10-19.
@@ -23,6 +46,7 @@ Released on 2026-10-19.
 - Start a movie's sound on the frame the French or German version starts it, with such a disc
 - Let briefings play to the end with a French, German or Japanese disc
 - Draw no dark lines along the held weapon with multisampling
+
 ## v0.3.1
 
 Released on 2026-10-17.

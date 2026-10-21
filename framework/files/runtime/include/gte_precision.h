@@ -56,13 +56,44 @@ int gte_precision_load_word(uint32_t addr, uint32_t packed,
 
 /* memory.c owns the write result: every 32-bit write attempt clears the token, a completed main-RAM or scratchpad write
  * arms it, and projection callbacks consume it once before provenance enters the cache. */
-void gte_precision_word_write_begin(void);
-void gte_precision_main_ram_word_committed(uint32_t physical);
+typedef struct GtePrecisionWordCommitToken {
+    uint32_t physical;
+    uint8_t domain;  /* gte.cpp's PrecisionWordDomain: 0 none, 1 main RAM */
+    uint8_t pending;
+} GtePrecisionWordCommitToken;
+/* Inline: memory.c runs these two on every 32-bit store. */
+extern GtePrecisionWordCommitToken g_gte_precision_word_commit;
+static inline void gte_precision_word_write_begin(void) {
+    g_gte_precision_word_commit.domain = 0u;
+    g_gte_precision_word_commit.pending = 0u;
+}
+/* memory.c passes the folded address after all four bytes are written: no unaligned host write may become an aligned token. */
+static inline void gte_precision_main_ram_word_committed(uint32_t physical) {
+    if (physical >= 0x00200000u || (physical & 3u) != 0u) {
+        gte_precision_word_write_begin();
+        return;
+    }
+    g_gte_precision_word_commit.physical = physical;
+    g_gte_precision_word_commit.domain = 1u;
+    g_gte_precision_word_commit.pending = 1u;
+}
 void gte_precision_scratch_word_committed(uint32_t physical);
 /* Allocated enhancement packet memory uses a distinct physical-address domain. */
 void gte_precision_gpu_dma_word_committed(uint32_t physical);
 void gte_precision_store_word(uint32_t addr, uint8_t reg);
 void gte_precision_invalidate_word(uint32_t addr);
+/* A bit a 4 KB page that may hold provenance this generation, per domain: a store elsewhere skips the call. */
+extern uint32_t g_gte_precision_ram_pages[16];
+extern uint32_t g_gte_precision_dma_pages[8];
+extern uint32_t g_gte_precision_scratch_live;
+static inline int gte_precision_ram_live(uint32_t addr) {
+    const uint32_t page = (addr & 0x1FFFFFu) >> 12;
+    return (int)((g_gte_precision_ram_pages[page >> 5] >> (page & 31u)) & 1u);
+}
+static inline int gte_precision_dma_live(uint32_t phys) {
+    const uint32_t page = ((phys - 0x00F00000u) >> 12) & 255u;
+    return (int)((g_gte_precision_dma_pages[page >> 5] >> (page & 31u)) & 1u);
+}
 
 /* Register reviewed MFC2 and ordinary-SW identities. The MFC2 callback snapshots the projection read, the post-write
  * callback fires after the matching SW and the memory token confirms the commit. Both need the registered raw

@@ -216,10 +216,10 @@ require('    if (option_list("disruptor.draw_distance", &distance) &&\n'
         "disruptor_far_rendering_netplay_blocked()" in enhancements and
         '    {"disruptor.smooth_fade", Page::enhancements},\n    {"disruptor.fog_shape", Page::enhancements, nullptr, true},\n    {"disruptor.draw_distance", Page::enhancements},\n' in launcher and
         "Page::experimental}" not in launcher.split("disruptor.draw_distance")[1].split("\n")[0] and
-        "draw_distances, saved<&Settings::has_draw_distance>, draw_distance, set_draw_distance, {}, offered_now,\n           \"Longer distances come in a later release.\")," in options and
-        "constexpr int offered_now = 1;" in options,
+        "draw_distances, saved<&Settings::has_draw_distance>, draw_distance, set_draw_distance, {}, distances_offered,\n           \"Longer distances come in a later release.\")," in options and
+        "constexpr int distances_offered = 2;" in options,
         "the menu saves only a draw distance the game took, both front ends list it on Enhancements under the smooth fade, "
-        "and only the original distance is offered for now")
+        "and only the original distance and 1.25x are offered for now")
 require("        (psx_mod_widescreen_x_margin() == 0 && !disruptor_far_rendering_edge_margin() &&\n"
         "         disruptor_far_rendering_get_preset() == DISRUPTOR_FAR_RENDERING_RETAIL)) {\n" in arena and
         "    disruptor_far_rendering_drawn_distances(&far_distance, &fade_start);\n" in arena and
@@ -286,7 +286,7 @@ require("void gl_renderer_set_palette_fade_power(int power)" in renderer and
         "the renderer's fade grows with the power the far rendering hands over")
 
 margin = body(source, "bool edge_margin_active")
-require("constexpr uint32_t kEdgeMargin = 256u;" in source and
+require("constexpr uint32_t kEdgeMargin = 512u;" in source and
         "gl_renderer_smooth_fade() != 0 && g_depth_fade_mode == DISRUPTOR_FAR_RENDERING_DEPTH_FADE_RETAIL &&" in margin and
         "!comparator_active() && !psx_netplay_active();" in margin and
         "? std::min(effective_far + kEdgeMargin, kMaximumSafeEffectiveFar) : effective_far;" in body(source, "void write_distances") and

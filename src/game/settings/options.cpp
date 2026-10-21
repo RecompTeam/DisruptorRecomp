@@ -102,8 +102,9 @@ constexpr const char* schemes[] = {"Classic", "Modern"};
 constexpr const char* antialiasing_levels[] = {"Off",     "2x MSAA", "4x MSAA", "8x MSAA", "16x MSAA",
                                                "2x SSAA", "4x SSAA", "8x SSAA", "16x SSAA"};
 constexpr const char* draw_distances[] = {"Original", "1.25x", "1.5x", "2x"};
-constexpr const char* fog_shapes[] = {"Even", "Soft", "Late"};
-constexpr int offered_now = 1;  /* for now only the game's own distance and fog are offered */
+constexpr const char* fog_shapes[] = {"Original", "Soft", "Late"};
+constexpr int distances_offered = 2;  /* Original and 1.25x for now */
+constexpr int fog_shapes_offered = 1;  /* Original only for now */
 
 constexpr const char* geometry_key = "disruptor.geometry_correction";
 constexpr const char* frames_key = "video.frame_interpolation";
@@ -318,14 +319,15 @@ constexpr Option option_list[] = {
            antialiasing_saved, antialiasing, set_antialiasing, needs_geometry),
     choice("disruptor.draw_distance", "Draw distance", 0,
            "How far off walls, enemies and pickups are drawn.\n"
-           "Original: as on the PlayStation.",
-           draw_distances, saved<&Settings::has_draw_distance>, draw_distance, set_draw_distance, {}, offered_now,
+           "Original: as on the PlayStation.\n"
+           "1.25x: a quarter further.",
+           draw_distances, saved<&Settings::has_draw_distance>, draw_distance, set_draw_distance, {}, distances_offered,
            "Longer distances come in a later release."),
     choice("disruptor.fog_shape", "Fog shape", 0,
            "How the smooth distance fade thickens.\n"
-           "Even: at one pace, as the game's own.",
+           "Original: at one pace, as the game's own.",
            fog_shapes, saved<&Settings::has_fog_shape>, read<&Settings::fog_shape>,
-           write<&Settings::has_fog_shape, &Settings::fog_shape>, needs_smooth_fade, offered_now,
+           write<&Settings::has_fog_shape, &Settings::fog_shape>, needs_smooth_fade, fog_shapes_offered,
            "Other shapes come in a later release."),
 };
 } // namespace
@@ -349,6 +351,13 @@ int stored(const Settings& settings, const Option& option) {
     if (!option.saved(settings)) return option.initial;
     const int value = option.get(settings);
     return option.kind == Kind::choice && value > option.highest ? option.initial : value;
+}
+
+Settings with_defaults(Settings settings) {
+    for (const auto& option : option_list)
+        if (std::string_view(option.key).starts_with("disruptor.") && !option.saved(settings))
+            option.set(settings, option.initial);
+    return settings;
 }
 
 std::string describe(const Settings& settings) {

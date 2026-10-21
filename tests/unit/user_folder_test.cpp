@@ -126,19 +126,20 @@ void test_seeding() {
     const fs::path root = fresh("disruptor-user-folder-test-seed");
     const fs::path program = root / "program";
     const fs::path user = root / "user";
-    put(program / "settings.toml", "shipped settings");
+    put(program / "settings.toml", "an older release's settings");
     put(program / "keybinds.ini", "shipped keys");
     fs::create_directories(user);
     seed(program, user);
-    expect(read(user / "settings.toml") == "shipped settings" && read(user / "keybinds.ini") == "shipped keys",
-           "a new folder gets the shipped settings and key bindings");
-    put(user / "settings.toml", "the player's settings");
+    expect(!fs::exists(user / "settings.toml") && read(user / "keybinds.ini") == "shipped keys",
+           "a new folder gets the key bindings, and no settings: the game's table holds their defaults");
+    put(user / "keybinds.ini", "the player's keys");
+    seed(program, user);
+    expect(read(user / "keybinds.ini") == "the player's keys", "the player's own file is never replaced");
     fs::remove(user / "keybinds.ini");
     seed(program, user);
-    expect(read(user / "settings.toml") == "the player's settings", "the player's own file is never replaced");
     expect(read(user / "keybinds.ini") == "shipped keys", "a missing one is given again");
     seed(program, program);
-    expect(read(program / "settings.toml") == "shipped settings", "a copy whose files are its program folder is left alone");
+    expect(read(program / "keybinds.ini") == "shipped keys", "a copy whose files are its program folder is left alone");
     fs::remove(program / "keybinds.ini");
     fs::remove(user / "keybinds.ini");
     seed(program, user);
@@ -186,12 +187,12 @@ void test_prepared_folder() {
     expect(in_user_folder("disruptor-mouse-aim.log") == "disruptor-mouse-aim.log" && own_or_shipped("mouse-aim.ini") == "mouse-aim.ini",
            "before a folder is prepared a name stays alone");
     const fs::path program = root / "program";
-    put(program / "settings.toml", "shipped settings");
+    put(program / "keybinds.ini", "shipped keys");
     put(program / "mouse-aim.ini", "shipped tuning");
     const fs::path user = root / "files of the player";
     choose(user.string().c_str());
     expect(prepare(program) == user && fs::is_directory(user), "PSX_USER_DIR names the folder, and it is made");
-    expect(read(user / "settings.toml") == "shipped settings", "and given the shipped settings");
+    expect(read(user / "keybinds.ini") == "shipped keys", "and given the shipped key bindings");
     expect(in_user_folder("disruptor-mouse-aim.log") == user / "disruptor-mouse-aim.log", "a log goes into it");
     expect(own_or_shipped("mouse-aim.ini") == program / "mouse-aim.ini", "the shipped tuning is read while the player has none");
     put(user / "mouse-aim.ini", "the player's tuning");

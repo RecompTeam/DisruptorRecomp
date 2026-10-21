@@ -1,8 +1,30 @@
 diff --git a/recompiler/src/full_function_emitter.cpp b/recompiler/src/full_function_emitter.cpp
-index 6d7f80bf721ec298f293ebd8cb39449f52865668..5c5cb38670df0dba8d65860eb134ebfed4e3dd3f 100644
+index 6d7f80bf721ec298f293ebd8cb39449f52865668..4ca5e6822568f91cb59c2ba5a14b632a23103d5c 100644
 --- a/recompiler/src/full_function_emitter.cpp
 +++ b/recompiler/src/full_function_emitter.cpp
-@@ -1792,7 +1792,7 @@
+@@ -1745,6 +1745,21 @@
+     }
+     out += "};\n\n";
+ 
++    std::vector<uint32_t> dispatch_keys;
++    for (const auto& vh : vec_handlers) dispatch_keys.push_back(vh.ram_addr);
++    dispatch_keys.insert(dispatch_keys.end(), emitted_normalized.begin(), emitted_normalized.end());
++    uint32_t key_gap_lo = 0, key_gap_hi = 0;
++    for (size_t i = 1; i < dispatch_keys.size(); ++i) {
++        if (dispatch_keys[i] <= dispatch_keys[i - 1])
++            throw std::runtime_error(fmt::format(
++                "dispatch table key 0x{:08X} follows 0x{:08X}: the binary search and its key gap need ascending keys",
++                dispatch_keys[i], dispatch_keys[i - 1]));
++        if (dispatch_keys[i] - dispatch_keys[i - 1] > key_gap_hi - key_gap_lo) {
++            key_gap_lo = dispatch_keys[i - 1];
++            key_gap_hi = dispatch_keys[i];
++        }
++    }
++
+     // --- Kernel body-extent table (runtime kernel-image bless) ---
+     // The BIOS copies Kernel Part 2 from ROM [0x1FC10000,0x1FC18000) to RAM
+     // [0x500,0x8500) at boot; the functions above with keys in that window
+@@ -1792,7 +1807,7 @@
                             g_sym_prefix, kb_count);
          out += kb;
          out += "};\n";
@@ -11,3 +33,14 @@ index 6d7f80bf721ec298f293ebd8cb39449f52865668..5c5cb38670df0dba8d65860eb134ebfe
                             g_sym_prefix, kb_count);
      }
  
+@@ -1989,7 +2004,9 @@
+     out += "        }\n";
+     out += "#endif\n";
+     out += "        uint32_t phys = normalize(addr);\n";
+-    out += "        if (!found) {\n";
++    out += fmt::format("        /* No key lies strictly between 0x{:08X} and 0x{:08X}, where the game's RAM is: no search there. */\n"
++                       "        if (!found && !(phys > 0x{:08X}u && phys < 0x{:08X}u)) {{\n",
++                       key_gap_lo, key_gap_hi, key_gap_lo, key_gap_hi);
+     out += "        while (lo <= hi) {\n";
+     out += "            int mid = (lo + hi) / 2;\n";
+     out += "            if (dispatch_table[mid].addr == phys) {\n";

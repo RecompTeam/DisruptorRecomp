@@ -310,9 +310,11 @@ void apply_saved_preferences(const PSXRecompV4::UserSettings &settings) {
                                   ? settings.diagnostic_view : 0);
     }
     if (settings.has_smooth_fade) gl_renderer_set_smooth_fade(settings.smooth_fade ? 1 : 0);
-    if (settings.has_multisampling) gl_renderer_set_multisampling(settings.multisampling);
-    if (settings.has_sample_shading) gl_renderer_set_sample_shading(settings.sample_shading ? 1 : 0);
+    // A file may name one half of the list: the other is off, as the list starts.
+    gl_renderer_set_multisampling(settings.multisampling);
+    gl_renderer_set_sample_shading(settings.sample_shading ? 1 : 0);
     (void)disruptor_far_rendering_set_preset(stored(settings, *find_option("disruptor.draw_distance")));
+    disruptor_far_rendering_force_from_environment();
     disruptor_far_rendering_set_fog_exponent(stored(settings, *find_option("disruptor.fog_shape")) + 1);
     // Downscale averaging and edge smoothing are withdrawn for now: off whatever an older file says.
     gl_renderer_set_downscale_averaging(0);
@@ -447,7 +449,7 @@ void load_preferences_for_session() {
         return;
     }
     std::printf("disruptor: settings at start: %s\n", disruptor::settings::describe(settings).c_str());
-    apply_saved_preferences(settings);
+    apply_saved_preferences(disruptor::settings::with_defaults(settings));
     apply_pending_preferences();
     /* A capsule recorded later copies the file: a layer left there by the last session must not go into it. */
     if (settings.has_diagnostic_view && settings.diagnostic_view != 0 && !env_override_present("PSX_DISRUPTOR_CAPSULE_REPLAY")) {

@@ -12,8 +12,8 @@ import sys
 from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parents[2]
-KEY_OF_BYTES = "2d1942e0"
-KEY_OF_TEXT = "2cece446"
+KEY_OF_BYTES = "ac516026"
+KEY_OF_TEXT = "5a873eb6"
 
 specification = importlib.util.spec_from_file_location("framework_tool", ROOT / "tools" / "framework.py")
 if specification is None or specification.loader is None:
@@ -68,9 +68,9 @@ require(
 hashing = read("psxrecomp/runtime/hash_codegen.cmake")
 require(
     'string(SHA256 _h "${_cat}")\nstring(SUBSTRING "${_h}" 0 8 _h8)\n' in hashing
-    and "        h.codegen_hash  != (uint32_t)PSX_OVERLAY_CODEGEN_HASH ||\n"
-    in read("psxrecomp/runtime/src/boot_state.c"),
-    "the key is the first eight digits of the sources' hash, and a state of another key is refused",
+    and "        h.codegen_hash  != (uint32_t)PSX_OVERLAY_CODEGEN_HASH ||\n" in read("psxrecomp/runtime/src/boot_state.c")
+    and "getenv" not in read("psxrecomp/runtime/src/boot_state.c"),
+    "the key is the first eight digits of the sources' hash, and a state of another key is refused, whatever the environment",
 )
 require("    disruptor_contract(state_key)\n" in read("CMakeLists.txt"), "this contract must remain registered")
 

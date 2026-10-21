@@ -5,8 +5,8 @@ The program's files come from an explicit list and exclude game data. The packag
 CHANGELOG.md as their notes. The GitHub release's text is release/notes/<version>.md when it is written, else that
 section. The previous release on GitHub, when there is one, gives the update a delta package. Nothing is
 published unless --publish is given. The players' files are signed with Sigstore first: a browser opens to sign in as
-the organisation's account, and each gets a bundle and a line of SLSA provenance. Windows publishes first and
-makes the release, Linux adds its files to it.
+the organisation's account, and each gets a bundle and a line of SLSA provenance. Windows comes first and makes
+the release as a draft, Linux adds its files and publishes it, so players never see a release without them.
 """
 
 from __future__ import annotations
@@ -131,7 +131,7 @@ def with_install(body: str, platform: Platform) -> str:
 
 
 def create_command(version: str, repository: str, commit: str, body: Path, uploads: list[str]) -> list[str]:
-    """The release Windows makes at `commit`: a regular one, not a pre-release, and the latest."""
+    """The release Windows makes at `commit`: a draft, not a pre-release. GitHub tags the commit when it is published."""
     return [
         "gh",
         "release",
@@ -141,13 +141,20 @@ def create_command(version: str, repository: str, commit: str, body: Path, uploa
         repository,
         "--target",
         commit,
-        "--latest",
+        "--draft",
         "--title",
         version.removeprefix("v"),
         "--notes-file",
         str(body),
         *uploads,
     ]
+
+
+def finish_command(version: str, repository: str, body: Path, draft: bool) -> list[str]:
+    """Linux's edit of the release text. A draft is published with it as a regular release and the latest, a release
+    already published keeps its place."""
+    publish = ["--draft=false", "--latest"] if draft else []
+    return ["gh", "release", "edit", version, "--repo", repository, "--notes-file", str(body), *publish]
 
 
 def now() -> str:
@@ -258,7 +265,6 @@ def payload_of(build: Path, version: str, zstd_license: Path, platform: Platform
         "game.toml": ROOT / "game.toml",
         "mouse-aim.ini": ROOT / "mouse-aim.ini",
         "keybinds.ini": ROOT / "config/keybinds-modern.ini",
-        "settings.toml": ROOT / "release/windows/settings.toml",
         "GETTING_STARTED.md": ROOT / "docs/PLAYING.md",
         "CHANGELOG.md": ROOT / "CHANGELOG.md",
         "bios/openbios.bin": build / "bios/openbios.bin",
@@ -334,9 +340,10 @@ def payload_of(build: Path, version: str, zstd_license: Path, platform: Platform
 def add_to_release(
     work: Path, repository: str, version: str, commit: str, platform: Platform, uploads: list[str]
 ) -> None:
-    """Uploads `platform`'s files to the release Windows made from the same commit and adds its install lines."""
+    """Uploads `platform`'s files to the draft Windows made from the same commit, adds its install lines and
+    publishes it."""
     shown = subprocess.run(
-        ["gh", "release", "view", version, "--repo", repository, "--json", "body,targetCommitish"],
+        ["gh", "release", "view", version, "--repo", repository, "--json", "body,targetCommitish,isDraft"],
         capture_output=True,
         text=True,
         check=False,
@@ -350,9 +357,7 @@ def add_to_release(
     (work / "body.md").write_text(body, encoding="utf-8")
     # A publish run again after a failure replaces what it uploaded and finishes the text.
     subprocess.run(["gh", "release", "upload", version, "--repo", repository, "--clobber", *uploads], check=True)
-    subprocess.run(
-        ["gh", "release", "edit", version, "--repo", repository, "--notes-file", str(work / "body.md")], check=True
-    )
+    subprocess.run(finish_command(version, repository, work / "body.md", release["isDraft"]), check=True)
 
 
 def vpk(work: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
@@ -510,6 +515,14 @@ def main() -> None:
         if tagged.stdout.strip():
             raise SystemExit(
                 f"{args.version} is tagged on GitHub already: the release would not be this build's commit"
+            )
+        existing = subprocess.run(
+            ["gh", "release", "view", args.version, "--repo", repository], capture_output=True, text=True, check=False
+        )
+        if existing.returncode == 0:
+            raise SystemExit(
+                f"{args.version} has a release or a draft already: delete a draft left by a failed run with "
+                f"`gh release delete {args.version} --repo {repository}`, then run again"
             )
         subprocess.run(create_command(args.version, repository, commit, work / "body.md", uploads), check=True)
 

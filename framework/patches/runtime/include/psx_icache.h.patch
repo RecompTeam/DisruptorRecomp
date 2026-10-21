@@ -1,0 +1,23 @@
+diff --git a/runtime/include/psx_icache.h b/runtime/include/psx_icache.h
+index e1d1b722c70d6aa96f571384dd5574950f09e460..350ac190ded6dc957ef0d93bb601a0d132d08ee3 100644
+--- a/runtime/include/psx_icache.h
++++ b/runtime/include/psx_icache.h
+@@ -11,8 +11,17 @@
+ extern int g_psx_icache_active;
+ extern int g_ls_replay_active;
+ void psx_icache_reset(void);
++void psx_icache_fetch_miss(CPUState *cpu, uint32_t addr);
++#if defined(PSX_OVERLAY_DLL_BUILD)
+ void psx_icache_fetch(CPUState *cpu, uint32_t addr);
+-void psx_icache_fetch_miss(CPUState *cpu, uint32_t addr);
++#else
++/* The tag hit inline at every block leader: the miss path's own early return. A hit skips its lazy resolution of
++ * g_psx_icache_active, which only that path and psx_icache_fetch_interp read, each resolving it before use. */
++static inline void psx_icache_fetch(CPUState *cpu, uint32_t addr) {
++    if (g_psx_icache_tv[(addr & 0xFFCu) >> 2] == addr) return;
++    psx_icache_fetch_miss(cpu, addr);
++}
++#endif
+ 
+ /* Keep the interpreter's steady-state tag hit inside its translation unit.
+  * Misses use the shared slow path, preserving exact cache evolution/timing. */

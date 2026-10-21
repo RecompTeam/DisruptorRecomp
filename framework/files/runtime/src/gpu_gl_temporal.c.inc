@@ -270,9 +270,17 @@ static int temporal_texture(TemporalScene *s) {
     s->texture_generation[i] = s_temporal_raw_generation;
     return i;
 }
+/* A 32-bit word a step, a quarter of the steps of a byte at a time (every field hashed is whole words), then any tail byte by byte. */
 static uint64_t temporal_hash(uint64_t h, const void *data, size_t n) {
     const unsigned char *p = (const unsigned char *)data;
-    for (size_t i = 0; i < n; ++i) { h ^= p[i]; h *= UINT64_C(1099511628211); }
+    size_t i = 0;
+    for (; i + 4 <= n; i += 4) {
+        uint32_t word;
+        memcpy(&word, p + i, sizeof(word));
+        h ^= word;
+        h *= UINT64_C(1099511628211);
+    }
+    for (; i < n; ++i) { h ^= p[i]; h *= UINT64_C(1099511628211); }
     return h;
 }
 
@@ -362,7 +370,7 @@ static void temporal_draw(const float *vertices, const uint64_t *identities, int
     const int stride = textured ? TEXV : GEOV;
     for (int i=0; i<n; ++i) {
         float *v = &s->vertices[(s->nv+i)*TEXV];
-        memset(v, 0, TEXV*sizeof(float));
+        if (stride < TEXV) memset(v + stride, 0, (TEXV - stride)*sizeof(float));
         memcpy(v, vertices+i*stride, stride*sizeof(float));
         if (textured && v[19] < -1.5f) {
             s->backdrop=1; s->backdrop_origin=s_tile.origin; s->backdrop_period=s_tile.period;
@@ -370,15 +378,16 @@ static void temporal_draw(const float *vertices, const uint64_t *identities, int
         }
         temporal_position(v, textured, gate, direct);
     }
+    uint64_t command_hash=UINT64_C(14695981039346656037);  /* the command's part of each triangle's material, the same for all */
+    command_hash=temporal_hash(command_hash,&textured,sizeof(textured));
+    command_hash=temporal_hash(command_hash,&c->semi,sizeof(c->semi));
+    command_hash=temporal_hash(command_hash,&c->mask,sizeof(c->mask));
+    command_hash=temporal_hash(command_hash,&c->filter,sizeof(c->filter));
+    command_hash=temporal_hash(command_hash,c->twin,sizeof(c->twin));
     if (mode == GL_TRIANGLES) for (int i=0; i<n; i+=3) {
         GpuTemporalTriangle *t=&s->triangles[s->nt++];
         memset(t,0,sizeof(*t));
-        uint64_t hash=UINT64_C(14695981039346656037);
-        hash=temporal_hash(hash,&textured,sizeof(textured));
-        hash=temporal_hash(hash,&c->semi,sizeof(c->semi));
-        hash=temporal_hash(hash,&c->mask,sizeof(c->mask));
-        hash=temporal_hash(hash,&c->filter,sizeof(c->filter));
-        hash=temporal_hash(hash,c->twin,sizeof(c->twin));
+        uint64_t hash=command_hash;
         const int sprite = identities && identities[i]==TEMPORAL_SPRITE_IDENTITY &&
             identities[i+1]==TEMPORAL_SPRITE_IDENTITY && identities[i+2]==TEMPORAL_SPRITE_IDENTITY;
         const int partial = identities && identities[i]==TEMPORAL_PARTIAL_IDENTITY &&

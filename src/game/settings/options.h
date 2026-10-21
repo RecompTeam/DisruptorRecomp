@@ -36,6 +36,8 @@ const Option* find_option(const char* key);
 bool applies(const Option& option, const std::function<bool(const Option&)>& on);
 // The option's value in `settings`, or the one a fresh installation runs with where the file does not name it.
 int stored(const Settings& settings, const Option& option);
+// `settings` with each disruptor option the file does not name at its initial value. The runtime's own keys keep game.toml's.
+Settings with_defaults(Settings settings);
 // Every option as `key=value` in the table's order, for the game's log.
 std::string describe(const Settings& settings);
 

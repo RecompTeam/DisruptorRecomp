@@ -760,12 +760,14 @@ void mouse_aim_frame() {
                      static_cast<int>(psx_mod_widescreen_x_margin()),
                      ws_native_wide_active(), gpu_ws_present_native_43(),
                      ws_nw_extra());
-        log_geometry_diagnostics_scope(
-            "cumulative", g_mouse.frame, geometry_diagnostics,
-            geometry_diagnostics.cumulative);
-        log_geometry_diagnostics_scope(
-            "latest_live", g_mouse.frame, geometry_diagnostics,
-            geometry_diagnostics.latest_live);
+        if (gpu_geometry_diagnostics_detail()) {
+            log_geometry_diagnostics_scope(
+                "cumulative", g_mouse.frame, geometry_diagnostics,
+                geometry_diagnostics.cumulative);
+            log_geometry_diagnostics_scope(
+                "latest_live", g_mouse.frame, geometry_diagnostics,
+                geometry_diagnostics.latest_live);
+        }
         std::fflush(g_mouse.log);
         g_mouse.interval_mouse_x = 0.0;
         g_mouse.interval_mouse_y = 0.0;

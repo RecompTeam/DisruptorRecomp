@@ -78,6 +78,8 @@ SDL_Window *sdl_window = &g_window;
 
 void mod_register_frame_hook(void (*hook)(void)) { g_hook = hook; }
 void gl_renderer_set_debug_messages(int enabled) { g_asked = enabled; }
+int g_geometry_detail = -1;
+void gpu_geometry_diagnostics_set_detail(int enabled) { g_geometry_detail = enabled; }
 int gl_renderer_debug_messages_active(void) { return g_active; }
 int gl_renderer_debug_message_take(char *text, int size, unsigned *id, int *severity, int *context, unsigned *lost) {
     *lost = g_lost;

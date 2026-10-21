@@ -1,0 +1,14 @@
+diff --git a/runtime/src/parity_trace.c b/runtime/src/parity_trace.c
+index e8c110dd30bc4baa29805b0c6fff261f18397d0c..0acf258ae6047f1e0def43ad65abfbe5282c39eb 100644
+--- a/runtime/src/parity_trace.c
++++ b/runtime/src/parity_trace.c
+@@ -10,7 +10,8 @@
+ 
+ static ParityEntry s_ring[PARITY_RING_CAP];
+ static uint64_t    s_seq      = 0;
+-static uint32_t    s_armed    = 0;
++uint32_t g_parity_trace_armed = 0;  /* read by memory.c before each store's call */
++#define s_armed g_parity_trace_armed
+ static uint32_t    s_frozen   = 0;
+ 
+ static uint32_t    s_watched_tcb   = 0;

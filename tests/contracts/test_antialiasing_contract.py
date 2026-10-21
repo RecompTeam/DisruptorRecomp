@@ -275,10 +275,10 @@ require(
     "setting of its own, so an older file keeps them, and the launcher's Experimental page shows the anti-aliasing list alone",
 )
 require(
-    "    if (settings.has_sample_shading) gl_renderer_set_sample_shading(settings.sample_shading ? 1 : 0);\n" in menu
+    "    gl_renderer_set_sample_shading(settings.sample_shading ? 1 : 0);\n" in menu
     and '"disruptor.sample_shading"' not in menu + experimental
     and "mark_sample_shading" not in menu + experimental,
-    "supersampling is the anti-aliasing list's shading: no row of its own, and a start with it saved applies it",
+    "supersampling is the anti-aliasing list's shading: no row of its own, and every start applies it",
 )
 require(
     '    const Option& antialiasing = *find_option("disruptor.multisampling");\n'
@@ -298,7 +298,7 @@ require(
     "    if (!sampling_applies) ImGui::EndDisabled();\n" in experimental
     and "downscale_averaging" not in experimental
     and "edge_smoothing" not in experimental
-    and "    if (settings.has_multisampling) gl_renderer_set_multisampling(settings.multisampling);\n" in menu
+    and "    gl_renderer_set_multisampling(settings.multisampling);\n" in menu
     and "    gl_renderer_set_downscale_averaging(0);\n    gl_renderer_set_edge_smoothing(0);\n" in menu
     and "gl_renderer_set_downscale_averaging(settings" not in menu
     and "gl_renderer_set_edge_smoothing(settings" not in menu

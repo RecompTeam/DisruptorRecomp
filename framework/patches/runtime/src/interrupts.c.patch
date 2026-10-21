@@ -1,5 +1,5 @@
 diff --git a/runtime/src/interrupts.c b/runtime/src/interrupts.c
-index c267a87da5a361b8d34d15a00622279e231c314f..7544e4b1b39d36fcfbef97b2cf054a7ec5cb5aa0 100644
+index c267a87da5a361b8d34d15a00622279e231c314f..391dc934a05a6e77caa8588c02e3d20852dbcf99 100644
 --- a/runtime/src/interrupts.c
 +++ b/runtime/src/interrupts.c
 @@ -37,6 +37,7 @@
@@ -10,18 +10,43 @@ index c267a87da5a361b8d34d15a00622279e231c314f..7544e4b1b39d36fcfbef97b2cf054a7e
  #include <stdio.h>
  #include <stdlib.h>
  #include <string.h>
-@@ -447,6 +448,10 @@
+@@ -136,7 +137,8 @@
+ extern int g_cosim_dirty_pump_site;
+ 
+ /* Reentrancy guard: prevent interrupt handler from triggering interrupts. */
+-static int in_exception;
++int psx_irq_in_exception;  /* exported for the inline block-edge check in cpu_state.h */
++#define in_exception psx_irq_in_exception
+ /* Guest-cycle deadline: IRQ delivery is blocked while psx_get_cycle_count() is
+  * below this. 0 = no cooldown active. Counted in guest cycles (not calls) so both
+  * backends make the identical delivery decision — see the cooldown constants. */
+@@ -446,7 +448,14 @@
+  * is in progress. If the delivered handler later RFEs to the sentinel outside
   * the synchronous host window, dirty_ram_dispatch can resume at this guest PC
   * instead of treating the sentinel as pc=0 termination. */
- static uint32_t s_compiled_interrupt_resume_pc = 0;
+-static uint32_t s_compiled_interrupt_resume_pc = 0;
++uint32_t psx_irq_compiled_resume_pc = 0;
++#define s_compiled_interrupt_resume_pc psx_irq_compiled_resume_pc
 +/* Set by psx_check_interrupts_at for the one call it makes: in any other call the latch above is an earlier call's. */
-+static int s_resume_pc_given = 0;
-+static int s_save_poll_owed = 0;
++int psx_irq_resume_pc_given = 0;
++#define s_resume_pc_given psx_irq_resume_pc_given
++int psx_irq_save_poll_owed = 0;
++#define s_save_poll_owed psx_irq_save_poll_owed
 +extern void savestate_poll(CPUState* cpu, uint32_t resume_pc);
  static uint32_t s_last_interrupt_check_pc = 0;
  static uint64_t s_last_interrupt_check_cycle = UINT64_MAX;
  
-@@ -609,6 +614,10 @@
+@@ -464,7 +473,8 @@
+  * detected nested, we record it here, let the outgoing thread resume
+  * transparently, and honor it at the next outermost block-leader boundary (top
+  * of psx_check_interrupts) where the thread can be re-saved cleanly. */
+-static int      s_defer_switch_pending = 0;
++int psx_irq_defer_switch_pending = 0;
++#define s_defer_switch_pending psx_irq_defer_switch_pending
+ static uint32_t s_defer_switch_target  = 0;  /* TCB PCB[0] should name after the switch */
+ static uint32_t s_defer_switch_from    = 0;  /* the interrupted thread to re-save cleanly */
+ 
+@@ -609,6 +619,10 @@
      last_sio_progress_cycle = psx_get_cycle_count();
  }
  
@@ -32,16 +57,30 @@ index c267a87da5a361b8d34d15a00622279e231c314f..7544e4b1b39d36fcfbef97b2cf054a7e
  /*
   * Called by the runtime's ReturnFromException implementation (traps.c)
   * when the recompiled BIOS handler or a chain callback invokes
-@@ -731,6 +740,8 @@
+@@ -730,8 +744,18 @@
+     return 1;
  }
  
++uint32_t psx_irq_fast_maintenance = 0;
++#define s_fast_maintenance psx_irq_fast_maintenance
++
  void psx_check_interrupts(CPUState* cpu) {
 +    const int save_point = s_resume_pc_given;
 +    s_resume_pc_given = 0;
      psx_cyc_batch_flush();
++    psx_check_interrupts_flushed(cpu, save_point);
++}
++
++/* The check from after its flush: cpu_state.h's inline edge takes the mark and flushes itself, then continues here. */
++void psx_check_interrupts_flushed(CPUState* cpu, int save_point) {
      extern int g_ls_suppress_record;
  #define PSX_CHECK_INTERRUPTS_RETURN() do { if (g_ls_suppress_record > 0) g_ls_suppress_record--; return; } while (0)
-@@ -749,11 +760,10 @@
+ #ifdef PSX_COSIM
+@@ -745,15 +769,13 @@
+      * mid-path bookkeeping / irq_deliver_eval that used to run every BB.
+      * Guest-visible timing unchanged (same non-delivery). LTO can collapse
+      * this into the VLC call sites. */
+-    static uint32_t s_fast_maintenance;
      if (!in_exception && !s_defer_switch_pending && (i_stat & i_mask) != 0) {
          uint32_t sr = cpu->cop0[COP0_SR];
          if (!(sr & 0x01u) || !(sr & (1u << 10))) {
@@ -56,7 +95,7 @@ index c267a87da5a361b8d34d15a00622279e231c314f..7544e4b1b39d36fcfbef97b2cf054a7e
              return;
          }
      }
-@@ -795,11 +805,10 @@
+@@ -795,11 +817,10 @@
              psx_idle_note_check(cpu, check_pc);
          }
          if ((i_stat & i_mask) == 0 && sw_pending == 0) {
@@ -71,7 +110,7 @@ index c267a87da5a361b8d34d15a00622279e231c314f..7544e4b1b39d36fcfbef97b2cf054a7e
              return;
          }
          /* Idle skip advanced time and a device raised I_STAT — deliver below. */
-@@ -817,11 +826,10 @@
+@@ -817,11 +838,10 @@
          s_last_interrupt_check_cycle = psx_get_cycle_count();
          g_ls_suppress_record++;
          total_checks++;
@@ -87,7 +126,7 @@ index c267a87da5a361b8d34d15a00622279e231c314f..7544e4b1b39d36fcfbef97b2cf054a7e
          goto irq_deliver_eval;
      }
  
-@@ -862,10 +870,8 @@
+@@ -862,10 +882,8 @@
       * only act outside the exception handler so a restore's stack-unwind can't
       * strand a half-finished handler. Near-free when nothing is staged. A load
       * longjmps to the scheduler and never returns here. */
@@ -100,8 +139,12 @@ index c267a87da5a361b8d34d15a00622279e231c314f..7544e4b1b39d36fcfbef97b2cf054a7e
  
      /* Deferred cooperative thread switch: honor at the next real thread-save
       * boundary (see s_defer_switch_* above). A
-@@ -1649,6 +1655,7 @@
- void psx_check_interrupts_at(CPUState* cpu, uint32_t resume_pc) {
+@@ -1646,9 +1664,10 @@
+  * interrupts via psx_check_interrupts (cpu->pc / scratch sentinel). Forwarding
+  * here gives the mmx6 baseline interrupt behavior — sufficient to build+run the
+  * current generated code on the good baseline for instrumented comparison. */
+-void psx_check_interrupts_at(CPUState* cpu, uint32_t resume_pc) {
++void psx_check_interrupts_at_slow(CPUState* cpu, uint32_t resume_pc) {
      uint32_t prev = s_compiled_interrupt_resume_pc;
      s_compiled_interrupt_resume_pc = resume_pc;
 +    s_resume_pc_given = 1;

@@ -64,10 +64,10 @@ require(
 
 lookup = body(gte, "static GtePrecisionLookupResult precision_lookup_projection(")
 require(
-    "    if (entry.projection.saturated && !(entry.projection.clamped && entry.projection.unbounded && precision_unpin()))\n"
+    "    if (stored.saturated && !(stored.clamped && stored.unbounded && precision_unpin()))\n"
     "        return GTE_PRECISION_LOOKUP_SATURATED;" in lookup
     and lookup.count("GTE_PRECISION_LOOKUP_SATURATED") == 1
-    and lookup.index("return GTE_PRECISION_LOOKUP_ZERO_DEPTH;") < lookup.index("entry.projection.saturated"),
+    and lookup.index("return GTE_PRECISION_LOOKUP_ZERO_DEPTH;") < lookup.index("stored.saturated"),
     "a saturated projection must be refused unless the game pinned it and an exact divide placed it, and never without a depth",
 )
 load = body(gte, 'extern "C" GtePrecisionLookupResult gte_precision_load_word_ex(')

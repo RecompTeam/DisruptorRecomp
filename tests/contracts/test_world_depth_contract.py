@@ -173,10 +173,9 @@ require(
     row.endswith("needs_geometry")
     and "constexpr const char* needs_geometry[] = {geometry_key};\n" in options
     and options.count('"disruptor.depth_sorted_world"') == 1
-    and launcher.count('"disruptor.depth_sorted_world"') == 2
-    and '    {"disruptor.depth_sorted_world", Page::enhancements},\n' in launcher
-    and "smooth_fade = true\ndepth_sorted_world = true\n" in read("release/windows/settings.toml"),
-    "the launcher offers it on the Enhancements page, on in a release and only with geometry correction",
+    and launcher.count('"disruptor.depth_sorted_world"') == 1
+    and '    {"disruptor.depth_sorted_world", Page::enhancements},\n' in launcher,
+    "the launcher offers it on the Enhancements page, on by default and only with geometry correction",
 )
 
 print("Disruptor depth-sorted world source contract: PASS")

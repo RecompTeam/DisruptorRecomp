@@ -1,5 +1,5 @@
 diff --git a/runtime/src/gte.cpp b/runtime/src/gte.cpp
-index e7a1083a316b72fc30b9fa34038b773911bced51..043d4dbf51f84ec67b751da32d4a1b5f3d4a83d8 100644
+index e7a1083a316b72fc30b9fa34038b773911bced51..f07488b2ed42918fad03283feacf74e29aef83c1 100644
 --- a/runtime/src/gte.cpp
 +++ b/runtime/src/gte.cpp
 @@ -1,5 +1,7 @@
@@ -10,7 +10,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..043d4dbf51f84ec67b751da32d4a1b5f
  #include <algorithm>
  #include <cstdlib>
  #include <cstdio>
-@@ -184,35 +186,70 @@
+@@ -184,65 +186,178 @@
  // ---------------------------------------------------------------------------
  static int32_t s_ws_xnum = 1, s_ws_xden = 1;
  extern "C" int gpu_ws_present_native_43(void);  /* gpu.c — suppress on 4:3 frames */
@@ -95,24 +95,33 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..043d4dbf51f84ec67b751da32d4a1b5f
 +constexpr int64_t kUnboundedLimit16 = INT64_C(1) << 30;
  
  #define PRECISION_STORE_SIZE 65536u
- struct PrecisionStoreEntry {
-@@ -223,9 +260,73 @@
- static PrecisionStoreEntry s_precision_store[PRECISION_STORE_SIZE];
+-struct PrecisionStoreEntry {
++struct PrecisionStoreTag {
+     uint32_t addr;
+-    PreciseProjection projection;
+     uint32_t generation;
+ };
+-static PrecisionStoreEntry s_precision_store[PRECISION_STORE_SIZE];
++/* Tags apart from the projections: every store into a live page checks a tag, 512 KB of them against 5.8 MB of entries. */
++static PrecisionStoreTag s_precision_tag[PRECISION_STORE_SIZE];
++static PreciseProjection s_precision_projection[PRECISION_STORE_SIZE];
++extern "C" uint32_t g_gte_precision_ram_pages[16] = {};
++extern "C" uint32_t g_gte_precision_dma_pages[8] = {};
++extern "C" uint32_t g_gte_precision_scratch_live = 0;
++static_assert(PSX_MOD_GPU_DMA_APERTURE_BASE == 0x00F00000u && PSX_MOD_GPU_DMA_APERTURE_SIZE == (256u << 12),
++              "gte_precision_dma_live's page arithmetic");
  static uint32_t s_precision_generation = 1;
  static int s_precision_tracking = 0;
 +static GtePrecisionDiagnostics s_precision_diagnostics = {};
-+struct PrecisionWordCommitToken {
-+    uint32_t physical;
-+    uint8_t domain;
-+    uint8_t pending;
-+};
-+static PrecisionWordCommitToken s_precision_word_commit = {};
++extern "C" GtePrecisionWordCommitToken g_gte_precision_word_commit = {};
++#define s_precision_word_commit g_gte_precision_word_commit
 +enum PrecisionWordDomain : uint8_t {
 +    PRECISION_WORD_DOMAIN_NONE = 0,
 +    PRECISION_WORD_DOMAIN_MAIN_RAM = 1,
 +    PRECISION_WORD_DOMAIN_SCRATCHPAD = 2,
 +    PRECISION_WORD_DOMAIN_GPU_DMA = 3,
 +};
++static_assert(PRECISION_WORD_DOMAIN_NONE == 0 && PRECISION_WORD_DOMAIN_MAIN_RAM == 1, "the inline token writers in gte_precision.h");
 +#define PRECISION_STORE_PC_ROUTE_MAX 32u
 +struct PrecisionStorePcRoute {
 +    uint32_t physical_pc;
@@ -162,15 +171,23 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..043d4dbf51f84ec67b751da32d4a1b5f
  static PreciseProjection s_speculative_saved_sxy[4];
  static uint32_t s_speculative_depth = 0;
  static int s_speculative_timeline_invalidated = 0;
-+
+ 
 +static void precision_copy_captures_clear(void) {
 +    for (uint32_t i = 0; i < s_precision_copy_pc_route_count; ++i)
 +        s_precision_copy_pc_routes[i].capture.valid = 0;
 +}
- 
++
  static void gte_precision_generation_advance(void) {
++    std::memset(g_gte_precision_ram_pages, 0, sizeof(g_gte_precision_ram_pages));
++    std::memset(g_gte_precision_dma_pages, 0, sizeof(g_gte_precision_dma_pages));
++    g_gte_precision_scratch_live = 0;
      if (++s_precision_generation == 0) {
-@@ -236,13 +337,20 @@
+-        std::memset(s_precision_store, 0, sizeof(s_precision_store));
++        std::memset(s_precision_tag, 0, sizeof(s_precision_tag));
++        std::memset(s_precision_projection, 0, sizeof(s_precision_projection));
+         s_precision_generation = 1;
+     }
+ }
  
  static void gte_geom_generation_advance(void) {
      if (++s_geom_generation == 0) {
@@ -192,7 +209,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..043d4dbf51f84ec67b751da32d4a1b5f
      /* Raw machine-state restore is authoritative even if host polling reached
       * it during a speculative validation pass. Defer the generation advance
       * until the outer transaction ends so old provenance cannot be restored. */
-@@ -255,6 +363,8 @@
+@@ -255,6 +370,8 @@
  }
  
  extern "C" void gte_precision_speculative_begin(void) {
@@ -201,7 +218,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..043d4dbf51f84ec67b751da32d4a1b5f
      if (s_speculative_depth++ == 0) {
          std::memcpy(s_speculative_saved_sxy, s_precise_sxy,
                      sizeof(s_precise_sxy));
-@@ -273,6 +383,8 @@
+@@ -273,6 +390,8 @@
              std::memcpy(s_precise_sxy, s_speculative_saved_sxy,
                          sizeof(s_precise_sxy));
          }
@@ -210,7 +227,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..043d4dbf51f84ec67b751da32d4a1b5f
      }
  }
  
-@@ -283,64 +395,678 @@
+@@ -283,64 +402,674 @@
  }
  
  static inline int precision_ram_address(uint32_t addr, uint32_t *physical) {
@@ -229,19 +246,6 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..043d4dbf51f84ec67b751da32d4a1b5f
      return 1;
  }
  
--extern "C" void gte_precision_tracking_set(int enabled) {
--    s_precision_tracking = enabled ? 1 : 0;
--    gte_precision_generation_advance();
--}
--
--extern "C" void gte_precision_store_word(uint32_t addr, uint8_t reg) {
--    if (s_speculative_depth != 0 || s_gte_replay_sandbox || !s_precision_tracking ||
--        reg < 12 || reg > 15) return;
--    int index = reg == 15 ? 2 : (int)reg - 12;
--    const PreciseProjection &projection = s_precise_sxy[index];
--    if (!projection.valid) return;
--    uint32_t physical;
--    if (!precision_ram_address(addr, &physical)) return;
 +static inline int precision_scratch_address(uint32_t addr,
 +                                             uint32_t *physical) {
 +    /* Same translation as memory.c, with KSEG2/KSEG3 kept from aliasing a scratchpad slot. */
@@ -265,17 +269,26 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..043d4dbf51f84ec67b751da32d4a1b5f
 +
 +static void precision_store_projection(
 +        uint32_t physical, const PreciseProjection &projection) {
-     PrecisionStoreEntry &entry = s_precision_store[precision_hash(physical)];
-+    if (entry.generation != 0 && entry.addr != physical) {
++    const uint32_t slot = precision_hash(physical);
++    PrecisionStoreTag &tag = s_precision_tag[slot];
++    if (tag.generation != 0 && tag.addr != physical) {
 +        ++s_precision_diagnostics.store_collisions;
-+        if (entry.generation == s_precision_generation)
++        if (tag.generation == s_precision_generation)
 +            ++s_precision_diagnostics.store_evictions;
 +    }
-     entry.addr = physical;
-     entry.projection = projection;
-     entry.generation = s_precision_generation;
- }
- 
++    tag.addr = physical;
++    s_precision_projection[slot] = projection;
++    tag.generation = s_precision_generation;
++    if (physical < 0x00200000u) {
++        g_gte_precision_ram_pages[physical >> 17] |= 1u << ((physical >> 12) & 31u);
++    } else if (physical - PSX_MOD_GPU_DMA_APERTURE_BASE < PSX_MOD_GPU_DMA_APERTURE_SIZE) {
++        const uint32_t page = (physical - PSX_MOD_GPU_DMA_APERTURE_BASE) >> 12;
++        g_gte_precision_dma_pages[page >> 5] |= 1u << (page & 31u);
++    } else {
++        g_gte_precision_scratch_live = 1;
++    }
++}
++
 +static const PrecisionStorePcRoute *precision_store_pc_route(
 +        uint32_t store_pc, uint32_t instruction) {
 +    const uint32_t physical_pc = store_pc & 0x1FFFFFFFu;
@@ -344,23 +357,6 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..043d4dbf51f84ec67b751da32d4a1b5f
 +    return nullptr;
 +}
 +
-+extern "C" void gte_precision_word_write_begin(void) {
-+    s_precision_word_commit.domain = PRECISION_WORD_DOMAIN_NONE;
-+    s_precision_word_commit.pending = 0;
-+}
-+
-+extern "C" void gte_precision_main_ram_word_committed(uint32_t physical) {
-+    /* memory.c passes the folded address after all four bytes are written: no unaligned host write may become an aligned token. */
-+    if (physical >= 0x00200000u || (physical & 3u) != 0u) {
-+        s_precision_word_commit.domain = PRECISION_WORD_DOMAIN_NONE;
-+        s_precision_word_commit.pending = 0;
-+        return;
-+    }
-+    s_precision_word_commit.physical = physical;
-+    s_precision_word_commit.domain = PRECISION_WORD_DOMAIN_MAIN_RAM;
-+    s_precision_word_commit.pending = 1;
-+}
-+
 +/* Only memory.c arms this domain, so a renderer lookup cannot alias it with a folded main-RAM word. */
 +extern "C" void gte_precision_gpu_dma_word_committed(uint32_t physical) {
 +    if (physical < PSX_MOD_GPU_DMA_APERTURE_BASE ||
@@ -392,16 +388,16 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..043d4dbf51f84ec67b751da32d4a1b5f
 +    s_precision_word_commit.pending = 1;
 +}
 +
-+extern "C" void gte_precision_tracking_set(int enabled) {
-+    s_precision_tracking = enabled ? 1 : 0;
+ extern "C" void gte_precision_tracking_set(int enabled) {
+     s_precision_tracking = enabled ? 1 : 0;
 +    std::memset(s_precision_mfc2_capture, 0,
 +                sizeof(s_precision_mfc2_capture));
 +    precision_copy_captures_clear();
 +    s_precision_word_commit.domain = PRECISION_WORD_DOMAIN_NONE;
 +    s_precision_word_commit.pending = 0;
-+    gte_precision_generation_advance();
-+}
-+
+     gte_precision_generation_advance();
+ }
+ 
 +extern "C" void gte_precision_store_pc_routes_reset(void) {
 +    s_precision_store_pc_route_count = 0;
 +    s_precision_scratch_store_pc_route_count = 0;
@@ -607,24 +603,27 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..043d4dbf51f84ec67b751da32d4a1b5f
 +    if ((addr & 3u) != 0u) return packed;
 +    uint32_t physical;
 +    if (!precision_copy_source_address(addr, &physical)) return packed;
-+    const PrecisionStoreEntry &entry =
-+        s_precision_store[precision_hash(physical)];
-+    if (entry.generation != s_precision_generation || entry.addr != physical ||
-+        !entry.projection.valid || entry.projection.packed != packed)
++    const uint32_t slot = precision_hash(physical);
++    const PrecisionStoreTag &tag = s_precision_tag[slot];
++    const PreciseProjection &stored = s_precision_projection[slot];
++    if (tag.generation != s_precision_generation || tag.addr != physical ||
++        !stored.valid || stored.packed != packed)
 +        return packed;
-+    route->capture = entry.projection;
++    route->capture = stored;
 +    ++s_precision_diagnostics.copy_load_accepts;
 +    return packed;
 +}
 +
-+extern "C" void gte_precision_store_word(uint32_t addr, uint8_t reg) {
+ extern "C" void gte_precision_store_word(uint32_t addr, uint8_t reg) {
 +    /* Consume before every early return so no write token outlives into a later SWC2 callback. */
 +    const uint32_t committed_physical = s_precision_word_commit.physical;
 +    const uint8_t committed_domain = s_precision_word_commit.domain;
 +    const int committed = s_precision_word_commit.pending != 0;
 +    s_precision_word_commit.domain = PRECISION_WORD_DOMAIN_NONE;
 +    s_precision_word_commit.pending = 0;
-+    if (s_speculative_depth != 0 || s_gte_replay_sandbox || !s_precision_tracking ||
+     if (s_speculative_depth != 0 || s_gte_replay_sandbox || !s_precision_tracking ||
+-        reg < 12 || reg > 15) return;
+-    int index = reg == 15 ? 2 : (int)reg - 12;
 +        reg < 12 || reg > 15 || (addr & 3u) != 0u) return;
 +    uint32_t physical;
 +    if (!precision_ram_address(addr, &physical)) return;
@@ -640,8 +639,8 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..043d4dbf51f84ec67b751da32d4a1b5f
 +        return;
 +    }
 +    int index = precision_projection_index(reg);
-+    const PreciseProjection &projection = s_precise_sxy[index];
-+    if (!projection.valid) return;
+     const PreciseProjection &projection = s_precise_sxy[index];
+     if (!projection.valid) return;
 +    precision_store_projection(physical, projection);
 +}
 +
@@ -663,8 +662,12 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..043d4dbf51f84ec67b751da32d4a1b5f
 +        !s_precision_tracking || (addr & 3u) != 0u)
 +        return;
 +    ++s_precision_diagnostics.registered_store_attempts;
-+    uint32_t physical;
-+    if (!precision_ram_address(addr, &physical)) return;
+     uint32_t physical;
+     if (!precision_ram_address(addr, &physical)) return;
+-    PrecisionStoreEntry &entry = s_precision_store[precision_hash(physical)];
+-    entry.addr = physical;
+-    entry.projection = projection;
+-    entry.generation = s_precision_generation;
 +    if (!committed || !precision_memory_commit_matches(committed_domain, physical) ||
 +        committed_physical != physical) {
 +        ++s_precision_diagnostics.store_uncommitted_rejections;
@@ -770,18 +773,21 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..043d4dbf51f84ec67b751da32d4a1b5f
 +    }
 +    precision_store_projection(physical, projection);
 +    ++s_precision_diagnostics.copy_store_accepts;
-+}
-+
+ }
+ 
  extern "C" void gte_precision_invalidate_word(uint32_t addr) {
      if (s_speculative_depth != 0 || s_gte_replay_sandbox || !s_precision_tracking) return;
      uint32_t physical;
 -    if (!precision_ram_address(addr, &physical)) return;
+-    PrecisionStoreEntry &entry = s_precision_store[precision_hash(physical)];
+-    if (entry.generation == s_precision_generation && entry.addr == physical)
+-        entry.generation = 0;
 +    if (!precision_copy_source_address(addr, &physical)) return;
-     PrecisionStoreEntry &entry = s_precision_store[precision_hash(physical)];
-     if (entry.generation == s_precision_generation && entry.addr == physical)
-         entry.generation = 0;
- }
- 
++    PrecisionStoreTag &tag = s_precision_tag[precision_hash(physical)];
++    if (tag.generation == s_precision_generation && tag.addr == physical)
++        tag.generation = 0;
++}
++
 +static GtePrecisionLookupResult precision_lookup_projection(
 +        uint32_t addr, uint32_t packed,
 +        const PreciseProjection **projection) {
@@ -795,23 +801,25 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..043d4dbf51f84ec67b751da32d4a1b5f
 +    uint32_t physical;
 +    if (!precision_ram_address(addr, &physical))
 +        return GTE_PRECISION_LOOKUP_SOURCE_NOT_RAM;
-+    const PrecisionStoreEntry &entry = s_precision_store[precision_hash(physical)];
-+    if (entry.generation != s_precision_generation)
++    const uint32_t slot = precision_hash(physical);
++    const PrecisionStoreTag &tag = s_precision_tag[slot];
++    const PreciseProjection &stored = s_precision_projection[slot];
++    if (tag.generation != s_precision_generation)
 +        return GTE_PRECISION_LOOKUP_STORE_MISS;
-+    if (entry.addr != physical) {
++    if (tag.addr != physical) {
 +        ++s_precision_diagnostics.lookup_collisions;
 +        return GTE_PRECISION_LOOKUP_STORE_COLLISION;
 +    }
-+    if (!entry.projection.valid)
++    if (!stored.valid)
 +        return GTE_PRECISION_LOOKUP_PROJECTION_INVALID;
-+    if (entry.projection.packed != packed)
++    if (stored.packed != packed)
 +        return GTE_PRECISION_LOOKUP_PACKED_MISMATCH;
-+    if (entry.projection.z == 0)
++    if (stored.z == 0)
 +        return GTE_PRECISION_LOOKUP_ZERO_DEPTH;
 +    /* A corner the GTE saturated and the game then pinned to its guard band is drawn where it projects. */
-+    if (entry.projection.saturated && !(entry.projection.clamped && entry.projection.unbounded && precision_unpin()))
++    if (stored.saturated && !(stored.clamped && stored.unbounded && precision_unpin()))
 +        return GTE_PRECISION_LOOKUP_SATURATED;
-+    if (projection) *projection = &entry.projection;
++    if (projection) *projection = &stored;
 +    return GTE_PRECISION_LOOKUP_ACCEPTED;
 +}
 +
@@ -857,9 +865,10 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..043d4dbf51f84ec67b751da32d4a1b5f
 +    uint32_t physical;
 +    if (!view || s_speculative_depth != 0 || !s_precision_tracking || (addr & 3u) != 0u || !precision_ram_address(addr, &physical))
 +        return 0;
-+    const PrecisionStoreEntry &entry = s_precision_store[precision_hash(physical)];
-+    const PreciseProjection &projection = entry.projection;
-+    if (entry.generation != s_precision_generation || entry.addr != physical || !projection.valid || projection.packed != packed ||
++    const uint32_t slot = precision_hash(physical);
++    const PrecisionStoreTag &tag = s_precision_tag[slot];
++    const PreciseProjection &projection = s_precision_projection[slot];
++    if (tag.generation != s_precision_generation || tag.addr != physical || !projection.valid || projection.packed != packed ||
 +        !projection.viewed)
 +        return 0;
 +    view->hx = (double)projection.view_x * projection.focal * (double)projection.squash_num / (double)projection.squash_den;
@@ -879,8 +888,8 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..043d4dbf51f84ec67b751da32d4a1b5f
 +    const PreciseProjection *projection = nullptr;
 +    return precision_lookup_projection(addr, packed, &projection) == GTE_PRECISION_LOOKUP_ACCEPTED &&
 +           projection->clamped;
-+}
-+
+ }
+ 
  extern "C" int gte_precision_load_word(uint32_t addr, uint32_t packed,
                                          int32_t *x16, int32_t *y16,
                                          uint16_t *z) {
@@ -921,7 +930,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..043d4dbf51f84ec67b751da32d4a1b5f
      gte_geom_generation_advance();
  }
  
-@@ -349,50 +1075,50 @@
+@@ -349,50 +1078,50 @@
  }
  
  extern "C" uint32_t gte_geometry_correction_hits(void) {
@@ -1009,7 +1018,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..043d4dbf51f84ec67b751da32d4a1b5f
  extern "C" void gte_ws_set_far_threshold(int t) { s_ws_far_threshold = t; }
  extern "C" int  gte_ws_get_far_threshold(void) { return (int)s_ws_far_threshold; }
  /* SZ stats observed while suppress is active (one frame window, reset on read). */
-@@ -814,13 +1540,13 @@
+@@ -814,13 +1543,13 @@
      // this frame is being stretched — never on a 4:3-presented frame (FMV /
      // full-2D screen), so content and present stay locked.
      int64_t xterm = (int64_t)gte->IR1 * h_div_sz;
@@ -1025,7 +1034,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..043d4dbf51f84ec67b751da32d4a1b5f
          /* Depth-gated: un-squash only FAR geometry (the backdrop); keep near
           * props squashed so they stay aligned. Record SZ stats for tuning. */
          int32_t sz = gte->SZ[3];
-@@ -829,7 +1555,7 @@
+@@ -829,7 +1558,7 @@
              if (sz > s_ws_sz_max) s_ws_sz_max = sz;
              s_ws_sz_n++;
          }
@@ -1034,7 +1043,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..043d4dbf51f84ec67b751da32d4a1b5f
              do_squash = false;
              if (!s_gte_replay_sandbox) s_ws_sz_far++;
          }
-@@ -863,11 +1589,54 @@
+@@ -863,11 +1592,54 @@
          s_precise_sxy[2].x16 = (int32_t)sx16;
          s_precise_sxy[2].y16 = (int32_t)sy16;
          s_precise_sxy[2].z = gte->SZ[3];
@@ -1092,7 +1101,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..043d4dbf51f84ec67b751da32d4a1b5f
      // Step 5: Depth cueing (MAC0/IR0) — only for last vertex of RTPT or RTPS
      if (setMac0) {
          int64_t mac0 = (int64_t)gte->DQA * h_div_sz + gte->DQB;
-@@ -1494,6 +2263,7 @@
+@@ -1494,6 +2266,7 @@
  extern "C" int gte_replay_side_effects_begin(void) {
      using namespace PSXRecomp::GTE;
      if (s_gte_replay_sandbox) return 0;
@@ -1100,7 +1109,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..043d4dbf51f84ec67b751da32d4a1b5f
      s_gte_replay_saved_caller_ra = s_gte_caller_ra;
      s_gte_replay_sandbox = 1;
      return 1;
-@@ -1503,6 +2273,7 @@
+@@ -1503,6 +2276,7 @@
      if (!s_gte_replay_sandbox) return;
      s_gte_caller_ra = s_gte_replay_saved_caller_ra;
      s_gte_replay_sandbox = 0;
@@ -1108,7 +1117,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..043d4dbf51f84ec67b751da32d4a1b5f
  }
  
  static uint32_t gte_cpu_lzcr(uint32_t value);
-@@ -2010,6 +2781,34 @@
+@@ -2010,6 +2784,34 @@
      p.y16 = y16;
      p.z = z;
      p.valid = 1;
@@ -1143,7 +1152,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..043d4dbf51f84ec67b751da32d4a1b5f
  }
  
  extern "C" void gte_test_get_precise_projection(uint32_t index,
-@@ -2029,8 +2828,8 @@
+@@ -2029,8 +2831,8 @@
  
  extern "C" void gte_test_seed_geometry(uint32_t packed, int32_t x16,
                                           int32_t y16) {

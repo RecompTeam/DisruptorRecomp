@@ -323,6 +323,7 @@ struct Capsule {
     uint32_t bios = 0, entry = 0;
     std::vector<Frame> recorded, replayed;
     std::vector<uint64_t> seen;
+    uint64_t run = 0xCBF29CE484222325ull;  /* each replayed frame's memory and guest cycle count, folded: builds that run alike print one value */
     Frame open;  /* the VBlank being recorded: its memory is known, its input is not yet */
     size_t at = 0, same = 0, last_same = 0, unwritten = 0;
     uint64_t first_cycle = 0, played_first_cycle = 0;
@@ -484,8 +485,9 @@ void write_picture(size_t number) {
 [[noreturn]] void finish_replay() {
     Capsule &capsule = g_capsule;
     const bool in_step = capsule.same != 0 && capsule.last_same + kInStep >= capsule.replayed.size();
-    std::fprintf(stderr, "disruptor: capsule: replayed %zu frames and %s: the game's memory is the recording's at %zu of them, last at frame %zu\n",
-                 capsule.replayed.size(), in_step ? "stayed in step with the recording" : "LEFT the recording", capsule.same, capsule.last_same);
+    std::fprintf(stderr, "disruptor: capsule: replayed %zu frames and %s: the game's memory is the recording's at %zu of them, last at frame %zu, run %016llx\n",
+                 capsule.replayed.size(), in_step ? "stayed in step with the recording" : "LEFT the recording", capsule.same, capsule.last_same,
+                 static_cast<unsigned long long>(capsule.run));
     if (!capsule.pictures.empty()) {
         std::string lines;
         char line[64];
@@ -506,6 +508,8 @@ void replay_frame() {
     Capsule &capsule = g_capsule;
     const Frame &frame = capsule.replayed[capsule.at];
     capsule.seen.push_back(memory_now());
+    capsule.run = (capsule.run ^ capsule.seen.back()) * 0x100000001B3ull;
+    capsule.run = (capsule.run ^ psx_cycle_count) * 0x100000001B3ull;
     if (capsule.seen.back() == frame.memory) {
         ++capsule.same;
         capsule.last_same = capsule.at;

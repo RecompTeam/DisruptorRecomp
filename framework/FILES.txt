@@ -8,9 +8,11 @@ recompiler/src/main_psx.cpp
 recompiler/tests/recompiler_patch_test.cpp
 recompiler/tests/test_reachable_discovery_codegen.py
 runtime/CMakeLists.txt
+runtime/include/cpu_state.h
 runtime/include/crash_trace.h
 runtime/include/dirty_ram_interp.h
 +runtime/include/game_host.h
+runtime/include/psx_icache.h
 runtime/include/psx_sdl_audio.h
 runtime/include/text_xlate.h
 +runtime/include/user_dir.h
@@ -46,6 +48,8 @@ runtime/include/savestate.h
 runtime/include/overlay_dispatch_preamble.c.inc
 runtime/include/ws_aspect_cone_math.h
 runtime/src/boot_state.c
+runtime/src/card_data_writes.c
+runtime/src/parity_trace.c
 runtime/src/psx_sdl_audio.cpp
 runtime/src/savestate.c
 runtime/src/crash_trace.c

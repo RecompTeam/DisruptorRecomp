@@ -21,7 +21,7 @@ namespace disruptor::user_folder {
 
 namespace {
 
-constexpr std::array<const char*, 2> shipped = {"settings.toml", "keybinds.ini"};
+constexpr std::array<const char*, 1> shipped = {"keybinds.ini"};
 
 struct Prepared {
     std::mutex mutex;

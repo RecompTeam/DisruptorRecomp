@@ -1,5 +1,5 @@
 diff --git a/runtime/src/gpu_gl_renderer.c b/runtime/src/gpu_gl_renderer.c
-index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..013cd9de7f2a7b664ce2b446de3b2a6502a2ceb4 100644
+index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c496bd1f1ea255e59179b8c50bf1a8efa5780cc2 100644
 --- a/runtime/src/gpu_gl_renderer.c
 +++ b/runtime/src/gpu_gl_renderer.c
 @@ -1,747 +1,1145 @@
@@ -1880,7 +1880,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..013cd9de7f2a7b664ce2b446de3b2a65
  static const char *INTERP_FS =
      "#version 330\n"
      "in vec2 v_uv; uniform sampler2D u_prev; uniform sampler2D u_curr;\n"
-@@ -757,2715 +1155,4737 @@
+@@ -757,2715 +1155,4742 @@
      "  }\n"
      "  frag=mix(prev,curr,alpha);\n"
      "}\n";
@@ -3762,7 +3762,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..013cd9de7f2a7b664ce2b446de3b2a65
 +    "uniform vec4 u_fade;     /* depth the fade begins at, depth of one row, rows of a fade (0 = as drawn), share of the step aside */\n"
 +    "uniform vec4 u_fade_at;  /* the picture's centre column, half its width, how much deeper the depth handed over is than the surface, 1 for the UV view */\n"
 +    "uniform float u_fade_power; /* the fog grows with this power of the depth into it */\n"
-+    "uniform vec4 u_dissolve;  /* share of the fog's depth the world starts to dissolve into what lies behind at, 1 where it may, 1 with the sky behind */\n"
++    "uniform vec4 u_dissolve;  /* camera depth the world starts to dissolve into what lies behind at, 1 where it may, 1 with the sky behind, the depth the game drops it at */\n"
 +    "uniform vec4 u_clear;     /* the frame's background, 1 when known: without the sky only a fog that ends in it dissolves */\n"
 +    "uniform vec4 u_visual_options;  /* w above 0: a filler or outline pass */\n"
 +    "int g_row;\n"
@@ -3835,7 +3835,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..013cd9de7f2a7b664ce2b446de3b2a65
 +    "    float range = (1.0 + u_fade.w*abs(v_fade.y - u_fade_at.x)/u_fade_at.y)/(v_fade.x*u_fade_at.z);\n"
 +    "    float into = (range - u_fade.x)/(u_fade.y*float(rows));\n"
 +    "    level = clamp(float(rows)*(into > 0.0 ? pow(min(into, 1.0), max(u_fade_power, 1.0)) : into), 0.0, float(rows - 1));\n"
-+    "    if (u_dissolve.y > 0.5) dissolve = smoothstep(u_dissolve.x, 1.0, into);\n"
++    "    if (u_dissolve.y > 0.5) dissolve = smoothstep(u_dissolve.x, u_dissolve.w, 1.0/(v_fade.x*u_fade_at.z));\n"
 +    "    g_row = v_clut.y - v_clut.y % rows + int(level);\n"
 +    "  } else if ((v_raw & 2) != 0) level = float(v_raw >> 2)/256.0;  /* a sprite the game faded: its row, and the share of the next */\n"
 +    "  if (!sample_texture(sample_uv, rgb, stp)) discard;\n"
@@ -4668,14 +4668,19 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..013cd9de7f2a7b664ce2b446de3b2a65
 + * downscale keeps such a wave, so a picture gives the texel under a pixel to a sixteenth. Shading and filters would spoil the values. */
 +static int s_uv_view = 0;
 +
-+/* Under the smooth fade the world dissolves toward the fog's end into what lies behind, so no square of it pops in or out: while
-+ * the sky is drawn, or where the frame's background is within a step of the pixel's own last fog shade (the shader compares).
-+ * What shows through is that background or farther geometry, itself in the fog's last fifth. */
++/* Under the smooth fade the world dissolves just short of the depth the game drops whole polygons at, so squares stop popping there (a
++ * polygon deeper than the edge margin still can) and the fogged shapes before it stay: while the sky is drawn, or where the frame's
++ * background is within 1.5 five-bit steps of the pixel's own last fog shade. What shows through is that background or fogged geometry. */
++#define EDGE_DISSOLVE_BAND 512.0f  /* camera depth the world dissolves over before that edge: 64 of the game's units, a fog row */
 +static int s_edge_sky = 0;
++static float s_edge_depth = 0.0f;
 +static int s_clear_known = 0;
 +static float s_clear_rgb[3];
 +void gl_renderer_set_edge_sky(int sky) { s_edge_sky = sky != 0; }
-+static int edge_dissolving(void) { return s_smooth_fade && (s_edge_sky || s_clear_known) && s_fade_rows > 1 && !s_uv_view; }
++void gl_renderer_set_edge_depth(float depth) { s_edge_depth = depth; }
++static int edge_dissolving(void) {
++    return s_smooth_fade && (s_edge_sky || s_clear_known) && s_fade_rows > 1 && s_edge_depth > EDGE_DISSOLVE_BAND && !s_uv_view;
++}
 +
 +/* An opaque pass blends by the second output while the edge dissolves: its factor is 0, the pixel unchanged, short of the edge. */
 +static void opaque_blend(void) {
@@ -4840,7 +4845,6 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..013cd9de7f2a7b664ce2b446de3b2a65
 +}
 +void gl_renderer_set_palette_fade_power(int power) { s_fade_power = power < 1 ? 1 : power > 3 ? 3 : power; }
 +
-+#define EDGE_DISSOLVE_FROM 0.8f  /* share of the fog's depth: the last fifth dissolves */
 +#define EDGE_CLEAR_WIDTH 256     /* a fill this large over the whole drawing area is a frame's background */
 +#define EDGE_CLEAR_HEIGHT 192
 +
@@ -4848,7 +4852,8 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..013cd9de7f2a7b664ce2b446de3b2a65
 +static int batch_dissolves(int semi, int check) { return edge_dissolving() && (semi < 0 || (semi == 4 && !check)); }
 +
 +static void edge_dissolve_batch(GLint dissolve, GLint clear, int semi, int check) {
-+    p_glUniform4f(dissolve, EDGE_DISSOLVE_FROM, batch_dissolves(semi, check) ? 1.0f : 0.0f, s_edge_sky ? 1.0f : 0.0f, 0.0f);
++    p_glUniform4f(dissolve, s_edge_depth - EDGE_DISSOLVE_BAND, batch_dissolves(semi, check) ? 1.0f : 0.0f, s_edge_sky ? 1.0f : 0.0f,
++                  s_edge_depth);
 +    p_glUniform4f(clear, s_clear_rgb[0], s_clear_rgb[1], s_clear_rgb[2], s_clear_known ? 1.0f : 0.0f);
 +}
 +
@@ -9299,7 +9304,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..013cd9de7f2a7b664ce2b446de3b2a65
      uint64_t freq = SDL_GetPerformanceFrequency();
      uint64_t deadline = SDL_GetPerformanceCounter();
      uint64_t diag_start = deadline, diag_swaps = 0, diag_captures = 0;
-@@ -3473,11 +5893,12 @@
+@@ -3473,11 +5898,12 @@
      while (SDL_AtomicGet(&s_interp_thread_run)) {
          SDL_LockMutex(s_interp_mutex);
          double hz = s_interp_target_hz;
@@ -9313,7 +9318,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..013cd9de7f2a7b664ce2b446de3b2a65
              uint64_t period = (uint64_t)((double)freq / hz);
              if (!period) period = 1;
              deadline += period;
-@@ -3492,235 +5913,427 @@
+@@ -3492,235 +5918,427 @@
              }
              while (SDL_GetPerformanceCounter() < deadline) {}
              now = SDL_GetPerformanceCounter();

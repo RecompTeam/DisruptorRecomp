@@ -88,7 +88,7 @@ require(
     "        s_precise_sxy[2].squash_num = do_squash ? s_ws_xnum : 1;\n"
     "        s_precise_sxy[2].squash_den = do_squash ? s_ws_xden : 1;\n"
     "        s_precise_sxy[2].viewed = do_squash || xterm == (int64_t)gte->IR1 * h_div_sz;\n" in gte
-    and "    if (entry.generation != s_precision_generation || entry.addr != physical || !projection.valid || projection.packed != packed ||\n"
+    and "    if (tag.generation != s_precision_generation || tag.addr != physical || !projection.valid || projection.packed != packed ||\n"
     "        !projection.viewed)\n"
     "        return 0;\n"
     "    view->hx = (double)projection.view_x * projection.focal * (double)projection.squash_num / (double)projection.squash_den;\n" in gte

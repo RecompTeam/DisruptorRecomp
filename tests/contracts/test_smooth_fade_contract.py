@@ -31,7 +31,7 @@ require(
     '    "    float range = (1.0 + u_fade.w*abs(v_fade.y - u_fade_at.x)/u_fade_at.y)/(v_fade.x*u_fade_at.z);\\n"\n'
     '    "    float into = (range - u_fade.x)/(u_fade.y*float(rows));\\n"\n'
     '    "    level = clamp(float(rows)*(into > 0.0 ? pow(min(into, 1.0), max(u_fade_power, 1.0)) : into), 0.0, float(rows - 1));\\n"\n'
-    '    "    if (u_dissolve.y > 0.5) dissolve = smoothstep(u_dissolve.x, 1.0, into);\\n"\n'
+    '    "    if (u_dissolve.y > 0.5) dissolve = smoothstep(u_dissolve.x, u_dissolve.w, 1.0/(v_fade.x*u_fade_at.z));\\n"\n'
     '    "    g_row = v_clut.y - v_clut.y % rows + int(level);\\n"\n' in renderer
     and '    "  if (rows > 1 && v_fade.x > 0.0 && v_depth != 2) {\\n"\n' in renderer
     and '    "  int rows = int(u_fade.z + 0.5); float level = -1.0, dissolve = 0.0;\\n"\n' in renderer,
@@ -125,7 +125,7 @@ require(
     and renderer.index('"  if (dissolve > 0.0 && u_dissolve.z < 0.5) {') < renderer.index('"  if (dissolve > 0.0 && dst_factor == 0.0) {')
     and "    if (w >= EDGE_CLEAR_WIDTH && h >= EDGE_CLEAR_HEIGHT && x <= s_area_x1 && y <= s_area_y1 && x + w - 1 >= s_area_x2 &&\n        y + h - 1 >= s_area_y2) {\n        s_clear_rgb[0] = r; s_clear_rgb[1] = g; s_clear_rgb[2] = b;\n        s_clear_known = 1;\n    }\n" in renderer
     and renderer.count("s_clear_known = 1;") == 1 and renderer.count("s_clear_rgb[0] = ") == 1
-    and "#define EDGE_DISSOLVE_FROM 0.8f " in renderer
+    and "#define EDGE_DISSOLVE_BAND 512.0f " in renderer and "EDGE_DISSOLVE_FROM" not in renderer
     and "#define EDGE_CLEAR_WIDTH 256 " in renderer and "#define EDGE_CLEAR_HEIGHT 192\n" in renderer
     and '    "  if (dissolve > 0.0 && dst_factor == 0.0) {  /* where the sky or a background like the fog shows through: no filler, its colour thinned, its depth kept */\\n"\n'
     '    "    if (u_visual_options.w > 0.0) discard;\\n"\n'
@@ -133,11 +133,12 @@ require(
     and "u_semipass >= 3) discard" not in renderer
     and renderer.index('"  if (dissolve > 0.0 && dst_factor == 0.0) {') > renderer.index('"  if (u_semimode == 4 && v_semi != 0 && stp != 0) {\\n"')
     and "void gl_renderer_set_edge_sky(int sky) { s_edge_sky = sky != 0; }\n" in renderer
-    and "static int edge_dissolving(void) { return s_smooth_fade && (s_edge_sky || s_clear_known) && s_fade_rows > 1 && !s_uv_view; }\n" in renderer
+    and "void gl_renderer_set_edge_depth(float depth) { s_edge_depth = depth; }\n" in renderer
+    and "    return s_smooth_fade && (s_edge_sky || s_clear_known) && s_fade_rows > 1 && s_edge_depth > EDGE_DISSOLVE_BAND && !s_uv_view;\n" in renderer
     and "    if (!edge_dissolving()) { glDisable(GL_BLEND); return; }\n    glEnable(GL_BLEND);\n" in renderer
     and "    p_glBlendFuncSeparate(GL_ONE, PSXGL_SRC1_ALPHA, GL_ONE, GL_ZERO);\n}\n\n/* Draw the queued textured batch" in renderer
     and "static int batch_dissolves(int semi, int check) { return edge_dissolving() && (semi < 0 || (semi == 4 && !check)); }\n" in renderer
-    and "    p_glUniform4f(dissolve, EDGE_DISSOLVE_FROM, batch_dissolves(semi, check) ? 1.0f : 0.0f, s_edge_sky ? 1.0f : 0.0f, 0.0f);\n" in renderer
+    and "    p_glUniform4f(dissolve, s_edge_depth - EDGE_DISSOLVE_BAND, batch_dissolves(semi, check) ? 1.0f : 0.0f, s_edge_sky ? 1.0f : 0.0f,\n                  s_edge_depth);\n" in renderer
     and "    p_glUniform4f(clear, s_clear_rgb[0], s_clear_rgb[1], s_clear_rgb[2], s_clear_known ? 1.0f : 0.0f);\n" in renderer
     and "temporal_colour_without_depth" not in presenter
     and presenter.count("edge_dissolve_batch(u->dissolve,u->clear,c->semi,c->check);") == 2
@@ -147,11 +148,14 @@ require(
     and presenter.count("opaque_blend()") == 3
     and "    } else if (c->semi<0) {\n        opaque_blend(); temporal_mask(c->check,c->mask);\n        p_glUniform1i(u->pass,0);" in presenter
     and "    gl_renderer_set_edge_sky(disruptor_backdrop_tiles_sky_behind(psx_mod_read_word(kVBlanks)));\n" in read("src/game/render/render_arena.cpp")
+    and "    gl_renderer_set_edge_depth(8.0f * static_cast<float>(far_distance + kCullReach));\n" in read("src/game/render/render_arena.cpp")
+    and "constexpr uint32_t kCullReach = 160u;" in read("src/game/render/render_arena.cpp")
     and "            if (g_sky_seen) g_sky_at = cpu->read_word(kVBlanks);\n" in read("src/game/render/backdrop_tiles.cpp")
     and "constexpr uint32_t kSkyVBlanks = 300u;" in read("src/game/render/backdrop_tiles.cpp"),
-    "under the smooth fade the world dissolves over the fog's last fifth while the game draws the sky behind it (a sky tile "
+    "under the smooth fade the world dissolves over the last 64 units before the depth the game drops whole polygons at (far + 160, "
+    "the drawn far, so the edge margin does not move it) while the game draws the sky behind it (a sky tile "
     "in the last five seconds), or where its texture's last fog shade is within a step of the frame's background (the last "
-    "fill over the whole drawing area): what shows through is that background or farther geometry in the fog's last fifth. An opaque pixel is thinned by the second blend "
+    "fill over the whole drawing area): what shows through is that background or farther fogged geometry. An opaque pixel is thinned by the second blend "
     "output in every pass, a batch only where its colour pass blends so; its fillers and outlines are dropped, its depth kept, "
     "for the void fill and the rim eraser read depth as geometry",
 )

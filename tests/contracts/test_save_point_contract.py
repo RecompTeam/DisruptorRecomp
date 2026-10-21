@@ -64,12 +64,15 @@ require(
 
 require(
     '#include "save_point.h"\n' in interrupts
-    and "static uint32_t s_compiled_interrupt_resume_pc = 0;\n" in interrupts
-    and "static int s_resume_pc_given = 0;\n" in interrupts
+    and "uint32_t psx_irq_compiled_resume_pc = 0;\n#define s_compiled_interrupt_resume_pc psx_irq_compiled_resume_pc\n" in interrupts
+    and "int psx_irq_resume_pc_given = 0;\n#define s_resume_pc_given psx_irq_resume_pc_given\n" in interrupts
     and len(re.findall(r"\bs_resume_pc_given\b", interrupts)) == 4
     and interrupts.count("s_resume_pc_given = 1;") == 1
-    and interrupts.count("s_resume_pc_given = 0;") == 2,
-    "the mark is declared off, set in one place, taken in one place and read nowhere else",
+    and interrupts.count("s_resume_pc_given = 0;") == 1
+    and "    psx_irq_compiled_resume_pc = resume_pc;\n    psx_irq_resume_pc_given = 0;\n    psx_cyc_batch_flush();\n" in read("psxrecomp/runtime/include/cpu_state.h")
+    and len(re.findall(r"\bpsx_irq_resume_pc_given\b", read("psxrecomp/runtime/include/cpu_state.h"))) == 2,
+    "the mark is declared off, set in one place, taken in one place and read nowhere else; the inline edge takes it, "
+    "as the check it stands for would, before its flush",
 )
 
 require(
@@ -79,7 +82,7 @@ require(
     "a check takes the mark before anything else, so a check that leaves by a long jump cannot pass it on",
 )
 
-given = between(interrupts, "void psx_check_interrupts_at(CPUState* cpu, uint32_t resume_pc) {", "\n}\n")
+given = between(interrupts, "void psx_check_interrupts_at_slow(CPUState* cpu, uint32_t resume_pc) {", "\n}\n")
 require(
     "    uint32_t prev = s_compiled_interrupt_resume_pc;\n"
     "    s_compiled_interrupt_resume_pc = resume_pc;\n"
@@ -90,7 +93,7 @@ require(
     "the mark is set with the address, right before the one call it is for",
 )
 
-check = between(interrupts, "void psx_check_interrupts(CPUState* cpu) {", "\nvoid psx_check_interrupts_at(")
+check = between(interrupts, "void psx_check_interrupts(CPUState* cpu) {", "\nvoid psx_check_interrupts_at_slow(")
 fast = (
     "            const int periodic = (++s_fast_maintenance & 0x3FFFu) == 0;\n"
     "            if (psx_save_poll_due(periodic, save_point, &s_save_poll_owed))\n"
@@ -114,9 +117,13 @@ require(
     polls_are_the_four(interrupts)
     and check.count(POLL) == 4
     and len(re.findall(r"\bpsx_save_poll_due\b", interrupts)) == 4
-    and len(re.findall(r"\bsave_point\b", check)) == 5
+    and len(re.findall(r"\bsave_point\b", check)) == 7
+    and "    psx_check_interrupts_flushed(cpu, save_point);\n}\n" in check
+    and "    psx_check_interrupts_flushed(cpu, 1);\n" in read("psxrecomp/runtime/include/cpu_state.h")
     and len(re.findall(r"\bs_save_poll_owed\b", interrupts)) == 5
-    and "static int s_save_poll_owed = 0;\n" in interrupts
+    and "int psx_irq_save_poll_owed = 0;\n#define s_save_poll_owed psx_irq_save_poll_owed\n" in interrupts
+    and len(re.findall(r"\bpsx_irq_save_poll_owed\b", read("psxrecomp/runtime/include/cpu_state.h"))) == 2
+    and "!psx_irq_save_poll_owed &&" in read("psxrecomp/runtime/include/cpu_state.h")
     and "savestate_pending" not in interrupts,
     "every poll goes through the rule with this check's mark and passes the address this check was given",
 )

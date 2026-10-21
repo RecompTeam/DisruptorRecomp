@@ -246,14 +246,14 @@ def main() -> int:
     copy_load_route_pos = copy_load.index("precision_copy_load_pc_route(")
     copy_load_clear_pos = copy_load.index("route->capture.valid = 0")
     copy_load_lookup_pos = copy_load.index(
-        "s_precision_store[precision_hash(physical)]")
-    copy_load_capture_pos = copy_load.index("route->capture = entry.projection")
+        "s_precision_tag[slot]")
+    copy_load_capture_pos = copy_load.index("route->capture = stored")
     require(copy_load_route_pos < copy_load_clear_pos < copy_load_lookup_pos <
             copy_load_capture_pos,
             "reviewed packet-copy LW must clear stale state then snapshot only "
             "the exact proven source word")
-    require("entry.addr != physical" in copy_load and
-            "entry.projection.packed != packed" in copy_load,
+    require("tag.addr != physical" in copy_load and
+            "stored.packed != packed" in copy_load,
             "packet-copy LW must match the exact RAM address and packed word")
     require("precision_copy_source_address(addr, &physical)" in copy_load and
             "precision_ram_address(addr, &physical)" not in copy_load,

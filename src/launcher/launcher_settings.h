@@ -29,8 +29,6 @@ struct Placement {
 };
 
 std::span<const Placement> layout();
-// Whether a release's settings.toml names the row: for these the game's own value is not the one a release runs with.
-bool shipped(const Option& option);
 // A row still being tried on a page other than Experimental: it carries a tag beside its name.
 bool experimental(const Option& option);
 std::span<const wchar_t* const> page_labels();
@@ -60,8 +58,6 @@ public:
     bool set(const Option& option, int value);
     // The rows of `page` back to what a new installation has.
     bool reset(Page page);
-    // Writes each shipped row the file does not name: for those the game's own value is not the one shown here.
-    bool complete();
 
     // UTF-8 paths. An empty language disc means the US disc alone.
     const std::string& language_disc() const { return settings_.language_disc; }

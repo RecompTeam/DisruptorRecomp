@@ -95,11 +95,8 @@ std::wstring shown_status(std::wstring_view said, std::wstring_view problem) {
     return text;
 }
 
-std::wstring running_text(const std::wstring& overriding, bool unwritten) {
+std::wstring running_text(const std::wstring& overriding) {
     std::wstring text = L"Disruptor is running. You can close this launcher and keep playing.";
-    if (unwritten)
-        text += L"\nsettings.toml cannot be written.\n"
-                L"Where it names no value, the game uses its own, which may differ from what is shown here.";
     if (!overriding.empty())
         text += L"\nPSX_ environment variables are set, and the game lets some of them replace settings for this "
                 L"run: " + overriding;

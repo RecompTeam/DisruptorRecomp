@@ -228,14 +228,10 @@ void test_the_window_acts_on_an_outcome() {
 }
 
 void test_the_running_status() {
-    const std::wstring plain = running_text(L"", false);
+    const std::wstring plain = running_text(L"");
     require(plain == L"Disruptor is running. You can close this launcher and keep playing.", "a plain start says the game runs");
-    const std::wstring unwritten = running_text(L"", true), both = running_text(L"PSX_VSYNC", true);
-    require(starts(unwritten, plain.c_str()) && unwritten.find(L"settings.toml cannot be written") != std::wstring::npos &&
-                running_text(L"PSX_VSYNC", false).find(L"settings.toml") == std::wstring::npos,
-            "a settings file that could not be completed is named, and only then");
-    require(ends(both, L"run: PSX_VSYNC") && both.find(L"settings.toml cannot be written") != std::wstring::npos &&
-                unwritten.find(L"PSX_") == std::wstring::npos,
+    const std::wstring overriding = running_text(L"PSX_VSYNC");
+    require(starts(overriding, plain.c_str()) && ends(overriding, L"run: PSX_VSYNC") && plain.find(L"PSX_") == std::wstring::npos,
             "the variables that replace settings are named, and only when there are some");
 }
 
