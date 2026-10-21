@@ -2,6 +2,33 @@
 
 What changed in each release. The launcher shows the section of its own version on its home page.
 
+## v0.6.0
+
+Released on 2026-10-22
+
+### Changes
+
+- Weapon keys: Number keys pick weapons is now Weapon and psionic keys, no longer experimental
+- Game menu: Master volume and Mute all audio moved from System to a new Audio tab
+- Game code: changed, the launcher carries save states of 0.5.0 over
+- Capsules: those of 0.5.0 no longer load
+- Text: lines in the launcher and the game's menu end without a full stop
+
+### Enhancements
+
+- Weapon and psionic keys: two keys for every weapon and power, set on the Controls page
+- Psionic keys: a power's key also uses the power once it is in hand, on at first
+- Key profiles: two sets of every key on the Controls page, saved and loaded there
+- Bass: Original, Reduced or TV speaker on the Audio page
+- Mute in the background: silences the game while its window is not in front
+- 60 FPS gameplay: enemies and shots move on every frame
+- Launcher colours: headings red, what a line is about green, the date grey
+
+### Bug fixes
+
+- Weapon switch: the far draw distance and the vertical look hold while a weapon changes
+- Widescreen: a list's name no longer flashes at the screen's edge as the list opens
+
 ## v0.5.0
 
 Released on 2026-10-21
