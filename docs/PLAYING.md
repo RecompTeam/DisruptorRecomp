@@ -241,7 +241,8 @@ Controls page and the game's Controls tab name the one connected.
 
 - In the launcher, under **Settings**: the pages **Display**,
   **Enhancements**, **Controls**, **Audio**, **Experimental** and
-  **Troubleshooting**.
+  **Troubleshooting**. **Controls** has four tabs: **Keys**, **Weapons**,
+  **Mouse** and **Gamepad**.
 - In the game, with Backquote: tabs of the same names. **Detailed logging**
   is on **Debug**. Keys and gamepad buttons are changed in the launcher
   only.
@@ -279,6 +280,7 @@ The page is in four groups, in the launcher and in the game alike.
 | Picture | **Exact-provenance geometry**, **Perspective-correct world textures**, **Gap filling**, **Smooth distance fade**, **Depth-sorted world** | On |
 | Picture | **Fog shape** and **Draw distance** | Original |
 | Shading | **Ambient occlusion**, its reach and strength | Off |
+| Movies | **Movie filter** | Smooth |
 | Startup | **Skip the logos and the title movie** | Off |
 
 - In-between frames, Ambient occlusion and the other Picture settings but
@@ -288,11 +290,15 @@ The page is in four groups, in the launcher and in the game alike.
   where the game steps through twelve shades. Distant walls and floors fade in
   instead of appearing in blocks.
 - **Fog shape** under it offers only the game's own fog, Original, in this
-  release. **Draw distance** offers Original and 1.25x, a quarter further. The
-  other shapes and longer distances come in a later release.
+  release. The other shapes come in a later release. **Draw distance** offers
+  Original and 1.25x, a quarter further.
 - **Depth-sorted world** draws world polygons by their depth where the game's
   own order puts a far one over a near one.
 - **Ambient occlusion** shades corners and the floor under things.
+- **Movie filter** sets how the game's movies are drawn at the size of your
+  screen. Smooth takes away the square blocks the PlayStation's video
+  compression leaves and the grain in flat areas. Original shows every pixel
+  as a square, as before.
 - **Skip the logos and the title movie** skips only the boot intro. The other
   movies play. Escape skips the logo or movie on screen while the settings
   menu is closed.
@@ -540,6 +546,5 @@ describe the replay tool and its limits.
 - **Other problems:** see [Reporting a problem](#reporting-a-problem). Do not
   attach your game image, game assets or BIOS files.
 
-This is an early version. The first mission and the training-level path have
-been tested, the 8x / 32:9 corruption fix included. The whole campaign is not
-covered yet, and small geometry or texture faults can remain.
+This is an early version. The whole campaign can be played through. Small
+geometry or texture faults can remain.

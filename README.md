@@ -53,7 +53,7 @@
       Weapon and psionic keys, mouse, gamepad
     </td>
     <td valign="top">
-      <img src="docs/images/keys.png" alt="The key and gamepad tables" width="100%"><br>
+      <img src="docs/images/keys.png" alt="The key table" width="100%"><br>
       <b>Keys and buttons</b><br>
       Click an action, press the new key
     </td>
@@ -67,6 +67,7 @@
 | **Picture** | Internal resolution scale | 4x | Up to 8x the original resolution |
 | | Aspect ratio | 4:3 | 16:9, 21:9, 32:9 or the window's shape |
 | | Anti-aliasing (MSAA / SSAA) | Off | Smoother edges, experimental |
+| | Movie filter | Smooth | Movies drawn smoothly at your screen's size, without their square blocks |
 | **Motion** | 60 FPS gameplay | On | The game runs at up to 60 FPS instead of 30 |
 | | In-between frames | Off | Adds frames for smoother motion, up to 320 FPS |
 | | Smooth mouse turning | On | The view turns between the game's 256 heading steps |
@@ -75,7 +76,7 @@
 | | Gap filling | On | Closes hairline gaps between polygons |
 | | Depth-sorted world | On | Draws a near polygon over a far one where the game's own order gets it wrong |
 | | Smooth distance fade | On | Walls fade evenly instead of in twelve steps, distant ones fade in instead of appearing in blocks |
-| | Draw distance | Original | Longer distances come in a later release |
+| | Draw distance | Original | 1.25x draws the world a quarter further |
 | | Ambient occlusion | Off | Shaded corners and floors under things |
 | **Controls** | Control scheme | Modern | WASD and the mouse, or the original keys |
 | | Weapon and psionic keys | Off | Two keys a weapon or power, 1 to 9 and 0 at first |

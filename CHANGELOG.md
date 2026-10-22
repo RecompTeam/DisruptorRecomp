@@ -2,6 +2,31 @@
 
 What changed in each release. The launcher shows the section of its own version on its home page.
 
+## v0.7.0
+
+Released on 2026-10-22
+
+### Changes
+
+- Movies: drawn smoothly by the new Movie filter at first, Original keeps every pixel square
+- Capsules: those of 0.6.0 load, but the game leaves their recording at once
+
+### Enhancements
+
+- Movie filter: Original or Smooth on the Enhancements page, Smooth takes away the blocks and grain
+- Launcher Controls: four tabs, Keys, Weapons, Mouse and Gamepad
+- Launcher sliders: the value stands beside the track
+- Launcher paths: a long folder path is shortened in the middle
+- Launcher fonts: Japanese, Chinese and Korean folder names show
+- Detailed logging: the pictures shown and the longest gap between them
+
+### Bug fixes
+
+- Mars: pickups no longer turn into pink or cyan squares after the second part loads (#49)
+- Prison: windows and gates no longer solid green up close with Smooth distance fade (#49)
+- Walls: no light cracks along polygon edges in widescreen, with Smooth distance fade or a longer draw distance
+- Launcher: no cut text in its smallest window
+
 ## v0.6.0
 
 Released on 2026-10-22
