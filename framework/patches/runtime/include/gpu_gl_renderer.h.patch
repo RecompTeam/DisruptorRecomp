@@ -1,0 +1,17 @@
+diff --git a/runtime/include/gpu_gl_renderer.h b/runtime/include/gpu_gl_renderer.h
+index 895bd537f34518af1fdee2800300c6a94c01121c..2191ddd3342bcd282ac501161466d33e33e49de6 100644
+--- a/runtime/include/gpu_gl_renderer.h
++++ b/runtime/include/gpu_gl_renderer.h
+@@ -42,9 +42,10 @@
+  * are authored 4:3 and get no GTE squash to compensate the stretch).
+  * content_w: if 0 < content_w < src_w, only columns [0, content_w) are shown
+  * (left-aligned in the letterbox; the rest stays cleared black). Used to hide
+- * a trailing depth24 margin without changing CRTC width / stretching. */
++ * a trailing depth24 margin without changing CRTC width / stretching.
++ * movie: a movie frame, scaled by a Mitchell filter instead of `linear`'s. */
+ void gl_renderer_present(const uint32_t *pixels, int src_w, int src_h, int linear,
+-                         int force_4_3, int content_w);
++                         int force_4_3, int content_w, int movie);
+ 
+ /* Clear to black + swap (display-disabled frame). */
+ void gl_renderer_present_blank(void);

@@ -63,7 +63,7 @@ static GLint s_temp_uPull=-1;
 static int s_temp_fill;         /* departed faces are leaving their depth where the scene left none, see temporal_submit */
 static float s_temp_scratch[TEXBATCH_MAXV * TEXV], s_temp_under[TEXBATCH_MAXV * TEXV];
 typedef struct {
-    GLint shift, xhalf, visual, options, twin, mask, filter, pass, semi, fade, fade_at, fade_power, dissolve, clear;
+    GLint shift, xhalf, visual, options, twin, mask, filter, pass, semi, fade, fade_at, fade_power, fade_blocks, fade_block_count, dissolve, clear;
 } TemporalUniforms;
 static TemporalUniforms s_temp_uniforms[2];
 
@@ -602,7 +602,7 @@ static void temporal_uniforms_init(GLuint p, TemporalUniforms *u) {
     TEMP_U(shift,"u_shift"); TEMP_U(xhalf,"u_xhalf"); TEMP_U(visual,"u_visual");
     TEMP_U(options,"u_visual_options"); TEMP_U(twin,"u_twin"); TEMP_U(mask,"u_maskset");
     TEMP_U(filter,"u_filter"); TEMP_U(pass,"u_semipass"); TEMP_U(semi,"u_semimode");
-    TEMP_U(fade,"u_fade"); TEMP_U(fade_at,"u_fade_at"); TEMP_U(fade_power,"u_fade_power"); TEMP_U(dissolve,"u_dissolve"); TEMP_U(clear,"u_clear");
+    TEMP_U(fade,"u_fade"); TEMP_U(fade_at,"u_fade_at"); TEMP_U(fade_power,"u_fade_power"); TEMP_U(fade_blocks,"u_fade_blocks"); TEMP_U(fade_block_count,"u_fade_block_count"); TEMP_U(dissolve,"u_dissolve"); TEMP_U(clear,"u_clear");
 #undef TEMP_U
     p_glUseProgram(p);
     p_glUniform1f(p_glGetUniformLocation(p,"u_xscale"),1);
@@ -743,7 +743,7 @@ static void temporal_submit(const TemporalScene *s,const TemporalCommand *c,int 
     if (wide<narrow) wide=narrow;
     glEnable(GL_SCISSOR_TEST); glScissor(0,sy*s->scale,s->width*s->scale,sh*s->scale);
     p_glUseProgram(s_temp_tex_prog);
-    smooth_fade_uniforms(u->fade, u->fade_at, u->fade_power, s_temp_fade_nearer);
+    smooth_fade_uniforms(u->fade, u->fade_at, u->fade_power, u->fade_blocks, u->fade_block_count, s_temp_fade_nearer);
     edge_dissolve_batch(u->dissolve,u->clear,c->semi,c->check);
     p_glUniform1f(u->shift,0.5f/s->scale-1.0f/64.0f);
     p_glUniform1f(u->xhalf,s->width/2.0f); p_glUniform1f(u->visual,1);
@@ -776,7 +776,7 @@ static void temporal_submit_faces(const TemporalScene *s,const TemporalCommand *
     if (sh<=0 || count<=0) return;
     glEnable(GL_SCISSOR_TEST); glScissor(0,sy*s->scale,s->width*s->scale,sh*s->scale);
     p_glUseProgram(t?s_temp_tex_prog:s_temp_geo_prog);
-    if (t) smooth_fade_uniforms(u->fade, u->fade_at, u->fade_power, s_temp_fade_nearer);
+    if (t) smooth_fade_uniforms(u->fade, u->fade_at, u->fade_power, u->fade_blocks, u->fade_block_count, s_temp_fade_nearer);
     if (t) edge_dissolve_batch(u->dissolve,u->clear,c->semi,c->check);
     p_glUniform1f(u->shift,0.5f/s->scale-1.0f/64.0f);
     p_glUniform1f(u->xhalf,s->width/2.0f); p_glUniform1f(u->visual,1);

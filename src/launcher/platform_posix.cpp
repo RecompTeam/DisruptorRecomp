@@ -220,6 +220,8 @@ void write_standard(std::string_view text, bool error) {
 
 void unset(const std::string& name) { unsetenv(name.c_str()); }
 
+bool animations_enabled() { return true; }
+
 Instance::Instance(const fs::path& data) {
     const fs::path lock = data / ".launcher.lock";  // in the folder itself, whatever the caller's environment says
     descriptor_ = open(lock.c_str(), O_RDWR | O_CREAT | O_CLOEXEC, 0600);

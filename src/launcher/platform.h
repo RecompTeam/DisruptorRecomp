@@ -81,4 +81,7 @@ private:
 // The system's name and version, then one line per display and graphics adapter, for a problem report.
 std::vector<std::string> system_lines();
 
+// False when the player switched the system's animation effects off: the window then moves nothing.
+bool animations_enabled();
+
 } // namespace disruptor::launcher::platform

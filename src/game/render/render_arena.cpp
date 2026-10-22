@@ -19,10 +19,12 @@
 #include "psx_netplay.h"
 
 #include <cstdint>
+#include <cstdlib>
 
 extern "C" void gl_renderer_set_ssao_fade(float from, float to);
 extern "C" void gl_renderer_set_palette_fade(int rows, float start, float step, float side);
 extern "C" void gl_renderer_set_palette_fade_power(int power);
+extern "C" void gl_renderer_set_palette_blocks(const int *blocks, int count);
 extern "C" void gl_renderer_set_edge_sky(int sky);
 extern "C" void gl_renderer_set_edge_depth(float depth);
 extern "C" int disruptor_backdrop_tiles_sky_behind(uint32_t vblanks);
@@ -39,7 +41,50 @@ constexpr uint32_t kOriginalRoots[2] = {0x800776BCu, 0x800776C0u};
 constexpr uint32_t kArenaOffset = 0x70u;
 constexpr uint32_t kRetailBytes = 0x11000u;
 constexpr uint32_t kArenaBytes = PSX_MOD_GPU_DMA_APERTURE_SIZE / 2u;
+/* gte.cpp's provenance hash is collision free within a 256 KiB block: 512 KiB apart the arenas evicted each other's corners. */
+constexpr uint32_t kArenaOffsets[2] = {0u, kArenaBytes + 0x20000u};
+constexpr uint32_t kDescriptors = 0x8007162Cu;      /* gp+0x4E0, set at 0x80015B4C: 8 bytes a texture, the palette in the first's top half */
+constexpr uint32_t kDescriptorCount = 0x800717B4u;  /* gp+0x668, set at 0x80015B58 */
+constexpr uint32_t kMostDescriptors = 1024u;        /* the mesh renderer's index (0x80046D14) reaches no further */
+constexpr int kFadeBlocks = 64;
 uint32_t g_arena_base = 0;
+
+/* The first rows of the level's palettes: the renderer adds the fade level to them (0x80046D44), the smooth fade starts
+ * there. Two blocks of one column closer than twelve rows, or more blocks than the renderer holds, leave the game's rows. */
+void publish_fade_blocks() {
+    int blocks[2 * kFadeBlocks];
+    int found = 0;
+    const uint32_t table = psx_mod_read_word(kDescriptors), count = psx_mod_read_word(kDescriptorCount);
+    if (count <= kMostDescriptors && table >= 0x80000000u && table <= 0x80200000u - count * 8u) {
+        for (uint32_t index = 0; index < count; ++index) {
+            const uint32_t clut = psx_mod_read_word(table + index * 8u) >> 16;
+            const int x = static_cast<int>(clut & 63u) * 16, row = static_cast<int>((clut >> 6) & 511u);
+            bool known = false;
+            for (int seen = 0; seen < found && !known; ++seen) known = blocks[2 * seen] == x && blocks[2 * seen + 1] == row;
+            if (known) continue;
+            if (found == kFadeBlocks) {
+                found = 0;
+                break;
+            }
+            blocks[2 * found] = x;
+            blocks[2 * found + 1] = row;
+            ++found;
+        }
+    }
+    int kept = 0;
+    for (int one = 0; one < found; ++one) {
+        bool apart = true;
+        for (int other = 0; other < found && apart; ++other)
+            apart = other == one || blocks[2 * other] != blocks[2 * one] ||
+                    std::abs(blocks[2 * other + 1] - blocks[2 * one + 1]) >= 12;
+        if (apart) {
+            blocks[2 * kept] = blocks[2 * one];
+            blocks[2 * kept + 1] = blocks[2 * one + 1];
+            ++kept;
+        }
+    }
+    gl_renderer_set_palette_blocks(blocks, kept);
+}
 } // namespace
 
 /* At the renderer's entry, and from far_rendering.cpp after the screen effects, which change the fade start. */
@@ -53,6 +98,7 @@ extern "C" void disruptor_render_arena_publish_fades(void) {
     disruptor_far_rendering_fog_ramp(&ramp_start, &ramp_length, &ramp_power);
     gl_renderer_set_palette_fade(12, 8.0f * static_cast<float>(ramp_start), 8.0f * static_cast<float>(ramp_length) / 12.0f, 0.375f);
     gl_renderer_set_palette_fade_power(ramp_power);
+    publish_fade_blocks();
     gl_renderer_set_edge_depth(8.0f * static_cast<float>(far_distance + kCullReach));
     gl_renderer_set_edge_sky(disruptor_backdrop_tiles_sky_behind(psx_mod_read_word(kVBlanks)));
 }
@@ -78,17 +124,18 @@ void renderer_entry(CPUState *cpu, uint32_t address) {
      * re-derived when a state is loaded into another process or timeline. */
     const uint32_t allocated = psx_mod_gpu_dma_memory_bytes();
     if (allocated != 2u * kArenaBytes) g_arena_base = 0u;
-    const uint32_t saved_root = PSX_MOD_GPU_DMA_GUEST_BASE + index * kArenaBytes;
+    const uint32_t saved_root = PSX_MOD_GPU_DMA_GUEST_BASE + kArenaOffsets[index];
     if (!g_arena_base && allocated == 2u * kArenaBytes && current == saved_root)
         g_arena_base = PSX_MOD_GPU_DMA_GUEST_BASE;
     const uint32_t relocated = g_arena_base ?
-        g_arena_base + index * kArenaBytes : 0u;
-    if (current != original && current != relocated) return;
+        g_arena_base + kArenaOffsets[index] : 0u;
+    const uint32_t earlier = g_arena_base ? g_arena_base + index * kArenaBytes : 0u;  /* an older state's place */
+    if (current != original && current != relocated && current != earlier) return;
 
     if (g_ls_mode || g_ls_replay_active || psx_netplay_active() || map ||
         (psx_mod_widescreen_x_margin() == 0 && !disruptor_far_rendering_edge_margin() &&
          disruptor_far_rendering_get_preset() == DISRUPTOR_FAR_RENDERING_RETAIL)) {
-        if (current == relocated && relocated)
+        if ((current == relocated || current == earlier) && relocated)
             psx_mod_write_word(root_address, original);
         return;
     }
@@ -96,7 +143,7 @@ void renderer_entry(CPUState *cpu, uint32_t address) {
         g_arena_base = psx_mod_alloc_gpu_dma_memory(2u * kArenaBytes, 16u);
         if (!g_arena_base) return;
     }
-    const uint32_t destination = g_arena_base + index * kArenaBytes;
+    const uint32_t destination = g_arena_base + kArenaOffsets[index];
     if (current == destination) return;
 
     /* Preserve any retail packet templates on activation or a level reset.

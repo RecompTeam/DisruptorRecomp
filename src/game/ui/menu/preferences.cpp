@@ -252,6 +252,7 @@ void apply_saved_preferences(const PSXRecompV4::UserSettings &settings) {
     disruptor_selection_wheels_set_enabled(settings.has_selection_wheels && settings.selection_wheels);
     disruptor_number_keys_set_enabled(settings.has_number_keys && settings.number_keys);
     disruptor_psionic_keys_use_set_enabled(stored(settings, *find_option("disruptor.psionic_keys_use")) != 0);
+    disruptor_smooth_movies_set_enabled(stored(settings, *find_option("disruptor.movie_filter")) != 0);
     if (settings.has_horizontal_sensitivity &&
         !env_override_present("PSX_DISRUPTOR_MOUSE_SENSITIVITY"))
         (void)disruptor_mouse_set_horizontal_sensitivity(
@@ -355,6 +356,8 @@ void apply_pending_preferences() {
         disruptor_number_keys_set_enabled(pending.number_keys);
     if (changed("disruptor.psionic_keys_use"))
         disruptor_psionic_keys_use_set_enabled(pending.psionic_keys_use);
+    if (changed("disruptor.movie_filter"))
+        disruptor_smooth_movies_set_enabled(stored(pending, *find_option("disruptor.movie_filter")) != 0);
     if (changed("disruptor.horizontal_sensitivity"))
         (void)disruptor_mouse_set_horizontal_sensitivity(
             pending.horizontal_sensitivity);

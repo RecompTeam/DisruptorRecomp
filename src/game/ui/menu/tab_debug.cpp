@@ -4,6 +4,22 @@ namespace disruptor::menu {
 namespace {
 constexpr const char *driver_words[] = {"off", "on", "from the next launch", "not offered by this driver"};
 
+#if DISRUPTOR_DEV_TOOLS
+void draw_mission_select() {
+    static int mission = DISRUPTOR_FIRST_MISSION;
+    ImGui::TextUnformatted("Start a mission");
+    draw_status_badge("DEV BUILD", ImVec4(1.0f, 0.73f, 0.25f, 1.0f));
+    ImGui::SetNextItemWidth(160.0f);
+    ImGui::SliderInt("##mission", &mission, DISRUPTOR_FIRST_MISSION, DISRUPTOR_LAST_MISSION, "Mission %d");
+    ImGui::SameLine();
+    const bool ready = disruptor_mission_select_ready() != 0;
+    if (!ready) ImGui::BeginDisabled();
+    if (ImGui::Button("Start") && disruptor_mission_select_start(mission)) set_menu_open(false);
+    if (!ready) ImGui::EndDisabled();
+    ImGui::TextDisabled("Works from the game's main menu\nStarts as the mission's password would\nNo carried weapons or flags");
+}
+#endif
+
 std::string local_time(int64_t second) {
     const std::time_t when = static_cast<std::time_t>(second);
     std::tm local{};
@@ -168,6 +184,11 @@ void draw_debug_tab() {
                         disruptor_mouse_vertical_pitch() * (360.0 / 256.0));
     ImGui::TextDisabled("Mouse captured before this menu opened: %s\nThe menu releases it while open and gives it "
                         "back when closed", g_menu.restore_mouse_capture ? "yes" : "no");
+
+#if DISRUPTOR_DEV_TOOLS
+    ImGui::Separator();
+    draw_mission_select();
+#endif
 
     ImGui::Separator();
     draw_capsules();

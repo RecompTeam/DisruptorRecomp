@@ -104,7 +104,7 @@ std::wstring running_text(const std::wstring& overriding) {
 }
 
 LanguageList language_list(const std::vector<std::string>& discs, const Regions& regions, const std::string& spoken) {
-    LanguageList list{{L"English (the US disc alone)"}, 0, L"Add a French, German or Japanese disc image to play in that language"};
+    LanguageList list{{L"English (US disc)"}, 0, L"Add a French, German or Japanese disc image to play in that language"};
     for (size_t index = 0; index < discs.size(); ++index) {
         const auto looked = regions.find(discs[index]);
         const RegionDisc* disc = looked != regions.end() && looked->second ? &*looked->second : nullptr;

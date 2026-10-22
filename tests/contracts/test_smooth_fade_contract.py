@@ -32,12 +32,17 @@ require(
     '    "    float into = (range - u_fade.x)/(u_fade.y*float(rows));\\n"\n'
     '    "    level = clamp(float(rows)*(into > 0.0 ? pow(min(into, 1.0), max(u_fade_power, 1.0)) : into), 0.0, float(rows - 1));\\n"\n'
     '    "    if (u_dissolve.y > 0.5) dissolve = smoothstep(u_dissolve.x, u_dissolve.w, 1.0/(v_fade.x*u_fade_at.z));\\n"\n'
-    '    "    g_row = v_clut.y - v_clut.y % rows + int(level);\\n"\n'
+    '    "    g_row = first + int(level);\\n"\n'
     in renderer
-    and '    "  if (rows > 1 && v_fade.x > 0.0 && v_depth != 2) {\\n"\n' in renderer
-    and '    "  int rows = int(u_fade.z + 0.5); float level = -1.0, dissolve = 0.0;\\n"\n' in renderer,
+    and '    "  int first = rows > 1 && v_fade.x > 0.0 && v_depth != 2 ? fade_first_row(rows) : -1;\\n"\n'
+    '    "  if (first >= 0) {\\n"\n' in renderer
+    and '    "  int rows = int(u_fade.z + 0.5); float level = -1.0, dissolve = 0.0;\\n"\n' in renderer
+    and '    "    if (u_fade_blocks[i].x == v_clut.x && v_clut.y >= u_fade_blocks[i].y && v_clut.y < u_fade_blocks[i].y + rows) return u_fade_blocks[i].y;\\n"\n'
+    in renderer
+    and "    publish_fade_blocks();\n" in arena
+    and "    const uint32_t table = psx_mod_read_word(kDescriptors), count = psx_mod_read_word(kDescriptorCount);\n" in arena,
     "a pixel's fade level is its range past the fade's start in rows: the range is the depth, more by a share of the step aside, "
-    "and the palette's block of rows begins at a multiple of their count",
+    "and the palette's block of rows begins at the row a level's texture descriptor names, a palette no descriptor names keeps the game's row",
 )
 require(
     '    "  if (!sample_texture(sample_uv, rgb, stp)) discard;\\n"\n'
@@ -65,7 +70,7 @@ require(
     in renderer
     and "    p_glUniform4f(at, (float)g_wide_cur_base + s_yaw_center_x, s_yaw_center_x > 0.0f ? s_yaw_center_x : 160.0f, nearer, s_uv_view ? 1.0f : 0.0f);\n"
     in renderer
-    and "    hr_begin(1);\n    p_glUseProgram(s_tex_prog);\n    smooth_fade_uniforms(s_tex_uFade, s_tex_uFadeAt, s_tex_uFadePower, 1.0f);\n    edge_dissolve_batch(s_tex_uDissolve, s_tex_uClear, semi, s_mask_check);\n"
+    and "    hr_begin(1);\n    p_glUseProgram(s_tex_prog);\n    smooth_fade_uniforms(s_tex_uFade, s_tex_uFadeAt, s_tex_uFadePower, s_tex_uFadeBlocks, s_tex_uFadeBlockCount, 1.0f);\n    edge_dissolve_batch(s_tex_uDissolve, s_tex_uClear, semi, s_mask_check);\n"
     in renderer
     and renderer.count("smooth_fade_uniforms(") == 2
     and "    s_fade_rows = rows; s_fade_start = start; s_fade_step = step > 0.0f ? step : 1.0f; s_fade_side = side;\n"
@@ -75,8 +80,8 @@ require(
 require(
     '            "  v_fade = (a_visual_flags > 1.5 && a_order > -0.9999 && a_order < 0.9999) ? vec2((1.0 - a_order)/32.0, a_visual_pos.x) : vec2(-1.0, 0.0);\\n"\n'
     in presenter
-    and presenter.count("smooth_fade_uniforms(u->fade, u->fade_at, u->fade_power, s_temp_fade_nearer);") == 2
-    and '    TEMP_U(fade,"u_fade"); TEMP_U(fade_at,"u_fade_at"); TEMP_U(fade_power,"u_fade_power"); TEMP_U(dissolve,"u_dissolve"); TEMP_U(clear,"u_clear");\n'
+    and presenter.count("smooth_fade_uniforms(u->fade, u->fade_at, u->fade_power, u->fade_blocks, u->fade_block_count, s_temp_fade_nearer);") == 2
+    and '    TEMP_U(fade,"u_fade"); TEMP_U(fade_at,"u_fade_at"); TEMP_U(fade_power,"u_fade_power"); TEMP_U(fade_blocks,"u_fade_blocks"); TEMP_U(fade_block_count,"u_fade_block_count"); TEMP_U(dissolve,"u_dissolve"); TEMP_U(clear,"u_clear");\n'
     in presenter
     and "    if (!s->mesh_stats.departed_faces || p->width!=s->width || p->scale!=s->scale) return;\n"
     "    s_temp_fade_nearer=covered ? TEMP_ORDER_CLEARANCE : 1.0f;\n"
@@ -130,7 +135,7 @@ require(
     in renderer
     and '    "uniform vec4 u_clear;' in renderer
     and '    "  if (dissolve > 0.0 && u_dissolve.z < 0.5) {\\n"\n'
-    '    "    vec3 last; int last_stp; int row = g_row; g_row = v_clut.y - v_clut.y % rows + rows - 1;\\n"\n'
+    '    "    vec3 last; int last_stp; int row = g_row; g_row = first + rows - 1;\\n"\n'
     '    "    bool same = u_clear.w > 0.5 && sample_texture(sample_uv, last, last_stp);\\n"\n'
     '    "    g_row = row;\\n"\n'
     '    "    if (same && (v_raw & 1) == 0) last = clamp(last * v_col.rgb * 2.0, 0.0, 1.0);\\n"\n'
@@ -170,9 +175,9 @@ require(
     in renderer
     and "temporal_colour_without_depth" not in presenter
     and presenter.count("edge_dissolve_batch(u->dissolve,u->clear,c->semi,c->check);") == 2
-    and "    if (t) smooth_fade_uniforms(u->fade, u->fade_at, u->fade_power, s_temp_fade_nearer);\n    if (t) edge_dissolve_batch(u->dissolve,u->clear,c->semi,c->check);\n"
+    and "    if (t) smooth_fade_uniforms(u->fade, u->fade_at, u->fade_power, u->fade_blocks, u->fade_block_count, s_temp_fade_nearer);\n    if (t) edge_dissolve_batch(u->dissolve,u->clear,c->semi,c->check);\n"
     in presenter
-    and "    smooth_fade_uniforms(u->fade, u->fade_at, u->fade_power, s_temp_fade_nearer);\n    edge_dissolve_batch(u->dissolve,u->clear,c->semi,c->check);\n"
+    and "    smooth_fade_uniforms(u->fade, u->fade_at, u->fade_power, u->fade_blocks, u->fade_block_count, s_temp_fade_nearer);\n    edge_dissolve_batch(u->dissolve,u->clear,c->semi,c->check);\n"
     in presenter
     and "    if (semi < 0) {\n        opaque_blend();\n" in renderer
     and presenter.count("opaque_blend()") == 3

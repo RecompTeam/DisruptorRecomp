@@ -22,6 +22,8 @@ struct Moment {
     const char* screen = "world";
     bool focused = true, minimized = false;
     uint32_t repeated = 0, lost = 0;  // driver messages said too often to print, and ones the queue had no room for
+    uint32_t shown = 0, shown_between = 0;  // pictures put on the screen since the pulse before, the in-between ones of them
+    double shown_gap_ms = -1.0;             // the longest wait between two of them, negative when not told
     double sound_queued_ms = -1.0;    // negative without a sound device
     uint64_t sound_underruns = 0;     // since the pulse before, or since the count restarted
     double sound_target_ms = 0.0, sound_sdl_ms = -1.0;  // the queue's aim, and what SDL holds after it (negative: not told)

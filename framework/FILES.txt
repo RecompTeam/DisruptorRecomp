@@ -33,6 +33,8 @@ runtime/include/gpu.h
 +runtime/include/gpu_turn_clip.h
 +runtime/include/gpu_world_depth.h
 +runtime/include/gpu_world_texel.h
++runtime/include/movie_filter.h
+runtime/include/gpu_gl_renderer.h
 runtime/include/gpu_render.h
 runtime/include/gpu_sw_renderer.h
 +runtime/include/host_borderless.h
@@ -54,6 +56,7 @@ runtime/src/psx_sdl_audio.cpp
 runtime/src/savestate.c
 runtime/src/crash_trace.c
 runtime/src/dirty_ram_interp.c
+runtime/src/dma.c
 runtime/src/freeze_heartbeat.c
 runtime/src/gpu.c
 runtime/src/gpu_gl_renderer.c

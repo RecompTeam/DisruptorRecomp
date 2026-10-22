@@ -106,6 +106,7 @@ constexpr const char* fog_shapes[] = {"Original", "Soft", "Late"};
 constexpr int distances_offered = 2;  /* Original and 1.25x for now */
 constexpr int fog_shapes_offered = 1;  /* Original only for now */
 constexpr const char* bass_cuts[] = {"Original", "Reduced", "TV speaker"};
+constexpr const char* movie_filters[] = {"Original", "Smooth"};
 
 constexpr const char* geometry_key = "disruptor.geometry_correction";
 constexpr const char* frames_key = "video.frame_interpolation";
@@ -203,7 +204,7 @@ constexpr Option option_list[] = {
         "disruptor.geometry_correction", "Exact-provenance geometry", 1,
         "Places polygons from the game's own arithmetic, before it rounds them to whole pixels\n"
         "This steadies the PlayStation's wobbling edges\n"
-        "Other options need it"),
+        "With it off, the options that need it are greyed out"),
     toggle<&Settings::has_perspective_textures, &Settings::perspective_textures>(
         "disruptor.perspective_textures", "Perspective-correct world textures", 1,
         "Draws wall and floor textures in true perspective\n"
@@ -221,6 +222,12 @@ constexpr Option option_list[] = {
         "Fades walls and floors evenly into the distance\n"
         "The game itself steps through twelve shades\n"
         "The world's far edge dissolves instead of appearing in squares", needs_geometry),
+    choice("disruptor.movie_filter", "Movie filter", 1,
+           "How the game's movies are drawn at the size of your screen\n"
+           "Original: every pixel shows as a square\n"
+           "Smooth: the square blocks and the grain smoothed away",
+           movie_filters, saved<&Settings::has_movie_filter>, read<&Settings::movie_filter>,
+           write<&Settings::has_movie_filter, &Settings::movie_filter>),
     toggle<&Settings::has_ambient_occlusion, &Settings::ambient_occlusion>(
         "disruptor.ambient_occlusion", "Ambient occlusion", 0,
         "Shades corners and the floor under things", needs_geometry),
@@ -254,8 +261,8 @@ constexpr Option option_list[] = {
         "Turns the view with the mouse\n"
         "In the game a middle-click captures the mouse\nA middle-click or Escape releases it"),
     choice("disruptor.modern_controls", "Control scheme", 1,
-           "Modern: WASD, left click fires, right click uses psionics, side buttons choose\n"
            "Classic: the original keys\nThe mouse only turns\n"
+           "Modern: WASD, left click fires, right click uses psionics, side buttons choose\n"
            "Keys you set yourself stay either way",
            schemes, saved<&Settings::has_modern_controls>, scheme, set_scheme),
     toggle<&Settings::has_number_keys, &Settings::number_keys>(
@@ -287,7 +294,7 @@ constexpr Option option_list[] = {
         "disruptor.high_precision_camera", "Smooth mouse turning", 1,
         "The game turns in 256 steps of a circle\n"
         "This also turns the picture by the part of a step in between\n"
-        "Needs mouse aim and exact geometry", needs_aim_and_geometry),
+        "Needs Horizontal mouse aim and Exact-provenance geometry", needs_aim_and_geometry),
     toggle<&Settings::has_vertical_look, &Settings::vertical_look>(
         "disruptor.vertical_look", "Vertical mouse look", 0,
         "Looks up and down with the mouse, about 31 degrees each way\n"
@@ -341,8 +348,7 @@ constexpr Option option_list[] = {
            "How far off walls, enemies and pickups are drawn\n"
            "Original: as on the PlayStation\n"
            "1.25x: a quarter further",
-           draw_distances, saved<&Settings::has_draw_distance>, draw_distance, set_draw_distance, {}, distances_offered,
-           "Longer distances come in a later release"),
+           draw_distances, saved<&Settings::has_draw_distance>, draw_distance, set_draw_distance, {}, distances_offered),
     choice("disruptor.fog_shape", "Fog shape", 0,
            "How the smooth distance fade thickens\n"
            "Original: at one pace, as the game's own",

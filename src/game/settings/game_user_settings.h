@@ -40,6 +40,7 @@ struct GameUserSettings {
     bool has_edge_smoothing = false; bool edge_smoothing = false;
     bool has_gap_filling = false; bool gap_filling = true;
     bool has_depth_sorted_world = false; bool depth_sorted_world = false;
+    bool has_movie_filter = false; int movie_filter = 1;  // an index into kDisruptorMovieFilters
     bool has_detailed_logging = false; bool detailed_logging = false;
     bool has_draw_distance = false; int draw_distance = 100;  // percent of the game's own, one of kDisruptorDrawDistances
     bool has_fog_shape = false; int fog_shape = 0;  // an index into kDisruptorFogShapes
@@ -54,6 +55,8 @@ inline constexpr const char* kDisruptorFogShapes[] = {"even", "soft", "late"};
 inline constexpr int kDisruptorFogShapeCount = 3;
 inline constexpr const char* kDisruptorBassCuts[] = {"original", "reduced", "tv_speaker"};
 inline constexpr int kDisruptorBassCutCount = 3;
+inline constexpr const char* kDisruptorMovieFilters[] = {"original", "smooth"};
+inline constexpr int kDisruptorMovieFilterCount = 2;
 
 }  // namespace PSXRecompV4
 

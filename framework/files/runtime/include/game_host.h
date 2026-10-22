@@ -47,6 +47,8 @@ void psx_game_before_input(void);
 void psx_game_after_input(void);
 /* The SPU's stereo output at `rate`, on the main thread, before any fade, gain or resampling: to change in place. */
 void psx_game_audio_output(int16_t *stereo, int frames, int rate);
+/* Nonzero when a 24-bit frame, a movie's, is to be cleaned of its blocks and scaled smoothly. Asked at every present. */
+int psx_game_smooth_movies(void);
 /* Nonzero when the four-cornered polygon whose command sits at `command_address` is the game's second copy of the one
  * before it, grown outwards. Then each corner's source address and source word are those of the first copy's corner. */
 int psx_game_grown_quad_sources(uint32_t command_address, const uint32_t *packet, uint32_t source_address[4],

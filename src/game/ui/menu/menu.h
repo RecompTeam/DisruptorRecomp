@@ -14,10 +14,14 @@
 #include "game/session/cheats.h"
 #include "game/render/billboard_aspect.h"
 #include "game/render/far_rendering.h"
+#include "game/render/movie_smoothing.h"
 #include "game/frame/frame_rate.h"
 #include "game/session/capsule.h"
 #include "game/session/diagnostics.h"
 #include "game/session/intro_skip.h"
+#if DISRUPTOR_DEV_TOOLS
+#include "game/session/mission_select.h"
+#endif
 #include "game/input/mouse_aim.h"
 #include "game/input/selection_wheel.h"
 #include "game/frame/present_rate.h"

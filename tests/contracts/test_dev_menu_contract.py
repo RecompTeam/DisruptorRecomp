@@ -896,7 +896,7 @@ staged_keys = set(re.findall(r'\bmark\("([\w.]+)"', menu)) | set(
 )
 applied_keys = set(re.findall(r'\bchanged\("([\w.]+)"\)', function_body(menu, "apply_pending_preferences")))
 require(
-    len(shared_keys) == 38
+    len(shared_keys) == 39
     and staged_keys == shared_keys
     and applied_keys == shared_keys
     and set(re.findall(r'\bfind_option\("([\w.]+)"', menu)) <= shared_keys,
@@ -992,7 +992,7 @@ present = read("src/game/frame/present_rate.cpp")
 require(
     HELPERS in menu
     and "bool option_list(const char *key, int *index, size_t skipped = 0);\n" in menu
-    and len(shared_labels) == 38
+    and len(shared_labels) == 39
     and drawn_keys == shared_keys
     and not [text for text in [*shared_labels, *shared_choices] if f'"{text}"' in menu + present]
     and "    static constexpr int kScaleCount = 8;\n" in menu
@@ -1046,7 +1046,7 @@ table_rows = re.split(
 needing = {}
 for row in table_rows:
     row = row.split("\n};")[0]
-    ending = re.search(r"\b(needs_\w+)(?:, \w+_offered,\s*\"[^\"]*\")?\),?\s*$", row)
+    ending = re.search(r"\b(needs_\w+)(?:, \w+_offered(?:,\s*\"[^\"]*\")?)?\),?\s*$", row)
     if ending:
         needing[re.search(r'"([\w.]+)"', row)[1]] = needs_lists[ending[1]]
 asked = set(re.findall(r'\bapplies\("([\w.]+)"\)', menu))
@@ -1130,10 +1130,10 @@ shared_hints = [
 written = "".join(re.findall(LITERAL, menu + present))
 require(
     HINT in read("src/game/ui/hint.h")
-    and len(shared_hints) == 38
+    and len(shared_hints) == 39
     and all(20 <= len(text) <= 240 for text in shared_hints)
     and not [text for text in shared_hints if text[:32] in written]
-    and "Needs mouse aim and exact geometry"
+    and "Needs Horizontal mouse aim and Exact-provenance geometry"
     in shared_hints[
         [key for key in re.findall(r'\b(?:toggle(?:<[^>]*>)?|choice|slider)\(\s*"([\w.]+)"', options)].index(
             "disruptor.high_precision_camera"

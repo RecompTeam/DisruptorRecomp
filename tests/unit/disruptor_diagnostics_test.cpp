@@ -94,6 +94,13 @@ int gl_renderer_debug_message_take(char *text, int size, unsigned *id, int *seve
     g_messages.pop_front();
     return 1;
 }
+int g_shown_count = -1;
+void gl_renderer_set_shown_count(int enabled) { g_shown_count = enabled; }
+void gl_renderer_shown_count_take(unsigned *pictures, unsigned *between, double *longest_ms) {
+    *pictures = 0;
+    *between = 0;
+    *longest_ms = -1.0;
+}
 int gpu_ws_displayed_flat(void) { return g_flat; }
 int gpu_ws_displayed_menu(void) { return g_menu; }
 int disruptor_frame_rate_last_window(DisruptorFrameRateWindow *out) {
@@ -143,6 +150,15 @@ void test_the_lines() {
                "pulse: 0 frames in 0.0 s, 0.0 ms a frame, longest 0.0 ms, game 0 frames in 0 vblanks with 3 late, menu, not focused, "
                "minimized, driver messages repeated 4, driver messages lost 2",
            "and a window out of focus or minimized, and driver messages left out, a stretch of no frames dividing by nothing");
+
+    Moment shown{30, 60, 0, "world", true, false, 0, 0};
+    shown.shown = 1200;
+    shown.shown_between = 1140;
+    shown.shown_gap_ms = 9.84;
+    expect(pulse_line(Stretch{600, 10.0, 0.0182}, shown) ==
+               "pulse: 600 frames in 10.0 s, 16.7 ms a frame, longest 18.2 ms, game 30 frames in 60 vblanks with 0 late, world, focused, "
+               "shown 1200 pictures, 1140 in between, longest gap 9.8 ms",
+           "a pulse says what reached the screen when the renderer tells: pictures, in-between ones, the longest gap");
 
     Moment sounding{30, 60, 0, "world", true, false, 0, 0};
     sounding.sound_queued_ms = 44.6;
@@ -230,6 +246,7 @@ void test_a_session() {
 
     disruptor_diagnostics_configure(1);
     expect(g_asked == 1 && disruptor_diagnostics_detailed() == 1, "the saved setting switches it on and asks the driver for its messages");
+    expect(g_shown_count == 1, "and the renderer counts what reaches the screen only then");
     expect(disruptor_diagnostics_driver_state() == DISRUPTOR_DRIVER_REFUSED, "asked at the start and not given, the driver refused");
     g_active = 1;
     expect(disruptor_diagnostics_driver_state() == DISRUPTOR_DRIVER_ON, "and given, they are on");
@@ -286,7 +303,8 @@ void test_a_session() {
     g_messages.push_back({"while off", 6, 2, 0});
     frame_at(50.0);
     disruptor_diagnostics_note("unseen");
-    expect(printed().empty() && disruptor_diagnostics_driver_state() == DISRUPTOR_DRIVER_OFF, "switched off in the menu it stops at once");
+    expect(printed().empty() && disruptor_diagnostics_driver_state() == DISRUPTOR_DRIVER_OFF && g_shown_count == 0,
+           "switched off in the menu it stops at once, the count of shown pictures with it");
     g_messages.clear();
 
     disruptor_diagnostics_configure(0);

@@ -176,6 +176,11 @@ void write_standard(std::string_view text, bool error) {
 
 void unset(const std::string& name) { SetEnvironmentVariableW(wide(name).c_str(), nullptr); }
 
+bool animations_enabled() {
+    BOOL enabled = TRUE;
+    return !SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &enabled, 0) || enabled;
+}
+
 Instance::Instance(const fs::path& data) {
     std::wstring key = fs::weakly_canonical(data).wstring();
     for (wchar_t& letter : key) letter = static_cast<wchar_t>(std::towlower(letter));

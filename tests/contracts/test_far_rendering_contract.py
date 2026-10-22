@@ -243,7 +243,7 @@ require(
     and '    {"disruptor.smooth_fade", Page::enhancements},\n    {"disruptor.fog_shape", Page::enhancements, nullptr, true},\n    {"disruptor.draw_distance", Page::enhancements},\n'
     in launcher
     and "Page::experimental}" not in launcher.split("disruptor.draw_distance")[1].split("\n")[0]
-    and 'draw_distances, saved<&Settings::has_draw_distance>, draw_distance, set_draw_distance, {}, distances_offered,\n           "Longer distances come in a later release"),'
+    and "draw_distances, saved<&Settings::has_draw_distance>, draw_distance, set_draw_distance, {}, distances_offered),"
     in options
     and "constexpr int distances_offered = 2;" in options,
     "the menu saves only a draw distance the game took, both front ends list it on Enhancements under the smooth fade, "

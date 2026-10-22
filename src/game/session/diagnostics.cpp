@@ -16,6 +16,8 @@ extern "C" void gl_renderer_set_debug_messages(int enabled);
 extern "C" void gpu_geometry_diagnostics_set_detail(int enabled);
 extern "C" int gl_renderer_debug_messages_active(void);
 extern "C" int gl_renderer_debug_message_take(char *text, int size, unsigned *id, int *severity, int *context, unsigned *lost);
+extern "C" void gl_renderer_set_shown_count(int enabled);
+extern "C" void gl_renderer_shown_count_take(unsigned *pictures, unsigned *between, double *longest_ms);
 extern "C" int gpu_ws_displayed_flat(void);
 extern "C" int gpu_ws_displayed_menu(void);
 extern "C" int psx_audio_out_stats(double *fill_ms, double *target_ms, uint64_t *underruns, uint64_t *overflow_drops,
@@ -116,6 +118,7 @@ Moment moment_now() {
     const SDL_WindowFlags flags = sdl_window ? SDL_GetWindowFlags(sdl_window) : 0;
     moment.focused = (flags & SDL_WINDOW_INPUT_FOCUS) != 0;
     moment.minimized = (flags & SDL_WINDOW_MINIMIZED) != 0;
+    gl_renderer_shown_count_take(&moment.shown, &moment.shown_between, &moment.shown_gap_ms);
     if (const Sound sound = sound_now(); sound.known) {
         moment.sound_queued_ms = sound.queued_ms;
         moment.sound_underruns = sound.underruns >= g_session.underruns ? sound.underruns - g_session.underruns : sound.underruns;
@@ -177,6 +180,11 @@ std::string pulse_line(const Stretch& stretch, const Moment& moment) {
                   stretch.longest * 1000.0, moment.game_frames, moment.game_vblanks, moment.late, moment.screen,
                   moment.focused ? "focused" : "not focused");
     std::string line = text;
+    if (moment.shown_gap_ms >= 0.0) {
+        std::snprintf(text, sizeof text, ", shown %u pictures, %u in between, longest gap %.1f ms", moment.shown, moment.shown_between,
+                      moment.shown_gap_ms);
+        line += text;
+    }
     if (moment.minimized) line += ", minimized";
     if (moment.repeated) line += ", driver messages repeated " + std::to_string(moment.repeated);
     if (moment.lost) line += ", driver messages lost " + std::to_string(moment.lost);
@@ -322,6 +330,7 @@ void disruptor_diagnostics_configure(int saved) {
     g_session.asked_at_start = g_session.detailed;
     gl_renderer_set_debug_messages(g_session.detailed ? 1 : 0);
     gpu_geometry_diagnostics_set_detail(g_session.detailed ? 1 : 0);
+    gl_renderer_set_shown_count(g_session.detailed ? 1 : 0);
 }
 
 int disruptor_diagnostics_detailed(void) { return g_session.detailed ? 1 : 0; }
@@ -329,6 +338,7 @@ int disruptor_diagnostics_detailed(void) { return g_session.detailed ? 1 : 0; }
 void disruptor_diagnostics_set_detailed(int enabled) {
     g_session.detailed = enabled != 0;
     gpu_geometry_diagnostics_set_detail(enabled != 0 ? 1 : 0);
+    gl_renderer_set_shown_count(enabled != 0 ? 1 : 0);
 }
 
 int disruptor_diagnostics_driver_state(void) {

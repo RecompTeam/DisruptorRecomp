@@ -445,6 +445,7 @@ def main() -> None:
     for name, value in {
         "CMAKE_BUILD_TYPE": "Release",
         "PSX_DEBUG_TOOLS": "OFF",
+        "DISRUPTOR_DEV_TOOLS": "OFF",
         "PSX_GAME_VERSION": args.version[1:],
     }.items():
         if cache_entries.get(name) != value:
@@ -463,6 +464,8 @@ def main() -> None:
     stage.mkdir(parents=True)
     packages.mkdir()
     payload = payload_of(build, args.version, args.zstd_license, platform)
+    if carrying := [name for name, data in payload.items() if b"Start a mission" in data]:
+        raise SystemExit(f"Developer tools in the release: {carrying}")
     for name, data in payload.items():
         (stage / name).parent.mkdir(parents=True, exist_ok=True)
         (stage / name).write_bytes(data)

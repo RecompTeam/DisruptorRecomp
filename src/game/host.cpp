@@ -8,6 +8,7 @@
 #include "game/input/selection_wheel.h"
 #include "game/input/weapon_list.h"
 #include "game/render/far_rendering.h"
+#include "game/render/movie_smoothing.h"
 #include "game/render/precision_routes.h"
 #include "game/session/capsule.h"
 #include "game/session/diagnostics.h"
@@ -151,6 +152,8 @@ void psx_game_after_input(void) {
 }
 
 void psx_game_audio_output(int16_t *stereo, int frames, int rate) { disruptor::audio::shape_output(stereo, frames, rate); }
+
+int psx_game_smooth_movies(void) { return disruptor_smooth_movies_enabled(); }
 
 }  // extern "C"
 

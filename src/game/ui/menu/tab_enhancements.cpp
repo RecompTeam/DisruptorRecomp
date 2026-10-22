@@ -157,6 +157,15 @@ void draw_enhancements_tab() {
     }
     ImGui::Unindent();
 
+    ImGui::SeparatorText("Movies");
+    int movie_filter = disruptor_smooth_movies_enabled() != 0 ? 1 : 0;
+    ImGui::SetNextItemWidth(260.0f);
+    if (option_list("disruptor.movie_filter", &movie_filter)) {
+        disruptor_smooth_movies_set_enabled(movie_filter);
+        mark("disruptor.movie_filter", movie_filter);
+    }
+    draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
+
     ImGui::SeparatorText("Startup");
     bool skip_intro = disruptor_intro_skip_enabled() != 0;
     if (option_toggle("disruptor.skip_intro", &skip_intro)) {

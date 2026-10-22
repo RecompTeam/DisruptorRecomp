@@ -92,7 +92,10 @@ struct Arguments {
     bool updates_window = false; // the home page with the Updates window open
     Screen screen = Screen::home;
     int page = 0;
+    int tab = 0; // of the Controls page
     int scroll = 0;
+    int width = 0, height = 0; // a picture's size in pixels, 0 for the usual one
+    float scale = 1.0f;
 };
 
 Arguments parse(int count, char** values) {
@@ -118,6 +121,18 @@ Arguments parse(int count, char** values) {
         } else if (words[i] == "--scroll" && more) {
             const auto pixels = words[++i];
             std::from_chars(pixels.data(), pixels.data() + pixels.size(), arguments.scroll);
+        } else if (words[i] == "--tab" && more) {
+            const auto tab = words[++i];
+            std::from_chars(tab.data(), tab.data() + tab.size(), arguments.tab);
+        } else if (words[i] == "--size" && more) {
+            const auto size = words[++i];
+            const auto cross = std::min(size.find('x'), size.size());
+            std::from_chars(size.data(), size.data() + cross, arguments.width);
+            if (cross < size.size()) std::from_chars(size.data() + cross + 1, size.data() + size.size(), arguments.height);
+        } else if (words[i] == "--scale" && more) {
+            const auto factor = words[++i];
+            std::from_chars(factor.data(), factor.data() + factor.size(), arguments.scale);
+            if (!(arguments.scale >= 0.5f && arguments.scale <= 4.0f)) arguments.scale = 1.0f;
         } else {
             throw std::runtime_error("Usage: DisruptorLauncher.exe --verify IMAGE | --import IMAGE [--root FOLDER] | "
                                      "--check [--root FOLDER]");
@@ -257,9 +272,14 @@ int run_window(const Arguments& arguments, Updater& updater, Activity& activity,
         return 1;
     }
     float scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
-    if (scale <= 0.0f || arguments.screenshot) scale = 1.0f;
+    if (arguments.screenshot) scale = arguments.scale > 0.0f ? arguments.scale : 1.0f;
+    else if (scale <= 0.0f) scale = 1.0f;
     const SDL_WindowFlags flags = SDL_WINDOW_RESIZABLE | SDL_WINDOW_BORDERLESS | SDL_WINDOW_HIGH_PIXEL_DENSITY | SDL_WINDOW_HIDDEN;
     int width = static_cast<int>(1060 * scale), height = static_cast<int>(720 * scale);
+    if (arguments.screenshot && arguments.width > 0 && arguments.height > 0) {
+        width = arguments.width;
+        height = arguments.height;
+    }
     // A first start takes most of a tall screen, so the home page has room for the release notes.
     SDL_Rect usable{};
     if (!arguments.screenshot && SDL_GetDisplayUsableBounds(SDL_GetPrimaryDisplay(), &usable) && usable.h > 0) {
@@ -307,7 +327,7 @@ int run_window(const Arguments& arguments, Updater& updater, Activity& activity,
     Session session(program, data, activity);
     View view(session, updater, activity, choices_file);
     view.style(scale);
-    view.show(arguments.screen, arguments.page);
+    view.show(arguments.screen, arguments.page, arguments.tab);
     if (arguments.screenshot) view.for_picture(static_cast<float>(arguments.scroll));
     if (arguments.updates_window) view.open_updates();
     view.attach(window, renderer);
@@ -365,11 +385,13 @@ int run_window(const Arguments& arguments, Updater& updater, Activity& activity,
         }
     } else {
         bool running = true;
-        int settle = 3;
+        // Frames go on a while after the last event, so a tooltip shows at its own delay and not at the next 250 ms wake.
+        constexpr Uint64 kLively = 700;
+        Uint64 lively_until = SDL_GetTicks() + kLively;
         while (running) {
             SDL_Event event;
             const bool working = session.busy() || updater.busy() || view.redraw();
-            if (SDL_WaitEventTimeout(&event, working || settle > 0 ? 16 : 250)) {
+            if (SDL_WaitEventTimeout(&event, working || SDL_GetTicks() < lively_until ? 16 : 250)) {
                 do {
                     // Releases still reach ImGui, which saw the presses made before the key button listened.
                     if (view.listening_pad()) {
@@ -405,9 +427,7 @@ int run_window(const Arguments& arguments, Updater& updater, Activity& activity,
                         note_normal();
                     }
                 } while (SDL_PollEvent(&event));
-                settle = 3;
-            } else if (settle > 0) {
-                --settle;
+                lively_until = SDL_GetTicks() + kLively;
             }
             if (session.closed()) running = false;
             if (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED) {

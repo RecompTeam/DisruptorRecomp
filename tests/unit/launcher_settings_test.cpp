@@ -205,8 +205,7 @@ void draw_distance_list() {
     odd.has_draw_distance = true;
     odd.draw_distance = 110;
     require(list.get(odd) == -1, "a percent the list does not have is no choice");
-    require(list.highest == 1 && list.notice && std::string_view(list.notice) == "Longer distances come in a later release",
-            "the original distance and 1.25x are offered for now, and the notice says why");
+    require(list.highest == 1 && !list.notice, "the original distance and 1.25x are offered, with no notice of more");
     Settings quarter;
     list.set(quarter, 1);
     require(stored(quarter, list) == 1, "1.25x is kept as chosen");
@@ -339,7 +338,7 @@ void placements() {
     std::vector<std::string> enhancements;
     for (const auto& row : rows)
         if (row.page == Page::enhancements) enhancements.emplace_back(row.key);
-    require(enhancements.size() == 14 && enhancements.front() == "disruptor.frame_unlock" && rows[5].group &&
+    require(enhancements.size() == 15 && enhancements.front() == "disruptor.frame_unlock" && rows[5].group &&
                 std::string_view(rows[5].key) == "disruptor.frame_unlock",
             "Enhancements opens with its frame rate group, 60 FPS gameplay first");
 }

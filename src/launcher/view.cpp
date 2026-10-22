@@ -21,6 +21,8 @@
 #include <cctype>
 #include <cfloat>
 #include <cmath>
+#include <fstream>
+#include <iterator>
 #include <random>
 #include <span>
 #include <sstream>
@@ -82,6 +84,7 @@ ImVec4 rgb(unsigned hex, float alpha = 1.0f) {
 ImU32 colour(unsigned hex, float alpha = 1.0f) { return ImGui::GetColorU32(rgb(hex, alpha)); }
 
 ImVec2 operator+(ImVec2 a, ImVec2 b) { return {a.x + b.x, a.y + b.y}; }
+ImVec2 operator-(ImVec2 a, ImVec2 b) { return {a.x - b.x, a.y - b.y}; }
 
 std::string text_of(std::wstring_view text) { return utf8(fs::path(text)); }
 
@@ -97,8 +100,20 @@ ImFont* font_from_resource(int id, const ImFontConfig& config, const ImWchar* ra
                                                       kFontSize, &config, ranges);
 }
 
+// The system font for the CJK letters of `text`, or none: Korean has its own, kana and Han share Yu Gothic.
+const char* far_east_font(std::wstring_view text) {
+    bool han = false;
+    for (const wchar_t letter : text) {
+        const auto code = static_cast<unsigned>(letter);
+        if ((code >= 0x1100 && code <= 0x11FF) || (code >= 0x3130 && code <= 0x318F) || (code >= 0xAC00 && code <= 0xD7AF))
+            return "malgun.ttf";
+        if ((code >= 0x3040 && code <= 0x30FF) || (code >= 0x3400 && code <= 0x9FFF) || (code >= 0xF900 && code <= 0xFAFF)) han = true;
+    }
+    return han ? "YuGothM.ttc" : nullptr;
+}
+
 // A font of the launcher's own, with the icons and then a system font merged in for letters it has none of.
-ImFont* load_font(int id, const char* system_file, float ink = 1.0f) {
+ImFont* load_font(int id, const char* system_file, float ink = 1.0f, std::vector<char>* far_east = nullptr) {
     ImFontConfig own;
     own.FontDataOwnedByAtlas = false;
     own.RasterizerMultiply = ink;
@@ -120,6 +135,13 @@ ImFont* load_font(int id, const char* system_file, float ink = 1.0f) {
         system.RasterizerMultiply = ink;
         const std::u8string name = fallback.u8string();
         ImGui::GetIO().Fonts->AddFontFromFileTTF(reinterpret_cast<const char*>(name.c_str()), kFontSize, &system);
+    }
+    if (far_east && !far_east->empty()) {
+        ImFontConfig letters;
+        letters.MergeMode = true;
+        letters.FontDataOwnedByAtlas = false;
+        letters.RasterizerMultiply = ink;
+        ImGui::GetIO().Fonts->AddFontFromMemoryTTF(far_east->data(), static_cast<int>(far_east->size()), kFontSize, &letters);
     }
     return font;
 }
@@ -175,16 +197,16 @@ UpdateLook update_look(const UpdateView& update) {
     case UpdateState::checking: return {icon::loader_circle, kAmber, "Checking for updates...", "Asking GitHub for the newest release"};
     case UpdateState::current: return {icon::circle_check, kGreen, "You have the newest version", version_text(update.installed)};
     case UpdateState::available:
-        return {icon::download, kRed, "Version " + update.latest + " is available",
+        return {icon::download, kGreen, "Version " + update.latest + " is available",
                 "About " + size_text(update.download_bytes) + " to download" +
                     (update.delta ? ", only what changed\nIf that cannot be applied, the whole release: " + size_text(update.full_bytes)
                                   : "")};
-    case UpdateState::downloading: return {icon::download, kRed, "Downloading version " + update.latest, ""};
+    case UpdateState::downloading: return {icon::download, kAmber, "Downloading version " + update.latest, ""};
     case UpdateState::ready:
         return {icon::circle_check, kGreen, "Version " + update.latest + " is ready to install",
                 "Downloaded, each package checked\nThe launcher closes, installs it and opens again"};
     case UpdateState::failed:
-        return {icon::circle_alert, 0xff7b72, "The update could not be completed",
+        return {icon::circle_alert, kRedText, "The update could not be completed",
                 update.error.empty() ? std::string("The launcher's activity, under Details, says why") : "Why: " + first_line(update.error)};
     }
     return {icon::info, kMuted, "", ""};
@@ -224,12 +246,48 @@ void card_label(const char* glyph, const char* text) {
     ImGui::PopStyleColor();
 }
 
-// Three quarters of a circle turning once a second, for work under way.
+// Three quarters of a circle turning every 0.7 s, for work under way.
 void spinner(ImDrawList* draw, ImVec2 centre, float radius, ImU32 tint, float thickness) {
-    const float start = static_cast<float>(ImGui::GetTime()) * 6.2831853f;
+    const float start = static_cast<float>(ImGui::GetTime()) * 6.2831853f / 0.7f;
     draw->PathArcTo(centre, radius, start, start + 4.712389f, 24);
     draw->PathStroke(tint, ImDrawFlags_None, thickness);
 }
+
+unsigned mix(unsigned from, unsigned to, float share) {
+    const auto part = [&](int shift) {
+        const float a = static_cast<float>((from >> shift) & 0xffu), b = static_cast<float>((to >> shift) & 0xffu);
+        return static_cast<unsigned>(std::lround(a + (b - a) * share)) << shift;
+    };
+    return part(16) | part(8) | part(0);
+}
+
+// A path too long for `width` with its middle given up for "...": the drive, the user and the last folders stay.
+std::string middle_cut(const std::string& text, float width) {
+    if (ImGui::CalcTextSize(text.c_str()).x <= width) return text;
+    std::vector<std::size_t> starts;
+    for (std::size_t at = 0; at < text.size(); ++at)
+        if ((static_cast<unsigned char>(text[at]) & 0xC0u) != 0x80u) starts.push_back(at);
+    const auto cut = [&](std::size_t keep) {
+        const std::size_t head = (keep + 1) / 2, tail = keep / 2;
+        return text.substr(0, starts[head]) + "..." + (tail ? text.substr(starts[starts.size() - tail]) : std::string());
+    };
+    std::size_t low = 0, high = starts.size() - 1;
+    while (low < high) {
+        const std::size_t keep = (low + high + 1) / 2;
+        if (ImGui::CalcTextSize(cut(keep).c_str()).x <= width) low = keep;
+        else high = keep - 1;
+    }
+    return cut(low);
+}
+
+// The opacity of a modal, held from before its Begin to after its End.
+class Opacity {
+public:
+    explicit Opacity(float alpha) { ImGui::PushStyleVar(ImGuiStyleVar_Alpha, alpha); }
+    ~Opacity() { ImGui::PopStyleVar(); }
+    Opacity(const Opacity&) = delete;
+    Opacity& operator=(const Opacity&) = delete;
+};
 
 void hand_when_hovered() {
     if (ImGui::IsItemHovered()) ImGui::SetMouseCursor(ImGuiMouseCursor_Hand);
@@ -354,9 +412,16 @@ void View::style(float scale) {
     if (body_) return;
     // Snapped to the pixel grid vertically only, as ClearType does: crisp small text that keeps its spacing.
     ImGui::GetIO().Fonts->FontLoaderFlags = ImGuiFreeTypeLoaderFlags_LightHinting;
-    body_ = load_font(regular_font, "segoeui.ttf", kRegularInk);
+    animate_ = platform::animations_enabled();
+    // Read only for a path that shows such letters: the file is 13 MB.
+    if (const char* file = far_east_font(session_.data().wstring() + session_.program().wstring())) {
+        const char* windows = SDL_getenv("WINDIR");
+        std::ifstream source(fs::path(windows ? windows : "C:\\Windows") / "Fonts" / file, std::ios::binary);
+        far_east_.assign(std::istreambuf_iterator<char>(source), std::istreambuf_iterator<char>());
+    }
+    body_ = load_font(regular_font, "segoeui.ttf", kRegularInk, &far_east_);
     if (!body_) body_ = ImGui::GetIO().Fonts->AddFontDefault();
-    bold_ = load_font(semibold_font, "segoeuib.ttf");
+    bold_ = load_font(semibold_font, "segoeuib.ttf", 1.0f, &far_east_);
     if (!bold_) bold_ = body_;
     ImFontConfig heavy;
     heavy.FontDataOwnedByAtlas = false;
@@ -560,11 +625,13 @@ void View::sidebar(const UpdateView& update) {
     const bool free = !session_.busy() && !session_.game_running();
     const bool dialog_open = dialog_is_open();
     const float utility = 32.0f * scale_;
-    const float bottom = utility * 5.0f + ImGui::GetTextLineHeightWithSpacing() * (waiting ? 2.0f : 1.0f) +
-                         ImGui::GetStyle().ItemSpacing.y * 6.0f;
+    const float divider = 9.0f * scale_;
+    const float bottom = utility * 5.0f + divider + ImGui::GetTextLineHeightWithSpacing() * (waiting ? 2.0f : 1.0f) +
+                         ImGui::GetStyle().ItemSpacing.y * 7.0f;
     const float gap = 8.0f * scale_;
     ImGui::SetCursorPosY(ImGui::GetCursorPosY() + std::max(gap, ImGui::GetContentRegionAvail().y - bottom));
-    const auto small = [&](const char* glyph, const char* label, bool enabled, const char* hint, bool current = false) {
+    const auto small = [&](const char* glyph, const char* label, bool enabled, const char* hint, bool current = false,
+                           const char* shortcut = nullptr) {
         ImGui::PushID(label);
         const ImVec2 at = ImGui::GetCursorScreenPos();
         const float wide = ImGui::GetContentRegionAvail().x;
@@ -579,6 +646,10 @@ void View::sidebar(const UpdateView& update) {
         const float middle = at.y + (utility - size) * 0.5f;
         draw->AddText(body_, size, ImVec2(at.x + 14.0f * scale_, middle), tint, glyph);
         draw->AddText(body_, size, ImVec2(at.x + 42.0f * scale_, middle), tint, label);
+        if (shortcut) {
+            const float keys = body_->CalcTextSizeA(size * 0.9f, FLT_MAX, 0.0f, shortcut).x;
+            draw->AddText(body_, size * 0.9f, ImVec2(at.x + wide - 10.0f * scale_ - keys, middle + size * 0.05f), colour(kFaint), shortcut);
+        }
         ImGui::PopID();
         return clicked && enabled;
     };
@@ -590,7 +661,12 @@ void View::sidebar(const UpdateView& update) {
     // A report can be made at any time, an import or a running game included.
     if (small(icon::bug, "Report a problem", true, "Saves the game's logs, your settings and a note of the system for a bug report"))
         session_.make_problem_report();
-    if (small(icon::circle_help, "Help", true, "The guide to setting up and playing\nF1 opens it too", screen_ == Screen::help))
+    // The actions above open something outside, the pages below are pages of this window.
+    ImGui::Dummy(ImVec2(0.0f, divider * 0.5f - ImGui::GetStyle().ItemSpacing.y * 0.5f));
+    const ImVec2 line = ImGui::GetCursorScreenPos() + ImVec2(14.0f * scale_, 0.0f);
+    draw->AddLine(line, line + ImVec2(ImGui::GetContentRegionAvail().x - 28.0f * scale_, 0.0f), colour(kBorder), scale_);
+    ImGui::Dummy(ImVec2(0.0f, divider * 0.5f - ImGui::GetStyle().ItemSpacing.y * 0.5f));
+    if (small(icon::circle_help, "Help", true, "The guide to setting up and playing", screen_ == Screen::help, "F1"))
         screen_ = Screen::help;
     if (small(icon::info, "About", true, nullptr, screen_ == Screen::about)) screen_ = Screen::about;
     ImGui::PushStyleColor(ImGuiCol_Text, rgb(kFaint));
@@ -670,6 +746,14 @@ bool View::news(const UpdateView& update) {
     }
     ImGui::BeginChild("news text", ImVec2(0.0f, 0.0f));
     blocks(news_blocks_, ImGui::GetContentRegionAvail().x - 14.0f * scale_, true);
+    // More below: the last lines fade out instead of ending on a cut row.
+    if (ImGui::GetScrollY() < ImGui::GetScrollMaxY() - 1.0f) {
+        const float fade = 32.0f * scale_;
+        const ImVec2 low = ImGui::GetWindowPos() + ImVec2(0.0f, ImGui::GetWindowHeight());
+        const ImVec2 corner = low + ImVec2(ImGui::GetWindowWidth() - ImGui::GetStyle().ScrollbarSize - 4.0f * scale_, 0.0f);
+        ImGui::GetWindowDrawList()->AddRectFilledMultiColor(low - ImVec2(0.0f, fade), corner, colour(kSurface, 0.0f), colour(kSurface, 0.0f),
+                                                            colour(kSurface), colour(kSurface));
+    }
     ImGui::EndChild();
     card_end();
     return true;
@@ -749,28 +833,33 @@ void View::banner(float height, bool dialog_open) {
         ImGui::BeginDisabled(!playable || dialog_open);
         const bool pressed = ImGui::InvisibleButton("play", play_size);
         const bool hovered = ImGui::IsItemHovered(), held = ImGui::IsItemActive();
+        const float press = eased(ImGui::GetItemID(), held && playable ? 1.0f : 0.0f, 0.1f);
         if (playable) hand_when_hovered();
         ImGui::EndDisabled();
-        if (!playable)
-            tooltip(running ? "The game is running" : busy ? "Wait for the task to finish" : "Add your game disc first");
+        tooltip(!playable ? (running ? "The game is running" : busy ? "Wait for the task to finish" : "Add your game disc first")
+                          : "Enter starts it too");
         const unsigned fill = !playable ? 0x232b24 : held ? kRedPressed : hovered ? kRedHover : kRed;
         const ImU32 ink = colour(playable ? 0xffffff : 0x66736a);
-        draw->AddRectFilled(play_at, play_at + play_size, colour(fill), 10.0f * scale_);
-        const float letters = 20.0f * scale_;
-        const float spacing = 2.5f * scale_;
+        // A press sinks the button by 3 percent, so it answers before the game window comes.
+        const float sink = 1.0f - 0.03f * press;
+        const ImVec2 shrunk((play_size.x * (1.0f - sink)) * 0.5f, (play_size.y * (1.0f - sink)) * 0.5f);
+        draw->AddRectFilled(play_at + shrunk, play_at + play_size - shrunk, colour(fill), 10.0f * scale_);
+        const float letters = 20.0f * scale_ * sink;
+        const float spacing = 2.5f * scale_ * sink;
         float label_width = 0.0f;
         for (const char letter : std::string_view("PLAY")) label_width += heavy_->CalcTextSizeA(letters, FLT_MAX, 0.0f, &letter, &letter + 1).x + spacing;
         const float glyph_width = body_->CalcTextSizeA(letters, FLT_MAX, 0.0f, icon::play).x;
-        float x = play_at.x + (play_size.x - label_width - glyph_width - 12.0f * scale_) * 0.5f;
+        float x = play_at.x + (play_size.x - label_width - glyph_width - 12.0f * scale_ * sink) * 0.5f;
         const float y = play_at.y + (play_size.y - letters) * 0.5f;
         draw->AddText(body_, letters, ImVec2(x, y + 1.0f * scale_), ink, icon::play);
-        x += glyph_width + 12.0f * scale_;
+        x += glyph_width + 12.0f * scale_ * sink;
         for (const char letter : std::string_view("PLAY")) {
             draw->AddText(heavy_, letters, ImVec2(x, y), ink, &letter, &letter + 1);
             x += heavy_->CalcTextSizeA(letters, FLT_MAX, 0.0f, &letter, &letter + 1).x + spacing;
         }
         if (pressed && playable) session_.play();
-        if (!busy) last_activity(taken + pad, play_at.x - 18.0f * scale_, play_at.y + play_size.y * 0.5f);
+        if (!busy && !last_activity(taken + pad, play_at.x - 18.0f * scale_, play_at.y + play_size.y * 0.5f))
+            last_activity(top.x + pad, bottom.x - pad, play_at.y - 12.0f * scale_ - ImGui::GetTextLineHeight());
     }
     if (busy) {
         const float done = std::clamp(static_cast<float>(session_.progress()) / 100.0f, 0.0f, 1.0f);
@@ -808,7 +897,8 @@ void View::first_run(bool dialog_open) {
     const float start_width = ImGui::GetFrameHeight() + style.ItemInnerSpacing.x + ImGui::CalcTextSize(start).x;
     const float earlier_width = ImGui::CalcTextSize(earlier).x;
     const float gap = 18.0f * scale_;
-    const float row = choose_width + gap + start_width + gap + earlier_width;
+    const bool one_row = choose_width + gap + start_width + gap + earlier_width + 2.0f * gap <= width;
+    const float row = choose_width + gap + start_width + (one_row ? gap + earlier_width : 0.0f);
     ImGui::SetCursorScreenPos(ImVec2(top.x + std::max(gap, (width - row) * 0.5f), top.y + 128.0f * scale_));
     ImGui::BeginDisabled(!free || dialog_open);
     ImGui::PushStyleColor(ImGuiCol_Button, rgb(kRed));
@@ -821,8 +911,12 @@ void View::first_run(bool dialog_open) {
     ImGui::PopStyleColor(4);
     ImGui::SameLine(0.0f, gap);
     ImGui::Checkbox(start, &session_.auto_play);
-    ImGui::SameLine(0.0f, gap);
-    ImGui::AlignTextToFramePadding();
+    if (one_row) {
+        ImGui::SameLine(0.0f, gap);
+        ImGui::AlignTextToFramePadding();
+    } else {
+        ImGui::SetCursorScreenPos(ImVec2(top.x + (width - earlier_width) * 0.5f, top.y + 164.0f * scale_));
+    }
     if (link(earlier)) pick(Wanted::earlier);
     ImGui::EndDisabled();
     ImGui::SetCursorScreenPos(top);
@@ -902,16 +996,17 @@ void View::cards(bool dialog_open) {
 
 // The launcher's last message and its Details link in the banner, ending at `right` on the line through `middle`,
 // cut so that it starts no farther left than `left`.
-void View::last_activity(float left, float right, float middle) {
+bool View::last_activity(float left, float right, float middle) {
     std::string status = first_line(text_of(session_.status()));
-    if (status.empty()) return;
+    if (status.empty()) return true;
     const float gap = ImGui::GetStyle().ItemSpacing.x;
     const float link_width = bold_->CalcTextSizeA(ImGui::GetFontSize(), FLT_MAX, 0.0f, "Details").x;
     const float icon_width = ImGui::CalcTextSize(icon::history).x;
     const float room = right - left - link_width - icon_width - 3.0f * gap;
-    if (room <= 0.0f) return;
     ImFont* font = ImGui::GetFont();
     const float size = ImGui::GetFontSize(), line = ImGui::GetTextLineHeight();
+    // Narrower than this a word of the line would break in two.
+    if (room < std::min(font->CalcTextSizeA(size, FLT_MAX, 0.0f, status.c_str()).x, 200.0f * scale_)) return false;
     // Two lines at most, the words that do not fit cut off at the end.
     const auto block = [&](const std::string& text) { return font->CalcTextSizeA(size, FLT_MAX, room, text.c_str()); };
     for (std::size_t cut = status.size(); block(status).y > 2.0f * line + 1.0f && cut > 0;) {
@@ -928,6 +1023,7 @@ void View::last_activity(float left, float right, float middle) {
     draw->AddText(font, size, ImVec2(x, y), colour(kMuted), status.c_str(), nullptr, room);
     ImGui::SetCursorScreenPos(ImVec2(right - link_width, middle - line * 0.5f));
     if (link("Details")) details_ = true;
+    return true;
 }
 
 bool View::update_strip(const UpdateView& update) {
@@ -1025,6 +1121,7 @@ void View::details_popup() {
         ImGui::OpenPopup("Details");
         details_ = false;
     }
+    const Opacity opacity(fade_in("Details"));
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowSize(ImVec2(viewport->WorkSize.x * 0.72f, viewport->WorkSize.y * 0.72f), ImGuiCond_Appearing);
     ImGui::SetNextWindowPos(viewport->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
@@ -1101,6 +1198,7 @@ void View::take_picked() {
 
 void View::earlier_popup() {
     if (session_.earlier() && !ImGui::IsPopupOpen("Bring these files here?")) ImGui::OpenPopup("Bring these files here?");
+    const Opacity opacity(fade_in("Bring these files here?"));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(18.0f * scale_, 16.0f * scale_));
     const bool open = ImGui::BeginPopupModal("Bring these files here?", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
     ImGui::PopStyleVar();
@@ -1168,12 +1266,34 @@ void View::settings() {
         muted("Changes are saved at once and apply the next time the game starts");
     }
     ImGui::Spacing();
+    const bool controls = page_ == static_cast<int>(Page::controls);
+    bool tab_changed = false;
+    if (controls) {
+        static constexpr const char* tabs[] = {"Keys", "Weapons", "Mouse", "Gamepad"};
+        controls_tab_ = std::clamp(controls_tab_, 0, static_cast<int>(std::size(tabs)) - 1);
+        tab_changed = segmented("controls tabs", &controls_tab_, tabs, std::min(ImGui::GetContentRegionAvail().x, 520.0f * scale_));
+        if (tab_changed) {
+            listening_.clear();
+            stop_pad_capture();
+        }
+        ImGui::Spacing();
+    }
     ImGui::PushStyleColor(ImGuiCol_ChildBg, rgb(kSurface));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(18.0f * scale_, 8.0f * scale_));
     if (rows_scroll_ > 0.0f) ImGui::SetNextWindowScroll(ImVec2(0.0f, rows_scroll_));
-    ImGui::BeginChild("rows", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding);
+    else if (tab_changed) ImGui::SetNextWindowScroll(ImVec2(0.0f, 0.0f));
+    // The bar's room is kept on a page too short to scroll, so the controls stand in one column on every page.
+    const bool hidden_bar = !rows_scroll_bar_;
+    if (hidden_bar) {
+        ImGui::PushStyleColor(ImGuiCol_ScrollbarGrab, rgb(0, 0.0f));
+        ImGui::PushStyleColor(ImGuiCol_ScrollbarGrabHovered, rgb(0, 0.0f));
+        ImGui::PushStyleColor(ImGuiCol_ScrollbarGrabActive, rgb(0, 0.0f));
+    }
+    ImGui::BeginChild("rows", ImVec2(0.0f, 0.0f), ImGuiChildFlags_Borders | ImGuiChildFlags_AlwaysUseWindowPadding,
+                      ImGuiWindowFlags_AlwaysVerticalScrollbar);
+    if (hidden_bar) ImGui::PopStyleColor(3);
     rows();
-    if (page_ == static_cast<int>(Page::controls)) pad_buttons();
+    if (controls && controls_tab_ == 3) pad_buttons();
     const char* note = page_notes[std::clamp(page_, 0, static_cast<int>(std::size(page_notes)) - 1)];
     if (*note) {
         ImGui::Spacing();
@@ -1196,11 +1316,13 @@ void View::settings() {
         ImGui::EndDisabled();
     }
     ImGui::Dummy(ImVec2(0.0f, 6.0f * scale_));
+    rows_scroll_bar_ = ImGui::GetScrollMaxY() > 0.0f;
     ImGui::EndChild();
     ImGui::PopStyleVar();
     ImGui::PopStyleColor();
     if (reset_asked) ImGui::OpenPopup("Reset settings?");
 
+    const Opacity opacity(fade_in("Reset settings?"));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(18.0f * scale_, 16.0f * scale_));
     const bool open = ImGui::BeginPopupModal("Reset settings?", nullptr, ImGuiWindowFlags_AlwaysAutoResize);
     ImGui::PopStyleVar();
@@ -1289,9 +1411,9 @@ void View::pick_table(const char* heading, std::size_t first, std::size_t count,
     ImGui::PushFont(bold_, kFontSize);
     ImGui::TextUnformatted(heading);
     ImGui::PopFont();
+    // The names' column is as wide in both tables, so the weapons' and the powers' keys stand in one line.
     float label_width = 0.0f;
-    for (std::size_t row = first; row < first + count; ++row)
-        label_width = std::max(label_width, ImGui::CalcTextSize(settings::pick_names[row]).x);
+    for (const char* name : settings::pick_names) label_width = std::max(label_width, ImGui::CalcTextSize(name).x);
     // A key's column is as wide as its longest text needs. Both halves side by side only where they fit.
     const float padding = 2.0f * ImGui::GetStyle().FramePadding.x + 4.0f * scale_;
     float key_width = ImGui::CalcTextSize("Press a key").x + padding;
@@ -1511,14 +1633,19 @@ void View::key_table() {
     float key_width = std::max(110.0f * scale_, ImGui::CalcTextSize("Press a key").x + padding);
     for (const std::string& name : shown) key_width = std::max(key_width, ImGui::CalcTextSize(name.c_str()).x + padding);
     constexpr ImGuiTableFlags flags = ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_PadOuterX;
-    if (ImGui::BeginTable("keys", columns * 2 + 1, flags)) {
-        for (int pair = 0; pair < 2; ++pair) {
+    // The two halves stand side by side where they fit, one under the other in a narrow window.
+    const float half_width = label_width + 12.0f * scale_ + key_width + mouse_width +
+                             2.0f * ImGui::GetStyle().CellPadding.x * static_cast<float>(columns);
+    const bool side_by_side = 2.0f * half_width + 28.0f * scale_ + 2.0f * ImGui::GetStyle().CellPadding.x <= ImGui::GetContentRegionAvail().x;
+    const int pairs = side_by_side ? 2 : 1;
+    if (ImGui::BeginTable("keys", columns * pairs + (side_by_side ? 1 : 0), flags)) {
+        for (int pair = 0; pair < pairs; ++pair) {
             ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthFixed, label_width + 12.0f * scale_);
             ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthFixed, key_width);
             if (modern) ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthFixed, mouse_width);
-            if (pair == 0) ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthFixed, 28.0f * scale_);
+            if (pair == 0 && side_by_side) ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthFixed, 28.0f * scale_);
         }
-        const std::size_t half = (actions.size() + 1) / 2;
+        const std::size_t half = side_by_side ? (actions.size() + 1) / 2 : actions.size();
         for (std::size_t row = 0; row < half; ++row) {
             ImGui::TableNextRow();
             for (const std::size_t index : {row, row + half}) {
@@ -1574,14 +1701,11 @@ void View::key_table() {
     const char* arrows = weapons ? "Arrows: Up and Down also walk while no action, weapon or power has them"
                                  : "Arrows: Up and Down also walk while no action has them";
     hint_lines(modern ? arrows : "Mouse: only turns the view", width);
-    hint_lines("To change a key: click it, then press the new one\nEscape cancels\nDelete takes the key away\n"
-               "Fixed keys: these do the same in both schemes and cannot be changed",
+    std::string fixed = "Fixed keys: ";
+    for (const FixedKey& key : fixed_keys()) fixed += std::string(fixed.ends_with(": ") ? "" : ", ") + key.keys;
+    hint_lines("To change a key: click it, then press the new one\nEscape cancels\nDelete takes the key away\n" + fixed +
+                   "\nThey cannot be changed\n[Help](#controls) says what each does",
                width);
-    ImGui::Indent(16.0f * scale_);
-    std::string fixed;
-    for (const FixedKey& key : fixed_keys()) fixed += std::string(fixed.empty() ? "" : "\n") + key.keys + ": " + key.does;
-    hint_lines(fixed, width - 16.0f * scale_);
-    ImGui::Unindent(16.0f * scale_);
     ImGui::PopFont();
     ImGui::Dummy(ImVec2(0.0f, 4.0f * scale_));
     if (button(icon::rotate_ccw, "Default keys")) {
@@ -1789,23 +1913,28 @@ void View::finish_pad(const std::string& source) {
 }
 
 void View::hint_lines(std::string_view text, float width) {
-    std::vector<Line> lines;
-    for (std::string_view rest = text;;) {
-        const std::size_t end = rest.find('\n');
-        const std::string_view part = rest.substr(0, end);
-        if (const std::size_t name = settings::choice_name(part)) {
-            Line line{{Style::bold, std::string(part.substr(0, name)), {}}};
-            const Line after = parse_inline(part.substr(name));
-            line.insert(line.end(), after.begin(), after.end());
-            lines.push_back(std::move(line));
-        } else {
-            lines.push_back(parse_inline(part));
+    // Kept, so that rich() gives a link the same ID on the frame it is pressed and the frame it is let go.
+    auto known = hints_.find(text);
+    if (known == hints_.end()) {
+        std::vector<Line> lines;
+        for (std::string_view rest = text;;) {
+            const std::size_t end = rest.find('\n');
+            const std::string_view part = rest.substr(0, end);
+            if (const std::size_t name = settings::choice_name(part)) {
+                Line line{{Style::bold, std::string(part.substr(0, name)), {}}};
+                const Line after = parse_inline(part.substr(name));
+                line.insert(line.end(), after.begin(), after.end());
+                lines.push_back(std::move(line));
+            } else {
+                lines.push_back(parse_inline(part));
+            }
+            if (end == std::string_view::npos) break;
+            rest.remove_prefix(end + 1);
         }
-        if (end == std::string_view::npos) break;
-        rest.remove_prefix(end + 1);
+        known = hints_.emplace(std::string(text), std::move(lines)).first;
     }
     ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(ImGui::GetStyle().ItemSpacing.x, 4.0f * scale_));
-    for (const Line& line : lines) rich(line, width, false, true, 1.4f);
+    for (const Line& line : known->second) rich(line, width, false, true, 1.4f);
     ImGui::PopStyleVar();
 }
 
@@ -1864,6 +1993,29 @@ void View::take_key(const char* name) {
                 (previous == "None" ? std::string("no key") : previous);
 }
 
+float View::eased(unsigned id, float target, float seconds) {
+    const double now = ImGui::GetTime();
+    Motion& motion = motions_.try_emplace(id, Motion{target, target, now - seconds}).first->second;
+    const auto at = [&](double time) {
+        const float done = seconds > 0.0f ? std::clamp(static_cast<float>((time - motion.since) / seconds), 0.0f, 1.0f) : 1.0f;
+        const float left = 1.0f - done;
+        return motion.from + (motion.to - motion.from) * (1.0f - left * left * left * left);
+    };
+    if (target != motion.to) {
+        motion.from = at(now);
+        motion.to = target;
+        motion.since = now;
+    }
+    if (!animate_ || seconds <= 0.0f || now - motion.since >= seconds) return motion.to;
+    redraw_ = true;
+    return at(now);
+}
+
+float View::fade_in(const char* name) {
+    const bool open = ImGui::IsPopupOpen(name);
+    return eased(ImGui::GetID(name), open ? 1.0f : 0.0f, open ? 0.18f : 0.0f);
+}
+
 bool View::toggle(const char* id, bool* value) {
     const float height = ImGui::GetFrameHeight() * 0.78f, width = height * 1.8f;
     const ImVec2 at = ImGui::GetCursorScreenPos() + ImVec2(0.0f, (ImGui::GetFrameHeight() - height) * 0.5f);
@@ -1871,13 +2023,14 @@ bool View::toggle(const char* id, bool* value) {
     hand_when_hovered();
     if (pressed) *value = !*value;
     const bool hovered = ImGui::IsItemHovered();
+    const float on = eased(ImGui::GetItemID(), *value ? 1.0f : 0.0f, 0.14f);
     ImDrawList* draw = ImGui::GetWindowDrawList();
     const float alpha = ImGui::GetStyle().Alpha;
-    const unsigned track = *value ? (hovered ? kRedHover : kRed) : (hovered ? 0x2f3d31 : 0x283329);
+    const unsigned track = mix(hovered ? 0x2f3d31 : 0x283329, hovered ? kRedHover : kRed, on);
     draw->AddRectFilled(at, at + ImVec2(width, height), colour(track, alpha), height * 0.5f);
     const float knob = height * 0.5f - 3.0f * scale_;
-    const float x = *value ? at.x + width - height * 0.5f : at.x + height * 0.5f;
-    draw->AddCircleFilled(ImVec2(x, at.y + height * 0.5f), knob, colour(*value ? 0xffffff : 0xa9b6aa, alpha));
+    const float x = at.x + height * 0.5f + (width - height) * on;
+    draw->AddCircleFilled(ImVec2(x, at.y + height * 0.5f), knob, colour(mix(0xa9b6aa, 0xffffff, on), alpha));
     return pressed;
 }
 
@@ -1904,12 +2057,19 @@ bool View::segmented(const char* id, int* index, std::span<const char* const> ch
         if (ImGui::IsItemHovered()) hovered_part = static_cast<int>(choice);
         ImGui::PopID();
     }
+    const float rounding = ImGui::GetStyle().FrameRounding - 2.0f * scale_;
+    const ImVec2 inset(3.0f * scale_, 3.0f * scale_);
+    if (hovered_part >= 0 && hovered_part != *index) {
+        const ImVec2 left = at + ImVec2(part * static_cast<float>(hovered_part), 0.0f);
+        draw->AddRectFilled(left + inset, left + ImVec2(part, height) - inset, colour(0x222d23, alpha), rounding);
+    }
+    if (*index >= 0) {
+        const ImVec2 left = at + ImVec2(eased(ImGui::GetID("##chosen"), part * static_cast<float>(*index), 0.15f), 0.0f);
+        draw->AddRectFilled(left + inset, left + ImVec2(part, height) - inset, colour(0x334235, alpha), rounding);
+    }
     for (std::size_t choice = 0; choice < choices.size(); ++choice) {
         const ImVec2 left = at + ImVec2(part * static_cast<float>(choice), 0.0f);
-        const bool chosen = *index == static_cast<int>(choice), hovered = hovered_part == static_cast<int>(choice);
-        if (chosen || hovered)
-            draw->AddRectFilled(left + ImVec2(3.0f * scale_, 3.0f * scale_), left + ImVec2(part - 3.0f * scale_, height - 3.0f * scale_),
-                                colour(chosen ? 0x334235 : 0x222d23, alpha), ImGui::GetStyle().FrameRounding - 2.0f * scale_);
+        const bool chosen = *index == static_cast<int>(choice);
         ImFont* font = chosen ? bold_ : body_;
         const ImVec2 size = font->CalcTextSizeA(ImGui::GetFontSize(), FLT_MAX, 0.0f, choices[choice]);
         draw->AddText(font, ImGui::GetFontSize(), left + ImVec2((part - size.x) * 0.5f, (height - size.y) * 0.5f),
@@ -1926,17 +2086,23 @@ void View::rows() {
     if (held_page_ != page_ || !session_.editable()) held_.clear();
     held_page_ = page_;
     const float control = std::min(300.0f * scale_, ImGui::GetContentRegionAvail().x * 0.42f);
+    const bool tabbed = page_ == static_cast<int>(Page::controls);
+    int tab = 0;
     bool first = true;
     for (const auto& placement : layout()) {
         const Option& option = *find_option(placement.key);
         if (static_cast<int>(placement.page) != page_) continue;
+        if (placement.group) {
+            const std::string_view group(placement.group);
+            tab = group == "Weapons and psionics" ? 1 : group == "Mouse" || group == "Vertical look" ? 2 : group == "Gamepad" ? 3 : 0;
+            // The keyboard's keys follow the scheme that sets them, at the foot of the first tab.
+            if (tabbed && tab == 1 && controls_tab_ == 0) key_table();
+        }
+        if (tabbed && tab != controls_tab_) continue;
         ImGui::PushID(option.key);
         if (placement.group) {
-            // The keyboard's keys follow the scheme that sets them, before the group of the weapons' and powers' keys.
-            const std::string_view group(placement.group);
-            if (group == "Weapons and psionics") key_table();
             group_heading(placement.group, first);
-            if (group == "Gamepad") pad_status();
+            if (std::string_view(placement.group) == "Gamepad") pad_status();
         } else if (!first && !placement.child) {
             const ImVec2 at = ImGui::GetCursorScreenPos();
             ImGui::GetWindowDrawList()->AddLine(at, at + ImVec2(ImGui::GetContentRegionAvail().x, 0.0f), colour(kBorder));
@@ -2017,21 +2183,39 @@ void View::rows() {
             break;
         }
         case Kind::slider: {
-            ImGui::SetNextItemWidth(control);
             const auto held = held_.find(&option);
             int position = held != held_.end() ? held->second : to_position(option, value, highest);
             const int low = to_position(option, option.lowest, highest);
             const int high = to_position(option, highest, highest);
             const int shown = from_position(option, position, highest);
-            if (ImGui::SliderInt("##value", &position, low, high, slider_format(option, shown).c_str()))
-                held_[&option] = position;
+            // The value stands beside the track: on it the grab covered it. Ctrl+click typing still shows on the track.
+            float value_width = 0.0f;
+            for (const int sample : {option.lowest, highest, shown})
+                value_width = std::max(value_width, ImGui::CalcTextSize(text_of(value_text(option, sample)).c_str()).x);
+            const float gap = 12.0f * scale_;
+            ImGui::SetNextItemWidth(control - value_width - gap);
+            // A slider that is active while ImGui wants text is being typed into.
+            const bool typing = active_slider_ == &option && ImGui::GetIO().WantTextInput;
+            if (!typing) ImGui::PushStyleColor(ImGuiCol_Text, rgb(0, 0.0f));
+            const bool moved = ImGui::SliderInt("##value", &position, low, high, slider_format(option, shown).c_str());
+            const bool released = ImGui::IsItemDeactivatedAfterEdit(), active = ImGui::IsItemActive();
+            if (!typing) ImGui::PopStyleColor();
+            if (active) active_slider_ = &option;
+            else if (active_slider_ == &option) active_slider_ = nullptr;
+            if (moved) held_[&option] = position;
             // One write when the slider is let go, not one for every step of a drag.
-            if (ImGui::IsItemDeactivatedAfterEdit()) {
+            if (released) {
                 session_.set(option, from_position(option, position, highest));
                 held_.erase(&option);
-            } else if (!ImGui::IsItemActive()) {
+            } else if (!active) {
                 held_.erase(&option);
             }
+            const std::string said = text_of(value_text(option, from_position(option, position, highest)));
+            const ImVec2 after = ImGui::GetCursorPos();
+            ImGui::SameLine(0.0f, gap + value_width - ImGui::CalcTextSize(said.c_str()).x);
+            ImGui::AlignTextToFramePadding();
+            ImGui::TextUnformatted(said.c_str());
+            ImGui::SetCursorPos(ImVec2(after.x, std::max(after.y, ImGui::GetCursorPosY())));
             break;
         }
         }
@@ -2046,6 +2230,7 @@ void View::rows() {
 
 bool View::updates_popup(const UpdateView& update) {
     if (std::exchange(updates_open_, false)) ImGui::OpenPopup("Updates");
+    const Opacity opacity(fade_in("Updates"));
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     const float wide = viewport->WorkSize.x * 0.72f;
     ImGui::SetNextWindowSize(ImVec2(wide, 0.0f));
@@ -2366,6 +2551,7 @@ void View::rich(const Line& line, float width, bool strong, bool faint, float le
             if (clicked && section >= 0) {
                 section_ = section;
                 section_changed_ = true;
+                screen_ = Screen::help;
             } else if (clicked) {
                 SDL_OpenURL(address.c_str());
             }
@@ -2444,13 +2630,18 @@ void View::about() {
         ImGui::TextDisabled("%s", label);
         ImGui::TableNextColumn();
         ImGui::AlignTextToFramePadding();
-        ImGui::TextUnformatted(utf8(path).c_str());
+        const std::string full = utf8(path), shown = middle_cut(full, ImGui::GetContentRegionAvail().x);
+        ImGui::TextUnformatted(shown.c_str());
+        if (shown != full) tooltip(full.c_str());
         ImGui::TableNextColumn();
         ImGui::PushID(id);
         if (ImGui::Button("Open")) platform::open_folder(path);
         ImGui::PopID();
     };
     if (ImGui::BeginTable("folders", 3, ImGuiTableFlags_SizingFixedFit)) {
+        ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthFixed);
+        ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthStretch);
+        ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthFixed);
         folder("Your saves and settings", session_.data(), "data");
         folder("Program", session_.program(), "program");
         ImGui::EndTable();

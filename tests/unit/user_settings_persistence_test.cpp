@@ -96,6 +96,8 @@ int main() {
         written.frame_unlock = true;
         written.has_skip_intro = true;
         written.skip_intro = true;
+        written.has_movie_filter = true;
+        written.movie_filter = 0;
         written.has_mute_in_background = true;
         written.mute_in_background = true;
         written.has_bass_cut = true;
@@ -182,6 +184,7 @@ int main() {
                     loaded.perspective_textures &&
                     loaded.has_frame_unlock && loaded.frame_unlock &&
                     loaded.has_skip_intro && loaded.skip_intro &&
+                    loaded.has_movie_filter && loaded.movie_filter == 0 &&
                     loaded.has_mute_in_background && loaded.mute_in_background &&
                     loaded.has_bass_cut && loaded.bass_cut == 2 &&
                     loaded.has_language_disc && loaded.language_disc == "C:\\Games \"old\"\\Disruptor (France).cue" &&
@@ -294,6 +297,23 @@ int main() {
             const UserSettings kept = PSXRecompV4::load_user_settings(scale_path);
             require(!kept.parse_error && kept.has_draw_distance && kept.draw_distance == 200,
                     "a draw distance of a dropped choice did not load as the longest kept");
+        }
+        const struct { const char* text; bool has; int filter; } movie_files[] = {
+            {"smooth_movies = false", true, 0},
+            {"smooth_movies = true", false, 1},
+            {"smooth_movies = false\nmovie_filter = \"smooth\"", true, 1},
+            {"movie_filter = \"blurry\"", false, 1},
+            {"smooth_movies = false\nmovie_filter = \"blurry\"", false, 1},
+        };
+        for (const auto& movie : movie_files) {
+            {
+                std::ofstream out(scale_path, std::ios::trunc);
+                out << "[disruptor]\n" << movie.text << "\n";
+            }
+            const UserSettings loaded_filter = PSXRecompV4::load_user_settings(scale_path);
+            require(!loaded_filter.parse_error && loaded_filter.has_movie_filter == movie.has &&
+                        loaded_filter.movie_filter == movie.filter,
+                    "the movie filter, or the switch it replaced, loaded wrong");
         }
         for (int invalid_distance : {0, 110, 350}) {
             {

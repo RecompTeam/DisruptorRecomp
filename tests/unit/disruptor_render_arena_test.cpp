@@ -53,6 +53,7 @@ void disruptor_far_rendering_fog_ramp(int32_t *start, int32_t *length, int *powe
     *power = ramp_power;
 }
 void gl_renderer_set_palette_fade_power(int power) { published_power = power; }
+void gl_renderer_set_palette_blocks(const int *, int) {}
 int sky_behind = 0, edge_sky = -1;
 void gl_renderer_set_edge_sky(int sky) { edge_sky = sky; }
 float edge_depth = -1.0f;
@@ -102,7 +103,7 @@ int main() {
     renderer_entry(&cpu, kRendererEntry);
     const uint32_t first = psx_mod_read_word(kContexts[0] + kArenaOffset);
     const uint32_t second = psx_mod_read_word(kContexts[1] + kArenaOffset);
-    require(first == PSX_MOD_GPU_DMA_GUEST_BASE && second == first + kArenaBytes,
+    require(first == PSX_MOD_GPU_DMA_GUEST_BASE && second == first + kArenaOffsets[1],
             "back buffers did not receive separate DMA arenas");
     require(psx_mod_read_word(first) == 0x12345678u &&
             psx_mod_read_word(second) == 0x12345679u,

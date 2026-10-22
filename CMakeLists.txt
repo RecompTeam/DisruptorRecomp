@@ -30,6 +30,17 @@ option(DISRUPTOR_DEV_MENU
 option(DISRUPTOR_FRAME_INTERPOLATION
     "Build the experimental presentation-only frame interpolator"
     ON)
+if(DEFINED PSX_GAME_VERSION AND NOT PSX_GAME_VERSION STREQUAL "")
+    set(DISRUPTOR_DEV_TOOLS_DEFAULT OFF)
+else()
+    set(DISRUPTOR_DEV_TOOLS_DEFAULT ON)
+endif()
+option(DISRUPTOR_DEV_TOOLS
+    "Build the developer tools of the Debug tab, such as starting any mission"
+    ${DISRUPTOR_DEV_TOOLS_DEFAULT})
+if(DISRUPTOR_DEV_TOOLS AND DEFINED PSX_GAME_VERSION AND NOT PSX_GAME_VERSION STREQUAL "")
+    message(FATAL_ERROR "A build with PSX_GAME_VERSION is a release: set DISRUPTOR_DEV_TOOLS=OFF")
+endif()
 
 set(DISRUPTOR_EXTRA_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/backdrop_tiles.cpp"
@@ -39,6 +50,7 @@ set(DISRUPTOR_EXTRA_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/control_probe.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/diagnostics.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/far_rendering.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/movie_smoothing.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/frame/frame_rate.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/host.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/audio/bass_cut.cpp"
@@ -64,6 +76,9 @@ set(DISRUPTOR_EXTRA_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/mover_motion.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/sprite_depth.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/vertical_camera.cpp")
+if(DISRUPTOR_DEV_TOOLS)
+    list(APPEND DISRUPTOR_EXTRA_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/mission_select.cpp")
+endif()
 
 # The project deliberately uses the redistributable OpenBIOS backend only.
 set(PSXRECOMP_BIOS_STEMS "OpenBIOS" CACHE STRING "" FORCE)
@@ -176,6 +191,9 @@ psxrecomp_add_runtime_target(psx-runtime
 )
 target_compile_definitions(psx-runtime PRIVATE
     PSX_HAS_GAME_HOST=1)
+if(DISRUPTOR_DEV_TOOLS)
+    target_compile_definitions(psx-runtime PRIVATE DISRUPTOR_DEV_TOOLS=1)
+endif()
 if(NOT DISRUPTOR_FRAME_INTERPOLATION)
     target_compile_definitions(psx-runtime PRIVATE
         # Keep the experimental sources available, but compile out frame
@@ -410,6 +428,7 @@ disruptor_unit_test(disruptor_bass_cut tests/unit/disruptor_bass_cut_test.cpp
     disruptor_unit_test(disruptor_gpu_pinned_corner tests/unit/gpu_pinned_corner_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_gpu_turned_perspective tests/unit/gpu_turned_perspective_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_gpu_turn_clip tests/unit/gpu_turn_clip_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_movie_filter tests/unit/movie_filter_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_gpu_world_depth tests/unit/gpu_world_depth_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_gpu_near_face tests/unit/gpu_near_face_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_gpu_world_texel tests/unit/gpu_world_texel_test.cpp RUNTIME_HEADERS

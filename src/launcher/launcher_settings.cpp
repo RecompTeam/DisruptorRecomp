@@ -36,6 +36,7 @@ constexpr Placement placed[] = {
     {"disruptor.ambient_occlusion", Page::enhancements, "Shading"},
     {"disruptor.occlusion_reach", Page::enhancements, nullptr, true},
     {"disruptor.occlusion_strength", Page::enhancements, nullptr, true},
+    {"disruptor.movie_filter", Page::enhancements, "Movies"},
     {"disruptor.skip_intro", Page::enhancements, "Startup"},
     {"disruptor.modern_controls", Page::controls, "Scheme"},
     {"disruptor.number_keys", Page::controls, "Weapons and psionics"},

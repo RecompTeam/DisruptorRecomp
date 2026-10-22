@@ -40,15 +40,17 @@ public:
     View& operator=(const View&) = delete;
 
     void style(float scale);
-    void show(Screen screen, int page) {
+    void show(Screen screen, int page, int tab = 0) {
         screen_ = screen;
         page_ = page;
         section_ = page;
+        controls_tab_ = tab;
     }
     void open_updates() { updates_open_ = true; }
     void for_picture(float pixels) {
         rows_scroll_ = pixels;
         version_hidden_ = true;
+        animate_ = false;
     }
     void attach(SDL_Window* window, SDL_Renderer* renderer);
     void dropped(const std::filesystem::path& file) { session_.take_image(file); }
@@ -86,7 +88,8 @@ private:
     void banner(float height, bool dialog_open);
     void first_run(bool dialog_open);
     void cards(bool dialog_open);
-    void last_activity(float left, float right, float middle);
+    // The last task's line between `left` and `right`. False, with nothing drawn, when it has no room there.
+    bool last_activity(float left, float right, float middle);
     bool update_strip(const UpdateView& update);
     std::string update_action_label(const UpdateView& update) const;
     // The one button a state of the updater offers. True when the launcher must close for the update to be applied.
@@ -115,6 +118,10 @@ private:
     void group_heading(const char* name, bool first);
     bool toggle(const char* id, bool* value);
     bool segmented(const char* id, int* index, std::span<const char* const> choices, float width);
+    // A value on its way to `target` over `seconds`, eased out: while it moves the window draws again. At once without animations.
+    float eased(unsigned id, float target, float seconds);
+    // A modal's opacity: it fades in, and leaves at once.
+    float fade_in(const char* name);
     bool updates_popup(const UpdateView& update);
     void help();
     // `compact` sets a card's notes tighter than the Help page's guide.
@@ -193,6 +200,17 @@ private:
     int caption_hovered_ = -1;
     double caption_hovered_since_ = 0.0;
     std::map<const Option*, int> held_; // a slider's position while it is dragged, written when it is let go
+    const Option* active_slider_ = nullptr;
+    bool rows_scroll_bar_ = false; // the settings rows scrolled at the last frame
+    struct Motion {
+        float from = 0.0f, to = 0.0f;
+        double since = 0.0;
+    };
+    std::map<unsigned, Motion> motions_;
+    bool animate_ = true;
+    std::vector<char> far_east_; // a system font for CJK letters in a shown path, kept for the font atlas
+    std::map<std::string, std::vector<Line>, std::less<>> hints_;
+    int controls_tab_ = 0;
 };
 
 } // namespace disruptor::launcher

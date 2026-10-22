@@ -1,8 +1,8 @@
 diff --git a/runtime/src/gpu_gl_renderer.c b/runtime/src/gpu_gl_renderer.c
-index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c496bd1f1ea255e59179b8c50bf1a8efa5780cc2 100644
+index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..793f65edc4734c7475f3d72b9c0d2f4602308543 100644
 --- a/runtime/src/gpu_gl_renderer.c
 +++ b/runtime/src/gpu_gl_renderer.c
-@@ -1,747 +1,1145 @@
+@@ -1,747 +1,1166 @@
 -/* gpu_gl_renderer.c — hardware OpenGL renderer backend.
 - *
 - * ARCHITECTURE (v2 — GPU-authoritative VRAM)
@@ -466,6 +466,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c496bd1f1ea255e59179b8c50bf1a8ef
 +typedef void   (APIENTRY *PFN_glUniform1i)(GLint, GLint);
 +typedef void   (APIENTRY *PFN_glUniform1f)(GLint, GLfloat);
 +typedef void   (APIENTRY *PFN_glUniform2i)(GLint, GLint, GLint);
++typedef void   (APIENTRY *PFN_glUniform2iv)(GLint, GLsizei, const GLint *);
 +typedef void   (APIENTRY *PFN_glUniform4i)(GLint, GLint, GLint, GLint, GLint);
 +typedef void   (APIENTRY *PFN_glUniform4f)(GLint, GLfloat, GLfloat, GLfloat, GLfloat);
 +typedef void   (APIENTRY *PFN_glBlendColor)(GLfloat, GLfloat, GLfloat, GLfloat);
@@ -535,6 +536,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c496bd1f1ea255e59179b8c50bf1a8ef
 +static PFN_glUniform1i         p_glUniform1i;
 +static PFN_glUniform1f         p_glUniform1f;
 +static PFN_glUniform2i         p_glUniform2i;
++static PFN_glUniform2iv        p_glUniform2iv;
 +static PFN_glUniform4i         p_glUniform4i;
 +static PFN_glUniform4f         p_glUniform4f;
 +static PFN_glBlendColor        p_glBlendColor;
@@ -596,7 +598,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c496bd1f1ea255e59179b8c50bf1a8ef
 +    LOAD(p_glGetProgramInfoLog, "glGetProgramInfoLog"); LOAD(p_glUseProgram, "glUseProgram");
 +    LOAD(p_glGetUniformLocation, "glGetUniformLocation"); LOAD(p_glUniform1i, "glUniform1i");
 +    LOAD(p_glUniform1f, "glUniform1f");
-+    LOAD(p_glUniform2i, "glUniform2i"); LOAD(p_glUniform4i, "glUniform4i");
++    LOAD(p_glUniform2i, "glUniform2i"); LOAD(p_glUniform2iv, "glUniform2iv"); LOAD(p_glUniform4i, "glUniform4i");
 +    LOAD(p_glUniform4f, "glUniform4f");
 +    LOAD(p_glBlendColor, "glBlendColor");
 +    LOAD(p_glBlendFuncSeparate, "glBlendFuncSeparate");
@@ -658,6 +660,8 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c496bd1f1ea255e59179b8c50bf1a8ef
 +static int           s_present_w = 0, s_present_h = 0;
 +static GLuint        s_present_prog = 0, s_present_vao = 0;
 +static GLint         s_present_uTex = -1, s_present_uUvRect = -1;
++static GLuint        s_movie_prog = 0;
++static GLint         s_movie_uTex = -1, s_movie_uUvRect = -1, s_movie_uLast = -1;
 +static GLuint        s_aa_prog = 0;
 +static GLint         s_aa_uTex = -1, s_aa_uUvRect = -1, s_aa_uPx = -1;
 +/* Experimental ambient occlusion: the display mirror keeps the depth the painter's order leaves, the present pass shades by it. */
@@ -1233,6 +1237,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c496bd1f1ea255e59179b8c50bf1a8ef
 +static GLint s_geo_uVisual = -1, s_geo_uCamera = -1, s_geo_uVisualOptions = -1;
 +static GLint s_tex_uVisual = -1, s_tex_uCamera = -1, s_tex_uVisualOptions = -1;
 +static GLint s_tex_uFade = -1, s_tex_uFadeAt = -1, s_tex_uFadePower = -1, s_tex_uDissolve = -1, s_tex_uClear = -1;
++static GLint s_tex_uFadeBlocks = -1, s_tex_uFadeBlockCount = -1;
 +/* Runtime controls (ws_backdrop_stretch debug command). */
 +int g_ws_bd_stretch_on   = 1;   /* feature on (gated by native-wide + per-prim gate) */
 +int g_ws_bd_stretch_pct  = 0;   /* 0 = auto (g_wide_w/native_w); else pct/100 */
@@ -1737,6 +1742,22 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c496bd1f1ea255e59179b8c50bf1a8ef
 +    "#version 330\n"
 +    "in vec2 v_uv; uniform sampler2D u_tex; out vec4 frag;\n"
 +    "void main(){ frag = texture(u_tex, v_uv); }\n";
++/* Mitchell (B = C = 1/3) on 4x4 taps, none past u_last: Lanczos-2's four-texel clamp cut slanted lines into stairs. */
++static const char *MOVIE_FS =
++    "#version 330\n"
++    "in vec2 v_uv; uniform sampler2D u_tex; uniform vec4 u_last; out vec4 frag;\n"
++    "float mitchell(float x){ x = abs(x);\n"
++    "  if (x < 1.0) return (7.0 * x * x * x - 12.0 * x * x + 16.0 / 3.0) / 6.0;\n"
++    "  if (x < 2.0) return (-7.0 / 3.0 * x * x * x + 12.0 * x * x - 20.0 * x + 32.0 / 3.0) / 6.0;\n"
++    "  return 0.0; }\n"
++    "void main(){\n"
++    "  ivec2 size = textureSize(u_tex, 0);\n"
++    "  vec2 at = v_uv * vec2(size) - 0.5; vec2 base = floor(at); vec2 f = at - base;\n"
++    "  vec4 sum = vec4(0.0); float total = 0.0;\n"
++    "  for (int j = -1; j <= 2; ++j) { float wy = mitchell(f.y - float(j));\n"
++    "    for (int i = -1; i <= 2; ++i) { float w = mitchell(f.x - float(i)) * wy;\n"
++    "      sum += texelFetch(u_tex, clamp(ivec2(base) + ivec2(i, j), ivec2(0), ivec2(u_last.xy)), 0) * w; total += w; } }\n"
++    "  frag = vec4(clamp(sum / total, 0.0, 1.0).rgb, 1.0); }\n";
 +/* Anti-aliasing of the shown picture, a screen pixel each. The linear filter gives the mean of the target's texels under the pixel
 + * (four where the target is twice the screen's size). Along an edge the pixel is then read a part of a step across it, by its
 + * place between the ends of that step (the method of FXAA, written here): 0.0312 and an eighth are the least contrast of an edge. */
@@ -1880,7 +1901,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c496bd1f1ea255e59179b8c50bf1a8ef
  static const char *INTERP_FS =
      "#version 330\n"
      "in vec2 v_uv; uniform sampler2D u_prev; uniform sampler2D u_curr;\n"
-@@ -757,2715 +1155,4742 @@
+@@ -757,2715 +1176,4808 @@
      "  }\n"
      "  frag=mix(prev,curr,alpha);\n"
      "}\n";
@@ -3762,6 +3783,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c496bd1f1ea255e59179b8c50bf1a8ef
 +    "uniform vec4 u_fade;     /* depth the fade begins at, depth of one row, rows of a fade (0 = as drawn), share of the step aside */\n"
 +    "uniform vec4 u_fade_at;  /* the picture's centre column, half its width, how much deeper the depth handed over is than the surface, 1 for the UV view */\n"
 +    "uniform float u_fade_power; /* the fog grows with this power of the depth into it */\n"
++    "uniform ivec2 u_fade_blocks[64]; uniform int u_fade_block_count;  /* the level's palettes: x and first row of each fade */\n"
 +    "uniform vec4 u_dissolve;  /* camera depth the world starts to dissolve into what lies behind at, 1 where it may, 1 with the sky behind, the depth the game drops it at */\n"
 +    "uniform vec4 u_clear;     /* the frame's background, 1 when known: without the sky only a fog that ends in it dissolves */\n"
 +    "uniform vec4 u_visual_options;  /* w above 0: a filler or outline pass */\n"
@@ -3789,6 +3811,11 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c496bd1f1ea255e59179b8c50bf1a8ef
 +    "}\n"
 +    "vec3 col5(int raw){\n"
 +    "  return vec3(float(raw & 31), float((raw >> 5) & 31), float((raw >> 10) & 31)) / 31.0;\n"
++    "}\n"
++    "int fade_first_row(int rows){\n"
++    "  for (int i = 0; i < u_fade_block_count; ++i)\n"
++    "    if (u_fade_blocks[i].x == v_clut.x && v_clut.y >= u_fade_blocks[i].y && v_clut.y < u_fade_blocks[i].y + rows) return u_fade_blocks[i].y;\n"
++    "  return -1;\n"
 +    "}\n"
 +    "bool sample_texture(vec2 sample_uv, out vec3 rgb, out int stp){\n"
 +    "  if (u_filter == 0) {\n"
@@ -3831,12 +3858,13 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c496bd1f1ea255e59179b8c50bf1a8ef
 +    "  int stp; vec3 rgb;\n"
 +    "  g_row = v_clut.y;\n"
 +    "  int rows = int(u_fade.z + 0.5); float level = -1.0, dissolve = 0.0;\n"
-+    "  if (rows > 1 && v_fade.x > 0.0 && v_depth != 2) {\n"
++    "  int first = rows > 1 && v_fade.x > 0.0 && v_depth != 2 ? fade_first_row(rows) : -1;\n"
++    "  if (first >= 0) {\n"
 +    "    float range = (1.0 + u_fade.w*abs(v_fade.y - u_fade_at.x)/u_fade_at.y)/(v_fade.x*u_fade_at.z);\n"
 +    "    float into = (range - u_fade.x)/(u_fade.y*float(rows));\n"
 +    "    level = clamp(float(rows)*(into > 0.0 ? pow(min(into, 1.0), max(u_fade_power, 1.0)) : into), 0.0, float(rows - 1));\n"
 +    "    if (u_dissolve.y > 0.5) dissolve = smoothstep(u_dissolve.x, u_dissolve.w, 1.0/(v_fade.x*u_fade_at.z));\n"
-+    "    g_row = v_clut.y - v_clut.y % rows + int(level);\n"
++    "    g_row = first + int(level);\n"
 +    "  } else if ((v_raw & 2) != 0) level = float(v_raw >> 2)/256.0;  /* a sprite the game faded: its row, and the share of the next */\n"
 +    "  if (!sample_texture(sample_uv, rgb, stp)) discard;\n"
 +    "  if (level >= 0.0 && int(level) < rows - 1) {\n"
@@ -3847,7 +3875,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c496bd1f1ea255e59179b8c50bf1a8ef
 +    "  if (u_semipass == 2 && stp == 0) discard;\n"
 +    "  if ((v_raw & 1) == 0) rgb = clamp(rgb * v_col.rgb * 2.0, 0.0, 1.0);\n"
 +    "  if (dissolve > 0.0 && u_dissolve.z < 0.5) {\n"
-+    "    vec3 last; int last_stp; int row = g_row; g_row = v_clut.y - v_clut.y % rows + rows - 1;\n"
++    "    vec3 last; int last_stp; int row = g_row; g_row = first + rows - 1;\n"
 +    "    bool same = u_clear.w > 0.5 && sample_texture(sample_uv, last, last_stp);\n"
 +    "    g_row = row;\n"
 +    "    if (same && (v_raw & 1) == 0) last = clamp(last * v_col.rgb * 2.0, 0.0, 1.0);\n"
@@ -4844,6 +4872,14 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c496bd1f1ea255e59179b8c50bf1a8ef
 +    s_fade_rows = rows; s_fade_start = start; s_fade_step = step > 0.0f ? step : 1.0f; s_fade_side = side;
 +}
 +void gl_renderer_set_palette_fade_power(int power) { s_fade_power = power < 1 ? 1 : power > 3 ? 3 : power; }
++#define FADE_BLOCKS 64
++static GLint s_fade_blocks[2 * FADE_BLOCKS];
++static int s_fade_block_count = 0;
++void gl_renderer_set_palette_blocks(const int *blocks, int count) {
++    count = count < 0 ? 0 : count > FADE_BLOCKS ? FADE_BLOCKS : count;
++    for (int i = 0; i < 2 * count; ++i) s_fade_blocks[i] = blocks[i];
++    s_fade_block_count = count;
++}
 +
 +#define EDGE_CLEAR_WIDTH 256     /* a fill this large over the whole drawing area is a frame's background */
 +#define EDGE_CLEAR_HEIGHT 192
@@ -4857,8 +4893,10 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c496bd1f1ea255e59179b8c50bf1a8ef
 +    p_glUniform4f(clear, s_clear_rgb[0], s_clear_rgb[1], s_clear_rgb[2], s_clear_known ? 1.0f : 0.0f);
 +}
 +
-+static void smooth_fade_uniforms(GLint fade, GLint at, GLint power, float nearer) {
++static void smooth_fade_uniforms(GLint fade, GLint at, GLint power, GLint blocks, GLint block_count, float nearer) {
 +    p_glUniform4f(fade, s_fade_start, s_fade_step, s_smooth_fade ? (float)s_fade_rows : 0.0f, s_fade_side);
++    if (s_fade_block_count) p_glUniform2iv(blocks, s_fade_block_count, s_fade_blocks);
++    p_glUniform1i(block_count, s_fade_block_count);
 +    p_glUniform1f(power, (float)s_fade_power);
 +    p_glUniform4f(at, (float)g_wide_cur_base + s_yaw_center_x, s_yaw_center_x > 0.0f ? s_yaw_center_x : 160.0f, nearer, s_uv_view ? 1.0f : 0.0f);
 +}
@@ -4876,7 +4914,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c496bd1f1ea255e59179b8c50bf1a8ef
 +
 +    hr_begin(1);
 +    p_glUseProgram(s_tex_prog);
-+    smooth_fade_uniforms(s_tex_uFade, s_tex_uFadeAt, s_tex_uFadePower, 1.0f);
++    smooth_fade_uniforms(s_tex_uFade, s_tex_uFadeAt, s_tex_uFadePower, s_tex_uFadeBlocks, s_tex_uFadeBlockCount, 1.0f);
 +    edge_dissolve_batch(s_tex_uDissolve, s_tex_uClear, semi, s_mask_check);
 +    geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 0);
 +    p_glActiveTexture(PSXGL_TEXTURE0);
@@ -6176,6 +6214,8 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c496bd1f1ea255e59179b8c50bf1a8ef
 +    s_tex_uFade = p_glGetUniformLocation(s_tex_prog, "u_fade");
 +    s_tex_uFadeAt = p_glGetUniformLocation(s_tex_prog, "u_fade_at");
 +    s_tex_uFadePower = p_glGetUniformLocation(s_tex_prog, "u_fade_power");
++    s_tex_uFadeBlocks = p_glGetUniformLocation(s_tex_prog, "u_fade_blocks");
++    s_tex_uFadeBlockCount = p_glGetUniformLocation(s_tex_prog, "u_fade_block_count");
 +    s_tex_uDissolve = p_glGetUniformLocation(s_tex_prog, "u_dissolve");
 +    s_tex_uClear = p_glGetUniformLocation(s_tex_prog, "u_clear");
 +    s_tex_uPull = p_glGetUniformLocation(s_tex_prog, "u_pull");
@@ -6380,6 +6420,12 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c496bd1f1ea255e59179b8c50bf1a8ef
 +        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
 +        glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
 +        s_present_prog = build_program(PRESENT_VS, PRESENT_FS);
++        s_movie_prog = build_program(PRESENT_VS, MOVIE_FS);
++        if (s_movie_prog) {
++            s_movie_uTex = p_glGetUniformLocation(s_movie_prog, "u_tex");
++            s_movie_uUvRect = p_glGetUniformLocation(s_movie_prog, "u_uv_rect");
++            s_movie_uLast = p_glGetUniformLocation(s_movie_prog, "u_last");
++        }
 +        s_ssao_prog = build_program(PRESENT_VS, SSAO_FS);
 +        s_ssao_mix_prog = build_program(PRESENT_VS, SSAO_MIX_FS);
 +        s_aa_prog = build_program(PRESENT_VS, AA_FS);
@@ -6692,7 +6738,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c496bd1f1ea255e59179b8c50bf1a8ef
 +}
 +
 +void gl_renderer_present(const uint32_t *pixels, int src_w, int src_h, int linear,
-+                         int force_4_3, int content_w) {
++                         int force_4_3, int content_w, int movie) {
 +    if (!s_ctx) return;
 +    interp_reset_history();
 +    int ww = 0, wh = 0; gl_visible_size(&ww, &wh);
@@ -6731,6 +6777,10 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c496bd1f1ea255e59179b8c50bf1a8ef
 +    glViewport(lx, ly, lw, lh);
 +    p_glActiveTexture(PSXGL_TEXTURE0);
 +    upload_present_tex(pixels, src_w, src_h, linear);
++    if (movie && s_movie_prog) {
++        p_glUseProgram(s_movie_prog); p_glUniform1i(s_movie_uTex, 0);
++        p_glUniform4f(s_movie_uUvRect, 0.f, 0.f, uv_x1, 1.f);
++        p_glUniform4f(s_movie_uLast, (float)((crop ? content_w : src_w) - 1), (float)(src_h - 1), 0.f, 0.f);    } else {
 +    p_glUseProgram(s_present_prog); p_glUniform1i(s_present_uTex, 0);
 +    if (crop) {
          p_glUniform4f(s_present_uUvRect, 0.f, 0.f, uv_x1, 1.f);
@@ -7394,6 +7444,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c496bd1f1ea255e59179b8c50bf1a8ef
 +        p_glUniform4f(s_present_uUvRect, u0, v0, 1.f - u0, 1.f - v0);
 +    } else {
 +        p_glUniform4f(s_present_uUvRect, 0.f, 0.f, 1.f, 1.f);
++    }
 +    }
 +    p_glBindVertexArray(s_present_vao); glDrawArrays(GL_TRIANGLES, 0, 3);
 +    p_glBindVertexArray(0); p_glUseProgram(0);
@@ -9193,9 +9244,45 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c496bd1f1ea255e59179b8c50bf1a8ef
 +    if (texture) glDeleteTextures(1, &texture);
 +}
 +
++/* What reached the screen since the detailed log last asked: pictures, the in-between ones, the longest gap between two. */
++static SDL_SpinLock s_shown_count_lock;
++static unsigned     s_shown_pictures = 0, s_shown_between = 0;
++static uint64_t     s_shown_last = 0, s_shown_gap = 0;
++static int          s_shown_counting = 0;
++
++void gl_renderer_set_shown_count(int enabled) {
++    SDL_AtomicLock(&s_shown_count_lock);
++    s_shown_counting = enabled != 0;
++    s_shown_pictures = s_shown_between = 0;
++    s_shown_last = s_shown_gap = 0;
++    SDL_AtomicUnlock(&s_shown_count_lock);
++}
++
++static void shown_count(int kind) {
++    if (!s_shown_counting) return;
++    const uint64_t now = SDL_GetPerformanceCounter();
++    SDL_AtomicLock(&s_shown_count_lock);
++    if (s_shown_last && now - s_shown_last > s_shown_gap) s_shown_gap = now - s_shown_last;
++    s_shown_last = now;
++    ++s_shown_pictures;
++    if (kind) ++s_shown_between;
++    SDL_AtomicUnlock(&s_shown_count_lock);
++}
++
++void gl_renderer_shown_count_take(unsigned *pictures, unsigned *between, double *longest_ms) {
++    SDL_AtomicLock(&s_shown_count_lock);
++    *pictures = s_shown_pictures;
++    *between = s_shown_between;
++    *longest_ms = s_shown_pictures ? (double)s_shown_gap * 1000.0 / (double)SDL_GetPerformanceFrequency() : -1.0;
++    s_shown_pictures = s_shown_between = 0;
++    s_shown_gap = 0;
++    SDL_AtomicUnlock(&s_shown_count_lock);
++}
++
 +static void shown_capture(int kind, float alpha) {
 +    int ww = 0, wh = 0;
 +    shown_snap();
++    shown_count(kind);
 +    if (s_shown_left <= 0) return;
 +    if (s_shown_skip > 0) { --s_shown_skip; return; }
 +    gl_visible_size(&ww, &wh);
@@ -9304,7 +9391,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c496bd1f1ea255e59179b8c50bf1a8ef
      uint64_t freq = SDL_GetPerformanceFrequency();
      uint64_t deadline = SDL_GetPerformanceCounter();
      uint64_t diag_start = deadline, diag_swaps = 0, diag_captures = 0;
-@@ -3473,11 +5898,12 @@
+@@ -3473,11 +5985,12 @@
      while (SDL_AtomicGet(&s_interp_thread_run)) {
          SDL_LockMutex(s_interp_mutex);
          double hz = s_interp_target_hz;
@@ -9318,7 +9405,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..c496bd1f1ea255e59179b8c50bf1a8ef
              uint64_t period = (uint64_t)((double)freq / hz);
              if (!period) period = 1;
              deadline += period;
-@@ -3492,235 +5918,427 @@
+@@ -3492,235 +6005,427 @@
              }
              while (SDL_GetPerformanceCounter() < deadline) {}
              now = SDL_GetPerformanceCounter();

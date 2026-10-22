@@ -247,12 +247,12 @@ void test_the_status_line() {
 void test_the_language_box() {
     const std::string french = utf8(kImage), missing = kGone;
     LanguageList list = language_list({}, {}, "");
-    require(list.labels == std::vector<std::wstring>{L"English (the US disc alone)"} && list.selected == 0 && starts(list.note, L"Add a French"),
+    require(list.labels == std::vector<std::wstring>{L"English (US disc)"} && list.selected == 0 && starts(list.note, L"Add a French"),
             "without discs the box offers English and says how to add one");
 
     Regions regions{{french, RegionDisc{"French", true}}, {missing, std::nullopt}};
     list = language_list({kGerman, french, missing}, regions, french);
-    require(list.labels == std::vector<std::wstring>{L"English (the US disc alone)", L"Disc image (Disruptor (Germany).cue)",
+    require(list.labels == std::vector<std::wstring>{L"English (US disc)", L"Disc image (Disruptor (Germany).cue)",
                                                      L"French (Disruptor (France).cue)", L"Unknown or missing (gone.cue)"},
             "a disc is listed by its language and file name, one not looked at yet as a disc image");
     require(list.selected == 2 && starts(list.note, L"French disc: ") && ends(list.note, L"\nThe image is used where it is"),

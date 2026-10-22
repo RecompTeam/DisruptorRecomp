@@ -191,6 +191,22 @@ void read_game_user_settings(const toml::value& doc, UserSettings& s) {
             s.depth_sorted_world = toml::find<bool>(d, "depth_sorted_world");
             s.has_depth_sorted_world = true;
         });
+        /* The switch movie_filter replaced: off keeps the movies as they are, on takes the filter's default. */
+        if (d.contains("smooth_movies") && !d.contains("movie_filter")) try_get([&]{
+            if (!toml::find<bool>(d, "smooth_movies")) {
+                s.movie_filter = 0;
+                s.has_movie_filter = true;
+            }
+        });
+        if (d.contains("movie_filter")) try_get([&]{
+            const std::string filter = toml::find<std::string>(d, "movie_filter");
+            for (int index = 0; index < kDisruptorMovieFilterCount; ++index) {
+                if (filter == kDisruptorMovieFilters[index]) {
+                    s.movie_filter = index;
+                    s.has_movie_filter = true;
+                }
+            }
+        });
         if (d.contains("draw_distance")) try_get([&]{
             int percent = toml::find<int>(d, "draw_distance");
             /* 250 and 300 were choices once: a file naming them draws at the longest kept. */
@@ -244,7 +260,7 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
         s.has_perspective_textures || s.has_frame_unlock ||
         s.has_ambient_occlusion || s.has_occlusion_reach || s.has_occlusion_strength || s.has_smooth_fade ||
         s.has_multisampling || s.has_sample_shading || s.has_downscale_averaging || s.has_edge_smoothing ||
-        s.has_gap_filling || s.has_depth_sorted_world || s.has_draw_distance || s.has_fog_shape || s.has_diagnostic_view || s.has_detailed_logging ||
+        s.has_gap_filling || s.has_depth_sorted_world || s.has_movie_filter || s.has_draw_distance || s.has_fog_shape || s.has_diagnostic_view || s.has_detailed_logging ||
         s.has_language_discs || s.has_mute_in_background || s.has_bass_cut ||
         s.has_language_disc || s.has_skip_intro ||
         s.has_hud_scale) {
@@ -337,6 +353,8 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
             f << "gap_filling = " << (s.gap_filling ? "true" : "false") << "\n";
         if (s.has_depth_sorted_world)
             f << "depth_sorted_world = " << (s.depth_sorted_world ? "true" : "false") << "\n";
+        if (s.has_movie_filter && s.movie_filter >= 0 && s.movie_filter < kDisruptorMovieFilterCount)
+            f << "movie_filter = " << quoted(kDisruptorMovieFilters[s.movie_filter]) << "\n";
         if (s.has_draw_distance &&
             std::ranges::find(kDisruptorDrawDistances, s.draw_distance) != std::end(kDisruptorDrawDistances))
             f << "draw_distance = " << s.draw_distance << "\n";
