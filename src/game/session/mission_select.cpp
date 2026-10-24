@@ -6,6 +6,8 @@
 
 #include "game/session/mission_select.h"
 
+#include "game/achievements/game_client.h"
+
 #include "cpu_state.h"
 #include "lockstep.h"
 #include "mod_plugins.h"
@@ -56,6 +58,7 @@ void vsync_entry(CPUState *cpu, uint32_t) {
     }
     g_asked.store(0, std::memory_order_relaxed);
     g_from_launch = false;
+    if (!disruptor_achievements_allows(DISRUPTOR_ACHIEVEMENTS_START_MISSION)) return;
     psx_mod_write_byte(kMission, static_cast<uint8_t>(mission));
     psx_mod_write_byte(kLevel, psx_mod_read_byte(kLevels + static_cast<uint32_t>(mission)));
     for (const uint32_t flag : kFlags) psx_mod_write_byte(flag, 0u);
@@ -87,6 +90,7 @@ extern "C" int disruptor_mission_select_ready(void) {
 
 extern "C" int disruptor_mission_select_start(int mission) {
     if (mission < DISRUPTOR_FIRST_MISSION || mission > DISRUPTOR_LAST_MISSION || !at_main_menu()) return 0;
+    if (!disruptor_achievements_allows(DISRUPTOR_ACHIEVEMENTS_START_MISSION)) return 0;
     g_waited.store(0, std::memory_order_relaxed);
     g_asked.store(mission, std::memory_order_relaxed);
     return 1;

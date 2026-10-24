@@ -41,6 +41,7 @@ typedef struct {
     float clear[4], tint;
     GLuint textures[TEMP_MAX_TEXTURES];
     uint64_t texture_generation[TEMP_MAX_TEXTURES];
+    DdgiFrame ddgi;  /* the probe lighting's camera, casters and lights of this frame */
 } TemporalScene;
 static TemporalScene s_temp_build[TEMP_BUILD_SLOTS], s_temp_prev, s_temp_curr;
 /* Slots the builder skips (in matching, or a retired scene still sampled), apart since a publish copies scenes whole. */
@@ -506,6 +507,7 @@ static TemporalScene *temporal_prepare_scene(GLuint fbo, int y, int w, int h) {
         s->clear_y > y || s->clear_y+s->clear_h < y+h ||
         s->width != w || s->scale != s_scale || !s->nc) return NULL;
     s->origin_y=y; s->height=h; s->matched=s->world=s->moving=0;
+    s->ddgi=s_ddgi_frame_now;
     s->backdrop_back=0.0f;
     memset(&s->mesh_stats,0,sizeof(s->mesh_stats));
     for (int i=0; i<s->nc; ++i) {
@@ -1137,6 +1139,7 @@ static int temporal_present(float alpha,int lx,int ly,int lw,int lh) {
                 s->mesh_stats.departed_faces,s->mesh_stats.camera_inliers,s->height*s->scale);
 #endif
     glDisable(GL_STENCIL_TEST); glDisable(GL_SCISSOR_TEST); glDisable(GL_BLEND);
+    ddgi_present_between(&s_temp_prev.ddgi,&s->ddgi,alpha);
     if (ssao_draw(&s_ssao_thread,s_interp_thread_vao,s_temp_fbo,0,s_temp_tex,s->width*s->scale,VRAM_H*s->scale,
                   0.5f/s->width,0.5f/VRAM_H,1-0.5f/s->width,(s->height-0.5f)/VRAM_H,
                   s->scale,s_interp_linear,lx,ly,lw,lh)) {

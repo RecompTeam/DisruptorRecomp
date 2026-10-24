@@ -41,6 +41,23 @@ GtePrecisionLookupResult gte_precision_load_perspective_word_ex(
 GtePrecisionLookupResult gte_precision_load_identity(
     uint32_t addr, uint32_t packed, uint64_t *identity);
 
+/* The camera of one world draw: a game marks its start, the first projection after it fills the rest. A world point is
+ * input + offset, the input the GTE's vertex. */
+typedef struct GteCameraPose {
+    int16_t rotation[9];
+    int32_t translation[3];
+    int32_t offset[3];
+    int32_t centre_x16, centre_y16;
+    int32_t squash_num, squash_den;
+    uint16_t focal;
+    uint32_t sequence; /* 0: no pose */
+} GteCameraPose;
+void gte_pose_begin(void);
+void gte_set_pose_offset_reader(void (*reader)(int32_t offset[3]));
+int gte_pose_get(uint32_t sequence, GteCameraPose *pose);
+/* The pose and input vertex of a stored projection, whether or not its place is accepted. */
+GtePrecisionLookupResult gte_precision_load_pose(uint32_t addr, uint32_t packed, uint32_t *sequence, uint64_t *identity);
+
 /* A corner before the divide, behind the viewer too: its place is (centre_x + hx / w, centre_y + hy / w) while w is not 0. */
 typedef struct GtePrecisionView {
     double hx, hy, centre_x, centre_y;

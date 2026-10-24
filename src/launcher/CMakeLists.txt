@@ -22,7 +22,10 @@ target_compile_definitions(disruptor-launcher-config PUBLIC
     FMT_HEADER_ONLY=1 NOMINMAX WIN32_LEAN_AND_MEAN)
 
 # A language disc is checked with the game's own layout code.
+disruptor_achievements_library(disruptor-achievements-launcher STATIC_RUNTIME)
+
 add_library(disruptor-launcher-model STATIC
+    achievements_account.cpp
     choices.cpp
     guide.cpp
     ini_lines.cpp
@@ -42,8 +45,12 @@ add_library(disruptor-launcher-model STATIC
     "${PROJECT_SOURCE_DIR}/src/game/settings/options.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/settings/user_folder.cpp")
 target_include_directories(disruptor-launcher-model PUBLIC "${PROJECT_SOURCE_DIR}/src")
+if(DISRUPTOR_DEV_TOOLS)
+    target_compile_definitions(disruptor-launcher-model PUBLIC DISRUPTOR_DEV_TOOLS=1)
+endif()
 target_link_libraries(disruptor-launcher-model PUBLIC
-    disruptor-disc-import disruptor-launcher-config $<$<BOOL:${WIN32}>:shell32 ole32 advapi32 user32>)
+    disruptor-disc-import disruptor-launcher-config disruptor-achievements-launcher
+    $<$<BOOL:${WIN32}>:shell32 ole32 advapi32 user32>)
 # A save state's stamp and header come from the framework's own definitions; the hash is made at build time.
 target_include_directories(disruptor-launcher-model PRIVATE "${PSXRECOMP_ROOT}/runtime/include")
 add_dependencies(disruptor-launcher-model psxrecomp_codegen_hash)
@@ -273,6 +280,11 @@ if(BUILD_TESTING)
     target_link_libraries(disruptor-launcher-state-stamp-test PRIVATE disruptor-launcher-model)
     add_test(NAME disruptor_launcher_state_stamp COMMAND disruptor-launcher-state-stamp-test)
 
+    add_executable(disruptor-achievements-test "${PROJECT_SOURCE_DIR}/tests/unit/achievements_test.cpp")
+    target_link_libraries(disruptor-achievements-test PRIVATE disruptor-launcher-model)
+    target_include_directories(disruptor-achievements-test PRIVATE "${disruptor_rcheevos_SOURCE_DIR}/src")
+    add_test(NAME disruptor_achievements COMMAND disruptor-achievements-test)
+
     # The synthetic discs include the layout code whole, so this test takes region_disc.cpp and not the library.
     add_executable(disruptor-region-disc-test
         "${PROJECT_SOURCE_DIR}/tests/unit/region_disc_test.cpp" region_disc.cpp)
@@ -284,7 +296,8 @@ if(BUILD_TESTING)
         disruptor-launcher-release-notes-test
         disruptor-launcher-key-bindings-test disruptor-launcher-pad-bindings-test disruptor-launcher-report-test
         disruptor-launcher-platform-test
-        disruptor-launcher-player-files-test disruptor-launcher-state-stamp-test disruptor-region-disc-test PROPERTIES
+        disruptor-launcher-player-files-test disruptor-launcher-state-stamp-test disruptor-region-disc-test
+        disruptor-achievements-test PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
     if(MSVC)
         set_property(TARGET disruptor-launcher-settings-test disruptor-launcher-flow-test disruptor-launcher-guide-test
@@ -292,6 +305,7 @@ if(BUILD_TESTING)
                             disruptor-launcher-key-bindings-test disruptor-launcher-pad-bindings-test disruptor-launcher-report-test
                             disruptor-launcher-platform-test
                             disruptor-launcher-player-files-test disruptor-launcher-state-stamp-test disruptor-region-disc-test
+                            disruptor-achievements-test
             PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
         target_compile_options(disruptor-launcher-settings-test PRIVATE /utf-8)
         target_compile_options(disruptor-launcher-flow-test PRIVATE /utf-8)
@@ -304,5 +318,6 @@ if(BUILD_TESTING)
         target_compile_options(disruptor-launcher-player-files-test PRIVATE /W4 /utf-8)
         target_compile_options(disruptor-launcher-state-stamp-test PRIVATE /W4 /utf-8)
         target_compile_options(disruptor-region-disc-test PRIVATE /utf-8)
+        target_compile_options(disruptor-achievements-test PRIVATE /W4 /utf-8)
     endif()
 endif()

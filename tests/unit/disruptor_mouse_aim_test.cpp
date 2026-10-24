@@ -50,6 +50,7 @@ bool g_wheel_consuming = false;
 
 constexpr std::uint32_t kTestYawAddress = 0x80077624u;
 constexpr std::uint32_t kTestHeldWeaponAddress = 0x80071484u;
+constexpr std::uint32_t kTestGameModeAddress = 0x800716F0u;  /* gp+0x5A4, 3 while the attract demo plays */
 
 }  // namespace
 
@@ -722,6 +723,52 @@ void test_direct_weapon_mapping() {
     }
 }
 
+void test_demo_leaves_the_camera() {
+    reset_state();
+    g_mouse.enabled = true;
+    g_mouse.mouse_aim_enabled = true;
+    g_mouse.vertical_look_enabled = true;
+    g_mouse.high_precision_camera = true;
+    g_mouse.captured = true;
+    g_mouse.configured = true;
+    g_mouse.horizontal_sensitivity = 0.08;
+    g_mouse.log = std::tmpfile();
+    psx_write_byte(kTestYawAddress, 100);
+    psx_write_byte(kSceneModeAddress, 0u);
+    g_relative_x = 13.0f;
+    mouse_aim_frame();
+    expect(psx_read_byte(kTestYawAddress) == 99 && g_mouse.fractional_yaw != 0.0, "in play the mouse turns, a part step kept");
+    psx_write_byte(kTestGameModeAddress, 3u);
+    g_relative_x = 25.0f;
+    g_relative_y = 25.0f;
+    mouse_aim_frame();
+    expect(psx_read_byte(kTestYawAddress) == 99, "the mouse does not turn a demo's camera");
+    expect_close(g_relative_x, 0.0, "and its motion is dropped");
+    expect_close(g_mouse.vertical_pitch, 0.0, "nor does it tilt the camera");
+    mouse_aim_frame();
+    expect_close(g_camera_yaw_residual, 0.0, "a demo is drawn without the player's part step");
+    psx_write_byte(kTestGameModeAddress, 1u);
+    g_relative_x = 25.0f;
+    mouse_aim_frame();
+    expect(psx_read_byte(kTestYawAddress) == 97, "the campaign's mode turns again");
+
+    prepare_weapon_input();
+    psx_write_byte(kTestGameModeAddress, 3u);
+    psx_write_byte(kCurrentWeaponAddress, 6u);
+    g_keys[SDL_SCANCODE_1] = 1;
+    const std::vector<Uint8> before(g_ram.begin(), g_ram.end());
+    mouse_aim_frame();
+    expect(std::equal(g_ram.begin(), g_ram.end(), before.begin()) && g_notes == 0 && g_list_shows == 0,
+           "a number key picks no weapon in a demo");
+    g_keys[SDL_SCANCODE_1] = 0;
+    g_mouse.captured = true;
+    g_buttons = SDL_BUTTON_LMASK;
+    mouse_aim_frame();
+    expect((g_pad_buttons & kPadCross) == 0, "a click is the pad's button still, which ends a demo as the game does");
+    g_buttons = 0;
+    psx_write_byte(kTestGameModeAddress, 0u);
+}
+
 void test_weapon_selection_guards() {
     for (int guard = 0; guard < 9; ++guard) {
         prepare_weapon_input();
@@ -1236,6 +1283,8 @@ void test_psionic_keys() {
 
 void test_psionic_use() {
     prepare_weapon_input();
+    expect(disruptor_psionic_keys_use_enabled() == 0, "a power's key only picks it at first");
+    disruptor_psionic_keys_use_set_enabled(1);
     std::array<int, 30> keys{};
     keys[10 + 0] = SDL_SCANCODE_Z;  // Shock's first key
     keys[10 + 2] = SDL_SCANCODE_W;  // Heal's first
@@ -1302,7 +1351,6 @@ void test_psionic_use() {
     disruptor_psionic_keys_use_set_enabled(0);
     g_keys[SDL_SCANCODE_W] = 1;
     expect(!used() && disruptor_psionic_keys_use_enabled() == 0, "with the setting off a power's key only picks it");
-    disruptor_psionic_keys_use_set_enabled(1);
 }
 
 void test_waiting_pick_forgotten() {
@@ -1548,6 +1596,7 @@ int main(int argc, char **argv) {
         test_vertical_direction_inversion_and_clamp();
         test_simultaneous_relative_axes_sample();
         test_pause_holds_the_camera();
+        test_demo_leaves_the_camera();
         test_capture_release_and_frame_motion();
         test_focus_and_the_players_choice();
         test_high_precision_camera_residual();

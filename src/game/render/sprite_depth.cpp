@@ -22,6 +22,7 @@
  */
 
 #include "game/render/far_rendering.h"
+#include "game/render/shot_lights.h"
 
 #include "cpu_state.h"
 #include "gpu.h"
@@ -58,6 +59,7 @@ constexpr uint32_t kReciprocals = 0x80057E98u;  /* 65536 / n in 16 bits, a table
 constexpr uint32_t kCameraHeight = 0x800775D0u;
 constexpr uint32_t kShadowPacketSite = 0x8003D488u;
 constexpr uint32_t kEffectPacketSite = 0x8003C848u;
+constexpr uint8_t kShotRecordGpr = 19u; /* $s3: the shot the draw 0x8003C000 is at, from 0x8003C03C to 0x8003CAF4 */
 constexpr uint32_t kWarped = 1u;
 constexpr int32_t kLargest = 0x1FF;  /* the game caps a side here and rescales the other */
 constexpr int64_t kTaken = 3 * kOne / 2;  /* the renderer takes a size this far over its packet's, an effect's two cuts can leave more */
@@ -161,6 +163,12 @@ std::array<Sprite, 256> g_record{};
 [[nodiscard]] bool readable(const CPUState& cpu) {
     return cpu.read_word && cpu.read_half && cpu.read_byte;
 }
+
+struct CpuMemory {
+    const CPUState& cpu;
+    uint32_t word(uint32_t address) const { return cpu.read_word(address); }
+    uint32_t byte(uint32_t address) const { return cpu.read_byte(address); }
+};
 
 [[nodiscard]] std::optional<int32_t> operand(const CPUState& cpu, Operand source) {
     if (source.gpr != 0u) return static_cast<int32_t>(cpu.gpr[source.gpr]);
@@ -783,6 +791,11 @@ extern "C" void disruptor_sprite_depth_packet(
     }
     if (sprite.depth <= 0 || sprite.depth > INT32_MAX / kGteDepthPerSpriteDepth) return;
     gpu_temporal_note_sprite(cpu, packet, sprite.depth * kGteDepthPerSpriteDepth);
+    if (packet_site == kFunnels[2].packets[0] || packet_site == kFunnels[2].packets[1]) {
+        gpu_temporal_effect_sprite(packet);
+        const float gain = readable(*cpu) ? disruptor::shot_lights::gain(CpuMemory{*cpu}, cpu->gpr[kShotRecordGpr]) : 1.0f;
+        if (gain != 1.0f) gpu_temporal_light_sprite(packet, gain);
+    }
     if (!sprite.place) return;
     gpu_temporal_place_sprite(packet, sprite.place->x, sprite.place->dy);
     if (sprite.shape) {

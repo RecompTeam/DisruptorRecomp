@@ -322,7 +322,7 @@ require(
 )
 slots = re.findall(r"^\s*const uint32_t slot = ([^;]+);$", gte, re.MULTILINE)
 require(
-    slots == ["precision_hash(physical)"] * 4 and gte.count("s_precision_projection[slot]") == 4,
+    slots == ["precision_hash(physical)"] * 5 and gte.count("s_precision_projection[slot]") == 5,
     "every slot is the hash of the one address whose tag it reads, and its projection is the tag's own",
 )
 

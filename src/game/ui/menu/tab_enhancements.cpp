@@ -129,6 +129,23 @@ void draw_enhancements_tab() {
     if (!depth_applies) ImGui::EndDisabled();
     draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
 
+    const Option& antialiasing = *find_option("disruptor.multisampling");
+    settings::Settings running;
+    running.multisampling = gl_renderer_multisampling();
+    running.sample_shading = gl_renderer_sample_shading() != 0;
+    int level = antialiasing.get(running);
+    const bool sampling_applies = applies("disruptor.multisampling");
+    if (!sampling_applies) ImGui::BeginDisabled();
+    ImGui::SetNextItemWidth(260.0f);
+    if (option_list("disruptor.multisampling", &level)) {
+        antialiasing.set(running, level);
+        gl_renderer_set_multisampling(running.multisampling);
+        gl_renderer_set_sample_shading(running.sample_shading ? 1 : 0);
+        mark_antialiasing(level);
+    }
+    if (!sampling_applies) ImGui::EndDisabled();
+    draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
+
     ImGui::SeparatorText("Shading");
     bool occlusion = gl_renderer_ssao() != 0;
     const bool occlusion_applies = applies("disruptor.ambient_occlusion");

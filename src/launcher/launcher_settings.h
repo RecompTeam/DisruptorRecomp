@@ -19,7 +19,7 @@ using settings::Settings;
 using settings::stored;
 using settings::Unit;
 
-enum class Page { display, enhancements, controls, audio, experimental, troubleshooting };
+enum class Page { display, enhancements, controls, audio, experimental, troubleshooting, achievements };
 // A row of the settings pages. The rows of a page are shown in the order they are listed. A row with a group starts a
 // group of that name, a child row stands indented under the row it needs, right above it.
 struct Placement {
@@ -33,6 +33,9 @@ std::span<const Placement> layout();
 // A row still being tried on a page other than Experimental: it carries a tag beside its name.
 bool experimental(const Option& option);
 std::span<const wchar_t* const> page_labels();
+// Experimental's rows are the lighting prototype: a developer build shows them, a release a note in their place.
+bool page_rows_shown(Page page, bool dev_tools);
+bool page_rows_shown(Page page);
 
 // Bytes that are not UTF-8 come out as U+FFFD, a lone surrogate going back the same way.
 std::wstring wide(std::string_view utf8_text);
@@ -50,6 +53,8 @@ public:
     // False when the file is not valid TOML: nothing is written then, a save would replace it with defaults.
     bool load();
     bool readable() const { return readable_; }
+    // An unreadable file moved to a free `kept` beside it: true once moved, readable() then says if a new one reads.
+    bool start_over(std::filesystem::path& kept);
 
     void set_display_rate(double hertz) { display_rate_ = hertz; }
     int highest(const Option& option) const;

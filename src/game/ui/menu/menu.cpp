@@ -176,6 +176,19 @@ bool scancode_event(const SDL_Event *event, SDL_Scancode scancode) {
     return key_down(event, scancode) && !event->key.repeat;
 }
 
+#if DISRUPTOR_DEV_TOOLS
+/* PSX_DISRUPTOR_MENU_TAB names a tab to open the menu on at the first frame, for its picture without a click. */
+const char *g_asked_tab = std::getenv("PSX_DISRUPTOR_MENU_TAB");
+
+ImGuiTabItemFlags asked_tab(const char *name) {
+    if (!g_asked_tab || std::strcmp(g_asked_tab, name) != 0) return 0;
+    g_asked_tab = nullptr;
+    return ImGuiTabItemFlags_SetSelected;
+}
+#else
+ImGuiTabItemFlags asked_tab(const char *) { return 0; }
+#endif
+
 void draw_menu() {
     char picked[4096];
     if (psx_host_pick_disc_image_poll(picked, static_cast<int>(sizeof picked)) == 1) mark_language_disc(picked);
@@ -208,10 +221,12 @@ void draw_menu() {
                 draw_audio_tab();
                 ImGui::EndTabItem();
             }
+#if DISRUPTOR_DEV_TOOLS
             if (ImGui::BeginTabItem("Experimental")) {
                 draw_experimental_tab();
                 ImGui::EndTabItem();
             }
+#endif
             if (ImGui::BeginTabItem("Language")) {
                 draw_language_tab();
                 ImGui::EndTabItem();
@@ -224,8 +239,14 @@ void draw_menu() {
                 draw_debug_tab();
                 ImGui::EndTabItem();
             }
+#if DISRUPTOR_DEV_TOOLS
             if (ImGui::BeginTabItem("Cheats")) {
                 draw_cheats_tab();
+                ImGui::EndTabItem();
+            }
+#endif
+            if (ImGui::BeginTabItem("Achievements", nullptr, asked_tab("Achievements"))) {
+                draw_achievements_tab();
                 ImGui::EndTabItem();
             }
             ImGui::EndTabBar();
@@ -269,6 +290,7 @@ void on_runtime_shutdown(void *) {
     g_menu.open = false;
     g_menu.restore_mouse_capture = false;
     if (g_menu.imgui_ready) {
+        release_achievement_pictures();
         ImGui_ImplOpenGL3_Shutdown();
         imgui_sdl_shutdown();
         ImGui::DestroyContext();
@@ -318,7 +340,10 @@ int on_sdl_event(void *, const SDL_Event *event) {
 uint32_t current_flags(void *) {
     if (disruptor_selection_wheel_open())
         return PSX_HOST_UI_VISIBLE;
-    if (!g_menu.open || !g_menu.imgui_ready) return disruptor_capsule_notice() ? PSX_HOST_UI_VISIBLE : 0u;
+    if (!g_menu.open || !g_menu.imgui_ready) {
+        const bool achievements = achievements_overlay_shown();
+        return disruptor_capsule_notice() || achievements ? PSX_HOST_UI_VISIBLE | PSX_HOST_UI_LAYER : 0u;
+    }
     return PSX_HOST_UI_CAPTURE_KEYBOARD |
            PSX_HOST_UI_CAPTURE_MOUSE |
            PSX_HOST_UI_CAPTURE_GAMEPAD |
@@ -326,25 +351,31 @@ uint32_t current_flags(void *) {
 }
 
 /* Drawn without the SDL backend's frame: that one reads and captures the mouse, which is the game's while the menu is closed. */
-void render_notice(const char *word, int width, int height) {
+void render_notices(const char *word, int width, int height) {
     ImGui_ImplOpenGL3_NewFrame();
     ImGuiIO &io = ImGui::GetIO();
     io.DisplaySize = ImVec2(static_cast<float>(width), static_cast<float>(height));
     io.DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
     io.DeltaTime = 1.0f / 60.0f;
     ImGui::NewFrame();
-    ImGui::SetNextWindowPos(ImVec2(16.0f, 16.0f));
-    ImGui::Begin("##capsule", nullptr,
-                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings |
-                     ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing);
-    ImGui::SetWindowFontScale(std::max(1.0f, static_cast<float>(height) / 360.0f));
-    ImGui::TextColored(ImVec4(1.0f, 0.25f, 0.2f, 1.0f), "%s", word);
-    ImGui::End();
+    if (word) {
+        ImGui::SetNextWindowPos(ImVec2(16.0f, 16.0f));
+        ImGui::Begin("##capsule", nullptr,
+                     ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings |
+                         ImGuiWindowFlags_NoNav | ImGuiWindowFlags_NoFocusOnAppearing);
+        ImGui::SetWindowFontScale(std::max(1.0f, static_cast<float>(height) / 360.0f));
+        ImGui::TextColored(ImVec4(1.0f, 0.25f, 0.2f, 1.0f), "%s", word);
+        ImGui::End();
+    }
+    draw_achievements_overlay(width, height);
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }
 
 void render_gl(void *, int width, int height) {
+#if DISRUPTOR_DEV_TOOLS
+    if (g_asked_tab) set_menu_open(true);
+#endif
     if (disruptor_selection_wheel_open()) {
         if (!initialize_imgui()) return;
         gl_renderer_set_host_ui_suspended(1);
@@ -355,12 +386,13 @@ void render_gl(void *, int width, int height) {
         io.DeltaTime = 1.0f / 60.0f;
         ImGui::NewFrame();
         disruptor::wheel::draw(width, height);
+        draw_achievements_overlay(width, height);
         ImGui::Render();
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         return;
     }
-    if (const char *word = g_menu.open ? nullptr : disruptor_capsule_notice()) {
-        if (initialize_imgui()) render_notice(word, width, height);
+    if (!g_menu.open) {
+        if (initialize_imgui()) render_notices(disruptor_capsule_notice(), width, height);
         return;
     }
     if (!g_menu.open || !initialize_imgui()) return;
@@ -368,6 +400,7 @@ void render_gl(void *, int width, int height) {
     imgui_sdl_new_frame();
     ImGui::NewFrame();
     draw_menu();
+    draw_achievements_overlay(width, height);
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }

@@ -1,5 +1,5 @@
 diff --git a/runtime/src/gte.cpp b/runtime/src/gte.cpp
-index e7a1083a316b72fc30b9fa34038b773911bced51..f07488b2ed42918fad03283feacf74e29aef83c1 100644
+index e7a1083a316b72fc30b9fa34038b773911bced51..fecbafd608b1cbbf3224bcde53361282acf54c2e 100644
 --- a/runtime/src/gte.cpp
 +++ b/runtime/src/gte.cpp
 @@ -1,5 +1,7 @@
@@ -10,7 +10,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..f07488b2ed42918fad03283feacf74e2
  #include <algorithm>
  #include <cstdlib>
  #include <cstdio>
-@@ -184,65 +186,178 @@
+@@ -184,65 +186,214 @@
  // ---------------------------------------------------------------------------
  static int32_t s_ws_xnum = 1, s_ws_xden = 1;
  extern "C" int gpu_ws_present_native_43(void);  /* gpu.c — suppress on 4:3 frames */
@@ -77,7 +77,43 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..f07488b2ed42918fad03283feacf74e2
 +    uint16_t focal;
 +    uint8_t viewed; /* the view is kept: x came by the plain divide, or by the widescreen squash recorded beside it */
 +    uint64_t identity;
++    uint32_t pose;
  };
++
++static GteCameraPose s_poses[8];
++static uint32_t s_pose_sequence = 0;
++static int s_pose_open = 0;
++static void (*s_pose_offset_reader)(int32_t offset[3]) = nullptr;
++
++static void pose_fill(const PSXRecomp::GTE::GTEState *gte, int squash) {
++    GteCameraPose &pose = s_poses[s_pose_sequence & 7u];
++    for (int i = 0; i < 9; ++i) pose.rotation[i] = gte->RT[i / 3][i % 3];
++    for (int i = 0; i < 3; ++i) pose.translation[i] = gte->TR[i];
++    pose.offset[0] = pose.offset[1] = pose.offset[2] = 0;
++    if (s_pose_offset_reader) s_pose_offset_reader(pose.offset);
++    pose.centre_x16 = gte->OFX;
++    pose.centre_y16 = gte->OFY;
++    pose.squash_num = squash ? s_ws_xnum : 1;
++    pose.squash_den = squash ? s_ws_xden : 1;
++    pose.focal = gte->H;
++    pose.sequence = s_pose_sequence;
++    s_pose_open = 0;
++}
++
++extern "C" void gte_set_pose_offset_reader(void (*reader)(int32_t offset[3])) { s_pose_offset_reader = reader; }
++
++extern "C" void gte_pose_begin(void) {
++    if (s_gte_replay_sandbox) return;
++    if (++s_pose_sequence == 0) s_pose_sequence = 1;
++    s_poses[s_pose_sequence & 7u].sequence = 0;
++    s_pose_open = 1;
++}
++
++extern "C" int gte_pose_get(uint32_t sequence, GteCameraPose *pose) {
++    if (!sequence || !pose || s_poses[sequence & 7u].sequence != sequence) return 0;
++    *pose = s_poses[sequence & 7u];
++    return 1;
++}
  static PreciseProjection s_precise_sxy[4] = {};
 +/* PSX_GEOMETRY_UNPIN=0 in a build with debug tools leaves pinned corners as the game put them, for comparison. */
 +static int s_precision_unpin = -1;
@@ -209,7 +245,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..f07488b2ed42918fad03283feacf74e2
      /* Raw machine-state restore is authoritative even if host polling reached
       * it during a speculative validation pass. Defer the generation advance
       * until the outer transaction ends so old provenance cannot be restored. */
-@@ -255,6 +370,8 @@
+@@ -255,6 +406,8 @@
  }
  
  extern "C" void gte_precision_speculative_begin(void) {
@@ -218,7 +254,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..f07488b2ed42918fad03283feacf74e2
      if (s_speculative_depth++ == 0) {
          std::memcpy(s_speculative_saved_sxy, s_precise_sxy,
                      sizeof(s_precise_sxy));
-@@ -273,6 +390,8 @@
+@@ -273,6 +426,8 @@
              std::memcpy(s_precise_sxy, s_speculative_saved_sxy,
                          sizeof(s_precise_sxy));
          }
@@ -227,7 +263,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..f07488b2ed42918fad03283feacf74e2
      }
  }
  
-@@ -283,64 +402,674 @@
+@@ -283,64 +438,692 @@
  }
  
  static inline int precision_ram_address(uint32_t addr, uint32_t *physical) {
@@ -861,6 +897,24 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..f07488b2ed42918fad03283feacf74e2
 +    return result;
 +}
 +
++/* Also for a corner the lookup refuses, a saturated one beside the viewer's plane among them: its vertex and pose stand. */
++extern "C" GtePrecisionLookupResult gte_precision_load_pose(uint32_t addr, uint32_t packed, uint32_t *sequence,
++                                                          uint64_t *identity) {
++    uint32_t physical;
++    if (sequence) *sequence = 0u;
++    if (identity) *identity = 0u;
++    if (s_speculative_depth != 0 || !s_precision_tracking || (addr & 3u) != 0u || !precision_ram_address(addr, &physical))
++        return GTE_PRECISION_LOOKUP_STORE_MISS;
++    const uint32_t slot = precision_hash(physical);
++    const PreciseProjection &projection = s_precision_projection[slot];
++    if (s_precision_tag[slot].generation != s_precision_generation || s_precision_tag[slot].addr != physical ||
++        !projection.valid || projection.packed != packed)
++        return GTE_PRECISION_LOOKUP_STORE_MISS;
++    if (sequence) *sequence = projection.pose;
++    if (identity) *identity = projection.identity;
++    return GTE_PRECISION_LOOKUP_ACCEPTED;
++}
++
 +extern "C" int gte_precision_load_view_word(uint32_t addr, uint32_t packed, GtePrecisionView *view) {
 +    uint32_t physical;
 +    if (!view || s_speculative_depth != 0 || !s_precision_tracking || (addr & 3u) != 0u || !precision_ram_address(addr, &physical))
@@ -930,7 +984,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..f07488b2ed42918fad03283feacf74e2
      gte_geom_generation_advance();
  }
  
-@@ -349,50 +1078,50 @@
+@@ -349,50 +1132,50 @@
  }
  
  extern "C" uint32_t gte_geometry_correction_hits(void) {
@@ -1018,7 +1072,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..f07488b2ed42918fad03283feacf74e2
  extern "C" void gte_ws_set_far_threshold(int t) { s_ws_far_threshold = t; }
  extern "C" int  gte_ws_get_far_threshold(void) { return (int)s_ws_far_threshold; }
  /* SZ stats observed while suppress is active (one frame window, reset on read). */
-@@ -814,13 +1543,13 @@
+@@ -814,13 +1597,13 @@
      // this frame is being stretched — never on a 4:3-presented frame (FMV /
      // full-2D screen), so content and present stay locked.
      int64_t xterm = (int64_t)gte->IR1 * h_div_sz;
@@ -1034,7 +1088,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..f07488b2ed42918fad03283feacf74e2
          /* Depth-gated: un-squash only FAR geometry (the backdrop); keep near
           * props squashed so they stay aligned. Record SZ stats for tuning. */
          int32_t sz = gte->SZ[3];
-@@ -829,7 +1558,7 @@
+@@ -829,7 +1612,7 @@
              if (sz > s_ws_sz_max) s_ws_sz_max = sz;
              s_ws_sz_n++;
          }
@@ -1043,7 +1097,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..f07488b2ed42918fad03283feacf74e2
              do_squash = false;
              if (!s_gte_replay_sandbox) s_ws_sz_far++;
          }
-@@ -863,11 +1592,54 @@
+@@ -863,11 +1646,56 @@
          s_precise_sxy[2].x16 = (int32_t)sx16;
          s_precise_sxy[2].y16 = (int32_t)sy16;
          s_precise_sxy[2].z = gte->SZ[3];
@@ -1058,6 +1112,8 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..f07488b2ed42918fad03283feacf74e2
 +        s_precise_sxy[2].squash_num = do_squash ? s_ws_xnum : 1;
 +        s_precise_sxy[2].squash_den = do_squash ? s_ws_xden : 1;
 +        s_precise_sxy[2].viewed = do_squash || xterm == (int64_t)gte->IR1 * h_div_sz;
++        if (s_pose_open) pose_fill(gte, do_squash);
++        s_precise_sxy[2].pose = s_poses[s_pose_sequence & 7u].sequence;
 +        s_precise_sxy[2].identity = UINT64_C(0x8000000000000000) |
 +            static_cast<uint64_t>(static_cast<uint16_t>(V[0])) |
 +            static_cast<uint64_t>(static_cast<uint16_t>(V[1])) << 16 |
@@ -1101,7 +1157,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..f07488b2ed42918fad03283feacf74e2
      // Step 5: Depth cueing (MAC0/IR0) — only for last vertex of RTPT or RTPS
      if (setMac0) {
          int64_t mac0 = (int64_t)gte->DQA * h_div_sz + gte->DQB;
-@@ -1494,6 +2266,7 @@
+@@ -1494,6 +2322,7 @@
  extern "C" int gte_replay_side_effects_begin(void) {
      using namespace PSXRecomp::GTE;
      if (s_gte_replay_sandbox) return 0;
@@ -1109,7 +1165,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..f07488b2ed42918fad03283feacf74e2
      s_gte_replay_saved_caller_ra = s_gte_caller_ra;
      s_gte_replay_sandbox = 1;
      return 1;
-@@ -1503,6 +2276,7 @@
+@@ -1503,6 +2332,7 @@
      if (!s_gte_replay_sandbox) return;
      s_gte_caller_ra = s_gte_replay_saved_caller_ra;
      s_gte_replay_sandbox = 0;
@@ -1117,7 +1173,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..f07488b2ed42918fad03283feacf74e2
  }
  
  static uint32_t gte_cpu_lzcr(uint32_t value);
-@@ -2010,6 +2784,34 @@
+@@ -2010,6 +2840,34 @@
      p.y16 = y16;
      p.z = z;
      p.valid = 1;
@@ -1152,7 +1208,7 @@ index e7a1083a316b72fc30b9fa34038b773911bced51..f07488b2ed42918fad03283feacf74e2
  }
  
  extern "C" void gte_test_get_precise_projection(uint32_t index,
-@@ -2029,8 +2831,8 @@
+@@ -2029,8 +2887,8 @@
  
  extern "C" void gte_test_seed_geometry(uint32_t packed, int32_t x16,
                                           int32_t y16) {

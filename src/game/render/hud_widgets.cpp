@@ -29,6 +29,7 @@
 #include "mod_plugins.h"
 
 #include <cstdint>
+#include <cstdlib>
 
 namespace {
 
@@ -39,10 +40,14 @@ constexpr uint32_t kListModes[2] = {2u, 3u};  /* the HUD's mode with each panel 
 constexpr int32_t kPanels[2][6] = {{16, 10, 128, 200, 0, 0}, {232, 10, 298, 170, 320, 0}};
 constexpr int kHeldPage[2] = {15, 0};
 constexpr int kTextStrip = 128;  /* a printed line is one picture this wide: NO of the pause menu begins at column 169 and reaches 296 */
+/* The font's palette and the page its lines are printed to, as the HUD message's draw names them (0x80042914, 0x80042988). The psionic head and its digits share the palette on pages 14 and 15. */
+constexpr int kTextSource[4] = {512, 177, 8, 0};
 
 PSX_MOD_CONSTRUCTOR(register_disruptor_hud_widgets) {
     gpu_ws_set_hud_widgets(kTablePointer, kHudLayers, kPanels[0], 2);
     gpu_ws_set_hud_text_strip(kTextStrip);
+    const char *strokes = std::getenv("PSX_DISRUPTOR_HUD_TEXT_STROKES");
+    if (!strokes || strokes[0] != '0') gpu_ws_set_hud_text_source(kTextSource[0], kTextSource[1], kTextSource[2], kTextSource[3]);
     gpu_ws_set_hud_held_page(kHeldPage[0], kHeldPage[1]);
 }
 

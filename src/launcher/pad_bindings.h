@@ -19,6 +19,7 @@ public:
     // A missing file, or one that cannot be read, reads as the runtime's defaults. save() will not replace the latter.
     void load();
     void use_defaults();
+    bool uses_defaults() const;
     // The first source of `field`, empty for none.
     std::string source(std::string_view field) const;
     // Puts `source` alone on `field`. Others give it up, and an action left with nothing takes the field's old source.

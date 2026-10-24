@@ -11,7 +11,7 @@ namespace disruptor::settings {
 using Settings = PSXRecompV4::UserSettings;
 
 enum class Kind { toggle, choice, slider };
-enum class Unit { none, percent, frames, thousandths };
+enum class Unit { none, percent, frames, thousandths, degrees };
 
 // A value is 0 or 1 for a toggle, an index into `choices` for a choice and a whole number of `unit` for a slider. Text is UTF-8.
 struct Option {

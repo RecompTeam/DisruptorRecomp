@@ -61,14 +61,18 @@ void reading(const fs::path& folder) {
 
 void assigning() {
     PadBindings pads("unused.ini");
+    require(pads.uses_defaults(), "a new mapping is the default one");
     const auto swapped = pads.assign("cross", "b");
     require(swapped && *swapped == "circle" && pads.source("cross") == "b" && pads.source("circle") == "a",
             "a button already on an action moves there, and that action takes the old one");
+    require(!pads.uses_defaults(), "a swapped pair is no longer the default mapping, so putting it back asks first");
     require(!pads.assign("triangle", "rightstick") && pads.source("triangle") == "rightstick" && pads.source("r3").empty(),
             "a button the page does not show is simply taken from it");
     pads.use_defaults();
+    require(pads.uses_defaults(), "the defaults put back are the default mapping");
     require(!pads.assign("cross", "a") && pads.source("cross") == "a" && pads.source("circle") == "b",
             "a button put back on its own action changes nothing else");
+    require(pads.uses_defaults(), "a button put back on its own action leaves the mapping the default one");
 }
 
 void hand_edits(const fs::path& folder) {

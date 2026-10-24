@@ -281,7 +281,8 @@ void test_a_world_under_a_veil_stays_a_world() {
     PsxWsFrameKinds kinds{};
     frame(kinds, 1500, 0);
     frame(kinds, 1500, 240);
-    psx_ws_frame_kinds_copied(&kinds, 0, 0, 0, 240, 320, 240, 320, 240);
+    expect(psx_ws_frame_kinds_copied(&kinds, 0, 0, 0, 240, 320, 240, 320, 240) == 1,
+           "a whole frame copied onto the other buffer is told, so that the renderer's surfaces follow it");
     expect(worlds(kinds, 0, 0), "a world's frame copied whole onto the other buffer is that frame there too");
     for (int step = 0; step < 6; ++step) {
         const std::uint32_t y = step % 2 ? 240 : 0;
@@ -349,10 +350,10 @@ void test_a_fill_or_a_picture_ends_a_veil() {
 
 void test_a_buffer_copied_whole_keeps_its_kind() {
     PsxWsFrameKinds kinds{};
-    psx_ws_frame_kinds_copied(&kinds, 0, 0, 0, 240, 320, 240, 320, 240);
+    expect(psx_ws_frame_kinds_copied(&kinds, 0, 0, 0, 240, 320, 240, 320, 240) == 0, "a copy between unknown buffers is no frame's");
     expect(worlds(kinds, -1, -1), "a copy makes no buffer known");
     frame(kinds, 1500, 240);
-    psx_ws_frame_kinds_copied(&kinds, 0, 0, 0, 240, 320, 240, 320, 240);
+    expect(psx_ws_frame_kinds_copied(&kinds, 0, 0, 0, 240, 320, 240, 320, 240) == 0, "nor one from a buffer not known yet");
     expect(worlds(kinds, -1, 1), "a copy from where no buffer is known yet is a picture in the buffer it lands in");
     frame(kinds, 1500, 0);
     frame(kinds, 0, 240);
@@ -366,7 +367,7 @@ void test_a_buffer_copied_whole_keeps_its_kind() {
           {320, 0, 0, 240, 320, 240}}) {
         frame(kinds, 1500, 0);
         frame(kinds, 1500, 240);
-        psx_ws_frame_kinds_copied(&kinds, from_x, from_y, x, y, w, h, 320, 240);
+        expect(psx_ws_frame_kinds_copied(&kinds, from_x, from_y, x, y, w, h, 320, 240) == 0, "a part of a frame is not a frame copied");
         expect(psx_ws_frame_kinds_displayed(&kinds, 0, 240) == 1, "a copy of less than a whole buffer, or from or to another place, is a picture where it lands");
     }
     frame(kinds, 1500, 0);

@@ -3,6 +3,7 @@
 
 #include "cpu_state.h"
 #include "game/frame/frame_rate.h"
+#include "game/guest.h"
 #include "mod_plugins.h"
 
 #include <cstdint>
@@ -14,6 +15,7 @@ extern "C" int psx_netplay_active(void);
 namespace {
 
 using namespace disruptor::movers;
+using disruptor::Guest;
 
 constexpr uint32_t kDrawWorld = 0x80040E68u;
 constexpr uint32_t kDrawSector = 0x80046134u;
@@ -31,14 +33,6 @@ constexpr uint32_t kCameraHeight = 0x800775D0u;
 constexpr uint32_t kPlayerHeight = 0x800775C4u;
 constexpr uint32_t kPlayerStands = 0x80077608u; /* how far above the floor that height is */
 constexpr uint32_t kPlayerSector = 0x80077630u;
-
-struct Guest {
-    uint32_t word(uint32_t address) const { return psx_mod_read_word(address); }
-    uint32_t byte(uint32_t address) const { return psx_mod_read_byte(address); }
-    uint32_t half(uint32_t address) const { return psx_mod_read_half(address); }
-    void write(uint32_t address, uint32_t value) { psx_mod_write_word(address, value); }
-    void write_half(uint32_t address, uint16_t value) { psx_mod_write_half(address, value); }
-};
 
 Shifts g_shifts;
 Lifts g_lifts;

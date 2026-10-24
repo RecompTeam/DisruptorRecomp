@@ -448,6 +448,11 @@ void test_strings_are_found_by_their_text() {
     g_ls_replay_active = 0;
     put(kBuffer, "Phase Rifle");
     expect(drawn(kBuffer).second == "Fusil Laser" && drawn(kRifle).second == "Fusil Laser", "a copy of a string is the same string");
+    char words[16] = {};
+    expect(disruptor_language_words("Phase Rifle", words, sizeof words) == 1 && std::string(words) == "Fusil Laser",
+           "a module drawing a string itself is given the same words");
+    expect(disruptor_language_words("Phase Rifle", words, 11u) == 0 && disruptor_language_words("NO SUCH", words, sizeof words) == 0,
+           "but none that do not fit or that the pack lacks");
     expect(at(kResume) == "RESUME MISSION" && at(kBuffer) == "Phase Rifle", "the game's memory must stay as it was");
     expect(drawn_from("HELLO") == "HELLO" && drawn(kBuffer).first == kBuffer, "a string the pack does not know stays");
     expect(drawn_from("RESUME MISSION ") == "RESUME MISSION ", "a longer string is another string");

@@ -161,6 +161,12 @@ fs::path executable_path() {
 
 fs::path game_executable(const fs::path& program) { return program / "DisruptorRecompiled.exe"; }
 
+Moved move_new(const fs::path& from, const fs::path& to) {
+    if (MoveFileExW(from.c_str(), to.c_str(), MOVEFILE_WRITE_THROUGH)) return Moved::done;
+    const DWORD error = GetLastError();
+    return error == ERROR_ALREADY_EXISTS || error == ERROR_FILE_EXISTS ? Moved::taken : Moved::failed;
+}
+
 void open_folder(const fs::path& folder) { ShellExecuteW(nullptr, L"open", folder.c_str(), nullptr, nullptr, SW_SHOWNORMAL); }
 
 void show_file(const fs::path& file) {

@@ -25,6 +25,7 @@
 #include "game/input/baton_choice.h"
 #include "game/input/selection_wheel.h"
 #include "game/input/weapon_list.h"
+#include "game/input/psionic_change.h"
 #include "../../../psxrecomp/runtime/include/gpu.h"
 
 #include <algorithm>
@@ -62,6 +63,8 @@ constexpr uint32_t kCurrentWeaponAddress = 0x80077627u;
 constexpr uint32_t kHeldWeaponAddress = 0x80071484u;  // gp + 0x338: the weapon a change has reached
 constexpr uint32_t kWeaponOwnershipBase = 0x800770F4u;
 constexpr uint32_t kSceneModeAddress = 0x8007145Cu;
+constexpr uint32_t kGameModeAddress = 0x800716F0u;  // gp + 0x5A4: the menu's idle timer sets 3 for a demo (0x80020848)
+constexpr uint8_t kDemoMode = 3u;
 /* Retail weapon IDs follow the HUD names: baton, 18mm Semi, 18mm Auto,
  * Phase Rifle, Phase Repeater, Lockon Cannon, AM Blaster, AM Cyclone,
  * Zodiac, Plasma Lance. The last slot is on 0, as in other PC shooters. */
@@ -77,14 +80,16 @@ constexpr std::array<int, 2 * kPickRows> kPickKeys = {
     SDL_SCANCODE_KP_9, SDL_SCANCODE_KP_0,
     SDL_SCANCODE_UNKNOWN, SDL_SCANCODE_UNKNOWN, SDL_SCANCODE_UNKNOWN, SDL_SCANCODE_UNKNOWN, SDL_SCANCODE_UNKNOWN,
 };
-constexpr uint32_t kCurrentPsionicAddress = 0x80077629u;
-constexpr uint32_t kHeldPsionicAddress = 0x800715C0u;   // gp + 0x474: the power a change has reached
 constexpr uint32_t kPsionicHandAddress = 0x80071320u;   // gp + 0x1D4: zero while a power's pictures load
 constexpr uint32_t kPsionicOwnershipBase = 0x80077B5Cu;
-constexpr uint32_t kLoadKindAddress = 0x80071324u;      // gp + 0x1D8: 2 while a power's pictures load
 constexpr int kUseMargin = 2;     // frames Square stays down once the power is ready: one used Shock in the probe
 constexpr int kUsePatience = 90;  // frames a key waits for its power: a change took 21, one behind another twice that
-constexpr uint8_t kBlast = 4u, kTeraBlast = 5u, kNoPsionic = 0xFFu;  // the game holds Blast as 5 once it raises it
+using disruptor::psionic_change::kCurrentPsionicAddress;
+using disruptor::psionic_change::kHeldPsionicAddress;
+using disruptor::psionic_change::kLoadKindAddress;
+using disruptor::psionic_change::kNoPsionic;
+using disruptor::psionic_change::kTeraBlast;
+using disruptor::psionic_change::power_of;
 constexpr double kDefaultHorizontalSensitivity = 0.080;
 constexpr double kDefaultVerticalSensitivity = 0.080;
 constexpr double kMinimumSensitivity = 0.005;
@@ -130,7 +135,7 @@ struct MouseAimState {
     std::array<bool, kPickKeys.size()> pick_held{};  // down where it may pick: not an action's key
     int pending_weapon = -1;   // picked while the game was still changing weapons
     int pending_psionic = -1;  // and a power picked while it changed powers
-    bool psionic_keys_use = true;
+    bool psionic_keys_use = false;
     int using_power = -1;      // a power's key asked to use it
     int use_waited = 0;
     int use_ready = 0;         // frames that power has been ready
@@ -383,9 +388,13 @@ void set_capture(bool captured, const char *reason) {
 
 bool key_bound(int scancode) { return disruptor_key_bound(scancode) != 0; }
 
+// A demo plays its own recording: the mouse and the number keys leave it alone, its pad buttons end it as before.
+bool demo_playing() { return psx_read_byte(kGameModeAddress) == kDemoMode; }
+
 // Where select_weapon may write: play, not netplay, live gameplay.
 bool weapon_pick_possible() {
-    return !psx_netplay_active() && disruptor_vertical_camera_input_allowed() && psx_read_byte(kSceneModeAddress) == 0u;
+    return !psx_netplay_active() && disruptor_vertical_camera_input_allowed() && psx_read_byte(kSceneModeAddress) == 0u &&
+           !demo_playing();
 }
 
 // A key a weapon takes where it can be taken: elsewhere, in the pause and the game's lists, it stays what it was.
@@ -416,8 +425,6 @@ int sample_weapon_keys(const Uint8 *keys, const Uint8 *pad_keys) {
     }
     return requested;
 }
-
-uint8_t power_of(uint8_t id) { return id == kTeraBlast ? kBlast : id; }
 
 void forget_picks() { g_mouse.pending_weapon = g_mouse.pending_psionic = g_mouse.using_power = -1; }
 
@@ -799,8 +806,10 @@ void mouse_aim_frame() {
 
     apply_number_keys(keys, focused);
     apply_modern_controls(keys, g_mouse.swallow_left ? buttons & ~static_cast<uint32_t>(SDL_BUTTON_LMASK) : buttons);
-    // Scene mode 0 is play: the pause (4) and the game's own lists leave the camera to the game, and the motion is dropped.
-    if (g_mouse.captured && psx_read_byte(kSceneModeAddress) == 0u &&
+    // Scene mode 0 is play: the pause (4), the game's own lists and a demo leave the camera to the game, the motion is dropped.
+    const bool demo = demo_playing();
+    if (demo) g_mouse.fractional_yaw = 0.0;
+    if (g_mouse.captured && psx_read_byte(kSceneModeAddress) == 0u && !demo &&
         (g_mouse.mouse_aim_enabled || g_mouse.vertical_look_enabled)) {
         /* SDL drains both relative axes in one call.  Keep this a single
          * coherent sample so enabling one axis can never consume the other. */

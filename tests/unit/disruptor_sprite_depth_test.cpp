@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <iostream>
+#include <iterator>
 #include <map>
 #include <optional>
 #include <tuple>
@@ -99,6 +100,12 @@ void expect(bool condition, const char *message) {
 extern "C" void gpu_temporal_note_sprite(CPUState *, std::uint32_t packet, std::int32_t depth) {
     g_notes.push_back({packet, depth});
 }
+
+extern "C" void gpu_temporal_effect_sprite(std::uint32_t) {}
+
+std::vector<std::pair<std::uint32_t, float>> g_lights;
+
+extern "C" void gpu_temporal_light_sprite(std::uint32_t packet, float gain) { g_lights.push_back({packet, gain}); }
 
 extern "C" void gpu_temporal_place_sprite(std::uint32_t packet, std::int32_t x, std::int32_t dy) {
     g_places.push_back({packet, x, dy});
@@ -335,6 +342,60 @@ void run_effect(CPUState &cpu) {
     run(cpu, kTestFunnels[2], kTestFunnels[2].packets[0]);
 }
 
+/* The robot's bolt as mission 9 describes it (capsule 1792805320): kind 4 and its description's words. */
+void robots_bolt(std::uint32_t record) {
+    constexpr std::uint32_t kDescription = 0x8019EB7Cu, kKinds = 0x80076DE8u;
+    constexpr std::uint32_t kWords[] = {0x8019E99Cu, 0u, 0x30u, 0xDCu, 0x10u, 0x20u, 0x40u, 0x40u, 0x070FFF1Au,
+                                        0x1E010001u, 0x434343FFu, 0x150C0300u, 0x20202040u, 0x20202040u, 0x63u, 0xB1u};
+    for (std::uint32_t at = 0; at < std::size(kWords); ++at) put(kDescription + 4u * at, kWords[at], 4);
+    put(kKinds + 4u * 4u, kDescription, 4);
+    put(record + 26u, 4u, 1);
+}
+
+void test_a_known_shot_lights_brighter() {
+    for (const std::uint32_t site : kTestFunnels[2].packets) {
+        CPUState cpu = ready(kTestFunnels[2]);
+        effect(cpu, 0u, false, 640);
+        robots_bolt(kActor);
+        g_lights.clear();
+        run(cpu, kTestFunnels[2], site);
+        expect(g_lights.size() == 1u && g_lights[0].first == kPacket && g_lights[0].second == 10.0f,
+               "the robot's bolt, at either packet of the effect funnel, hands the renderer its gain with its packet");
+    }
+    CPUState cpu = ready(kTestFunnels[2]);
+    effect(cpu, 0u, false, 640);
+    robots_bolt(kActor);
+    put(kActor + 29u, 2u, 1);
+    g_lights.clear();
+    run_effect(cpu);
+    expect(g_lights.size() == 1u && g_lights[0].first == kPacket && g_lights[0].second == 4.0f,
+           "its hit hands the hit's gain");
+    effect(cpu, 0u, false, 640);
+    g_lights.clear();
+    run_effect(cpu);
+    expect(g_lights.empty(), "another shot hands none");
+    effect(cpu, 0u, false, 640);
+    robots_bolt(kActor);
+    cpu.read_byte = nullptr;
+    g_lights.clear();
+    run_effect(cpu);
+    cpu.read_byte = read_byte;
+    expect(g_lights.empty(), "nor a shot that cannot be read");
+    for (const std::size_t funnel : {std::size_t{0}, std::size_t{1}}) {
+        CPUState other = ready(kTestFunnels[funnel]);
+        g_memory.clear();
+        robots_bolt(kActor);
+        other.gpr[19] = kActor;
+        g_lights.clear();
+        run(other, kTestFunnels[funnel], kTestFunnels[funnel].packets[0]);
+        expect(g_lights.empty(), "a sprite of another funnel is no shot, whatever $s3 holds");
+    }
+    g_sizes.clear();
+    g_places.clear();
+    g_notes.clear();
+    g_lights.clear();
+}
+
 void test_an_effect_keeps_its_size_before_both_cuts() {
     /* At depth 640 the base is 100.25 px: 95.2375 x 52.63125 exactly, 95 x 52 after the cuts. */
     constexpr std::int32_t wide = 6241484, tall = 3449241;
@@ -530,6 +591,7 @@ void test_sizes_run_after_places() {
     test_a_projection_keeps_what_the_divisions_dropped();
     test_a_sprite_keeps_its_size_before_the_cut();
     test_an_effect_keeps_its_size_before_both_cuts();
+    test_a_known_shot_lights_brighter();
     test_the_renderer_takes_every_effect_size();
 }
 

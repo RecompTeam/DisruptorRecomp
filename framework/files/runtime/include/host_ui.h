@@ -3,12 +3,13 @@
 
 /* Optional in-game host UI seam. A statically linked game module registers one callback table before main(). The runtime
  * forwards SDL events, brackets the SDL/renderer lifetime and calls the OpenGL draw callback on the main GL context before
- * SwapWindow. Without a provider every function is a no-op. Callbacks and live setting functions are main-thread only.
+ * SwapWindow, or into a layer (PSX_HOST_UI_LAYER). Without a provider every function is a no-op. Callbacks and live setting functions are main-thread only.
  * The table is copied at registration, `userdata` stays caller-owned. */
 
 #include <stddef.h>
 #include <stdint.h>
 
+#include "host_ui_flags.h"
 #include "psx_sdl.h"
 
 #ifdef __cplusplus
@@ -22,19 +23,6 @@ enum PsxHostUiBackend {
     PSX_HOST_UI_BACKEND_SOFTWARE = 1,
     PSX_HOST_UI_BACKEND_OPENGL   = 2,
     PSX_HOST_UI_BACKEND_VULKAN   = 3,
-};
-
-enum PsxHostUiFlags {
-    /* Suppress the polled host input before it reaches SIO or a game mod. */
-    PSX_HOST_UI_CAPTURE_KEYBOARD = 1u << 0,
-    PSX_HOST_UI_CAPTURE_MOUSE    = 1u << 1,
-    PSX_HOST_UI_CAPTURE_GAMEPAD  = 1u << 2,
-
-    /* Stop high-refresh interpolation while the UI is open, so render_gl runs on the emulation thread's GL context. */
-    PSX_HOST_UI_SUSPEND_INTERPOLATION = 1u << 3,
-
-    /* The provider has visible GL output: defeats unchanged-frame and display-disabled present elision. */
-    PSX_HOST_UI_VISIBLE = 1u << 4,
 };
 
 typedef struct PsxHostUiHooks {
@@ -53,7 +41,8 @@ typedef struct PsxHostUiHooks {
 
     uint32_t (*flags)(void *userdata);
 
-    /* On the main GL context after the game image, before SwapWindow. The provider restores any GL state it changes. */
+    /* On the main GL context after the game image, before SwapWindow, or into the layer with its framebuffer bound and
+     * cleared. The provider restores any GL state it changes. */
     void (*render_gl)(void *userdata, int drawable_width, int drawable_height);
 } PsxHostUiHooks;
 

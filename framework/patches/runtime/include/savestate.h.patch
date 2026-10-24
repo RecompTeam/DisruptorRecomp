@@ -1,8 +1,8 @@
 diff --git a/runtime/include/savestate.h b/runtime/include/savestate.h
-index ca1c9d23f0a92b79b076facef8545f08a20f75ac..208159672bb2ba300a9626109b67df532983bd58 100644
+index ca1c9d23f0a92b79b076facef8545f08a20f75ac..24c7ddfb8d7e9556e08baefa6b99d5dec955da32 100644
 --- a/runtime/include/savestate.h
 +++ b/runtime/include/savestate.h
-@@ -66,6 +66,10 @@
+@@ -66,6 +66,16 @@
  
  /* Frontend hook (main.cpp): restage VRAM present path after a successful load. */
  void psx_frontend_on_savestate_loaded(void);
@@ -10,6 +10,12 @@ index ca1c9d23f0a92b79b076facef8545f08a20f75ac..208159672bb2ba300a9626109b67df53
 +void psx_frontend_before_savestate_save(void);
 +/* Nonzero while a requested state must wait for a later block leader. */
 +int psx_frontend_savestate_deferred(void);
++/* Called after a state is written, nonzero when it was. */
++void psx_frontend_after_savestate_save(int written);
++/* Zero refuses a load, asked when it is requested and again before it is restored. */
++int psx_frontend_savestate_load_allowed(void);
++/* The file being written or restored, while a frontend hook around it runs, otherwise NULL. */
++const char* savestate_active_path(void);
  
  /* Called every block from psx_check_interrupts (in_exception == 0). If a save is
   * pending, serialize with cpu->pc = resume_pc; if a load is pending, restore and

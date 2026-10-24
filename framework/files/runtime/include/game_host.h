@@ -33,6 +33,10 @@ void psx_game_states_configured(void);
 void psx_game_state_loaded(void);
 /* Called before a save state is written. */
 void psx_game_state_saving(void);
+/* Called after a save state is written, nonzero when it was. */
+void psx_game_state_saved(int written);
+/* Zero refuses a save state load, as a hardcore achievements session does. Asked at the request and before the restore. */
+int psx_game_state_load_allowed(void);
 /* Nonzero holds a requested save state back to a later block leader, as while the game's memory holds values for one frame. */
 int psx_game_state_save_deferred(void);
 /* A key went down or up. `plain` is set for a press without Ctrl, Alt or the system key and for every release. Nonzero when the game took a press. */

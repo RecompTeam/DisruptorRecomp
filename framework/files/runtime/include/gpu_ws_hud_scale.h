@@ -113,6 +113,18 @@ static inline int psx_ws_hud_scale_rect_strip(int32_t *x, int32_t *y,
     return 1;
 }
 
+/* A line of text shrunk to `percent` thins the font's one-texel strokes. In 64ths of a texel: how far each side of a stroke
+ * grows (the low byte) and how wide a dark rim is drawn beyond it (the next byte), a quarter and half of 1/scale - 1, so 16
+ * and 32 at 50 and nothing at the authored size. Dark text, as a list's item name, gets no rim: it would only thicken it. */
+static inline int psx_ws_hud_glyph_code(int percent, uint32_t color24) {
+    int shrink, grow, rim;
+    if (percent >= PSX_WS_HUD_SCALE_MAX || percent < PSX_WS_HUD_SCALE_MIN) return 0;
+    shrink = PSX_WS_HUD_SCALE_MAX * 64 / percent - 64;
+    grow = shrink / 4;
+    rim = (color24 & 0xFFu) < 64u && (color24 >> 8 & 0xFFu) < 64u && (color24 >> 16 & 0xFFu) < 64u ? 0 : shrink / 2;
+    return grow | rim << 8;
+}
+
 static inline int psx_ws_hud_scale_rect(int32_t *x, int32_t *y,
                                         int32_t *w, int32_t *h,
                                         int32_t screen_w, int32_t screen_h,

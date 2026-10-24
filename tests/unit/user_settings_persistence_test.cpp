@@ -100,6 +100,8 @@ int main() {
         written.movie_filter = 0;
         written.has_mute_in_background = true;
         written.mute_in_background = true;
+        written.has_achievements = true;
+        written.achievements = false;
         written.has_bass_cut = true;
         written.bass_cut = 2;
         written.has_language_disc = true;
@@ -113,9 +115,9 @@ int main() {
         written.has_ambient_occlusion = true;
         written.ambient_occlusion = true;
         written.has_occlusion_reach = true;
-        written.occlusion_reach = 240;
+        written.occlusion_reach = 120;
         written.has_occlusion_strength = true;
-        written.occlusion_strength = 130;
+        written.occlusion_strength = 70;
         written.has_smooth_fade = true;
         written.smooth_fade = true;
         written.has_draw_distance = true;
@@ -138,6 +140,34 @@ int main() {
         written.depth_sorted_world = true;
         written.has_diagnostic_view = true;
         written.diagnostic_view = 3;
+        written.has_probe_lighting = true;
+        written.probe_lighting = true;
+        written.has_probe_strength = true;
+        written.probe_strength = 80;
+        written.has_probe_bounce = true;
+        written.probe_bounce = 30;
+        written.has_probe_glow = true;
+        written.probe_glow = 250;
+        written.has_dynamic_shadows = true;
+        written.dynamic_shadows = true;
+        written.has_shadow_strength = true;
+        written.shadow_strength = 140;
+        written.has_shadow_underneath = true;
+        written.shadow_underneath = 60;
+        written.has_shot_lights = true;
+        written.shot_lights = true;
+        written.has_shot_light_strength = true;
+        written.shot_light_strength = 200;
+        written.has_sun_lighting = true;
+        written.sun_lighting = true;
+        written.has_sun_direction = true;
+        written.sun_direction = 270;
+        written.has_sun_height = true;
+        written.sun_height = 20;
+        written.has_sun_strength = true;
+        written.sun_strength = 90;
+        written.has_sun_shade = true;
+        written.sun_shade = 40;
         written.has_language = true;
         written.language = "en";
 
@@ -186,13 +216,14 @@ int main() {
                     loaded.has_skip_intro && loaded.skip_intro &&
                     loaded.has_movie_filter && loaded.movie_filter == 0 &&
                     loaded.has_mute_in_background && loaded.mute_in_background &&
+                    loaded.has_achievements && !loaded.achievements &&
                     loaded.has_bass_cut && loaded.bass_cut == 2 &&
                     loaded.has_language_disc && loaded.language_disc == "C:\\Games \"old\"\\Disruptor (France).cue" &&
                     loaded.has_language_discs && loaded.language_discs == written.language_discs &&
                     loaded.has_hud_scale && loaded.hud_scale == 70 &&
                     loaded.has_ambient_occlusion && loaded.ambient_occlusion &&
-                    loaded.has_occlusion_reach && loaded.occlusion_reach == 240 &&
-                    loaded.has_occlusion_strength && loaded.occlusion_strength == 130 &&
+                    loaded.has_occlusion_reach && loaded.occlusion_reach == 120 &&
+                    loaded.has_occlusion_strength && loaded.occlusion_strength == 70 &&
                     loaded.has_smooth_fade && loaded.smooth_fade &&
                     loaded.has_draw_distance && loaded.draw_distance == 125 &&
                     loaded.has_fog_shape && loaded.fog_shape == 2 &&
@@ -205,6 +236,21 @@ int main() {
                     loaded.has_depth_sorted_world && loaded.depth_sorted_world &&
                     loaded.has_diagnostic_view && loaded.diagnostic_view == 3,
                 "Disruptor preferences did not round-trip");
+        require(loaded.has_probe_lighting && loaded.probe_lighting &&
+                    loaded.has_probe_strength && loaded.probe_strength == 80 &&
+                    loaded.has_probe_bounce && loaded.probe_bounce == 30 &&
+                    loaded.has_probe_glow && loaded.probe_glow == 250 &&
+                    loaded.has_dynamic_shadows && loaded.dynamic_shadows &&
+                    loaded.has_shadow_strength && loaded.shadow_strength == 140 &&
+                    loaded.has_shadow_underneath && loaded.shadow_underneath == 60 &&
+                    loaded.has_shot_lights && loaded.shot_lights &&
+                    loaded.has_shot_light_strength && loaded.shot_light_strength == 200 &&
+                    loaded.has_sun_lighting && loaded.sun_lighting &&
+                    loaded.has_sun_direction && loaded.sun_direction == 270 &&
+                    loaded.has_sun_height && loaded.sun_height == 20 &&
+                    loaded.has_sun_strength && loaded.sun_strength == 90 &&
+                    loaded.has_sun_shade && loaded.sun_shade == 40,
+                "lighting preferences did not round-trip");
         require(loaded.has_language && loaded.language == "en",
                 "merge-save dropped an unrelated known setting");
 
@@ -377,6 +423,30 @@ int main() {
             require(!PSXRecompV4::load_user_settings(interpolation)
                          .has_frame_interpolation_blend,
                     "invalid interpolation mode was saved");
+        }
+
+        {
+            const fs::path lighting = root / "lighting.toml";
+            {
+                std::ofstream out(lighting, std::ios::trunc);
+                out << "[disruptor]\nprobe_strength = 201\nsun_height = 0\nsun_strength = 0\nsun_shade = 91\n"
+                       "shot_light_strength = -1\nprobe_lighting = 1\n";
+            }
+            const UserSettings rejected = PSXRecompV4::load_user_settings(lighting);
+            require(!rejected.parse_error && !rejected.has_probe_strength && !rejected.has_sun_height &&
+                        !rejected.has_sun_strength && !rejected.has_sun_shade && !rejected.has_shot_light_strength &&
+                        !rejected.has_probe_lighting,
+                    "a lighting value out of its range was accepted on load");
+            UserSettings preference;
+            preference.has_sun_height = true;
+            preference.sun_height = 90;
+            preference.has_sun_direction = true;
+            preference.sun_direction = 360;
+            const fs::path saved = root / "lighting-saved.toml";
+            require(PSXRecompV4::save_user_settings(saved, preference), "lighting preferences failed to save");
+            const UserSettings kept = PSXRecompV4::load_user_settings(saved);
+            require(!kept.has_sun_height && kept.has_sun_direction && kept.sun_direction == 360,
+                    "a lighting value was saved outside its range or the top of a range was lost");
         }
 
         for (const int rate : {0, 30, 45, 120, 1000}) {

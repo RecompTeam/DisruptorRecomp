@@ -41,7 +41,8 @@ require(
     in host
     and host.count("psx_game_before_input();") == host.count("psx_game_after_input();") == 1
     and "void psx_game_before_input(void) { disruptor_capsule_before_input(); }\n" in game_side
-    and "void psx_game_after_input(void) {\n    disruptor_capsule_after_input();\n    disruptor_selection_wheel_guard_input();\n}\n"
+    and "void psx_game_after_input(void) {\n    disruptor_capsule_after_input();\n    disruptor_selection_wheel_guard_input();\n"
+    "    disruptor_achievements_frame();\n}\n"
     in game_side
     and game_side.count("disruptor_capsule_before_input();") == game_side.count("disruptor_capsule_after_input();") == 1
     and game_side.count("disruptor_capsule_state_loaded();") == 1
@@ -85,13 +86,13 @@ require(
     in capsule
     and '    say(stored ? "REC saved" : "REC NOT saved");\n' in capsule
     and '    g_capsule.recording = Recording::kOff;\n    say("REC refused");\n' in capsule
-    and "    if (!g_menu.open || !g_menu.imgui_ready) return disruptor_capsule_notice() ? PSX_HOST_UI_VISIBLE : 0u;\n"
+    and "        return disruptor_capsule_notice() || achievements ? PSX_HOST_UI_VISIBLE | PSX_HOST_UI_LAYER : 0u;\n"
     in menu
-    and "    if (const char *word = g_menu.open ? nullptr : disruptor_capsule_notice()) {\n"
-    "        if (initialize_imgui()) render_notice(word, width, height);\n        return;\n    }\n"
+    and "    if (!g_menu.open) {\n"
+    "        if (initialize_imgui()) render_notices(disruptor_capsule_notice(), width, height);\n        return;\n    }\n"
     in menu
-    and "imgui_sdl_new_frame" not in menu[menu.index("void render_notice(") : menu.index("void render_gl(")]
-    and "ImGuiWindowFlags_NoInputs" in menu[menu.index("void render_notice(") : menu.index("void render_gl(")],
+    and "imgui_sdl_new_frame" not in menu[menu.index("void render_notices(") : menu.index("void render_gl(")]
+    and "ImGuiWindowFlags_NoInputs" in menu[menu.index("void render_notices(") : menu.index("void render_gl(")],
     "a recording shows a word for one second when it starts, ends or is refused, takes no input for it, "
     "and never holds the in-between frames off for longer",
 )

@@ -14,7 +14,8 @@
 namespace fs = std::filesystem;
 namespace disruptor::launcher {
 namespace {
-constexpr const wchar_t* pages[] = {L"Display", L"Enhancements", L"Controls", L"Audio", L"Experimental", L"Troubleshooting"};
+constexpr const wchar_t* pages[] = {L"Display", L"Enhancements", L"Controls", L"Audio", L"Experimental", L"Troubleshooting",
+                                    L"Achievements"};
 constexpr const char* rate_key = "video.frame_interpolation_fps";
 
 constexpr Placement placed[] = {
@@ -33,6 +34,7 @@ constexpr Placement placed[] = {
     {"disruptor.fog_shape", Page::enhancements, nullptr, true},
     {"disruptor.draw_distance", Page::enhancements},
     {"disruptor.depth_sorted_world", Page::enhancements},
+    {"disruptor.multisampling", Page::enhancements},
     {"disruptor.ambient_occlusion", Page::enhancements, "Shading"},
     {"disruptor.occlusion_reach", Page::enhancements, nullptr, true},
     {"disruptor.occlusion_strength", Page::enhancements, nullptr, true},
@@ -55,8 +57,29 @@ constexpr Placement placed[] = {
     {"disruptor.bass_cut", Page::audio},
     {"disruptor.mute_in_background", Page::audio},
     {"audio.muted", Page::audio},
-    {"disruptor.multisampling", Page::experimental},
-    {"disruptor.detailed_logging", Page::troubleshooting},
+    {"disruptor.probe_lighting", Page::experimental, "Lighting"},
+    {"disruptor.probe_strength", Page::experimental, nullptr, true},
+    {"disruptor.probe_bounce", Page::experimental, nullptr, true},
+    {"disruptor.probe_glow", Page::experimental, nullptr, true},
+    {"disruptor.dynamic_shadows", Page::experimental},
+    {"disruptor.shadow_strength", Page::experimental, nullptr, true},
+    {"disruptor.shadow_underneath", Page::experimental, nullptr, true},
+    {"disruptor.shot_lights", Page::experimental},
+    {"disruptor.shot_light_strength", Page::experimental, nullptr, true},
+    {"disruptor.sun_lighting", Page::experimental},
+    {"disruptor.sun_direction", Page::experimental, nullptr, true},
+    {"disruptor.sun_height", Page::experimental, nullptr, true},
+    {"disruptor.sun_strength", Page::experimental, nullptr, true},
+    {"disruptor.sun_shade", Page::experimental, nullptr, true},
+    {"disruptor.detailed_logging", Page::troubleshooting, "Logging"},
+    {"disruptor.achievements", Page::achievements, "Unlocks"},
+    {"disruptor.achievements_encore", Page::achievements},
+    {"disruptor.achievements_unofficial", Page::achievements},
+    {"disruptor.achievements_sound", Page::achievements},
+    {"disruptor.achievements_popups", Page::achievements, "Notifications"},
+    {"disruptor.achievements_popup_time", Page::achievements, nullptr, true},
+    {"disruptor.achievements_corner", Page::achievements},
+    {"disruptor.achievements_progress", Page::achievements},
 };
 
 bool listed(const std::vector<std::string>& discs, const std::string& path) {
@@ -66,6 +89,12 @@ bool listed(const std::vector<std::string>& discs, const std::string& path) {
 
 std::span<const Placement> layout() { return placed; }
 std::span<const wchar_t* const> page_labels() { return pages; }
+bool page_rows_shown(Page page, bool dev_tools) { return dev_tools || page != Page::experimental; }
+#if DISRUPTOR_DEV_TOOLS
+bool page_rows_shown(Page page) { return page_rows_shown(page, true); }
+#else
+bool page_rows_shown(Page page) { return page_rows_shown(page, false); }
+#endif
 
 std::wstring wide(std::string_view utf8_text) {
     std::wstring text;
@@ -155,6 +184,21 @@ bool SettingsFile::load() {
     readable_ = !settings_.parse_error;
     if (!readable_) settings_ = Settings{};
     return readable_;
+}
+
+bool SettingsFile::start_over(fs::path& kept) {
+    if (load()) return false;
+    // One rename that refuses a taken name: a check before it, or a copy and a removal, could each lose a version.
+    for (int number = 1; number < 1000; ++number) {
+        const std::string suffix = number > 1 ? "-" + std::to_string(number) : std::string();
+        kept = path_.parent_path() / from_utf8(utf8(path_.stem()) + ".unreadable" + suffix + utf8(path_.extension()));
+        switch (platform::move_new(path_, kept)) {
+        case platform::Moved::done: load(); return true;
+        case platform::Moved::taken: break;
+        case platform::Moved::failed: return false;
+        }
+    }
+    return false;
 }
 
 int SettingsFile::highest(const Option& option) const {

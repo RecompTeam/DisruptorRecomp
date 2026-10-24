@@ -111,6 +111,7 @@ void test_a_report_takes_logs_and_settings_only() {
     put(root / "DisruptorRecompiled.exe", "exe");
     put(root / "psx_last_run_report.json", R"({"reason": "seh", "module": "C:\\Users\\Alice\\x.dll"})");
     put(root / "psx_freeze_heartbeat.json", "{}");
+    put(root / "retroachievements.toml", "username = \"Player1\"\ntoken = \"DistinctiveToken0123\"\n");
     for (const long long made : {began - 3600, began - 1, began + 10, began + 20, began + 30}) put(root / dump(made), "{}");
     put(root / "psx_freeze_dump_private.json", "a file that only begins like a dump");
     put(root / ("psx_freeze_dump_psx-runtime_" + std::to_string(began + 40) + "x.json"), "no number");
@@ -146,6 +147,10 @@ void test_a_report_takes_logs_and_settings_only() {
     size_t files = 0;
     for (const auto& entry : fs::recursive_directory_iterator(plain.path)) files += entry.is_regular_file();
     expect(files == 9, "nothing else is taken: no BIOS, no save, no disc image, no executable, no file or folder or link that only looks like a dump");
+    bool token_seen = false;
+    for (const auto& entry : fs::recursive_directory_iterator(plain.path))
+        token_seen = token_seen || (entry.is_regular_file() && read(entry.path()).find("DistinctiveToken0123") != std::string::npos);
+    expect(!token_seen && !fs::exists(plain.path / "retroachievements.toml"), "nor the RetroAchievements account");
 
     fs::remove(root / dump(began + 30));
     fs::remove(root / dump(began + 20));

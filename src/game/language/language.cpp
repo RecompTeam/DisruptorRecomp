@@ -41,6 +41,7 @@
 #include <array>
 #include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <string>
 #include <string_view>
 #include <unordered_map>
@@ -326,3 +327,14 @@ extern "C" int disruptor_language_load_pack(const uint8_t *data, uint32_t size) 
 }
 
 extern "C" int disruptor_language_active(void) { return g_state == State::kOn ? 1 : 0; }
+
+extern "C" int disruptor_language_words(const char *text, char *words, uint32_t size) {
+    if (!text || !words || size == 0u || !may_run()) return 0;
+    if (g_state == State::kUnread) read_pack();
+    if (g_state != State::kOn) return 0;
+    std::string other;
+    if (!other_words(text, 0, other) || other.empty() || other.size() >= size) return 0;
+    std::memcpy(words, other.data(), other.size());
+    words[other.size()] = '\0';
+    return 1;
+}

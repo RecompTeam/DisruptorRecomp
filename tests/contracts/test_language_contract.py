@@ -338,7 +338,7 @@ require(
     in movie_sound
     and "    g_holding = started == kHeld;\n    g_held_at = psx_mod_read_word(kVBlanks);\n}\n" in movie_sound
     and "    disruptor_language_movie_sound_state_loaded();\n" in read("src/game/host.cpp")
-    and "disruptor_language_movie_sound_save_deferred();\n}\n" in read("src/game/host.cpp")
+    and "disruptor_language_movie_sound_save_deferred() ||\n" in read("src/game/host.cpp")
     and "int disruptor_language_disc_sound_start(uint32_t movie);" in header
     and "    if (g_state != State::kOn || movie >= disruptor::kMovies) return 0;\n    return g_disc.sound_starts()[movie];"
     in read("src/game/language/language_source.cpp"),

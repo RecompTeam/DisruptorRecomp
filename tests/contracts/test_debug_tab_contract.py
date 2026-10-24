@@ -87,7 +87,8 @@ require(
     }
 """
     in menu
-    and """        apply_diagnostic_view(settings.has_diagnostic_view && env_override_present("PSX_DISRUPTOR_CAPSULE_REPLAY")
+    and """        apply_diagnostic_view(kDeveloperBuild && settings.has_diagnostic_view &&
+                                      env_override_present("PSX_DISRUPTOR_CAPSULE_REPLAY")
                                   ? settings.diagnostic_view : 0);
 """
     in menu
@@ -150,7 +151,8 @@ require(
     "static int s_uv_view = 0;\n" in renderer
     and "void gl_renderer_set_uv_view(int enabled) {\n    s_uv_view = enabled != 0;\n    ssao_mode();\n}\nint gl_renderer_uv_view(void) { return s_uv_view; }\n"
     in renderer
-    and "    const int mode = s_uv_view ? 0 : s_ssao_view ? s_ssao_view + 1 : s_ssao_on;\n" in renderer
+    and "    const int mode = s_uv_view ? 0 : s_ssao_view ? s_ssao_view + 1 : (s_ssao_on || s_ddgi_light || s_ddgi_shadows ||"
+    in renderer
     and "s_yaw_center_x > 0.0f ? s_yaw_center_x : 160.0f, nearer, s_uv_view ? 1.0f : 0.0f);\n" in renderer
     and "    const int on = !s_uv_view && (grown > 1 || (s_aa_edges && edges)) && s_aa_prog && lw > 0 && lh > 0;\n"
     in renderer

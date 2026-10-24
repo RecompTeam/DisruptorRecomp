@@ -345,6 +345,21 @@ void Session::make_problem_report() {
 
 void Session::open_saves() const { platform::open_folder(settings_.saves_folder()); }
 
+void Session::start_settings_over() {
+    if (busy_ || game_) return;
+    fs::path kept;
+    if (settings_.start_over(kept)) {
+        write_failure_.clear();
+        say(L"settings.toml could not be read, so it is kept as " + wide(utf8(kept.filename())) +
+            (settings_.readable() ? L"\nThe settings are those of a new installation"
+                                  : L"\nA new settings.toml came meanwhile and cannot be read either"));
+    } else if (settings_.readable()) {
+        say(L"settings.toml can be read again");
+    } else {
+        say(L"settings.toml could not be moved aside\nClose any program that has it open, then try again");
+    }
+}
+
 void Session::reset_page(Page page) {
     if (editable()) saved(settings_.reset(page), L"The settings on this page are those of a new installation again");
 }
@@ -370,8 +385,12 @@ bool Session::set_pick_keys(const settings::PickKeys& keys) {
 
 // A file that could not be written is read again, so the page shows what the game will use.
 bool Session::save_keys() {
-    if (keys_.save()) return true;
-    say(L"Cannot write keybinds.ini\nCheck that the folder of your saves and settings can be written");
+    if (keys_.save()) {
+        write_failure_.clear();
+        return true;
+    }
+    write_failure_ = L"Cannot write keybinds.ini\nCheck that the file and its folder can be written";
+    say(write_failure_);
     keys_.load();
     return false;
 }
@@ -385,8 +404,12 @@ bool Session::store_keys(const KeyLayout& undo, const settings::PickKeys& picks)
 }
 
 bool Session::save_pads() {
-    if (pads_.save()) return true;
-    say(L"Cannot write input.ini\nCheck that the folder of your saves and settings can be written");
+    if (pads_.save()) {
+        write_failure_.clear();
+        return true;
+    }
+    write_failure_ = L"Cannot write input.ini\nCheck that the file and its folder can be written";
+    say(write_failure_);
     pads_.load();
     return false;
 }
@@ -418,13 +441,15 @@ void Session::show(const std::wstring& text) {
 }
 
 void Session::saved(bool written, const std::wstring& done) {
+    if (written) write_failure_.clear();
+    else if (settings_.readable()) write_failure_ = settings_error();
     if (!written) say(settings_error());
     else if (!done.empty()) say(done);
 }
 
 const wchar_t* Session::settings_error() const {
     return settings_.readable()
-        ? L"Cannot write settings.toml\nCheck that the folder of your saves and settings can be written"
+        ? L"Cannot write settings.toml\nCheck that the file and its folder can be written"
         : L"settings.toml is not valid TOML, so it is left as it is\nFix or delete it, then reopen the launcher";
 }
 

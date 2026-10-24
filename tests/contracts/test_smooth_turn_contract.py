@@ -150,10 +150,12 @@ require(
 )
 
 require(
-    """    gr_set_presentation_yaw(ws_geometry_correction &&
-                                isfinite(s_geometry_camera_yaw_residual)
-                                ? s_geometry_camera_yaw_residual : 0.0,
+    """static double geometry_camera_presentation_yaw(void) {
+    return ws_geometry_correction && isfinite(s_geometry_camera_yaw_residual) ? s_geometry_camera_yaw_residual : 0.0;
+}
 """
+    in gpu
+    and "    gr_set_presentation_yaw(geometry_camera_presentation_yaw(), GEOMETRY_CAMERA_FULL_TURN, center, center_y, focal);\n"
     in gpu,
     "the picture is turned only with geometry correction on, which is why the menu greys the setting without it",
 )

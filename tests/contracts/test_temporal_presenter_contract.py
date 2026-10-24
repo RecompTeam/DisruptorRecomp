@@ -342,8 +342,9 @@ require(
     and "+runtime/include/gpu_temporal_sprite.h" in read("framework/FILES.txt")
     and "    if (!t || t->stamp != (uint32_t)s_frame_count || !t->placed || width16 <= 0 || height16 <= 0) return;"
     in sizer
-    and "    t->placed = t->sized = t->shadow = t->whole = 0;" in gpu,
-    "the renderer must hand a sprite's own numbers, the squash and the shadow setting to the tested side arithmetic",
+    and "    t->placed = t->sized = t->shadow = t->whole = t->effect = 0;" in gpu,
+    "the renderer must hand a sprite's own numbers, the squash and the shadow setting to the tested side arithmetic, and a "
+    "tag starts each sprite with none of its kinds",
 )
 gte = read("psxrecomp/runtime/src/gte.cpp")
 runtime_main = read("psxrecomp/runtime/src/main.cpp")

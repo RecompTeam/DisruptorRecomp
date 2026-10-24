@@ -3,6 +3,7 @@
 #include <fcntl.h>
 #include <signal.h>
 #include <sys/file.h>
+#include <sys/syscall.h>
 #include <sys/utsname.h>
 #include <sys/wait.h>
 #include <unistd.h>
@@ -209,6 +210,13 @@ fs::path executable_path() {
 }
 
 fs::path game_executable(const fs::path& program) { return program / "DisruptorRecompiled"; }
+
+Moved move_new(const fs::path& from, const fs::path& to) {
+    // renameat2 with RENAME_NOREPLACE, Linux 3.15 on: a file system without it moves nothing rather than risk a replace.
+    constexpr unsigned no_replace = 1;
+    if (syscall(SYS_renameat2, AT_FDCWD, from.c_str(), AT_FDCWD, to.c_str(), no_replace) == 0) return Moved::done;
+    return errno == EEXIST ? Moved::taken : Moved::failed;
+}
 
 void open_folder(const fs::path& folder) { spawn_detached({"xdg-open", folder.string()}); }
 

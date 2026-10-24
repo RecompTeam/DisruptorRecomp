@@ -102,6 +102,7 @@ cmake = read("CMakeLists.txt")
 steps = read("src/game/render/mover_steps.h")
 objects = read("src/game/render/object_steps.h")
 motion = read("src/game/render/mover_motion.cpp")
+guest = read("src/game/guest.h")
 host = read("src/game/host.cpp")
 
 require(
@@ -179,14 +180,16 @@ require(
     and "constexpr uint32_t kLiftRecords = 0x8007173Cu;" in motion
     and "constexpr uint32_t kCameraHeight = 0x800775D0u;\nconstexpr uint32_t kPlayerHeight = 0x800775C4u;\n" in motion
     and "constexpr uint32_t kPlayerStands = 0x80077608u;" in motion
-    and motion.count("psx_mod_write") == 2
-    and "    void write(uint32_t address, uint32_t value) { psx_mod_write_word(address, value); }\n" in motion
-    and "    void write_half(uint32_t address, uint16_t value) { psx_mod_write_half(address, value); }\n" in motion,
+    and "psx_mod_write" not in motion
+    and '#include "game/guest.h"\n' in motion
+    and "using disruptor::Guest;\n" in motion
+    and "    void write(uint32_t address, uint32_t value) { psx_mod_write_word(address, value); }\n" in guest
+    and "    void write_half(uint32_t address, uint16_t value) { psx_mod_write_half(address, value); }\n" in guest,
     "a door's half step is taken back before a sector is drawn, after it, when the frame waits and before a tick, and given only in "
     "the world's loop of sectors after an odd tick. A lift's lag is given when the world's draw begins and taken back at the frame "
     "loop's wait after its last draw and before a tick, where the lifts' heights are noted. Both only under 60 FPS gameplay, outside a network game and "
     "with every hook registered. An enemy's or a shot's lag is given and taken back where a lift's is, and the module writes "
-    "guest memory through one word and one halfword call",
+    "guest memory only through the shared Guest's word and halfword calls",
 )
 require(
     'extern "C" void disruptor_mover_motion_state_loaded(void) {\n    forget(g_shifts);\n    forget(g_lifts);\n'

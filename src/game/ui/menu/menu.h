@@ -10,6 +10,7 @@
 #ifndef DISRUPTOR_UI_MENU_H
 #define DISRUPTOR_UI_MENU_H
 
+#include "game/achievements/game_client.h"
 #include "game/audio/bass_cut.h"
 #include "game/session/cheats.h"
 #include "game/render/billboard_aspect.h"
@@ -32,6 +33,7 @@
 #include "game/ui/hint.h"
 #include "config_loader.h"
 #include "gpu.h"
+#include "gpu_ddgi.h"
 #include "host_ui.h"
 #include "psx_keybinds.h"
 #include "psx_netplay.h"
@@ -47,6 +49,10 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <mutex>
+#include <deque>
+#include <cctype>
+#include <cstring>
 #include <cmath>
 #include <cstdlib>
 #include <cstdint>
@@ -180,6 +186,7 @@ void mark_fullscreen(int value);
 void mark_master_volume(int value);
 void mark_audio_muted(bool value);
 void mark_mute_in_background(bool value);
+void mark_achievements(bool value);
 void mark_bass_cut(int cut);
 void mark_skip_intro(bool value);
 void mark_language_disc(const std::string &path);
@@ -194,6 +201,8 @@ void mark_detailed_logging(bool value);
 void mark_occlusion_shape(int reach, int strength);
 void mark_gap_filling(bool value);
 void mark_world_depth(bool value);
+void mark_lighting();
+void mark_sun(const int amounts[4]);
 void apply_diagnostic_view(int view);
 void mark_diagnostic_view(int value);
 void apply_smooth_turn(bool enabled);
@@ -209,6 +218,12 @@ bool option_slider(const char *key, int *value);
 bool option_slider(const char *key, float *value);
 bool option_list(const char *key, int *index, size_t skipped = 0);
 void draw_status_badge(const char *label, const ImVec4 &colour);
+// The achievements overlay: whether it has something up, drawn inside the frame in progress, its pictures freed.
+bool achievements_overlay_shown();
+void draw_achievements_overlay(int width, int height);
+void release_achievement_pictures();
+// A badge's picture for ImGui, 0 until it is fetched or when it cannot be read. The render thread.
+unsigned achievement_picture(const std::string &url);
 
 void draw_controls_tab();
 void draw_display_tab();
@@ -217,6 +232,7 @@ void draw_audio_tab();
 void draw_experimental_tab();
 void draw_debug_tab();
 void draw_cheats_tab();
+void draw_achievements_tab();
 void draw_system_tab();
 void draw_language_tab();
 

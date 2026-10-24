@@ -75,7 +75,8 @@ void table() {
         if (one.kind == Kind::toggle) require(one.initial == 0 || one.initial == 1, "a toggle starts as neither");
         for (const char* need : one.needs)
             require(option(need).kind == Kind::toggle && &option(need) != &one, "a row needs no toggle");
-        require(one.hint && std::strlen(one.hint) >= 20 && std::strlen(one.hint) <= 240, "a row has no hint to show");
+        require(one.hint && (!*one.hint || (std::strlen(one.hint) >= 20 && std::strlen(one.hint) <= 240)),
+                "a row's description is empty or of 20 to 240 characters");
     }
 }
 
@@ -283,9 +284,9 @@ void described() {
     require(numbers.kind == Kind::toggle && numbers.initial == 0 && stored(settings, numbers) == 0,
             "the number keys pick no weapon until their option is on");
     const Option& use = *find_option("disruptor.psionic_keys_use");
-    require(use.kind == Kind::toggle && use.initial == 1 && stored(settings, use) == 1 && use.needs.size() == 1 &&
+    require(use.kind == Kind::toggle && use.initial == 0 && stored(settings, use) == 0 && use.needs.size() == 1 &&
                 std::string_view(use.needs[0]) == "disruptor.number_keys" && !experimental(use),
-            "a power's key uses the power at first, and only under the weapon and psionic keys");
+            "a power's key only picks the power at first, and uses it only under the weapon and psionic keys");
     require(experimental(wheels) && !experimental(numbers) && experimental(*find_option("disruptor.vertical_look")) &&
                 !experimental(*find_option("disruptor.modern_controls")),
             "the wheels and the vertical look carry the experimental tag, the number keys and the scheme do not");
@@ -314,10 +315,16 @@ void placements() {
         require(static_cast<size_t>(row.page) < page_labels().size(), "a row is on no page");
     }
     require(placed.size() == options().size(), "an option is on no page");
-    require(page_labels().size() == 6 && std::wstring_view(page_labels()[5]) == L"Troubleshooting", "the sixth page is Troubleshooting");
+    require(page_labels().size() == 7 && std::wstring_view(page_labels()[5]) == L"Troubleshooting" &&
+                std::wstring_view(page_labels()[6]) == L"Achievements",
+            "the sixth page is Troubleshooting and the last Achievements");
     for (const auto& row : layout())
         require((std::string_view(row.key) == "disruptor.detailed_logging") == (row.page == Page::troubleshooting),
                 "the Troubleshooting page holds the detailed log's switch and nothing else");
+    for (int page = 0; page < static_cast<int>(page_labels().size()); ++page)
+        require(page_rows_shown(static_cast<Page>(page), true) &&
+                    page_rows_shown(static_cast<Page>(page), false) == (static_cast<Page>(page) != Page::experimental),
+                "a developer build shows every page's rows, a release all but Experimental's");
     require(wide("caf\xC3\xA9") == L"café" && wide("").empty(), "an option's text is read as UTF-8");
     require(wide("a\xFF" "b\xC3") == L"a\uFFFDb\uFFFD" && wide("\xE0\x80\x80") == L"\uFFFD\uFFFD\uFFFD" &&
                 wide("\xED\xA0\x80") == L"\uFFFD\uFFFD\uFFFD",
@@ -338,7 +345,7 @@ void placements() {
     std::vector<std::string> enhancements;
     for (const auto& row : rows)
         if (row.page == Page::enhancements) enhancements.emplace_back(row.key);
-    require(enhancements.size() == 15 && enhancements.front() == "disruptor.frame_unlock" && rows[5].group &&
+    require(enhancements.size() == 16 && enhancements.front() == "disruptor.frame_unlock" && rows[5].group &&
                 std::string_view(rows[5].key) == "disruptor.frame_unlock",
             "Enhancements opens with its frame rate group, 60 FPS gameplay first");
 }
@@ -535,7 +542,7 @@ void reset_to_new(const fs::path& folder) {
     for (const auto& row : layout())
         require(settings.reset(row.page), "every page can be reset");
     for (const auto& one : options())
-        require(settings.shown(one) == (one.kind == Kind::slider && one.initial == 0 ? settings.highest(one) : one.initial),
+        require(settings.shown(one) == (std::string_view(one.key) == "video.frame_interpolation_fps" ? settings.highest(one) : one.initial),
                 "every page reset shows what a new installation has");
     require(has(file, "mouse_aim = true") && has(file, "master_volume = 100") && has(file, "frame_interpolation_fps = 0") &&
             settings.language_disc() == french, "a reset writes the page's rows and leaves the language");
@@ -556,6 +563,29 @@ void unreadable(const fs::path& folder) {
     require(settings.set(option("audio.muted"), 1) && settings.readable() &&
             settings.shown(option("video.supersampling")) == 1, "a mended file must be taken again");
     fs::remove(file);
+}
+
+void started_over(const fs::path& folder) {
+    const fs::path file = folder / "settings.toml";
+    const fs::path first = folder / "settings.unreadable.toml", second = folder / "settings.unreadable-2.toml";
+    const std::string broken = "[video\nsupersampling = 2\n", later = "[audio\nmuted = true\n";
+    write(file, "[video]\nsupersampling = 2\n");
+    SettingsFile settings(file);
+    fs::path kept;
+    require(!settings.start_over(kept) && read(file) == "[video]\nsupersampling = 2\n",
+            "a file that reads is never moved aside");
+    write(file, broken);
+    require(!settings.load(), "the broken file is unreadable");
+    require(settings.start_over(kept) && kept == first && read(first) == broken && !fs::exists(file) && settings.readable() &&
+                settings.shown(option("video.supersampling")) == option("video.supersampling").initial,
+            "an unreadable file is kept whole under its own name and the settings are a new installation's");
+    write(file, later);
+    require(settings.start_over(kept) && kept == second && read(second) == later && read(first) == broken,
+            "a second unreadable file takes the next free name and the first one stays");
+    require(settings.set(option("audio.muted"), 1) && has(file, "muted = true"), "after starting over a change writes a new file");
+    fs::remove(file);
+    fs::remove(first);
+    fs::remove(second);
 }
 
 void aspects(const fs::path& folder) {
@@ -772,6 +802,7 @@ int main() {
         dependants(folder);
         reset_to_new(folder);
         unreadable(folder);
+    started_over(folder);
         aspects(folder);
         rates(folder);
         overrides();

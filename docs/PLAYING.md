@@ -161,10 +161,11 @@ weapons have these at first, the powers none:
 - A key that an action gets in another scheme does only that action. The table
   shows it faint.
 - Blast's key still picks it once the game turns it into TeraBlast.
-- **Psionic keys use the power**, under the setting and on at first, makes a
+- **Psionic keys use the power**, under the setting and off at first, makes a
   power's key use the power too, as Psionic attack does. A power not in hand is
-  used the moment the game has it ready. Holding the key keeps using it. Switch
-  it off and the key only picks the power.
+  used the moment the game has it ready, and the game reads its pictures from
+  the disc four times as fast, so it is ready in about half the time. Holding
+  the key keeps using it. While it is off the key only picks the power.
 
 ### Scheme and keys
 
@@ -179,12 +180,14 @@ settings, is Modern or Classic.
 The **Keys** table under it puts any action on another key: click the key,
 then press the new one. A key another action had moves over, and that action
 takes the old key. Delete takes an action's key away. **Default keys** brings
-back the scheme's own keys.
+back the scheme's own keys once you say yes. It is greyed out while the keys
+are the scheme's own.
 
 **Profiles** keep two sets of keys: Save to 1 or 2 keeps every key of the page,
-the weapons' and the powers' too, and Load 1 or 2 brings one back. The scheme
-and the mouse settings stay out of a profile. The profiles are `keys-1.ini` and
-`keys-2.ini` beside `keybinds.ini`.
+the weapons' and the powers' too, and Load 1 or 2 brings one back. Save asks
+before it replaces a profile saved earlier. The scheme and the mouse settings
+stay out of a profile. The profiles are `keys-1.ini` and `keys-2.ini` beside
+`keybinds.ini`.
 
 These keys do the same in both schemes and cannot be changed:
 
@@ -231,8 +234,8 @@ Controls page and the game's Controls tab name the one connected.
   if you walk or turn without touching the stick.
 - To change a button, connect the gamepad, click the button on the launcher's
   Controls page, then press the new one on the gamepad. Escape cancels.
-  **Default buttons** brings back the table above. The left stick and the
-  D-pad always move and turn.
+  **Default buttons** brings back the table above once you say yes. The left
+  stick and the D-pad always move and turn.
 - The buttons are kept in `input.ini`, in the folder of your files.
 
 ## Settings
@@ -241,7 +244,7 @@ Controls page and the game's Controls tab name the one connected.
 
 - In the launcher, under **Settings**: the pages **Display**,
   **Enhancements**, **Controls**, **Audio**, **Experimental** and
-  **Troubleshooting**. **Controls** has four tabs: **Keys**, **Weapons**,
+  **Troubleshooting**. **Experimental** holds new settings while they are tried, none in this version. **Achievements** has a page of its own under **Play**. **Controls** has four tabs: **Keys**, **Weapons**,
   **Mouse** and **Gamepad**.
 - In the game, with Backquote: tabs of the same names. **Detailed logging**
   is on **Debug**. Keys and gamepad buttons are changed in the launcher
@@ -257,6 +260,25 @@ one is on. A setting that is on can always be switched off.
 **Reset this page...** at the foot of a launcher page returns the settings
 on that page to what a new installation has.
 
+A change that cannot be written is named in red under the page's title, and
+the setting stays as it was. If `settings.toml` cannot be read, the launcher's
+pages say so and show no settings. Mend the file, or press **Start over with
+defaults**: the file is kept beside it as `settings.unreadable.toml`.
+
+### The launcher without a mouse
+
+- **Tab** and the arrow keys move through a page. **Space** or **Enter**
+  presses what the cursor is on. **Escape** goes back to the side bar.
+- On the side bar, **Right** or **Space** opens a page and goes into it.
+- **Ctrl+Tab** and **Ctrl+Shift+Tab** step through the pages. **F1** opens
+  Help.
+- **Enter** starts the game on the home page while no control has the cursor.
+- A gamepad moves with the D-pad, presses with **A**, goes back with **B** and
+  steps through the pages with **LB** and **RB**. **Start** starts the game on
+  the home page.
+- On Help and under What's new, **PageUp** and **PageDown**, or the gamepad's
+  triggers, scroll the text.
+
 ### Display
 
 - **Display mode**, **VSync** and **Internal resolution scale**, 1x to 8x.
@@ -265,13 +287,14 @@ on that page to what a new installation has.
   screen: the backdrop is stretched, the logo and the text keep their shape.
   Movies, the map and loading screens stay 4:3.
 - **HUD size** for widescreen, from 50% to 100%. The weapon in hand keeps its
-  size.
+  size. Below 100% the game's text is drawn a little bolder and gets a dark
+  edge, so a small line stays readable. At 100% it is drawn as the game draws it.
 - Shadows keep the game's own shape at 4:3 and lie flat on the floor in
   widescreen.
 
 ### Enhancements
 
-The page is in four groups, in the launcher and in the game alike.
+The page is in five groups, in the launcher and in the game alike.
 
 | Group | Settings | At first |
 | --- | --- | --- |
@@ -279,6 +302,7 @@ The page is in four groups, in the launcher and in the game alike.
 | Frame rate | **In-between frames** and their rate | Off |
 | Picture | **Exact-provenance geometry**, **Perspective-correct world textures**, **Gap filling**, **Smooth distance fade**, **Depth-sorted world** | On |
 | Picture | **Fog shape** and **Draw distance** | Original |
+| Picture | **Anti-aliasing (MSAA / SSAA)** | Off |
 | Shading | **Ambient occlusion**, its reach and strength | Off |
 | Movies | **Movie filter** | Smooth |
 | Startup | **Skip the logos and the title movie** | Off |
@@ -294,6 +318,15 @@ The page is in four groups, in the launcher and in the game alike.
   Original and 1.25x, a quarter further.
 - **Depth-sorted world** draws world polygons by their depth where the game's
   own order puts a far one over a near one.
+- **Anti-aliasing (MSAA / SSAA)** smooths edges.
+  - MSAA at 2x, 4x, 8x or 16x smooths the edges of polygons and of the HUD's
+    rectangles.
+  - SSAA at the same counts also smooths textures and cut-out outlines, the
+    HUD's among them, and costs the graphics card that many times the shading.
+    It needs OpenGL 4.0 or its sample shading extension. Without it the card
+    draws MSAA of that count.
+  - A card with fewer samples uses its most.
+  - Video memory grows with the count and the internal resolution.
 - **Ambient occlusion** shades corners and the floor under things.
 - **Movie filter** sets how the game's movies are drawn at the size of your
   screen. Smooth takes away the square blocks the PlayStation's video
@@ -315,19 +348,6 @@ The page is in four groups, in the launcher and in the game alike.
 - **Mute in the background** silences the game while its window is not in
   front. It is off at first.
 - **Mute all audio** silences the game and keeps the volume.
-
-### Experimental
-
-**Anti-aliasing (MSAA / SSAA)** starts off and needs exact geometry.
-
-- MSAA at 2x, 4x, 8x or 16x smooths the edges of polygons and of the HUD's
-  rectangles.
-- SSAA at the same counts also smooths textures and cut-out outlines, the
-  HUD's among them, and costs the graphics card that many times the shading.
-  It needs OpenGL 4.0 or its sample shading extension. Without it the card
-  draws MSAA of that count.
-- A card with fewer samples uses its most.
-- Video memory grows with the count and the internal resolution.
 
 ## Other languages
 
@@ -362,6 +382,70 @@ not cut alike. With a language disc the twelve slots live in a folder of
 their own, `saves/German` for the German disc. The slots are empty after a
 change of language and come back when you return to it. Memory card saves do
 not depend on the language.
+
+## RetroAchievements
+
+The game counts the [RetroAchievements](https://retroachievements.org) set
+of Disruptor: 52 achievements for finishing levels, finding hidden areas and
+clearing a whole map.
+
+- Unlocks count as casual. RetroAchievements has not approved our client for
+  hardcore yet.
+- Any copy of the disc counts as the USA one, a language disc too.
+
+### Sign in
+
+1. Open the launcher's **Achievements** page.
+2. Type your RetroAchievements name and password and press **Sign in**.
+3. Start the game. It signs in by itself and shows how many you have.
+
+The password goes to retroachievements.org once and is not kept. The game
+keeps the token the site gives back instead, in `retroachievements.toml` in
+the folder of your files. On Windows the token is sealed for your Windows
+account. A problem report never carries it. **Sign out** on the same page,
+or in the game's menu, forgets it.
+
+### In the game
+
+The **Achievements** tab of the game's menu, opened with Backquote, shows:
+
+- whether you are signed in, with a link to your profile
+- each achievement with its picture, points and description
+- how far a counting one has come, as the kills and pickups of a level
+
+An unlock appears in a corner of the screen with its picture and a chime.
+
+| Setting | Default | What it changes |
+| --- | --- | --- |
+| Count achievements | On | Off plays without them, the account stays signed in |
+| Show notifications | On | The popup of each unlock |
+| Notification time | 12 seconds | 3, 5, 8, 12, 15 or 30 seconds |
+| Notification corner | Top right | Any corner of the screen |
+| Progress indicator | Off | A short note when a count moves |
+| Unlock sound | On | The chime, at the game's volume |
+| Sound file | The chime | A WAV of your own in place of the chime |
+| Encore | Off | Achievements you have can trigger again |
+| Unofficial achievements | On | Also the set's three unofficial ones, which the site does not record |
+
+Encore and unofficial achievements take effect at the next start of the
+game. The pictures are fetched once and kept in `achievements/badges/`.
+
+**Sound file** under Unlock sound takes a WAV of your own: plain PCM or
+32-bit float, mono or stereo, up to 10 seconds and 8 MB. The launcher
+copies it to `achievements/unlock.wav` in the folder of your files, so the
+original can move or go. It plays for every unlock and for a mastered set,
+from the game's next start. **Default** brings the chime back. A file that
+does not play leaves the chime, and the game's log says why.
+
+### Save states and achievements
+
+A save state keeps how far each achievement had counted, in a file beside
+it. Loading the state puts the counts back, so a 100% achievement still
+counts the kills before the save. The file fits that one state only. A state
+made with RetroAchievements off has none, and loading it starts every count
+over.
+
+Save states work as before. In casual play they do not stop an unlock.
 
 ## Where your files are
 
@@ -439,17 +523,12 @@ each one on this build in a hidden, silent run of a second.
 - A state that does not run stays as it was and is not tried again.
 - The originals are kept in `saves/old-states/` either way.
 
-### Cheats
-
-God Mode is off at every start. Granting all weapons and psionics marks the
-game as cheated, the saves made after it included.
-
 ## Reporting a problem
 
 ### Make a report
 
-Press **Report a problem** in the launcher, at the foot of its side bar or on
-its **Troubleshooting** page. It gathers into one ZIP:
+Press **Report a problem** on the launcher's **Troubleshooting** page. It
+gathers into one ZIP:
 
 - the game's log of the last two runs and the mouse log,
 - your settings,
@@ -482,21 +561,6 @@ too, under **Settings → Debug**. There the driver's part starts with the
 next launch.
 
 ## Recordings and capsules
-
-### Screen recording and views
-
-**Settings → Debug** in the game offers diagnostic views and **Record the
-screen**, for reports of a fault in the picture.
-
-- Close the settings menu to start the short recording. Its pictures and
-  timing data go to `shown/` in the folder of your files.
-- Diagnostic views are back to Off at the next start.
-- The **Texture coordinates** view paints each textured pixel with its place
-  in its texture, so a recording shows how a texture sits and moves on its
-  polygons. The world's semi-transparent pixels are left out and show what is
-  behind them. Those of the HUD and the weapon in hand are painted. The view
-  needs exact geometry and turns ambient occlusion and the anti-aliasing
-  filters off while it is on.
 
 ### Replay capsules
 
