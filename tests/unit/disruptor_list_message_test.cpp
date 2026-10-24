@@ -14,7 +14,11 @@ constexpr std::uint32_t kTestSentByDraw = 0x800429BCu;
 constexpr std::uint32_t kSprite = 0x800A0000u;
 
 std::map<std::uint32_t, std::uint8_t> g_ram;
-std::map<std::uint32_t, PSXModFunctionEntryCallback> g_entries;
+// GCC runs the hooks' constructor before a namespace-scope map is built: the map is made on first use.
+std::map<std::uint32_t, PSXModFunctionEntryCallback> &entries() {
+    static std::map<std::uint32_t, PSXModFunctionEntryCallback> registered;
+    return registered;
+}
 int g_failures = 0;
 
 void expect(bool condition, const char *message) {
@@ -38,7 +42,7 @@ void psx_mod_write_word(std::uint32_t address, std::uint32_t value) {
     for (std::uint32_t at = 0; at < 4u; ++at) g_ram[address + at] = static_cast<std::uint8_t>(value >> (8u * at));
 }
 int psx_mod_register_function_entry_plugin(const char *, std::uint32_t address, PSXModFunctionEntryCallback callback) {
-    g_entries[address] = callback;
+    entries()[address] = callback;
     return 1;
 }
 const char *g_other_words = nullptr;
@@ -127,7 +131,7 @@ void opened(bool forced = false) {
     list("AB", forced);
     disruptor_list_message_builder_ends(forced ? 2u : 0u);
     CPUState cpu{};
-    g_entries[kTestTick](&cpu, kTestTick);
+    entries()[kTestTick](&cpu, kTestTick);
 }
 
 /* The message draw as the game makes it from the memory it is given: time one less, the play colour with the reactor's
@@ -146,7 +150,7 @@ void game_draws() {
 void sent_by_draw() {
     CPUState cpu{};
     cpu.gpr[31] = kTestSentByDraw;
-    g_entries[kTestSent](&cpu, kTestSent);
+    entries()[kTestSent](&cpu, kTestSent);
 }
 
 /* A drawn frame through the module's hooks: the HUD builder with a list writing its name, then the message's draw. */
@@ -155,7 +159,7 @@ void frame(const char *name) {
     if (name) list(name);
     disruptor_list_message_builder_ends(0u);
     CPUState cpu{};
-    g_entries[kTestDraw](&cpu, kTestDraw);
+    entries()[kTestDraw](&cpu, kTestDraw);
     game_draws();
     sent_by_draw();
 }
@@ -218,7 +222,7 @@ void leaves_the_game_alone() {
     disruptor_list_message_builder_ends(0u);
     psx_mod_write_word(kMessageTime, 0u);
     CPUState cpu{};
-    g_entries[kTestDraw](&cpu, kTestDraw);
+    entries()[kTestDraw](&cpu, kTestDraw);
     g_ram[kSprite + 4u] = g_ram[kSprite + 5u] = g_ram[kSprite + 6u] = 0u;
     sent_by_draw();
     expect(colour() == 0u, "a draw with no time left built no sprite, and none is touched");
@@ -231,10 +235,10 @@ void other_sends_left_alone() {
     list("SHOTGUN");
     disruptor_list_message_builder_ends(0u);
     CPUState cpu{};
-    g_entries[kTestDraw](&cpu, kTestDraw);
+    entries()[kTestDraw](&cpu, kTestDraw);
     game_draws();
     cpu.gpr[31] = 0x80043E08u;
-    g_entries[kTestSent](&cpu, kTestSent);
+    entries()[kTestSent](&cpu, kTestSent);
     expect(colour() == 0u, "a list sent from elsewhere is not the message's");
     sent_by_draw();
     expect(colour() == 0x808080u, "the message's own send is");
@@ -260,7 +264,7 @@ void saves_wait_for_the_line() {
     disruptor_list_message_builder_ends(0u);
     expect(disruptor_list_message_save_deferred() == 1, "nor before the message is drawn");
     CPUState cpu{};
-    g_entries[kTestDraw](&cpu, kTestDraw);
+    entries()[kTestDraw](&cpu, kTestDraw);
     game_draws();
     expect(disruptor_list_message_save_deferred() == 1, "nor before its colour is the play colour");
     sent_by_draw();
@@ -268,7 +272,7 @@ void saves_wait_for_the_line() {
 
     disruptor_list_message_builder_begins();
     disruptor_list_message_builder_ends(0u);
-    g_entries[kTestTick](&cpu, kTestTick);
+    entries()[kTestTick](&cpu, kTestTick);
     expect(disruptor_list_message_save_deferred() == 0, "a tick ends what a frame without its draw had left");
     disruptor_list_message_builder_begins();
     disruptor_list_message_state_loaded();
@@ -313,7 +317,7 @@ void printed_frame(const char *name, uint32_t printed) {
     if (name) list(name);
     disruptor_list_message_builder_ends(0u);
     CPUState cpu{};
-    g_entries[kTestDraw](&cpu, kTestDraw);
+    entries()[kTestDraw](&cpu, kTestDraw);
     game_draws();
     psx_mod_write_word(kSprite, kLineTag);
     g_ram[kSprite + 7u] = 0x64u;
@@ -321,7 +325,7 @@ void printed_frame(const char *name, uint32_t printed) {
     psx_mod_write_word(kSprite + 16u, 11u << 16 | printed);
     cpu.gpr[31] = kTestLoadedByDraw;
     cpu.gpr[16] = printed;
-    g_entries[kTestLoad](&cpu, kTestLoad);
+    entries()[kTestLoad](&cpu, kTestLoad);
     sent_by_draw();
 }
 
@@ -378,12 +382,12 @@ void names_follow_the_countdown() {
     psx_mod_write_word(kMessageX, 0u);
     disruptor_list_message_builder_ends(0u);
     CPUState cpu{};
-    g_entries[kTestDraw](&cpu, kTestDraw);
+    entries()[kTestDraw](&cpu, kTestDraw);
     game_draws();
     psx_mod_write_word(kSprite, kLineTag);
     cpu.gpr[31] = kTestLoadedByDraw;
     cpu.gpr[16] = 40u;
-    g_entries[kTestLoad](&cpu, kTestLoad);
+    entries()[kTestLoad](&cpu, kTestLoad);
     sent_by_draw();
     expect(name_sprite(2) == (117u << 16 | (kCentre - 6u)), "a name at x 0 is centred as the draw centres a line");
 }
@@ -411,12 +415,12 @@ void names_left_out() {
     list("AB");
     disruptor_list_message_builder_ends(0u);
     CPUState cpu{};
-    g_entries[kTestDraw](&cpu, kTestDraw);
+    entries()[kTestDraw](&cpu, kTestDraw);
     game_draws();
     psx_mod_write_word(kSprite, kLineTag);
     cpu.gpr[31] = 0x80042A64u;
     cpu.gpr[16] = 40u;
-    g_entries[kTestLoad](&cpu, kTestLoad);
+    entries()[kTestLoad](&cpu, kTestLoad);
     sent_by_draw();
     expect(psx_mod_read_word(kSprite) == kLineTag && g_ram[kPictureAt + 48u] == 0u, "a picture another draw loads is not touched");
 
@@ -441,7 +445,7 @@ void names_left_out() {
     CPUState late{};
     late.gpr[31] = kTestLoadedByDraw;
     late.gpr[16] = 40u;
-    g_entries[kTestLoad](&late, kTestLoad);
+    entries()[kTestLoad](&late, kTestLoad);
     sent_by_draw();
     expect(psx_mod_read_word(kSprite) == kLineTag && g_ram[kPictureAt + 48u] == 0u, "a name is printed once a frame");
 }
@@ -457,7 +461,7 @@ void names_of_a_list_a_key_shows() {
     disruptor_list_message_builder_ends(2u);
     expect(shows_countdown("4 SECONDS"), "the countdown keeps its line while a key shows the list");
     CPUState cpu{};
-    g_entries[kTestDraw](&cpu, kTestDraw);
+    entries()[kTestDraw](&cpu, kTestDraw);
     game_draws();
     psx_mod_write_word(kSprite, kLineTag);
     g_ram[kSprite + 7u] = 0x64u;
@@ -465,7 +469,7 @@ void names_of_a_list_a_key_shows() {
     psx_mod_write_word(kSprite + 16u, 11u << 16 | 40u);
     cpu.gpr[31] = kTestLoadedByDraw;
     cpu.gpr[16] = 40u;
-    g_entries[kTestLoad](&cpu, kTestLoad);
+    entries()[kTestLoad](&cpu, kTestLoad);
     sent_by_draw();
     expect(glyph_at('B', 54u) && psx_mod_read_word(kSprite) == (0x04000000u | ((kPictureAt + kNameSprite) & 0x00FFFFFFu)),
            "its name is printed after the countdown and sent after the line");
@@ -480,10 +484,10 @@ void names_of_a_list_a_key_shows() {
     disruptor_list_message_builder_begins();
     list("AB", true);
     disruptor_list_message_builder_ends(0u);
-    g_entries[kTestDraw](&cpu, kTestDraw);
+    entries()[kTestDraw](&cpu, kTestDraw);
     game_draws();
     psx_mod_write_word(kSprite, kLineTag);
-    g_entries[kTestLoad](&cpu, kTestLoad);
+    entries()[kTestLoad](&cpu, kTestLoad);
     sent_by_draw();
     expect(psx_mod_read_word(kSprite) == kLineTag && g_ram[kPictureAt + 48u] == 0u,
            "a line written with no list shown is no list's name");
@@ -497,11 +501,11 @@ uint32_t opening_tag(uint32_t level, uint32_t mode, uint32_t forced) {
     if (forced == 0u) g_ram[kMode] = static_cast<uint8_t>(mode);
     disruptor_list_message_builder_ends(forced);
     CPUState cpu{};
-    g_entries[kTestDraw](&cpu, kTestDraw);
+    entries()[kTestDraw](&cpu, kTestDraw);
     game_draws();
     psx_mod_write_word(kSprite, kLineTag);
     sent_by_draw();
-    g_entries[kTestTick](&cpu, kTestTick);
+    entries()[kTestTick](&cpu, kTestTick);
     return psx_mod_read_word(kSprite);
 }
 
@@ -551,18 +555,18 @@ void names_wait_for_the_panel() {
     disruptor_list_message_builder_ends(0u);
     expect(disruptor_list_message_save_deferred() == 1, "no state is written between an opening pass and its draw");
     CPUState cpu{};
-    g_entries[kTestTick](&cpu, kTestTick);
+    entries()[kTestTick](&cpu, kTestTick);
     expect(disruptor_list_message_save_deferred() == 0, "a tick ends it");
     g_ram[kMode] = 0u;
     played();
     disruptor_list_message_builder_begins();
     disruptor_list_message_builder_ends(3u);
     expect(disruptor_list_message_save_deferred() == 1, "nor for a list a key shows");
-    g_entries[kTestTick](&cpu, kTestTick);
+    entries()[kTestTick](&cpu, kTestTick);
 }
 
 void hooks_registered() {
-    expect(g_entries.count(kTestDraw) && g_entries.count(kTestSent) && g_entries.count(kTestTick) && g_entries.count(kTestLoad) &&
+    expect(entries().count(kTestDraw) && entries().count(kTestSent) && entries().count(kTestTick) && entries().count(kTestLoad) &&
                !g_off,
            "the message draw, the load of its picture, the send of its list and the tick are hooked");
 }
