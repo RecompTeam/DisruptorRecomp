@@ -30,9 +30,9 @@
 
 ## Launcher
 
-- Drop your disc image on the window and press **Play**.
-- Updates install with one click and keep your saves and settings.
-- Sign in to [RetroAchievements](docs/PLAYING.md#retroachievements) and the game counts its 52 achievements, in casual for now.
+- Drop your disc image on the window and press **Play**
+- Updates install with one click and keep your saves and settings
+- Sign in to [RetroAchievements](docs/PLAYING.md#retroachievements) and the game counts its 52 achievements
 
 <table>
   <tr>
@@ -59,6 +59,18 @@
       Click an action, press the new key
     </td>
   </tr>
+  <tr>
+    <td valign="top">
+      <img src="docs/images/achievements.png" alt="The Achievements page" width="100%"><br>
+      <b>Achievements</b><br>
+      Sign in to RetroAchievements, choose how unlocks show
+    </td>
+    <td valign="top">
+      <img src="docs/images/audio.png" alt="The Audio page" width="100%"><br>
+      <b>Audio</b><br>
+      Volume, the bass, muting in the background
+    </td>
+  </tr>
 </table>
 
 ## Settings
@@ -81,9 +93,9 @@
 | | Ambient occlusion | Off | Shaded corners and floors under things |
 | **Controls** | Control scheme | Modern | WASD and the mouse, or the original keys |
 | | Weapon and psionic keys | Off | Two keys a weapon or power, 1 to 9 and 0 at first |
-| | Psionic keys use the power | On | A power's key uses the power too, once it is in hand, which comes twice as fast |
+| | Psionic keys use the power | Off | A power's key uses the power too, once it is in hand, which comes twice as fast |
 | | Weapon and psionic wheels | Off | **EXPERIMENTAL** Choose a weapon or a psionic on a wheel instead of the game's list |
-| | Vertical mouse look | Off | **EXPERIMENTAL** Looks up and down with the mouse, which the original cannot |
+| | Vertical mouse look | Off | **EXPERIMENTAL** Looks up and down with the mouse |
 | **And more** | | | HUD size, VSync, mouse sensitivity, gamepad buttons, the bass of the sound, a skip of the intro and others, all in the [player's guide](docs/PLAYING.md#settings) |
 
 ---
