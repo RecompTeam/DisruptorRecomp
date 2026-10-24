@@ -2,6 +2,44 @@
 
 What changed in each release. The launcher shows the section of its own version on its home page.
 
+## v0.8.0
+
+### Changes
+
+- Cheats: the tab is gone from this release, God Mode and all weapons and psionics are no longer offered
+- Debug tab: Detailed logging and the capsules stay, Record the screen and the diagnostic views are left out
+- Experimental: the page holds a note for now, what is tried there comes in a later version
+- Anti-aliasing: moved from Experimental to Enhancements, in the launcher and in the game's menu
+- Ambient occlusion: strength 100% at first (it was 80%) and at most, reach at most 160, a saved value past the end is the default
+- Psionic keys use the power: off at first, it was on
+- Save states: those of 0.7.0 load as they are
+- Capsules: those of 0.7.0 load, but the game leaves their recording at once
+
+### Enhancements
+
+- RetroAchievements: the game counts Disruptor's 52 achievements, sign in on the launcher's new Achievements page
+- Unlock cards: picture, name and points in a corner with a chime or a WAV of your own, for 3 to 30 seconds
+- Achievements tab: every achievement with its progress in the game's menu, with Sign out and the profile link
+- Save states: keep how far each achievement has counted
+- Launcher keyboard: Tab and the arrows move, Space or Enter presses, Escape goes back to the side bar
+- Launcher gamepad: the D-pad moves, A presses, B goes back, LB and RB change pages
+- Launcher pages: a column in the middle of a wide window, each keeps its scroll
+- Controls hints: a choice's name stands in a column of its own, one fact a line beside it
+- Settings file: one that cannot be read is named on the page, with Start over with defaults
+- HUD text: bolder with a dark edge below HUD size 100
+- Mission 9: the countdown stays while a list is open, and the list shows the chosen name too
+- Psionic keys: a key uses its power 9 to 13 frames after the press instead of 21 to 23
+
+### Bug fixes
+
+- Mission 9: under 60 FPS the teleport comes before the explosion again (#51)
+- Mission 9: the countdown no longer flickers with a pickup's message under 60 FPS (#51)
+- Sounds: no longer cut at half their length under 60 FPS, the reactor says its whole line
+- Abort mission: the world no longer flashes behind the darkening pause screen
+- Mission 9's end: the "0 SECONDS" line no longer blinks while the screen fades
+- Lists: a list's name no longer shows a frame before its box
+- Menu demo: the mouse no longer turns its camera and number keys no longer change its weapon
+
 ## v0.7.0
 
 ### Changes
