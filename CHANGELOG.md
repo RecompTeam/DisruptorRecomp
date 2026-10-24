@@ -4,8 +4,6 @@ What changed in each release. The launcher shows the section of its own version 
 
 ## v0.7.0
 
-Released on 2026-10-22
-
 ### Changes
 
 - Movies: drawn smoothly by the new Movie filter at first, Original keeps every pixel square
@@ -28,8 +26,6 @@ Released on 2026-10-22
 - Launcher: no cut text in its smallest window
 
 ## v0.6.0
-
-Released on 2026-10-22
 
 ### Changes
 
@@ -56,8 +52,6 @@ Released on 2026-10-22
 
 ## v0.5.0
 
-Released on 2026-10-21
-
 ### Changes
 
 - Game code: translated anew, the launcher carries save states of 0.4.x over
@@ -79,8 +73,6 @@ Released on 2026-10-21
 
 ## v0.4.0
 
-Released on 2026-10-19
-
 ### Changes
 
 - Move Fog shape and Draw distance to the Enhancements page and offer only Even and Original for now
@@ -101,8 +93,6 @@ Released on 2026-10-19
 
 ## v0.3.1
 
-Released on 2026-10-17
-
 ### Changes
 
 - Show the launcher's last message in the banner beside Play
@@ -122,8 +112,6 @@ Released on 2026-10-17
 
 ## v0.3.0-alpha.1
 
-Released on 2026-10-17
-
 ### Changes
 
 - Pick weapons with the number keys only when Number keys pick weapons is on, off at first, in either scheme
@@ -141,8 +129,6 @@ Released on 2026-10-17
 - Stop a dark rim hanging in the air beside a column in in-between frames
 
 ## v0.2.0-alpha.1
-
-Released on 2026-10-16
 
 ### Changes
 
@@ -191,8 +177,6 @@ Released on 2026-10-16
 
 ## v0.1.0-alpha.5
 
-Released on 2026-10-13
-
 ### Enhancements
 
 - Choose a weapon with the number keys under modern controls, on the number row or the keypad
@@ -214,8 +198,6 @@ Released on 2026-10-13
 - Name Windows 11 in a report
 
 ## v0.1.0-alpha.4
-
-Released on 2026-10-12
 
 ### Enhancements
 
@@ -243,8 +225,6 @@ Released on 2026-10-12
 
 ## v0.1.0-alpha.3
 
-Released on 2026-10-10
-
 ### Enhancements
 
 - Add a Windows launcher that copies your USA disc image into place, writes its CUE, verifies its whole SHA-256 and starts the game
@@ -269,8 +249,6 @@ Released on 2026-10-10
 
 ## v0.1.0-alpha.2
 
-Released on 2026-10-08
-
 ### Enhancements
 
 - Add optional 60 FPS gameplay, off by default
@@ -286,8 +264,6 @@ Released on 2026-10-08
 - Keep enemy shadows at their width while the player moves
 
 ## v0.1.0-alpha.1
-
-Released on 2026-10-06
 
 ### Enhancements
 

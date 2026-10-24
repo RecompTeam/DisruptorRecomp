@@ -41,7 +41,7 @@ require(
 # The far renderer shares the generated renderer-entry fan-out: a second config entry would duplicate the guest callback.
 require(
     configs.count(
-        'mod_function_entry_funcs = ["0x80011888", "0x8001A46C", "0x8001C484", "0x80020DD8", "0x80032514", "0x80039450", "0x8003B78C", "0x80040E68", "0x800429DC", "0x80044A10", "0x80044BDC", "0x80046134", "0x8004B3D4", "0x8004D348", "0x8004D410"]'
+        'mod_function_entry_funcs = ["0x80011888", "0x80013544", "0x8001A46C", "0x8001C484", "0x80020DD8", "0x80032514", "0x80039450", "0x8003B78C", "0x8003FE6C", "0x80040E68", "0x800427D0", "0x800429DC", "0x80044A10", "0x80044BDC", "0x80046134", "0x8004B3D4", "0x8004D348", "0x8004D410", "0x8004D684"]'
     )
     == 2,
     "both configs must retain exactly one audited renderer-entry seam",
@@ -311,7 +311,8 @@ require(
     in main
     and "int psx_game_state_save_deferred(void);\n" in read("psxrecomp/runtime/include/game_host.h")
     and "int psx_game_state_save_deferred(void) {\n    return disruptor_far_rendering_save_deferred() || "
-    "disruptor_language_movie_sound_save_deferred();\n}\n"
+    "disruptor_language_movie_sound_save_deferred() ||\n           disruptor_stock_frames_save_deferred() || "
+    "disruptor_list_message_save_deferred();\n}\n"
     in host,
     "a save state asked for inside a frame drawn at the preset's distances waits for a later block leader",
 )
@@ -332,7 +333,7 @@ require(
     in gpu
     and "static uint32_t gp0_cmd_buf[16];" in gpu
     and "    return disruptor_far_rendering_packet_fraction(resolved_packet, signature);\n" in host
-    and "    const int packet_raw = packet_fade >= 0 ? 2 | (packet_fade << 2) : 0;\n" in renderer
+    and "    const int packet_raw = packet_fade >= 0 ? 2 | (packet_fade << 2) : gpu_current_hud_glyph() << 2;\n" in renderer
     and "vp[13] = (float)((rawtex ? 1 : 0) | packet_raw);" in renderer
     and '"  } else if ((v_raw & 2) != 0) level = float(v_raw >> 2)/256.0;' in renderer
     and '"  if ((v_raw & 1) == 0) rgb = clamp(rgb * v_col.rgb * 2.0, 0.0, 1.0);\\n"' in renderer

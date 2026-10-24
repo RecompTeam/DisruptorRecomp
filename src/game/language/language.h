@@ -10,6 +10,8 @@ extern "C" {
 /* Takes a language pack once the game runs. Returns how many of its strings stand in, 0 when it is refused. */
 int disruptor_language_load_pack(const uint8_t *data, uint32_t size);
 int disruptor_language_active(void);
+/* The pack's words for `text` as the small font draws it, into `words` of `size` bytes. 0 when it has none. */
+int disruptor_language_words(const char *text, char *words, uint32_t size);
 /* Names the image of another region's disc. Asked before the drive first reads the game disc. */
 void disruptor_language_set_disc(const char *path);
 /* The strings of the language disc laid over the game disc, once it is. */

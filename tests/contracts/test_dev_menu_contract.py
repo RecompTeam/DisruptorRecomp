@@ -54,7 +54,7 @@ def host_ui_gl_restore_helper(source: str) -> tuple[str, str, str, str]:
 
 cmake = read("CMakeLists.txt")
 manifest = read("framework/FILES.txt")
-host_ui = read("psxrecomp/runtime/include/host_ui.h")
+host_ui = read("psxrecomp/runtime/include/host_ui.h") + read("psxrecomp/runtime/include/host_ui_flags.h")
 main_cpp = read("psxrecomp/runtime/src/main.cpp")
 gl = read("psxrecomp/runtime/src/gpu_gl_renderer.c")
 gte = read("psxrecomp/runtime/src/gte.cpp")
@@ -107,6 +107,8 @@ require(
         "tab_experimental.cpp",
         "tab_debug.cpp",
         "tab_cheats.cpp",
+        "tab_achievements.cpp",
+        "achievements_overlay.cpp",
         "tab_system.cpp",
         "tab_language.cpp",
         "menu.cpp",
@@ -145,7 +147,10 @@ require(
     "src/game/session/cheats.cpp" in cmake and "tests/unit/disruptor_cheats_test.cpp" in cmake,
     "version-pinned cheats and their behavioral test must be built",
 )
-require("+runtime/include/host_ui.h" in manifest, "new host UI ABI header must remain reviewed in the overlay manifest")
+require(
+    "+runtime/include/host_ui.h" in manifest and "+runtime/include/host_ui_flags.h" in manifest,
+    "new host UI ABI headers must remain reviewed in the overlay manifest",
+)
 
 for token in (
     "PSX_HOST_UI_ABI_VERSION",
@@ -225,6 +230,57 @@ for present_name in (
 require(
     "s_interp_content_suspended" in gl and "s_interp_host_ui_suspended" in gl,
     "FMV and menu interpolation suspension reasons must remain independent",
+)
+require(
+    "        gl_renderer_set_host_ui_suspended(psx_host_ui_stops_interpolation(ui_flags) ||\n"
+    "                                          (psx_host_ui_in_layer(ui_flags) && gl_renderer_host_ui_layer_failed()));\n"
+    in main_cpp,
+    "visible host UI stops the interpolation unless it goes into a layer that could be made",
+)
+layer_update = function_body(gl, "interp_layer_update")
+require(
+    "psx_host_ui_in_layer(psx_host_ui_capture_flags())" in layer_update
+    and "psx_host_ui_render_gl" not in layer_update
+    and layer_update.index("p_glWaitSync(s_interp_draw_fence")
+    < layer_update.index(f"{host_ui_helper}(ww, wh);")
+    < layer_update.index("s_layer_fence[i] = p_glFenceSync(")
+    < layer_update.index("s_layer_shown = i;"),
+    "UI that only shows is drawn into the layer by the same helper, after the presenter's last draw, then shown",
+)
+after_helper = layer_update[layer_update.index(f"{host_ui_helper}(ww, wh);") :]
+require(
+    after_helper.index("p_glBindFramebuffer(PSXGL_FRAMEBUFFER, 0);") < after_helper.index("glViewport(0, 0, ww, wh);")
+    < after_helper.index("s_layer_fence[i] = p_glFenceSync("),
+    "the layer's drawing leaves the window bound even when the helper drew nothing",
+)
+require(
+    re.findall(r"s_layer_next\b[^;]*;", gl) == ["s_layer_next = 0, s_layer_failed = 0;", "s_layer_next;", "s_layer_next = 1 - i;"]
+    and layer_update.index("const int i = s_layer_next;") < layer_update.index("s_layer_shown = i;")
+    < layer_update.index("s_layer_next = 1 - i;")
+    and set(re.findall(r"s_layer_shown = ([^,;]+)[,;]", gl)) == {"-1", "i"}
+    and re.findall(r"s_layer_shown = ([^,;]+)[,;]", gl).count("i") == 1
+    and "    if (drawn && !s_layer_prog) s_layer_failed = 1;\n" in layer_update
+    and "if (!make_fbo(&s_layer_fbo[i], s_layer_tex[i], 0)) {\n                s_layer_failed = 1;\n" in layer_update
+    and "s_layer_failed = 0;" in function_body(gl, "gl_renderer_shutdown"),
+    "the layer drawn is never the one shown: the two take turns, a shown one is only ever the one just drawn or none",
+)
+for present_name in ("gl_renderer_present_vram", "gl_renderer_present_wide_fbo"):
+    require(
+        "    if (interp_pair) {\n        interp_layer_update(ww, wh);\n" in function_body(gl, present_name),
+        f"{present_name} keeps the layer when the presenter shows its pictures",
+    )
+presenter = function_body(gl, "interp_present")
+require(
+    presenter.index("interp_draw_quad(")
+    < presenter.index("interp_layer_draw(ww, wh);")
+    < presenter.index("s_interp_draw_fence = p_glFenceSync(")
+    < presenter.index("shown_capture(1, shown);")
+    < presenter.index("SDL_GL_SwapWindow"),
+    "the presenter lays the layer over its picture before the fence the main thread waits on, the read-back and the swap",
+)
+require(
+    "s_layer_shown = -1;" in function_body(gl, "interp_reset_history_unlocked"),
+    "a history reset drops the layer with the pictures",
 )
 
 interpolation_setter = function_body(main_cpp, "psx_host_video_set_interpolation")
@@ -376,6 +432,32 @@ for token in (
     "psx_host_video_set_fullscreen_mode",
 ):
     require(token in menu, f"developer menu is missing {token}")
+
+launcher_settings = read("src/launcher/launcher_settings.cpp")
+require(
+    all(
+        f'#if DISRUPTOR_DEV_TOOLS\n            if (ImGui::BeginTabItem("{tab}")) {{\n' in menu
+        for tab in ("Experimental", "Cheats")
+    )
+    and "#if DISRUPTOR_DEV_TOOLS\nconstexpr bool kDeveloperBuild = true;\n#else\nconstexpr bool kDeveloperBuild = false;\n" in menu
+    and "return kDeveloperBuild ? stored(settings, *find_option(key)) : 0; };\n"
+    "    gl_renderer_set_ddgi_environment(kDeveloperBuild);\n" in menu
+    and "        apply_diagnostic_view(kDeveloperBuild && settings.has_diagnostic_view &&\n" in menu
+    and "#if DISRUPTOR_DEV_TOOLS\n    ImGui::Separator();\n    if (ImGui::Button(\"Record the screen\")" in menu
+    and "    ImGui::Separator();\n    draw_mission_select();\n#endif\n" in menu
+    and "    if (!asked && s_ddgi_environment) {\n" in read("psxrecomp/runtime/src/gpu_gl_ddgi.c.inc")
+    and "bool page_rows_shown(Page page, bool dev_tools) { return dev_tools || page != Page::experimental; }"
+    in launcher_settings
+    and "#if DISRUPTOR_DEV_TOOLS\nbool page_rows_shown(Page page) { return page_rows_shown(page, true); }\n#else\n"
+    in launcher_settings
+    and "    if (page_rows_shown(static_cast<Page>(page_))) rows();\n    else coming_soon();\n"
+    in read("src/launcher/view.cpp")
+    and "    target_compile_definitions(disruptor-launcher-model PUBLIC DISRUPTOR_DEV_TOOLS=1)\n"
+    in read("src/launcher/CMakeLists.txt")
+    and '"DISRUPTOR_DEV_TOOLS": "OFF",' in read("tools/package_release.py"),
+    "a release has no Experimental tab, a note in place of the Experimental page's rows, no Cheats tab and no recorder, views or probes on Debug, and its"
+    " lighting and views stay off whatever a developer build saved",
+)
 
 for forbidden in (
     'BeginTabItem("Diagnostics")',
@@ -896,7 +978,7 @@ staged_keys = set(re.findall(r'\bmark\("([\w.]+)"', menu)) | set(
 )
 applied_keys = set(re.findall(r'\bchanged\("([\w.]+)"\)', function_body(menu, "apply_pending_preferences")))
 require(
-    len(shared_keys) == 39
+    len(shared_keys) == 61
     and staged_keys == shared_keys
     and applied_keys == shared_keys
     and set(re.findall(r'\bfind_option\("([\w.]+)"', menu)) <= shared_keys,
@@ -948,7 +1030,7 @@ HELPERS = (
     "\n"
     "bool option_slider(const char *key, int *value) {\n"
     "    const Option &option = *find_option(key);\n"
-    '    const char *format = option.unit == Unit::percent ? "%d%%" : "%d";\n'
+    '    const char *format = option.unit == Unit::percent ? "%d%%" : option.unit == Unit::degrees ? "%d\\xc2\\xb0" : "%d";\n'
     "    const bool moved =\n"
     "        ImGui::SliderInt(option.label, value, option.lowest, option.highest,\n"
     "                         format, ImGuiSliderFlags_AlwaysClamp);\n"
@@ -992,7 +1074,7 @@ present = read("src/game/frame/present_rate.cpp")
 require(
     HELPERS in menu
     and "bool option_list(const char *key, int *index, size_t skipped = 0);\n" in menu
-    and len(shared_labels) == 39
+    and len(shared_labels) == 61
     and drawn_keys == shared_keys
     and not [text for text in [*shared_labels, *shared_choices] if f'"{text}"' in menu + present]
     and "    static constexpr int kScaleCount = 8;\n" in menu
@@ -1000,9 +1082,9 @@ require(
     and '{"4:3", "16:9", "21:9", "32:9", "Match window (up to 32:9)"}' in options
     and '{"Windowed", "Borderless fullscreen", "Exclusive fullscreen"}' in options
     and '{"Adaptive", "Immediate", "Synchronised"}' in options
-    and '"How far the view turns for a movement of the mouse", 5, 2000, Unit::thousandths,' in options
-    and '"How far the view tilts for a movement of the mouse", 5, 2000, Unit::thousandths,' in options
-    and '"The loudness of everything the game plays", 0, 100, Unit::percent,' in options,
+    and '"Horizontal sensitivity", 80,\n           "", 5, 2000, Unit::thousandths,' in options
+    and '"Vertical sensitivity", 80,\n           "", 5, 2000, Unit::thousandths,' in options
+    and '"Master volume", 100,\n           "", 0, 100, Unit::percent,' in options,
     "the menu must draw every shared option by its key, with the table's label, bounds and choices and none of its own",
 )
 
@@ -1022,8 +1104,13 @@ LIVE = (
     '    if (key == "disruptor.mouse_aim") return disruptor_mouse_aim_enabled() != 0;\n'
     '    if (key == "disruptor.ambient_occlusion") return gl_renderer_ssao() != 0;\n'
     '    if (key == "disruptor.smooth_fade") return gl_renderer_smooth_fade() != 0;\n'
+    '    if (key == "disruptor.probe_lighting") return gl_renderer_ddgi() != 0;\n'
+    '    if (key == "disruptor.dynamic_shadows") return gl_renderer_ddgi_shadows() != 0;\n'
+    '    if (key == "disruptor.shot_lights") return gl_renderer_ddgi_lamps() != 0;\n'
+    '    if (key == "disruptor.sun_lighting") return gl_renderer_ddgi_sun() != 0;\n'
     '    if (key == "disruptor.vertical_look") return disruptor_mouse_vertical_look_enabled() != 0;\n'
     '    if (key == "disruptor.number_keys") return disruptor_number_keys_enabled() != 0;\n'
+    '    if (key == "disruptor.achievements_popups") return disruptor::achievements::presentation().popups;\n'
     '    if (key == "disruptor.separate_vertical_speed")\n'
     "        return disruptor_mouse_vertical_follows_horizontal() == 0;\n"
     "    return false;\n"
@@ -1054,7 +1141,7 @@ told = set(re.findall(r'key == "([\w.]+)"', function_body(menu, "prerequisite_on
 require(
     RULE in options
     and LIVE in menu
-    and len(needing) == 16
+    and len(needing) == 31
     and needing["disruptor.high_precision_camera"] == ["disruptor.mouse_aim", "disruptor.geometry_correction"]
     and asked == set(needing) - {"video.frame_interpolation_fps"}
     and told == {key for keys in needing.values() for key in keys} - {"video.frame_interpolation"}
@@ -1084,7 +1171,7 @@ def greyed_by_own_rule(source: str, key: str) -> bool:
 
 greyed = asked - {"video.frame_interpolation"}
 require(
-    len(greyed) == 14
+    len(greyed) == 29
     and all(greyed_by_own_rule(menu, key) for key in greyed)
     and not greyed_by_own_rule(
         menu.replace("    if (!textures_apply) ImGui::BeginDisabled();\n", "    if (false) ImGui::BeginDisabled();\n"),
@@ -1098,7 +1185,7 @@ require(
 
 HINT = (
     "inline void hint(const char *text) {\n"
-    "    if (!ImGui::BeginItemTooltip()) return;\n"
+    "    if (!*text || !ImGui::BeginItemTooltip()) return;\n"
     "    ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30.0f);\n"
     "    for (std::string_view rest = text;;) {\n"
     "        const std::size_t end = rest.find('\\n');\n"
@@ -1130,10 +1217,10 @@ shared_hints = [
 written = "".join(re.findall(LITERAL, menu + present))
 require(
     HINT in read("src/game/ui/hint.h")
-    and len(shared_hints) == 39
-    and all(20 <= len(text) <= 240 for text in shared_hints)
-    and not [text for text in shared_hints if text[:32] in written]
-    and "Needs Horizontal mouse aim and Exact-provenance geometry"
+    and len(shared_hints) == 61
+    and all(not text or 20 <= len(text) <= 240 for text in shared_hints)
+    and not [text for text in shared_hints if text and text[:32] in written]
+    and "Also needs Exact-provenance geometry"
     in shared_hints[
         [key for key in re.findall(r'\b(?:toggle(?:<[^>]*>)?|choice|slider)\(\s*"([\w.]+)"', options)].index(
             "disruptor.high_precision_camera"

@@ -119,6 +119,8 @@ void mark_audio_muted(bool value) { mark("audio.muted", value); }
 
 void mark_mute_in_background(bool value) { mark("disruptor.mute_in_background", value); }
 
+void mark_achievements(bool value) { mark("disruptor.achievements", value); }
+
 void mark_bass_cut(int cut) { mark("disruptor.bass_cut", cut); }
 
 void mark_skip_intro(bool value) { mark("disruptor.skip_intro", value); }
@@ -156,6 +158,62 @@ void mark_detailed_logging(bool value) { mark("disruptor.detailed_logging", valu
 void mark_gap_filling(bool value) { mark("disruptor.gap_filling", value); }
 
 void mark_world_depth(bool value) { mark("disruptor.depth_sorted_world", value); }
+
+// What the renderer took, so a value it clamped or a variable set is saved as seen.
+void mark_lighting() {
+    const auto percent = [](float amount) { return static_cast<int>(std::lround(amount * 100.0f)); };
+    mark("disruptor.probe_lighting", gl_renderer_ddgi() != 0);
+    mark("disruptor.probe_strength", percent(gl_renderer_ddgi_strength()));
+    mark("disruptor.probe_bounce", percent(gl_renderer_ddgi_bounce()));
+    mark("disruptor.probe_glow", percent(gl_renderer_ddgi_glow()));
+    mark("disruptor.dynamic_shadows", gl_renderer_ddgi_shadows() != 0);
+    mark("disruptor.shadow_strength", percent(gl_renderer_ddgi_shadow_strength()));
+    mark("disruptor.shadow_underneath", percent(gl_renderer_ddgi_contact()));
+    mark("disruptor.shot_lights", gl_renderer_ddgi_lamps() != 0);
+    mark("disruptor.shot_light_strength", percent(gl_renderer_ddgi_lamp_strength()));
+    mark("disruptor.sun_lighting", gl_renderer_ddgi_sun() != 0);
+}
+
+void mark_sun(const int amounts[4]) {
+    mark("disruptor.sun_direction", amounts[0]);
+    mark("disruptor.sun_height", amounts[1]);
+    mark("disruptor.sun_strength", amounts[2]);
+    mark("disruptor.sun_shade", amounts[3]);
+}
+
+namespace {
+
+// A release does not offer the lighting prototype or the diagnostic views: a developer build's saved setting leaves them off.
+#if DISRUPTOR_DEV_TOOLS
+constexpr bool kDeveloperBuild = true;
+#else
+constexpr bool kDeveloperBuild = false;
+#endif
+
+void apply_lighting(const PSXRecompV4::UserSettings &settings) {
+    const auto value = [&](const char *key) { return kDeveloperBuild ? stored(settings, *find_option(key)) : 0; };
+    gl_renderer_set_ddgi_environment(kDeveloperBuild);
+    gl_renderer_set_ddgi_strength(value("disruptor.probe_strength") / 100.0f);
+    gl_renderer_set_ddgi_bounce(value("disruptor.probe_bounce") / 100.0f);
+    gl_renderer_set_ddgi_glow(value("disruptor.probe_glow") / 100.0f);
+    gl_renderer_set_ddgi_shadow_strength(value("disruptor.shadow_strength") / 100.0f);
+    gl_renderer_set_ddgi_contact(value("disruptor.shadow_underneath") / 100.0f);
+    gl_renderer_set_ddgi_lamp_strength(value("disruptor.shot_light_strength") / 100.0f);
+    gl_renderer_set_ddgi(value("disruptor.probe_lighting"));
+    gl_renderer_set_ddgi_shadows(value("disruptor.dynamic_shadows"));
+    gl_renderer_set_ddgi_lamps(value("disruptor.shot_lights"));
+    gl_renderer_set_ddgi_sun(value("disruptor.sun_lighting"));
+}
+
+// Only the second mission has a sun.
+void apply_sun(const PSXRecompV4::UserSettings &settings) {
+    const auto value = [&](const char *key) { return stored(settings, *find_option(key)); };
+    const float sun[4] = {static_cast<float>(value("disruptor.sun_direction")), static_cast<float>(value("disruptor.sun_height")),
+                          value("disruptor.sun_strength") / 100.0f, value("disruptor.sun_shade") / 100.0f};
+    gl_renderer_ddgi_sun_set_mission(2, sun);
+}
+
+}  // namespace
 
 // Views 1 to 4 are layers of the occlusion pass, 5 is the mesh drawn over in-between frames.
 void apply_diagnostic_view(int view) {
@@ -315,7 +373,8 @@ void apply_saved_preferences(const PSXRecompV4::UserSettings &settings) {
     if (!env_override_present("PSX_GL_SSAO")) {
         if (settings.has_ambient_occlusion) gl_renderer_set_ssao(settings.ambient_occlusion ? 1 : 0);
         /* A layer is a session's own. Only a capsule's replay starts in the one its recording was made in. */
-        apply_diagnostic_view(settings.has_diagnostic_view && env_override_present("PSX_DISRUPTOR_CAPSULE_REPLAY")
+        apply_diagnostic_view(kDeveloperBuild && settings.has_diagnostic_view &&
+                                      env_override_present("PSX_DISRUPTOR_CAPSULE_REPLAY")
                                   ? settings.diagnostic_view : 0);
     }
     if (settings.has_smooth_fade) gl_renderer_set_smooth_fade(settings.smooth_fade ? 1 : 0);
@@ -329,14 +388,17 @@ void apply_saved_preferences(const PSXRecompV4::UserSettings &settings) {
     gl_renderer_set_downscale_averaging(0);
     gl_renderer_set_edge_smoothing(0);
     gl_renderer_set_ssao_shape(
-        settings.has_occlusion_reach && !env_override_present("PSX_GL_SSAO_RADIUS")
+        !env_override_present("PSX_GL_SSAO_RADIUS")
             ? static_cast<float>(settings.occlusion_reach) : -1.0f,
-        settings.has_occlusion_strength && !env_override_present("PSX_GL_SSAO_STRENGTH")
+        !env_override_present("PSX_GL_SSAO_STRENGTH")
             ? settings.occlusion_strength / 100.0f : -1.0f);
     if (settings.has_gap_filling && !env_override_present("PSX_GL_CRACK_FILL") && !env_override_present("PSX_GL_GROWN_UNDER"))
         gl_renderer_set_gap_fill(settings.gap_filling ? 1 : 0);
     if (settings.has_depth_sorted_world && !env_override_present("PSX_GL_WORLD_DEPTH"))
         gl_renderer_set_world_depth(settings.depth_sorted_world ? 1 : 0);
+    // The renderer reads the PSX_DDGI variables at its first update, after this: they still win.
+    apply_sun(settings);
+    apply_lighting(settings);
     // The session's start switched it off after the mouse module read its variable, so the variable is applied here too.
     if (const char *forced = std::getenv("PSX_DISRUPTOR_HIGH_PRECISION_CAMERA"))
         apply_smooth_turn(forced[0] != '\0' && forced[0] != '0');
@@ -404,6 +466,13 @@ void apply_pending_preferences() {
         (void)psx_host_audio_set_muted(pending.audio_muted ? 1 : 0);
     if (changed("disruptor.mute_in_background"))
         (void)psx_host_audio_set_mute_in_background(pending.mute_in_background ? 1 : 0);
+    if (changed("disruptor.achievements"))
+        disruptor_achievements_configure(pending.achievements ? 1 : 0);
+    if (changed("disruptor.achievements_encore") || changed("disruptor.achievements_unofficial") ||
+        changed("disruptor.achievements_popups") || changed("disruptor.achievements_popup_time") ||
+        changed("disruptor.achievements_corner") || changed("disruptor.achievements_progress") ||
+        changed("disruptor.achievements_sound"))
+        disruptor::achievements::configure(pending);
     if (changed("disruptor.bass_cut"))
         disruptor_bass_cut_set(stored(pending, *find_option("disruptor.bass_cut")));
     if (changed("disruptor.hud_scale"))
@@ -433,6 +502,14 @@ void apply_pending_preferences() {
         gl_renderer_set_gap_fill(pending.gap_filling ? 1 : 0);
     if (changed("disruptor.depth_sorted_world"))
         gl_renderer_set_world_depth(pending.depth_sorted_world ? 1 : 0);
+    if (changed("disruptor.probe_lighting") || changed("disruptor.probe_strength") || changed("disruptor.probe_bounce") ||
+        changed("disruptor.probe_glow") || changed("disruptor.dynamic_shadows") || changed("disruptor.shadow_strength") ||
+        changed("disruptor.shadow_underneath") || changed("disruptor.shot_lights") ||
+        changed("disruptor.shot_light_strength") || changed("disruptor.sun_lighting"))
+        apply_lighting(pending);
+    if (changed("disruptor.sun_direction") || changed("disruptor.sun_height") || changed("disruptor.sun_strength") ||
+        changed("disruptor.sun_shade"))
+        apply_sun(pending);
     if (g_preferences.diagnostic_view_changed)
         apply_diagnostic_view(pending.diagnostic_view);
     if (changed("disruptor.high_precision_camera"))

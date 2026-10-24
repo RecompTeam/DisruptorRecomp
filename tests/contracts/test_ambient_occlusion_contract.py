@@ -54,7 +54,7 @@ require(
 
 require(
     """static void ssao_mode(void) {
-    const int mode = s_uv_view ? 0 : s_ssao_view ? s_ssao_view + 1 : s_ssao_on;
+    const int mode = s_uv_view ? 0 : s_ssao_view ? s_ssao_view + 1 : (s_ssao_on || s_ddgi_light || s_ddgi_shadows || s_ddgi_lamps || ddgi_sun_active());
     if (mode && !s_ssao) memset(s_wide_depth_shown, 0xFF, sizeof s_wide_depth_shown);
     s_ssao = mode;
 }
@@ -77,9 +77,11 @@ void gl_renderer_set_ssao_shape(float radius, float strength) {
 }
 """
     in renderer
-    and "int gl_renderer_ssao(void) { return s_ssao_on; }\n" in renderer,
-    "the setting and a diagnostic view are kept apart, the first of them has the mirror's depth made afresh, and a reach "
-    "or a strength that is not one changes nothing",
+    and "int gl_renderer_ssao(void) { return s_ssao_on; }\n" in renderer
+    and "p_glUniform4f(s_ssao_uAo, s_ssao_radius, s_ssao_on || s_ssao_view ? s_ssao_strength : 0.0f, 24.0f * (float)scale, (float)scale);"
+    in renderer,
+    "the setting and a diagnostic view are kept apart, the first of them has the mirror's depth made afresh, probe lighting "
+    "takes the same path with no occlusion unless the setting is on, and a reach or a strength that is not one changes nothing",
 )
 
 enhancements = between(menu, "void draw_enhancements_tab() {", "\n}\n") + "\n"
@@ -112,12 +114,10 @@ require(
     in enhancements
     and menu.count('option_toggle("disruptor.ambient_occlusion"') == 1
     and "occlusion" not in experimental
-    and experimental.count("ImGui::BeginDisabled()") == experimental.count("ImGui::EndDisabled()") == 1
-    and experimental.count("option_toggle(") == 0
-    and "ImGui::Checkbox(" not in experimental
+    and experimental == "void draw_experimental_tab() {\n    draw_lighting();\n"
     and '            if (ImGui::BeginTabItem("Enhancements")) {\n                draw_enhancements_tab();\n' in menu,
     "the Enhancements tab holds the occlusion: a switch greyed without geometry correction and two bounded sliders greyed without the switch, "
-    "and the Experimental tab keeps its anti-aliasing list alone",
+    "and the Experimental tab draws only its lighting",
 )
 
 require(
@@ -140,9 +140,9 @@ void mark_occlusion_shape(int reach, int strength) {
 """
     in menu
     and """    gl_renderer_set_ssao_shape(
-        settings.has_occlusion_reach && !env_override_present("PSX_GL_SSAO_RADIUS")
+        !env_override_present("PSX_GL_SSAO_RADIUS")
             ? static_cast<float>(settings.occlusion_reach) : -1.0f,
-        settings.has_occlusion_strength && !env_override_present("PSX_GL_SSAO_STRENGTH")
+        !env_override_present("PSX_GL_SSAO_STRENGTH")
             ? settings.occlusion_strength / 100.0f : -1.0f);
 """
     in menu
@@ -164,9 +164,9 @@ require(
     and """            const int percent = toml::find<int>(d, "occlusion_strength");
 """
     in loader
-    and """        if (s.has_occlusion_reach && s.occlusion_reach >= 50 && s.occlusion_reach <= 800)
+    and """        if (s.has_occlusion_reach && s.occlusion_reach >= 50 && s.occlusion_reach <= 160)
             f << "occlusion_reach = " << s.occlusion_reach << "\\n";
-        if (s.has_occlusion_strength && s.occlusion_strength >= 0 && s.occlusion_strength <= 300)
+        if (s.has_occlusion_strength && s.occlusion_strength >= 0 && s.occlusion_strength <= 100)
             f << "occlusion_strength = " << s.occlusion_strength << "\\n";
 """
     in loader
@@ -176,18 +176,18 @@ require(
     in loader
     and "    bool has_ambient_occlusion = false; bool ambient_occlusion = false;\n" in settings
     and "    bool has_occlusion_reach = false; int occlusion_reach = 160;" in settings
-    and "    bool has_occlusion_strength = false; int occlusion_strength = 80;" in settings,
+    and "    bool has_occlusion_strength = false; int occlusion_strength = 100;" in settings,
     "the settings file keeps the switch, off until made, and a reach and a strength only inside the sliders' bounds",
 )
 
 switch = between(options, '"disruptor.ambient_occlusion", "Ambient occlusion", 0,', "),\n")
 reach = between(options, 'slider("disruptor.occlusion_reach", "Occlusion reach", 160,', "),\n")
-strength = between(options, 'slider("disruptor.occlusion_strength", "Occlusion strength", 80,', "),\n")
+strength = between(options, 'slider("disruptor.occlusion_strength", "Occlusion strength", 100,', "),\n")
 require(
     switch.endswith("needs_geometry")
-    and "50, 800, Unit::none," in reach
+    and "50, 160, Unit::none," in reach
     and reach.endswith("needs_occlusion")
-    and "0, 300, Unit::percent," in strength
+    and "0, 100, Unit::percent," in strength
     and strength.endswith("needs_occlusion")
     and "constexpr const char* needs_occlusion[] = {occlusion_key};\n" in options
     and 'constexpr const char* occlusion_key = "disruptor.ambient_occlusion";\n' in options
@@ -195,8 +195,8 @@ require(
     '    {"disruptor.occlusion_reach", Page::enhancements, nullptr, true},\n'
     '    {"disruptor.occlusion_strength", Page::enhancements, nullptr, true},\n'
     in launcher
-    and launcher.count("Page::experimental") == 1,
-    "the launcher's Enhancements page holds these three rows and its Experimental page the anti-aliasing list: the switch needs geometry correction, the sliders the switch, "
+    and launcher.count('", Page::experimental') == 14,
+    "the launcher's Enhancements page holds these three rows and its Experimental page the lighting's fourteen rows: the switch needs geometry correction, the sliders the switch, "
     "with the menu's own bounds",
 )
 

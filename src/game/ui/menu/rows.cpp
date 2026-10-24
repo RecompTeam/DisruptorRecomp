@@ -11,8 +11,13 @@ bool prerequisite_on(const Option &option) {
     if (key == "disruptor.mouse_aim") return disruptor_mouse_aim_enabled() != 0;
     if (key == "disruptor.ambient_occlusion") return gl_renderer_ssao() != 0;
     if (key == "disruptor.smooth_fade") return gl_renderer_smooth_fade() != 0;
+    if (key == "disruptor.probe_lighting") return gl_renderer_ddgi() != 0;
+    if (key == "disruptor.dynamic_shadows") return gl_renderer_ddgi_shadows() != 0;
+    if (key == "disruptor.shot_lights") return gl_renderer_ddgi_lamps() != 0;
+    if (key == "disruptor.sun_lighting") return gl_renderer_ddgi_sun() != 0;
     if (key == "disruptor.vertical_look") return disruptor_mouse_vertical_look_enabled() != 0;
     if (key == "disruptor.number_keys") return disruptor_number_keys_enabled() != 0;
+    if (key == "disruptor.achievements_popups") return disruptor::achievements::presentation().popups;
     if (key == "disruptor.separate_vertical_speed")
         return disruptor_mouse_vertical_follows_horizontal() == 0;
     return false;
@@ -33,7 +38,7 @@ bool option_toggle(const char *key, bool *value) {
 
 bool option_slider(const char *key, int *value) {
     const Option &option = *find_option(key);
-    const char *format = option.unit == Unit::percent ? "%d%%" : "%d";
+    const char *format = option.unit == Unit::percent ? "%d%%" : option.unit == Unit::degrees ? "%d\xc2\xb0" : "%d";
     const bool moved =
         ImGui::SliderInt(option.label, value, option.lowest, option.highest,
                          format, ImGuiSliderFlags_AlwaysClamp);

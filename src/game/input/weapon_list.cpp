@@ -76,7 +76,10 @@ extern "C" void disruptor_weapon_list_state_loaded(void) {
 
 extern "C" void disruptor_weapon_list_instruction_hook(CPUState *cpu, uint32_t address, uint32_t instruction,
                                                        int phase) {
-    if (!cpu || phase != 1 || g_ls_mode != 0 || g_ls_replay_active != 0) return;
+    if (!cpu || phase != 1) return;
+    if (address == kModeSite && instruction == kModeWord) disruptor_list_message_builder_begins();
+    if (address == kHudEndSite && instruction == kHudEndWord) disruptor_list_message_builder_ends(g_forced);
+    if (g_ls_mode != 0 || g_ls_replay_active != 0) return;
     if (address == kModeSite && instruction == kModeWord) {
         const uint32_t list = shown();
         g_forced = list && cpu->gpr[kModeRegister] == kPlay ? list : 0u;

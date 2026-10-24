@@ -114,6 +114,48 @@ void read_game_user_settings(const toml::value& doc, UserSettings& s) {
             s.mute_in_background = toml::find<bool>(d, "mute_in_background");
             s.has_mute_in_background = true;
         });
+        if (d.contains("achievements")) try_get([&]{
+            s.achievements = toml::find<bool>(d, "achievements");
+            s.has_achievements = true;
+        });
+        if (d.contains("achievements_encore")) try_get([&]{
+            s.achievements_encore = toml::find<bool>(d, "achievements_encore");
+            s.has_achievements_encore = true;
+        });
+        if (d.contains("achievements_unofficial")) try_get([&]{
+            s.achievements_unofficial = toml::find<bool>(d, "achievements_unofficial");
+            s.has_achievements_unofficial = true;
+        });
+        if (d.contains("achievements_popups")) try_get([&]{
+            s.achievements_popups = toml::find<bool>(d, "achievements_popups");
+            s.has_achievements_popups = true;
+        });
+        if (d.contains("achievements_progress")) try_get([&]{
+            s.achievements_progress = toml::find<bool>(d, "achievements_progress");
+            s.has_achievements_progress = true;
+        });
+        if (d.contains("achievements_sound")) try_get([&]{
+            s.achievements_sound = toml::find<bool>(d, "achievements_sound");
+            s.has_achievements_sound = true;
+        });
+        if (d.contains("achievements_popup_time")) try_get([&]{
+            const int seconds = toml::find<int>(d, "achievements_popup_time");
+            for (int index = 0; index < kDisruptorPopupTimeCount; ++index) {
+                if (seconds == kDisruptorPopupTimes[index]) {
+                    s.achievements_popup_time = index;
+                    s.has_achievements_popup_time = true;
+                }
+            }
+        });
+        if (d.contains("achievements_corner")) try_get([&]{
+            const std::string corner = toml::find<std::string>(d, "achievements_corner");
+            for (int index = 0; index < kDisruptorPopupCornerCount; ++index) {
+                if (corner == kDisruptorPopupCorners[index]) {
+                    s.achievements_corner = index;
+                    s.has_achievements_corner = true;
+                }
+            }
+        });
         if (d.contains("bass_cut")) try_get([&]{
             const std::string cut = toml::find<std::string>(d, "bass_cut");
             for (int index = 0; index < kDisruptorBassCutCount; ++index) {
@@ -171,14 +213,14 @@ void read_game_user_settings(const toml::value& doc, UserSettings& s) {
         });
         if (d.contains("occlusion_reach")) try_get([&]{
             const int reach = toml::find<int>(d, "occlusion_reach");
-            if (reach >= 50 && reach <= 800) {
+            if (reach >= 50 && reach <= 160) {
                 s.occlusion_reach = reach;
                 s.has_occlusion_reach = true;
             }
         });
         if (d.contains("occlusion_strength")) try_get([&]{
             const int percent = toml::find<int>(d, "occlusion_strength");
-            if (percent >= 0 && percent <= 300) {
+            if (percent >= 0 && percent <= 100) {
                 s.occlusion_strength = percent;
                 s.has_occlusion_strength = true;
             }
@@ -190,6 +232,92 @@ void read_game_user_settings(const toml::value& doc, UserSettings& s) {
         if (d.contains("depth_sorted_world")) try_get([&]{
             s.depth_sorted_world = toml::find<bool>(d, "depth_sorted_world");
             s.has_depth_sorted_world = true;
+        });
+        if (d.contains("probe_lighting")) try_get([&]{
+            s.probe_lighting = toml::find<bool>(d, "probe_lighting");
+            s.has_probe_lighting = true;
+        });
+        if (d.contains("probe_strength")) try_get([&]{
+            const int amount = toml::find<int>(d, "probe_strength");
+            if (amount >= 0 && amount <= 200) {
+                s.probe_strength = amount;
+                s.has_probe_strength = true;
+            }
+        });
+        if (d.contains("probe_bounce")) try_get([&]{
+            const int amount = toml::find<int>(d, "probe_bounce");
+            if (amount >= 0 && amount <= 100) {
+                s.probe_bounce = amount;
+                s.has_probe_bounce = true;
+            }
+        });
+        if (d.contains("probe_glow")) try_get([&]{
+            const int amount = toml::find<int>(d, "probe_glow");
+            if (amount >= 0 && amount <= 400) {
+                s.probe_glow = amount;
+                s.has_probe_glow = true;
+            }
+        });
+        if (d.contains("dynamic_shadows")) try_get([&]{
+            s.dynamic_shadows = toml::find<bool>(d, "dynamic_shadows");
+            s.has_dynamic_shadows = true;
+        });
+        if (d.contains("shadow_strength")) try_get([&]{
+            const int amount = toml::find<int>(d, "shadow_strength");
+            if (amount >= 0 && amount <= 200) {
+                s.shadow_strength = amount;
+                s.has_shadow_strength = true;
+            }
+        });
+        if (d.contains("shadow_underneath")) try_get([&]{
+            const int amount = toml::find<int>(d, "shadow_underneath");
+            if (amount >= 0 && amount <= 200) {
+                s.shadow_underneath = amount;
+                s.has_shadow_underneath = true;
+            }
+        });
+        if (d.contains("shot_lights")) try_get([&]{
+            s.shot_lights = toml::find<bool>(d, "shot_lights");
+            s.has_shot_lights = true;
+        });
+        if (d.contains("shot_light_strength")) try_get([&]{
+            const int amount = toml::find<int>(d, "shot_light_strength");
+            if (amount >= 0 && amount <= 400) {
+                s.shot_light_strength = amount;
+                s.has_shot_light_strength = true;
+            }
+        });
+        if (d.contains("sun_lighting")) try_get([&]{
+            s.sun_lighting = toml::find<bool>(d, "sun_lighting");
+            s.has_sun_lighting = true;
+        });
+        if (d.contains("sun_direction")) try_get([&]{
+            const int amount = toml::find<int>(d, "sun_direction");
+            if (amount >= 0 && amount <= 360) {
+                s.sun_direction = amount;
+                s.has_sun_direction = true;
+            }
+        });
+        if (d.contains("sun_height")) try_get([&]{
+            const int amount = toml::find<int>(d, "sun_height");
+            if (amount >= 1 && amount <= 89) {
+                s.sun_height = amount;
+                s.has_sun_height = true;
+            }
+        });
+        if (d.contains("sun_strength")) try_get([&]{
+            const int amount = toml::find<int>(d, "sun_strength");
+            if (amount >= 1 && amount <= 400) {
+                s.sun_strength = amount;
+                s.has_sun_strength = true;
+            }
+        });
+        if (d.contains("sun_shade")) try_get([&]{
+            const int amount = toml::find<int>(d, "sun_shade");
+            if (amount >= 0 && amount <= 90) {
+                s.sun_shade = amount;
+                s.has_sun_shade = true;
+            }
         });
         /* The switch movie_filter replaced: off keeps the movies as they are, on takes the filter's default. */
         if (d.contains("smooth_movies") && !d.contains("movie_filter")) try_get([&]{
@@ -256,12 +384,17 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
         s.has_horizontal_sensitivity || s.has_invert_horizontal ||
         s.has_vertical_look || s.has_vertical_sensitivity ||
         s.has_invert_vertical || s.has_separate_vertical_speed ||
+        s.has_probe_lighting || s.has_probe_strength || s.has_probe_bounce || s.has_probe_glow ||
+        s.has_dynamic_shadows || s.has_shadow_strength || s.has_shadow_underneath ||
+        s.has_shot_lights || s.has_shot_light_strength || s.has_sun_lighting || s.has_sun_direction ||
+        s.has_sun_height || s.has_sun_strength || s.has_sun_shade ||
         s.has_high_precision_camera || s.has_geometry_correction ||
         s.has_perspective_textures || s.has_frame_unlock ||
         s.has_ambient_occlusion || s.has_occlusion_reach || s.has_occlusion_strength || s.has_smooth_fade ||
         s.has_multisampling || s.has_sample_shading || s.has_downscale_averaging || s.has_edge_smoothing ||
         s.has_gap_filling || s.has_depth_sorted_world || s.has_movie_filter || s.has_draw_distance || s.has_fog_shape || s.has_diagnostic_view || s.has_detailed_logging ||
-        s.has_language_discs || s.has_mute_in_background || s.has_bass_cut ||
+        s.has_language_discs || s.has_mute_in_background || s.has_achievements || s.has_bass_cut ||
+        s.has_achievements_encore || s.has_achievements_unofficial || s.has_achievements_popups || s.has_achievements_progress || s.has_achievements_sound || s.has_achievements_popup_time || s.has_achievements_corner ||
         s.has_language_disc || s.has_skip_intro ||
         s.has_hud_scale) {
         f << "\n[disruptor]\n";
@@ -319,6 +452,24 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
             f << "skip_intro = " << (s.skip_intro ? "true" : "false") << "\n";
         if (s.has_mute_in_background)
             f << "mute_in_background = " << (s.mute_in_background ? "true" : "false") << "\n";
+        if (s.has_achievements)
+            f << "achievements = " << (s.achievements ? "true" : "false") << "\n";
+        if (s.has_achievements_encore)
+            f << "achievements_encore = " << (s.achievements_encore ? "true" : "false") << "\n";
+        if (s.has_achievements_unofficial)
+            f << "achievements_unofficial = " << (s.achievements_unofficial ? "true" : "false") << "\n";
+        if (s.has_achievements_popups)
+            f << "achievements_popups = " << (s.achievements_popups ? "true" : "false") << "\n";
+        if (s.has_achievements_progress)
+            f << "achievements_progress = " << (s.achievements_progress ? "true" : "false") << "\n";
+        if (s.has_achievements_sound)
+            f << "achievements_sound = " << (s.achievements_sound ? "true" : "false") << "\n";
+        if (s.has_achievements_popup_time && s.achievements_popup_time >= 0 &&
+            s.achievements_popup_time < kDisruptorPopupTimeCount)
+            f << "achievements_popup_time = " << kDisruptorPopupTimes[s.achievements_popup_time] << "\n";
+        if (s.has_achievements_corner && s.achievements_corner >= 0 &&
+            s.achievements_corner < kDisruptorPopupCornerCount)
+            f << "achievements_corner = " << quoted(kDisruptorPopupCorners[s.achievements_corner]) << "\n";
         if (s.has_bass_cut && s.bass_cut >= 0 && s.bass_cut < kDisruptorBassCutCount)
             f << "bass_cut = " << quoted(kDisruptorBassCuts[s.bass_cut]) << "\n";
         if (s.has_language_disc)
@@ -333,9 +484,9 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
             f << "hud_scale = " << s.hud_scale << "\n";
         if (s.has_ambient_occlusion)
             f << "ambient_occlusion = " << (s.ambient_occlusion ? "true" : "false") << "\n";
-        if (s.has_occlusion_reach && s.occlusion_reach >= 50 && s.occlusion_reach <= 800)
+        if (s.has_occlusion_reach && s.occlusion_reach >= 50 && s.occlusion_reach <= 160)
             f << "occlusion_reach = " << s.occlusion_reach << "\n";
-        if (s.has_occlusion_strength && s.occlusion_strength >= 0 && s.occlusion_strength <= 300)
+        if (s.has_occlusion_strength && s.occlusion_strength >= 0 && s.occlusion_strength <= 100)
             f << "occlusion_strength = " << s.occlusion_strength << "\n";
         if (s.has_smooth_fade)
             f << "smooth_fade = " << (s.smooth_fade ? "true" : "false") << "\n";
@@ -353,6 +504,34 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
             f << "gap_filling = " << (s.gap_filling ? "true" : "false") << "\n";
         if (s.has_depth_sorted_world)
             f << "depth_sorted_world = " << (s.depth_sorted_world ? "true" : "false") << "\n";
+        if (s.has_probe_lighting)
+            f << "probe_lighting = " << (s.probe_lighting ? "true" : "false") << "\n";
+        if (s.has_probe_strength && s.probe_strength >= 0 && s.probe_strength <= 200)
+            f << "probe_strength = " << s.probe_strength << "\n";
+        if (s.has_probe_bounce && s.probe_bounce >= 0 && s.probe_bounce <= 100)
+            f << "probe_bounce = " << s.probe_bounce << "\n";
+        if (s.has_probe_glow && s.probe_glow >= 0 && s.probe_glow <= 400)
+            f << "probe_glow = " << s.probe_glow << "\n";
+        if (s.has_dynamic_shadows)
+            f << "dynamic_shadows = " << (s.dynamic_shadows ? "true" : "false") << "\n";
+        if (s.has_shadow_strength && s.shadow_strength >= 0 && s.shadow_strength <= 200)
+            f << "shadow_strength = " << s.shadow_strength << "\n";
+        if (s.has_shadow_underneath && s.shadow_underneath >= 0 && s.shadow_underneath <= 200)
+            f << "shadow_underneath = " << s.shadow_underneath << "\n";
+        if (s.has_shot_lights)
+            f << "shot_lights = " << (s.shot_lights ? "true" : "false") << "\n";
+        if (s.has_shot_light_strength && s.shot_light_strength >= 0 && s.shot_light_strength <= 400)
+            f << "shot_light_strength = " << s.shot_light_strength << "\n";
+        if (s.has_sun_lighting)
+            f << "sun_lighting = " << (s.sun_lighting ? "true" : "false") << "\n";
+        if (s.has_sun_direction && s.sun_direction >= 0 && s.sun_direction <= 360)
+            f << "sun_direction = " << s.sun_direction << "\n";
+        if (s.has_sun_height && s.sun_height >= 1 && s.sun_height <= 89)
+            f << "sun_height = " << s.sun_height << "\n";
+        if (s.has_sun_strength && s.sun_strength >= 1 && s.sun_strength <= 400)
+            f << "sun_strength = " << s.sun_strength << "\n";
+        if (s.has_sun_shade && s.sun_shade >= 0 && s.sun_shade <= 90)
+            f << "sun_shade = " << s.sun_shade << "\n";
         if (s.has_movie_filter && s.movie_filter >= 0 && s.movie_filter < kDisruptorMovieFilterCount)
             f << "movie_filter = " << quoted(kDisruptorMovieFilters[s.movie_filter]) << "\n";
         if (s.has_draw_distance &&

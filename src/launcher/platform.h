@@ -55,6 +55,10 @@ std::filesystem::path executable_path();
 // The game's executable in the program folder: DisruptorRecompiled.exe on Windows, DisruptorRecompiled elsewhere.
 std::filesystem::path game_executable(const std::filesystem::path& program);
 
+enum class Moved { done, taken, failed };
+// One rename that never replaces: `taken` when `to` already exists, and both files stay as they were.
+Moved move_new(const std::filesystem::path& from, const std::filesystem::path& to);
+
 void open_folder(const std::filesystem::path& folder);
 // The file's folder, with the file chosen where the file manager can.
 void show_file(const std::filesystem::path& file);

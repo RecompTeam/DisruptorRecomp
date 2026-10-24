@@ -1,5 +1,6 @@
 #pragma once
 
+#include "achievements_account.h"
 #include "activity.h"
 #include "key_bindings.h"
 #include "pad_bindings.h"
@@ -51,6 +52,10 @@ public:
     const std::optional<EarlierCopy>& earlier() const { return earlier_; }
     void open_saves() const;
     void reset_page(Page page);
+    // An unreadable settings.toml kept aside under another name, the settings a new installation's.
+    void start_settings_over();
+    // Why the last write of a settings file failed, empty once one succeeds: the page it was made on shows it.
+    const std::wstring& write_failure() const { return write_failure_; }
     void set(const Option& option, int value);
     bool set_pick_keys(const settings::PickKeys& keys);
     // Player 1's keys in keybinds.ini, read again with load() before they are shown.
@@ -59,6 +64,7 @@ public:
     // The keys held now and `picks` together: a failed write of the picks puts `undo` back.
     bool store_keys(const KeyLayout& undo, const settings::PickKeys& picks);
     PadBindings& pads() { return pads_; }
+    AchievementsAccount& achievements() { return achievements_; }
     bool save_pads();
     // True when the window may close now. A running task is cancelled first, and closed() turns true when it ends.
     bool close();
@@ -106,6 +112,7 @@ private:
     std::filesystem::path data_;
     KeyBindings keys_{data_ / "keybinds.ini"};
     PadBindings pads_{data_ / "input.ini"};
+    AchievementsAccount achievements_{data_};
     Activity& activity_;
     SettingsFile settings_;
     std::thread worker_;
@@ -115,6 +122,7 @@ private:
     VerifiedDisc verified_;
     Regions regions_; // filled by the worker only: an image on a share that is gone must not stall the window
     std::wstring status_;
+    std::wstring write_failure_;
     unsigned progress_ = 0;
     std::mutex handed_mutex_;
     std::optional<std::pair<std::wstring, unsigned>> handed_update_;

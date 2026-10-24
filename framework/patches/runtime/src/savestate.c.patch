@@ -1,8 +1,38 @@
 diff --git a/runtime/src/savestate.c b/runtime/src/savestate.c
-index b04e4ac0a7a80eac7201e3217e1a2982bda9ce33..427074c1401c24915c7418caa33e06416609d8d2 100644
+index b04e4ac0a7a80eac7201e3217e1a2982bda9ce33..009d46f0414bf3d3872717717e81e6237e8a9331 100644
 --- a/runtime/src/savestate.c
 +++ b/runtime/src/savestate.c
-@@ -204,12 +204,14 @@
+@@ -28,6 +28,7 @@
+ static int      s_load_completed = 0;
+ static uint64_t s_load_cooldown_until_frame = 0;
+ static int      s_load_cooldown_notice = 0;
++static const char* s_active_path = NULL;
+ 
+ extern int psx_hle_scheduler_enabled(void);
+ extern uint64_t s_frame_count;
+@@ -152,6 +153,10 @@
+ static int request_load_inner(int slot) {
+     if (!s_configured) { fprintf(stderr, "savestate: not configured\n"); return 0; }
+     if (slot < 0 || slot >= SAVESTATE_SLOTS) return 0;
++    if (!psx_frontend_savestate_load_allowed()) {
++        fprintf(stderr, "savestate: load of slot %d refused by the game\n", slot);
++        return 0;
++    }
+     if (s_frame_count < s_load_cooldown_until_frame) {
+         if (!s_load_cooldown_notice) {
+             fprintf(stderr, "savestate: load ignored during restore cooldown\n");
+@@ -194,6 +199,10 @@
+     return (s_save_pending >= 0 || s_load_pending >= 0) ? 1 : 0;
+ }
+ 
++const char* savestate_active_path(void) {
++    return s_active_path;
++}
++
+ int savestate_take_load_completed(void) {
+     int v = s_load_completed;
+     s_load_completed = 0;
+@@ -204,15 +213,20 @@
      if (s_save_pending < 0 && s_load_pending < 0) return;   /* hot path: nothing staged */
  
      if (s_save_pending >= 0) {
@@ -13,7 +43,34 @@ index b04e4ac0a7a80eac7201e3217e1a2982bda9ce33..427074c1401c24915c7418caa33e0641
          if (savestate_slot_path(slot, path, sizeof(path))) {
              /* Save the exact resume PC (cpu->pc is 0 mid-block; resume_pc is the
               * block leader the interrupt path would resume at). */
++            s_active_path = path;
 +            psx_frontend_before_savestate_save();
              CPUState snap = *cpu;
              snap.pc = resume_pc;
              int ok = boot_state_save(&snap, s_bios_checksum, s_entry_pc, path);
++            psx_frontend_after_savestate_save(ok);
++            s_active_path = NULL;
+             fprintf(stderr, "savestate: %s slot %d @ pc=0x%08X -> %s\n",
+                     ok ? "SAVED" : "SAVE FAILED", slot, (unsigned)resume_pc, path);
+         }
+@@ -223,6 +237,10 @@
+         s_load_pending = -1;
+         char path[600];
+         if (!savestate_slot_path(slot, path, sizeof(path))) return;
++        if (!psx_frontend_savestate_load_allowed()) {
++            fprintf(stderr, "savestate: staged load of slot %d refused by the game\n", slot);
++            return;
++        }
+         if (boot_state_load(path, s_bios_checksum, s_entry_pc, cpu)) {
+             psx_cycles_resync_after_restore();
+             s_load_cooldown_until_frame =
+@@ -234,7 +252,9 @@
+             s_load_completed = 1;
+             /* Restage FBO/present latch so the restored frame is visible
+              * immediately (avoids disabled-display blank latch + stale smooth). */
++            s_active_path = path;
+             psx_frontend_on_savestate_loaded();
++            s_active_path = NULL;
+             /* Unwind to the scheduler and re-dispatch the restored PC. Never
+              * returns; abandons the suspended CPS frames on the current stack. */
+             psx_scheduler_resume_at(cpu->pc);

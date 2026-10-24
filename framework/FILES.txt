@@ -12,6 +12,10 @@ runtime/include/cpu_state.h
 runtime/include/crash_trace.h
 runtime/include/dirty_ram_interp.h
 +runtime/include/game_host.h
++runtime/include/gpu_ddgi.h
++runtime/include/gpu_ddgi_bvh.h
++runtime/include/gpu_ddgi_mask.h
++runtime/include/gpu_ddgi_turn.h
 runtime/include/psx_icache.h
 runtime/include/psx_sdl_audio.h
 runtime/include/text_xlate.h
@@ -40,6 +44,7 @@ runtime/include/gpu_sw_renderer.h
 +runtime/include/host_borderless.h
 +runtime/include/host_pick_slot.h
 +runtime/include/host_ui.h
++runtime/include/host_ui_flags.h
 runtime/include/interrupts.h
 +runtime/include/iso_overlay.h
 runtime/include/mod_memory.h
@@ -59,6 +64,9 @@ runtime/src/dirty_ram_interp.c
 runtime/src/dma.c
 runtime/src/freeze_heartbeat.c
 runtime/src/gpu.c
++runtime/src/gpu_ddgi.c.inc
++runtime/src/gpu_ddgi_scene.c.inc
++runtime/src/gpu_gl_ddgi.c.inc
 runtime/src/gpu_gl_renderer.c
 +runtime/src/gpu_gl_temporal.c.inc
 runtime/src/gpu_render.c

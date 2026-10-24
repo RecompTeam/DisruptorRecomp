@@ -70,8 +70,9 @@ static inline void psx_ws_frame_kinds_pictured(PsxWsFrameKinds *kinds, uint32_t 
     }
 }
 
-/* The game copied a whole frame buffer onto the other: the copy is that frame, of that kind. Any other copy is a picture. */
-static inline void psx_ws_frame_kinds_copied(PsxWsFrameKinds *kinds, uint32_t from_x, uint32_t from_y, uint32_t x, uint32_t y, uint32_t w,
+/* The game copied a whole frame buffer onto the other: the copy is that frame, of that kind, and 1 is returned so that the
+ * renderer's own surfaces follow it. Any other copy is a picture: 0. */
+static inline int psx_ws_frame_kinds_copied(PsxWsFrameKinds *kinds, uint32_t from_x, uint32_t from_y, uint32_t x, uint32_t y, uint32_t w,
                                              uint32_t h, uint32_t wide, uint32_t tall) {
     for (int i = 0; i < 2; ++i) {
         const PsxWsFrameBuffer *from = &kinds->buffers[i];
@@ -80,9 +81,10 @@ static inline void psx_ws_frame_kinds_copied(PsxWsFrameKinds *kinds, uint32_t fr
         to->flat = from->flat;
         to->menu = from->menu;
         to->veiled = from->veiled;
-        return;
+        return 1;
     }
     psx_ws_frame_kinds_pictured(kinds, x, y, w, h, wide, tall);
+    return 0;
 }
 
 /* 1 when a drawing command (GP0 0x20 to 0x7F) only blends a flat colour over what is there: semi-transparent and untextured. */

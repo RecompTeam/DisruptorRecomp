@@ -219,6 +219,7 @@ require(
     "            } else if (ws_hud_widget_rect(&x0, &y0, &widget_w, &widget_h)) {\n"
     "                ws_w = (int)widget_w;\n"
     "                ws_h = (int)widget_h;\n"
+    "                shrunk = 1;\n"
     "            } else if (ws_auto_ui_transform_rect(&x0, y0, &corrected_w, h))" in textured_rect,
     "a textured rectangle must be tried as the held weapon and then as a widget, before every other HUD rule",
 )

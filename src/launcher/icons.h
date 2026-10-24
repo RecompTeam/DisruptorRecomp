@@ -33,6 +33,7 @@ inline constexpr const char* external_link = "\xee\x82\xb9";
 inline constexpr const char* circle_check = "\xee\x88\xa6";
 inline constexpr const char* rotate_ccw = "\xee\x85\x88";
 inline constexpr const char* keyboard = "\xee\x8a\x84";
+inline constexpr const char* trophy = "\xee\x8d\xb3";
 
 inline constexpr unsigned first = 0xE06C, last = 0xE494;
 

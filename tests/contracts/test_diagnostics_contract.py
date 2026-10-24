@@ -50,15 +50,23 @@ require(
     "the detailed log is a saved setting that starts off and needs nothing",
 )
 require(
-    "enum class Page { display, enhancements, controls, audio, experimental, troubleshooting };\n" in page_kinds
-    and 'L"Experimental", L"Troubleshooting"};\n' in pages
-    and '    {"disruptor.detailed_logging", Page::troubleshooting},\n' in pages
+    "enum class Page { display, enhancements, controls, audio, experimental, troubleshooting, achievements };\n"
+    in page_kinds
+    and 'L"Experimental", L"Troubleshooting",\n' in pages
+    and '    {"disruptor.detailed_logging", Page::troubleshooting, "Logging"},\n' in pages
     and pages.count("Page::troubleshooting") == 1
-    and '    "Switch on, play until the problem shows, close the game, then press Report a problem",\n};\n' in window
-    and "    const char* note = page_notes[std::clamp(page_, 0, static_cast<int>(std::size(page_notes)) - 1)];\n"
-    in window
-    and window.count('    "",\n') == 5,
-    "the launcher's sixth page is Troubleshooting: the switch alone, with a note that says what to do with it",
+    and "    if (page == Page::troubleshooting) {\n        report_steps();\n" in window
+    and all(
+        step
+        in window[window.index("void View::report_steps(bool first) {") : window.index("void View::group_heading(")]
+        for step in (
+            '"Switch on Detailed logging"',
+            '"Close the game"',
+            '"Press Report a problem below"',
+            "session_.make_problem_report();",
+        )
+    ),
+    "the launcher's sixth page is Troubleshooting: the switch, then the steps that say what to do with it and the button",
 )
 require(
     "    bool detailed = disruptor_diagnostics_detailed() != 0;\n"

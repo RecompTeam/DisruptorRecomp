@@ -46,6 +46,13 @@ void disruptor_hud_widgets_mode(std::uint32_t mode) {
     g_marked = mode;
     ++g_marks;
 }
+int g_builder_begins = 0, g_builder_ends = 0;
+std::uint32_t g_builder_forced = 0xFFu;
+void disruptor_list_message_builder_begins(void) { ++g_builder_begins; }
+void disruptor_list_message_builder_ends(std::uint32_t forced) {
+    ++g_builder_ends;
+    g_builder_forced = forced;
+}
 }
 
 #include "../../src/game/input/weapon_list.cpp"
@@ -252,6 +259,34 @@ void test_guards() {
     expect(cpu.gpr[3] == kTestDown, "no read of the buttons is changed before the HUD showed the list");
 }
 
+/* The countdown's line is told the builder's mode read and its end, in the comparator's runs too: it decides there. */
+void test_countdown_line_told() {
+    reset();
+    CPUState cpu{};
+    for (const int replay : {0, 1}) {
+        g_ls_replay_active = replay;
+        g_builder_begins = g_builder_ends = 0;
+        disruptor_weapon_list_instruction_hook(&cpu, kTestModeSite, kTestModeWord, 1);
+        disruptor_weapon_list_instruction_hook(&cpu, kTestDownSite, kTestDownWord, 1);
+        disruptor_weapon_list_instruction_hook(&cpu, 0x8003E8C8u, 0x8FBF00DCu, 1);
+        expect(g_builder_begins == 1 && g_builder_ends == 1, "the builder's mode read begins the line and its end ends it");
+    }
+    g_ls_replay_active = 0;
+    g_builder_begins = g_builder_ends = 0;
+    disruptor_weapon_list_instruction_hook(&cpu, kTestModeSite, kTestModeWord, 0);
+    disruptor_weapon_list_instruction_hook(&cpu, 0x8003E8C8u, 0x8FBF00DDu, 1);
+    expect(g_builder_begins == 0 && g_builder_ends == 0, "only after the pinned words ran");
+
+    reset();
+    hud(0u, 0u);
+    disruptor_weapon_list_instruction_hook(&cpu, 0x8003E8C8u, 0x8FBF00DCu, 1);
+    expect(g_builder_forced == 0u, "the end is told no list while the HUD sees play");
+    disruptor_weapon_list_show();
+    hud(0u, 0u);
+    disruptor_weapon_list_instruction_hook(&cpu, 0x8003E8C8u, 0x8FBF00DCu, 1);
+    expect(g_builder_forced == 2u, "and the list a key shows, its mode given to the builder's register alone");
+}
+
 }  // namespace
 
 int main() {
@@ -262,6 +297,7 @@ int main() {
     test_psionics_hand();
     test_loaded_state();
     test_guards();
+    test_countdown_line_told();
     if (g_failures != 0) return 1;
     std::cout << "disruptor weapon list: PASS\n";
     return 0;

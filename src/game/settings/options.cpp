@@ -107,6 +107,8 @@ constexpr int distances_offered = 2;  /* Original and 1.25x for now */
 constexpr int fog_shapes_offered = 1;  /* Original only for now */
 constexpr const char* bass_cuts[] = {"Original", "Reduced", "TV speaker"};
 constexpr const char* movie_filters[] = {"Original", "Smooth"};
+constexpr const char* popup_times[] = {"3 seconds", "5 seconds", "8 seconds", "12 seconds", "15 seconds", "30 seconds"};
+constexpr const char* popup_corners[] = {"Top right", "Top left", "Bottom right", "Bottom left"};
 
 constexpr const char* geometry_key = "disruptor.geometry_correction";
 constexpr const char* frames_key = "video.frame_interpolation";
@@ -117,6 +119,14 @@ constexpr const char* vertical_key = "disruptor.vertical_look";
 constexpr const char* separate_key = "disruptor.separate_vertical_speed";
 constexpr const char* smooth_fade_key = "disruptor.smooth_fade";
 constexpr const char* number_keys_key = "disruptor.number_keys";
+constexpr const char* probes_key = "disruptor.probe_lighting";
+constexpr const char* shadows_key = "disruptor.dynamic_shadows";
+constexpr const char* shots_key = "disruptor.shot_lights";
+constexpr const char* sun_key = "disruptor.sun_lighting";
+constexpr const char* needs_probes[] = {probes_key};
+constexpr const char* needs_shadows[] = {shadows_key};
+constexpr const char* needs_shots[] = {shots_key};
+constexpr const char* needs_sun[] = {sun_key};
 constexpr const char* needs_geometry[] = {geometry_key};
 constexpr const char* needs_frames[] = {frames_key};
 constexpr const char* needs_occlusion[] = {occlusion_key};
@@ -125,6 +135,8 @@ constexpr const char* needs_vertical[] = {vertical_key};
 constexpr const char* needs_separate[] = {separate_key};
 constexpr const char* needs_smooth_fade[] = {smooth_fade_key};
 constexpr const char* needs_number_keys[] = {number_keys_key};
+constexpr const char* popups_key = "disruptor.achievements_popups";
+constexpr const char* needs_popups[] = {popups_key};
 constexpr int default_sensitivity = 80;
 
 // A file from before the switch keeps the vertical speed it set where that differs from the horizontal one.
@@ -173,21 +185,15 @@ constexpr Option slider(const char* key, const char* label, int initial, const c
 
 constexpr Option option_list[] = {
     choice("video.fullscreen", "Display mode", 0,
-           "Windowed: a window\n"
-           "Borderless fullscreen: a window the size of the screen\n"
            "Exclusive fullscreen: the screen is the game's alone\n"
-           "Alt+Enter switches between a window and fullscreen while playing", display_modes,
+           "Alt+Enter switches between a window and fullscreen in the game", display_modes,
            saved<&Settings::has_fullscreen>, read<&Settings::fullscreen>,
            write<&Settings::has_fullscreen, &Settings::fullscreen>),
     choice("video.aspect_ratio", "Aspect ratio", 0,
-           "4:3: the original picture\n"
-           "16:9 and wider: more of the world at the sides\n"
-           "Match window: follows the window's shape, up to 32:9\n"
-           "Movies stay 4:3", aspects,
+           "4:3: the original picture\nWider ratios show more of the world at the sides\nMovies stay 4:3", aspects,
            aspect_saved, aspect, set_aspect),
     choice("video.supersampling", "Internal resolution scale", 3,
-           "Draws the picture at this multiple of the original resolution\nHigher is sharper\n"
-           "The graphics card's work grows with the square of the value", scales,
+           "Higher is sharper\nDoubling the scale makes four times the graphics card's work", scales,
            saved<&Settings::has_supersampling>, scale, set_scale),
     choice("video.vsync", "VSync", 2,
            "Synchronised: waits for the display, the picture never tears\n"
@@ -195,57 +201,48 @@ constexpr Option option_list[] = {
            "Adaptive: waits only while the game keeps up with the display",
            vsyncs, saved<&Settings::has_vsync>, vsync, set_vsync),
     slider("disruptor.hud_scale", "HUD size", 100,
-           "Widescreen only\nShrinks the health and ammunition displays toward the screen edges\n"
-           "The weapon keeps its size", 50, 100, Unit::percent,
+           "Shrinks the health and ammunition displays toward the edges\nThe weapon keeps its size\nSmaller text is drawn bolder, with a dark edge\nWidescreen only", 50, 100, Unit::percent,
            saved<&Settings::has_hud_scale>, read<&Settings::hud_scale>,
            write<&Settings::has_hud_scale, &Settings::hud_scale>),
 
     toggle<&Settings::has_geometry_correction, &Settings::geometry_correction>(
         "disruptor.geometry_correction", "Exact-provenance geometry", 1,
-        "Places polygons from the game's own arithmetic, before it rounds them to whole pixels\n"
-        "This steadies the PlayStation's wobbling edges\n"
-        "With it off, the options that need it are greyed out"),
+        "Steadies the PlayStation's wobbling edges"),
     toggle<&Settings::has_perspective_textures, &Settings::perspective_textures>(
         "disruptor.perspective_textures", "Perspective-correct world textures", 1,
         "Draws wall and floor textures in true perspective\n"
         "The PlayStation's own way bends them near the viewer", needs_geometry),
     toggle<&Settings::has_gap_filling, &Settings::gap_filling>(
         "disruptor.gap_filling", "Gap filling", 1,
-        "Closes hairline gaps between polygons\n"
-        "Keeps the game's own patches off their neighbours", needs_geometry),
+        "Closes hairline gaps between polygons", needs_geometry),
     toggle<&Settings::has_depth_sorted_world, &Settings::depth_sorted_world>(
         "disruptor.depth_sorted_world", "Depth-sorted world", 1,
-        "Draws world polygons by their depth where the game's own order puts a far one over a near "
-        "one", needs_geometry),
+        "Keeps nearer world surfaces in front of farther ones", needs_geometry),
     toggle<&Settings::has_smooth_fade, &Settings::smooth_fade>(
         "disruptor.smooth_fade", "Smooth distance fade", 1,
         "Fades walls and floors evenly into the distance\n"
-        "The game itself steps through twelve shades\n"
         "The world's far edge dissolves instead of appearing in squares", needs_geometry),
     choice("disruptor.movie_filter", "Movie filter", 1,
-           "How the game's movies are drawn at the size of your screen\n"
-           "Original: every pixel shows as a square\n"
-           "Smooth: the square blocks and the grain smoothed away",
+           "Smooth takes away the movies' square blocks and grain",
            movie_filters, saved<&Settings::has_movie_filter>, read<&Settings::movie_filter>,
            write<&Settings::has_movie_filter, &Settings::movie_filter>),
     toggle<&Settings::has_ambient_occlusion, &Settings::ambient_occlusion>(
         "disruptor.ambient_occlusion", "Ambient occlusion", 0,
         "Shades corners and the floor under things", needs_geometry),
     slider("disruptor.occlusion_reach", "Occlusion reach", 160,
-           "How far from a corner or an object the shade spreads", 50, 800, Unit::none,
+           "How far the shade spreads from corners and objects", 50, 160, Unit::none,
            saved<&Settings::has_occlusion_reach>, read<&Settings::occlusion_reach>,
            write<&Settings::has_occlusion_reach, &Settings::occlusion_reach>, needs_occlusion),
-    slider("disruptor.occlusion_strength", "Occlusion strength", 80,
-           "How dark the shade is", 0, 300, Unit::percent,
+    slider("disruptor.occlusion_strength", "Occlusion strength", 100,
+           "", 0, 100, Unit::percent,
            saved<&Settings::has_occlusion_strength>, read<&Settings::occlusion_strength>,
            write<&Settings::has_occlusion_strength, &Settings::occlusion_strength>, needs_occlusion),
     toggle<&Settings::has_frame_unlock, &Settings::frame_unlock>(
         "disruptor.frame_unlock", "60 FPS gameplay", 1,
-        "Lets the game run at up to 60 frames a second in place of its original rate"),
+        "Up to 60 frames a second instead of the original rate"),
     toggle<&Settings::has_frame_interpolation, &Settings::frame_interpolation>(
         "video.frame_interpolation", "In-between frames", 0,
-        "Shows extra pictures between the game's frames, for smoother motion\n"
-        "They are built from the game's own geometry", needs_geometry),
+        "Extra pictures between the game's frames, for smoother motion", needs_geometry),
     slider("video.frame_interpolation_fps", "In-between frame rate", 0,
            "Pictures shown per second while in-between frames are on",
            kDisruptorPresentRateLowest, kDisruptorPresentRateHighest, Unit::frames,
@@ -253,102 +250,158 @@ constexpr Option option_list[] = {
            write<&Settings::has_frame_interpolation_fps, &Settings::frame_interpolation_fps>, needs_frames),
     toggle<&Settings::has_skip_intro, &Settings::skip_intro>(
         "disruptor.skip_intro", "Skip the logos and the title movie", 0,
-        "Starts at the main menu without the logos and the title movie\n"
         "Escape skips a logo or a movie either way"),
 
     toggle<&Settings::has_mouse_aim, &Settings::mouse_aim>(
         "disruptor.mouse_aim", "Horizontal mouse aim", 1,
-        "Turns the view with the mouse\n"
         "In the game a middle-click captures the mouse\nA middle-click or Escape releases it"),
     choice("disruptor.modern_controls", "Control scheme", 1,
-           "Classic: the original keys\nThe mouse only turns\n"
-           "Modern: WASD, left click fires, right click uses psionics, side buttons choose\n"
-           "Keys you set yourself stay either way",
+           "Classic: The original keys\n"
+           "  The mouse only turns\n"
+           "Modern: WASD moves\n"
+           "  Left click fires, right click uses psionics\n"
+           "  Side buttons choose a weapon or a psionic\n"
+           "Keys you set stay either way",
            schemes, saved<&Settings::has_modern_controls>, scheme, set_scheme),
     toggle<&Settings::has_number_keys, &Settings::number_keys>(
         "disruptor.number_keys", "Weapon and psionic keys", 0,
-        "A key puts a weapon or a psionic power you own in hand\n"
+        "A key puts a weapon or a psionic you own in hand\n"
         "Weapons: 1 to 9 and 0 at first, on the keypad too\n"
-        "Powers: no keys at first\n"
-        "On a change the game's list shows for a second\n"
-        "Each takes two keys"),
+        "Powers: no keys at first"),
     toggle<&Settings::has_psionic_keys_use, &Settings::psionic_keys_use>(
-        "disruptor.psionic_keys_use", "Psionic keys use the power", 1,
-        "A power's key also uses the power once it is in hand\n"
-        "Holding the key keeps using it, like Psionic attack\n"
-        "Off: the key only picks the power", needs_number_keys),
+        "disruptor.psionic_keys_use", "Psionic keys use the power", 0,
+        "A power's key also uses the power once it is in hand\nThe power comes to hand twice as fast\nHolding the key keeps using it, like Psionic attack", needs_number_keys),
     toggle<&Settings::has_selection_wheels, &Settings::selection_wheels>(
         "disruptor.selection_wheels", "Weapon and psionic wheels", 0,
-        "Replaces both selection lists with wheels\n"
         "Hold Choose weapon or Choose psionic, point with the mouse or the left stick, let go to equip\n"
         "Escape or a right click cancels\n"
         "The game keeps running while a wheel is open"),
     slider("disruptor.horizontal_sensitivity", "Horizontal sensitivity", 80,
-           "How far the view turns for a movement of the mouse", 5, 2000, Unit::thousandths,
+           "", 5, 2000, Unit::thousandths,
            saved<&Settings::has_horizontal_sensitivity>, thousandths<&Settings::horizontal_sensitivity>,
            set_speed<&Settings::has_horizontal_sensitivity, &Settings::horizontal_sensitivity>),
     toggle<&Settings::has_invert_horizontal, &Settings::invert_horizontal>(
         "disruptor.invert_horizontal", "Invert horizontal mouse", 0,
-        "Turns the view left when the mouse moves right"),
+        ""),
     toggle<&Settings::has_high_precision_camera, &Settings::high_precision_camera>(
         "disruptor.high_precision_camera", "Smooth mouse turning", 1,
-        "The game turns in 256 steps of a circle\n"
-        "This also turns the picture by the part of a step in between\n"
-        "Needs Horizontal mouse aim and Exact-provenance geometry", needs_aim_and_geometry),
+        "Turns the view smoothly between the game's 256 steps\nAlso needs Exact-provenance geometry", needs_aim_and_geometry),
     toggle<&Settings::has_vertical_look, &Settings::vertical_look>(
         "disruptor.vertical_look", "Vertical mouse look", 0,
-        "Looks up and down with the mouse, about 31 degrees each way\n"
-        "The original game has no such view"),
+        "Looks up and down, about 31 degrees each way"),
     toggle("disruptor.separate_vertical_speed", "Separate vertical speed", 0,
-           "Off: the view tilts at the horizontal speed\n"
-           "On: the vertical speed below applies", separate_saved,
+           "Off: tilts at the horizontal speed", separate_saved,
            separate, write<&Settings::has_separate_vertical_speed, &Settings::separate_vertical_speed>, needs_vertical),
     slider("disruptor.vertical_sensitivity", "Vertical sensitivity", 80,
-           "How far the view tilts for a movement of the mouse", 5, 2000, Unit::thousandths,
+           "", 5, 2000, Unit::thousandths,
            saved<&Settings::has_vertical_sensitivity>, thousandths<&Settings::vertical_sensitivity>,
            set_speed<&Settings::has_vertical_sensitivity, &Settings::vertical_sensitivity>, needs_separate),
     toggle<&Settings::has_invert_vertical, &Settings::invert_vertical>(
         "disruptor.invert_vertical", "Invert vertical mouse", 0,
         "Looks down when the mouse moves forward", needs_vertical),
     slider("controller.deadzone", "Stick dead zone", 37,
-           "How far the stick moves before it counts\n"
-           "Raise it if you walk or turn without touching the stick", 0, 90,
+           "How far the stick moves before it counts\nRaise it if you walk or turn without touching the stick", 0, 90,
            Unit::percent, saved<&Settings::has_deadzone>, deadzone_percent, set_deadzone_percent),
 
     slider("audio.master_volume", "Master volume", 100,
-           "The loudness of everything the game plays", 0, 100, Unit::percent,
+           "", 0, 100, Unit::percent,
            saved<&Settings::has_master_volume>, read<&Settings::master_volume>,
            write<&Settings::has_master_volume, &Settings::master_volume>),
     choice("disruptor.bass_cut", "Bass", 0,
            "How much deep bass the game's sound keeps, music and movies too\n"
-           "Original: as the game plays it\n"
            "Reduced: the deepest rumble is softer\n"
            "TV speaker: as a television's own speakers played it",
            bass_cuts, saved<&Settings::has_bass_cut>, read<&Settings::bass_cut>,
            write<&Settings::has_bass_cut, &Settings::bass_cut>),
     toggle<&Settings::has_mute_in_background, &Settings::mute_in_background>(
         "disruptor.mute_in_background", "Mute in the background", 0,
-        "Silences the game while its window is not in front"),
+        ""),
     toggle<&Settings::has_audio_muted, &Settings::audio_muted>("audio.muted", "Mute all audio", 0,
-        "Silences the game and keeps the volume setting"),
+        ""),
+    toggle<&Settings::has_achievements, &Settings::achievements>(
+        "disruptor.achievements", "Count achievements", 1,
+        "Signs in with your RetroAchievements account and counts unlocks\nOff: the account stays signed in"),
+    toggle<&Settings::has_achievements_encore, &Settings::achievements_encore>(
+        "disruptor.achievements_encore", "Encore", 0,
+        "Unlocked achievements can trigger again, with their notification\nTakes effect when the game starts"),
+    toggle<&Settings::has_achievements_unofficial, &Settings::achievements_unofficial>(
+        "disruptor.achievements_unofficial", "Unofficial achievements", 1,
+        "Also counts the set's unofficial achievements\n"
+        "RetroAchievements does not record them\n"
+        "Takes effect when the game starts"),
+    toggle<&Settings::has_achievements_popups, &Settings::achievements_popups>(
+        "disruptor.achievements_popups", "Show notifications", 1,
+        ""),
+    choice("disruptor.achievements_popup_time", "Notification time", 3,
+           "", popup_times,
+           saved<&Settings::has_achievements_popup_time>, read<&Settings::achievements_popup_time>,
+           write<&Settings::has_achievements_popup_time, &Settings::achievements_popup_time>, needs_popups),
+    choice("disruptor.achievements_corner", "Notification corner", 0,
+           "Also sets where the progress indicator appears", popup_corners,
+           saved<&Settings::has_achievements_corner>, read<&Settings::achievements_corner>,
+           write<&Settings::has_achievements_corner, &Settings::achievements_corner>),
+    toggle<&Settings::has_achievements_progress, &Settings::achievements_progress>(
+        "disruptor.achievements_progress", "Progress indicator", 0,
+        "Shows for a moment how far an achievement has counted\nSuch as the kills and pickups of a 100% achievement"),
+    toggle<&Settings::has_achievements_sound, &Settings::achievements_sound>(
+        "disruptor.achievements_sound", "Unlock sound", 1,
+        "Plays at the game's volume"),
     toggle<&Settings::has_detailed_logging, &Settings::detailed_logging>(
         "disruptor.detailed_logging", "Detailed logging", 0,
-        "Writes more into the game's log for a bug report\n"
-        "Frame timing, menu changes, controllers and the graphics driver's complaints\n"
-        "Sound output and movie timing\n"
-        "The driver's part starts with the next launch"),
+        "Writes more into the game's log for a bug report"),
 
     choice("disruptor.multisampling", "Anti-aliasing (MSAA / SSAA)", 0,
-           "MSAA: smooths the edges of polygons and of the HUD\n"
-           "SSAA: also smooths textures and cut-out outlines\nIt shades that many times over and needs OpenGL 4.0\n"
-           "Video memory grows with the number",
+           "MSAA: smooths polygon edges and the HUD\n"
+           "SSAA: also smooths textures and cut-out outlines\n"
+           "Higher counts cost the graphics card more, SSAA the most",
            antialiasing_levels,
            antialiasing_saved, antialiasing, set_antialiasing, needs_geometry),
     choice("disruptor.draw_distance", "Draw distance", 0,
-           "How far off walls, enemies and pickups are drawn\n"
-           "Original: as on the PlayStation\n"
-           "1.25x: a quarter further",
+           "How far walls, enemies and pickups are drawn",
            draw_distances, saved<&Settings::has_draw_distance>, draw_distance, set_draw_distance, {}, distances_offered),
+    toggle<&Settings::has_probe_lighting, &Settings::probe_lighting>(
+        "disruptor.probe_lighting", "Probe lighting", 0,
+        "Light bounced from the walls around you", needs_geometry),
+    slider("disruptor.probe_strength", "Probe light strength", 100,
+           "", 0, 200, Unit::percent,
+           saved<&Settings::has_probe_strength>, read<&Settings::probe_strength>,
+           write<&Settings::has_probe_strength, &Settings::probe_strength>, needs_probes),
+    slider("disruptor.probe_bounce", "Second bounce", 0, "Light that bounced twice", 0, 100, Unit::percent,
+           saved<&Settings::has_probe_bounce>, read<&Settings::probe_bounce>,
+           write<&Settings::has_probe_bounce, &Settings::probe_bounce>, needs_probes),
+    slider("disruptor.probe_glow", "Glow of bright surfaces", 200, "How much lamps and screens light round them", 0, 400,
+           Unit::percent, saved<&Settings::has_probe_glow>, read<&Settings::probe_glow>,
+           write<&Settings::has_probe_glow, &Settings::probe_glow>, needs_probes),
+    toggle<&Settings::has_dynamic_shadows, &Settings::dynamic_shadows>(
+        "disruptor.dynamic_shadows", "Dynamic shadows", 0,
+        "Enemies, bodies and pickups cast shadows from the level's lights\nA soft shadow under each of them",
+        needs_geometry),
+    slider("disruptor.shadow_strength", "Shadow strength", 100, "How dark the shadows from the level's lights are", 0, 200,
+           Unit::percent, saved<&Settings::has_shadow_strength>, read<&Settings::shadow_strength>,
+           write<&Settings::has_shadow_strength, &Settings::shadow_strength>, needs_shadows),
+    slider("disruptor.shadow_underneath", "Shadow underneath", 100, "How dark the soft shadow under each one is", 0, 200,
+           Unit::percent, saved<&Settings::has_shadow_underneath>, read<&Settings::shadow_underneath>,
+           write<&Settings::has_shadow_underneath, &Settings::shadow_underneath>, needs_shadows),
+    toggle<&Settings::has_shot_lights, &Settings::shot_lights>(
+        "disruptor.shot_lights", "Light from shots and blasts", 0, "Shots, impacts and blasts light the walls, the floor and enemies",
+        needs_geometry),
+    slider("disruptor.shot_light_strength", "Light strength", 150, "", 0, 400,
+           Unit::percent, saved<&Settings::has_shot_light_strength>, read<&Settings::shot_light_strength>,
+           write<&Settings::has_shot_light_strength, &Settings::shot_light_strength>, needs_shots),
+    toggle<&Settings::has_sun_lighting, &Settings::sun_lighting>(
+        "disruptor.sun_lighting", "Sun on open levels", 0, "Sunlight and shadows on the second mission for now", needs_geometry),
+    slider("disruptor.sun_direction", "Sun direction", 35, "", 0, 360, Unit::degrees,
+           saved<&Settings::has_sun_direction>, read<&Settings::sun_direction>,
+           write<&Settings::has_sun_direction, &Settings::sun_direction>, needs_sun),
+    slider("disruptor.sun_height", "Sun height", 50, "", 1, 89, Unit::degrees,
+           saved<&Settings::has_sun_height>, read<&Settings::sun_height>,
+           write<&Settings::has_sun_height, &Settings::sun_height>, needs_sun),
+    slider("disruptor.sun_strength", "Sun strength", 110, "100% keeps sunlit ground as the game lights it", 1, 400,
+           Unit::percent, saved<&Settings::has_sun_strength>, read<&Settings::sun_strength>,
+           write<&Settings::has_sun_strength, &Settings::sun_strength>, needs_sun),
+    slider("disruptor.sun_shade", "Shade", 50, "How much darker what the sun does not reach is", 0, 90, Unit::percent,
+           saved<&Settings::has_sun_shade>, read<&Settings::sun_shade>,
+           write<&Settings::has_sun_shade, &Settings::sun_shade>, needs_sun),
     choice("disruptor.fog_shape", "Fog shape", 0,
            "How the smooth distance fade thickens\n"
            "Original: at one pace, as the game's own",

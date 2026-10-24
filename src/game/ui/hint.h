@@ -9,7 +9,7 @@ namespace disruptor::ui {
 
 // Shows `text` while the pointer rests on the control drawn last, a line's choice name in green as the launcher has it.
 inline void hint(const char *text) {
-    if (!ImGui::BeginItemTooltip()) return;
+    if (!*text || !ImGui::BeginItemTooltip()) return;
     ImGui::PushTextWrapPos(ImGui::GetFontSize() * 30.0f);
     for (std::string_view rest = text;;) {
         const std::size_t end = rest.find('\n');

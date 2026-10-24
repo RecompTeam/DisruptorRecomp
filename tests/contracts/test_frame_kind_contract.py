@@ -152,11 +152,40 @@ require(
 )
 require(
     "            gr_copy_rect(src_x, src_y, dst_x, dst_y, w, h);\n"
-    "            psx_ws_frame_kinds_copied(&ws_frame_kinds, (uint32_t)src_x, (uint32_t)src_y, (uint32_t)dst_x, (uint32_t)dst_y, (uint32_t)w, (uint32_t)h,\n"
-    "                                      (uint32_t)ws_disp_w(), (uint32_t)ws_disp_h());\n            break;\n"
+    "            if (psx_ws_frame_kinds_copied(&ws_frame_kinds, (uint32_t)src_x, (uint32_t)src_y, (uint32_t)dst_x, (uint32_t)dst_y,\n"
+    "                                          (uint32_t)w, (uint32_t)h, (uint32_t)ws_disp_w(), (uint32_t)ws_disp_h()) &&\n"
+    "                src_x + w <= 0x400 && dst_x + w <= 0x400 && src_y + h <= 0x200 && dst_y + h <= 0x200)\n"
+    "                gr_wide_copy_frame(src_x, src_y, dst_x, dst_y, h);\n            break;\n"
     in gpu
-    and gpu.count("psx_ws_frame_kinds_copied(") == 1,
-    "every copy inside video memory must report where it comes from and where it lands: one buffer copied whole onto the other keeps its kind",
+    and gpu.count("psx_ws_frame_kinds_copied(") == 1
+    and gpu.count("gr_wide_copy_frame(") == 1,
+    "every copy inside video memory must report where it comes from and where it lands: one buffer copied whole onto the "
+    "other keeps its kind, and the wide picture of its rows goes with it",
+)
+render = read("psxrecomp/runtime/src/gpu_render.c")
+gl = read("psxrecomp/runtime/src/gpu_gl_renderer.c")
+wide_copy = body(gl, "static void glb_wide_copy_frame(")
+require(
+    "    if (g_b->wide_copy_frame) g_b->wide_copy_frame(src_base_x, src_y, dst_base_x, dst_y, h);\n" in render
+    and "    .wide_copy_frame = glb_wide_copy_frame,\n" in gl
+    and "!s_raster_ok || g_wide_w <= 0 || s_mask_check || s_mask_set || h <= 0" in wide_copy
+    and "(from == to && src_y < dst_y + h && dst_y < src_y + h)) return;" in wide_copy
+    and "        if (s_wide_fbo[i] && s_wide_base[i] == src_base_x) from = s_wide_fbo[i];\n" in wide_copy
+    and "wide_fbo_for(src_base_x)" not in wide_copy
+    and wide_copy.index("temporal_invalidate_surface(to);")
+    < wide_copy.index("    const GLuint target = wide_drawn(to);")
+    < wide_copy.index("    wide_resolved(from, src_y, h);\n")
+    < wide_copy.index(
+        "    p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, from);\n    p_glBindFramebuffer(PSXGL_DRAW_FRAMEBUFFER, target);\n"
+        "    glDisable(GL_SCISSOR_TEST);\n"
+        "    p_glBlitFramebuffer(0, src_y * s_scale, w, (src_y + h) * s_scale, 0, dst_y * s_scale, w, (dst_y + h) * s_scale,\n"
+    )
+    and wide_copy.count("p_glBindFramebuffer(") == 3
+    and wide_copy.count("wide_drawn(") == 1
+    and "GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST);" in wide_copy,
+    "a frame copied whole takes the wide surface's rows with it: read where the source's twin was resolved, written through "
+    "the destination's twin, colour, depth and mask bits, never over its own rows, never under a mask test, and the "
+    "in-between presenter drops what it built from the rows drawn before",
 )
 require(
     "    if (opcode >= 0x20 && opcode <= 0x7F) {\n"

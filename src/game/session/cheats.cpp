@@ -12,6 +12,8 @@
 
 #include "game/session/cheats.h"
 
+#include "game/achievements/game_client.h"
+
 #include "cpu_state.h"
 #include "mod_plugins.h"
 #include "psx_netplay.h"
@@ -117,6 +119,7 @@ extern "C" int disruptor_cheats_set_god_mode(int enabled) {
         g_god_mode = false;
         return DISRUPTOR_CHEAT_NETPLAY_BLOCKED;
     }
+    if (!disruptor_achievements_allows(DISRUPTOR_ACHIEVEMENTS_CHEAT)) return DISRUPTOR_CHEAT_ACHIEVEMENTS_BLOCKED;
     if (!plausible_live_gameplay())
         return DISRUPTOR_CHEAT_GAME_NOT_READY;
     g_god_mode = true;
@@ -125,6 +128,7 @@ extern "C" int disruptor_cheats_set_god_mode(int enabled) {
 
 extern "C" int disruptor_cheats_grant_all_weapons(void) {
     if (psx_netplay_active()) return DISRUPTOR_CHEAT_NETPLAY_BLOCKED;
+    if (!disruptor_achievements_allows(DISRUPTOR_ACHIEVEMENTS_CHEAT)) return DISRUPTOR_CHEAT_ACHIEVEMENTS_BLOCKED;
     if (!plausible_live_gameplay()) return DISRUPTOR_CHEAT_GAME_NOT_READY;
     if (!maximum_ammo_table_matches())
         return DISRUPTOR_CHEAT_UNVERIFIED_STATE;

@@ -32,6 +32,7 @@
 
 - Drop your disc image on the window and press **Play**.
 - Updates install with one click and keep your saves and settings.
+- Sign in to [RetroAchievements](docs/PLAYING.md#retroachievements) and the game counts its 52 achievements, in casual for now.
 
 <table>
   <tr>
@@ -66,7 +67,7 @@
 | --- | --- | --- | --- |
 | **Picture** | Internal resolution scale | 4x | Up to 8x the original resolution |
 | | Aspect ratio | 4:3 | 16:9, 21:9, 32:9 or the window's shape |
-| | Anti-aliasing (MSAA / SSAA) | Off | Smoother edges, experimental |
+| | Anti-aliasing (MSAA / SSAA) | Off | Smoother edges |
 | | Movie filter | Smooth | Movies drawn smoothly at your screen's size, without their square blocks |
 | **Motion** | 60 FPS gameplay | On | The game runs at up to 60 FPS instead of 30 |
 | | In-between frames | Off | Adds frames for smoother motion, up to 320 FPS |
@@ -80,9 +81,9 @@
 | | Ambient occlusion | Off | Shaded corners and floors under things |
 | **Controls** | Control scheme | Modern | WASD and the mouse, or the original keys |
 | | Weapon and psionic keys | Off | Two keys a weapon or power, 1 to 9 and 0 at first |
-| | Psionic keys use the power | On | A power's key uses the power too, once it is in hand |
-| | Weapon and psionic wheels | Off | Choose a weapon or a psionic on a wheel instead of the game's list, experimental |
-| | Vertical mouse look | Off | Looks up and down with the mouse, which the original cannot, experimental |
+| | Psionic keys use the power | On | A power's key uses the power too, once it is in hand, which comes twice as fast |
+| | Weapon and psionic wheels | Off | **EXPERIMENTAL** Choose a weapon or a psionic on a wheel instead of the game's list |
+| | Vertical mouse look | Off | **EXPERIMENTAL** Looks up and down with the mouse, which the original cannot |
 | **And more** | | | HUD size, VSync, mouse sensitivity, gamepad buttons, the bass of the sound, a skip of the intro and others, all in the [player's guide](docs/PLAYING.md#settings) |
 
 ---

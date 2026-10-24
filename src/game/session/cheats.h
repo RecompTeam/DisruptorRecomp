@@ -9,6 +9,7 @@ enum DisruptorCheatResult {
     DISRUPTOR_CHEAT_GAME_NOT_READY = 0,
     DISRUPTOR_CHEAT_NETPLAY_BLOCKED = -1,
     DISRUPTOR_CHEAT_UNVERIFIED_STATE = -2,
+    DISRUPTOR_CHEAT_ACHIEVEMENTS_BLOCKED = -3,
 };
 
 /* Cheats are deliberately session-owned and are never written to settings.toml. */

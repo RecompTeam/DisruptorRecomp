@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Source contract for the experimental anti-aliasing: multisampling of the mirror, the two filters of the shown picture, the HUD's mark."""
+"""Source contract for the anti-aliasing: multisampling of the mirror, the two filters of the shown picture, the HUD's mark."""
 
 import re
 from pathlib import Path
@@ -24,6 +24,7 @@ presenter = read("psxrecomp/runtime/src/gpu_gl_temporal.c.inc")
 gpu = read("psxrecomp/runtime/src/gpu.c")
 menu = menu_text(ROOT)
 experimental = read("src/game/ui/menu/tab_experimental.cpp")
+enhancements = read("src/game/ui/menu/tab_enhancements.cpp")
 options = read("src/game/settings/options.cpp")
 saved = read("src/game/settings/saved.cpp")
 fields = read("src/game/settings/game_user_settings.h")
@@ -121,19 +122,24 @@ require(
     "where it is the world's picture and not a full-2D frame's",
 )
 require(
-    "    const int thread = t == &s_ssao_thread;\n"
+    "    const int thread = t == &s_ssao_thread;\n    ddgi_screen_measure(thread, " in renderer
+    and "                   u0, v0, u1, v1);\n"
     "    const int grown = aa_begin(thread, (int)((v1 - v0) * (float)h + 0.5f), 1, lx, ly, lw, lh);\n"
     in renderer
-    and "    p_glUniform4f(s_ssao_mix_uSpan, grown ? 0.0f : (float)lx, grown ? 0.0f : (float)ly, (float)s_ssao, (float)grown);\n"
-    "    glDrawArrays(GL_TRIANGLES, 0, 3);\n    p_glBindVertexArray(0);\n    p_glUseProgram(0);\n    aa_end(thread, vao, grown, 1, lx, ly, lw, lh);\n"
+    and "                        v1, grown ? 0.0f : (float)lx, grown ? 0.0f : (float)ly, (float)s_ssao, (float)grown)) {\n"
+    in renderer
+    and "        p_glUniform4f(s_ssao_mix_uSpan, grown ? 0.0f : (float)lx, grown ? 0.0f : (float)ly, (float)s_ssao, (float)grown);\n"
+    "    }\n    glDrawArrays(GL_TRIANGLES, 0, 3);\n    p_glBindVertexArray(0);\n    p_glUseProgram(0);\n"
+    "    aa_end(thread, vao, grown, 1, lx, ly, lw, lh);\n"
     in renderer
     and '    "  ivec2 at = ivec2((gl_FragCoord.xy - u_span.xy) / max(u_span.w, 1.0)), most = textureSize(u_shade, 0) - 1;\\n"\n'
     in renderer
     and '    "  vec4 seen = texture(u_tex, v_uv);\\n"\n    "  vec3 c = seen.rgb;\\n"\n' in renderer
     and '    "  frag = vec4(u_span.z > 1.5 ? vec3(0.0, 0.0, 0.25) : c, seen.a);\\n"\n' in renderer
     and '    "  frag = vec4(u_span.z > 1.5 ? vec3(lit) : c*lit, seen.a); }\\n";\n' in renderer,
-    "a shaded picture goes through the target too with the mirror's marks handed on, and its shading, a value a screen pixel, "
-    "is read by the screen pixel a target pixel belongs to",
+    "a shaded picture goes through the target too with the mirror's marks handed on, the lighting's own passes drawn before "
+    "it and its mix given the same span, and its shading, a value a screen pixel, is read by the screen pixel a target pixel "
+    "belongs to",
 )
 require(
     "static int s_world_begun = 0, s_frame_drawn = 0;\n"
@@ -161,11 +167,13 @@ require(
     and '    "  if(c.a<0.5 || (c.a>0.7 && c.a<0.8)) discard; frag=vec4(0.0); }\\n";' in renderer
     and '    "  return ((mark > 0.2 && mark < 0.3) || (mark > 0.7 && mark < 0.8)) ? 0.0 : cam(uv); }\\n"\n' in renderer
     and '    "  return ((mark > 0.2 && mark < 0.6) || (mark > 0.7 && mark < 0.8)) ? 0.0 : cam(uv); }\\n"\n' in renderer
-    and '    "  if (((mark > 0.2 && mark < 0.6) || (mark > 0.7 && mark < 0.8)) && u_span.z < 3.5) return;' in renderer
+    and '    "  if (((mark > 0.2 && mark < 0.6) || (mark > 0.7 && mark < 0.8) || abs(mark - 0.95) < 0.02) && u_span.z < 3.5) return;'
+    in renderer
     and renderer.count("mark > 0.7 && mark < 0.8") == 3,
     "on the mirror and in an in-between frame a flat picture over the world marks its pixels in the alpha: 0.95 where it is "
     "opaque with the mask bit and 0.75 elsewhere, blended or not. The shading takes 0.75 as it took such a picture's blends, "
-    "no surface and nothing to shade, and the stencil rebuilt from the alpha takes it for no mask bit, as that pixel had before",
+    "no surface and nothing to shade, leaves 0.95 alone as a picture with no depth of its own, and the stencil rebuilt from "
+    "the alpha takes 0.75 for no mask bit, as that pixel had before",
 )
 require(
     "static int s_msaa_asked = 0, s_msaa = 0;\n" in renderer
@@ -226,7 +234,8 @@ require(
     and "    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, wide_drawn(fbo));\n    glViewport(0, 0, g_wide_w * s_scale, H);\n"
     in renderer
     and "    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, wide_drawn(fbo));\n    glViewport(0, 0, W, H);\n" in renderer
-    and renderer.count("wide_drawn(") == 6
+    and "    const GLuint target = wide_drawn(to);" in renderer
+    and renderer.count("wide_drawn(") == 7
     and "p_glBindFramebuffer(PSXGL_FRAMEBUFFER, g_wide_cur)" not in renderer,
     "what is drawn into a mirror surface goes to its multisample twin, colour, depth and stencil, and a twin begins as the "
     "surface stands: one that cannot be made switches multisampling off with the others handed back",
@@ -245,7 +254,8 @@ require(
     in renderer
     and renderer.count("    wide_resolved(fbo, 0, VRAM_H);\n    p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, fbo);\n")
     == 2
-    and renderer.count("wide_resolved(") == 5
+    and "    wide_resolved(from, src_y, h);\n    const int w = g_wide_w * s_scale;\n" in renderer
+    and renderer.count("wide_resolved(") == 6
     and "    wide_blit(s_wide_ms_fbo[i], s_wide_fbo[i], 0, VRAM_H);\n    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, 0);\n    wide_twin_free(i);\n"
     in renderer
     and "    for (int i = 0; i < WIDE_MAX_SURF; ++i) wide_twin_drop(i);\n    for (int i = 0; i < WIDE_MAX_SURF; ++i) {\n        if (!s_wide_fbo[i]) continue;\n"
@@ -316,17 +326,19 @@ require(
     in saved
     and "        s.has_multisampling || s.has_sample_shading || s.has_downscale_averaging || s.has_edge_smoothing ||\n"
     in saved
-    and '    {"disruptor.multisampling", Page::experimental},\n' in launcher
+    and '    {"disruptor.depth_sorted_world", Page::enhancements},\n    {"disruptor.multisampling", Page::enhancements},\n'
+    in launcher
+    and launcher.count('"disruptor.multisampling"') == 1
     and '"disruptor.downscale_averaging"' not in launcher
     and '"disruptor.edge_smoothing"' not in launcher
     and '"disruptor.sample_shading"' not in launcher,
     "each of the four keys is read from the file, the samples only as a count the list has, written back and counted as a "
-    "setting of its own, so an older file keeps them, and the launcher's Experimental page shows the anti-aliasing list alone",
+    "setting of its own, so an older file keeps them, and the launcher's Enhancements page shows the anti-aliasing list alone",
 )
 require(
     "    gl_renderer_set_sample_shading(settings.sample_shading ? 1 : 0);\n" in menu
-    and '"disruptor.sample_shading"' not in menu + experimental
-    and "mark_sample_shading" not in menu + experimental,
+    and '"disruptor.sample_shading"' not in menu + enhancements + experimental
+    and "mark_sample_shading" not in menu + enhancements + experimental,
     "supersampling is the anti-aliasing list's shading: no row of its own, and every start applies it",
 )
 require(
@@ -345,9 +357,10 @@ require(
     "        mark_antialiasing(level);\n"
     "    }\n"
     "    if (!sampling_applies) ImGui::EndDisabled();\n"
-    in experimental
-    and "downscale_averaging" not in experimental
-    and "edge_smoothing" not in experimental
+    in enhancements
+    and "multisampling" not in experimental
+    and "downscale_averaging" not in enhancements + experimental
+    and "edge_smoothing" not in enhancements + experimental
     and "    gl_renderer_set_multisampling(settings.multisampling);\n" in menu
     and "    gl_renderer_set_downscale_averaging(0);\n    gl_renderer_set_edge_smoothing(0);\n" in menu
     and "gl_renderer_set_downscale_averaging(settings" not in menu
@@ -360,7 +373,7 @@ require(
     and 'void mark_antialiasing(int level) { mark("disruptor.multisampling", level); }\n' in menu
     and "void gl_renderer_set_downscale_averaging(int enabled) { s_aa_average = enabled != 0; }\n" in renderer
     and "void gl_renderer_set_edge_smoothing(int enabled) { s_aa_edges = enabled != 0; }\n" in renderer,
-    "the Experimental tab switches anti-aliasing at once and stages it for saving through the shared table's own reading of "
+    "the Enhancements tab switches anti-aliasing at once and stages it for saving through the shared table's own reading of "
     "the samples and their shading, a start with it saved applies it, and every start keeps the two withdrawn filters off "
     "whatever an older file says",
 )

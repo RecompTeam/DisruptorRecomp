@@ -190,6 +190,7 @@ std::wstring value_text(const Option& option, int value) {
     wchar_t text[32] = L"";
     if (option.unit == Unit::percent) swprintf(text, 32, L"%d%%", value);
     else if (option.unit == Unit::frames) swprintf(text, 32, L"%d FPS", value);
+    else if (option.unit == Unit::degrees) swprintf(text, 32, L"%d\u00b0", value);
     else if (option.unit == Unit::thousandths) {
         const double times = static_cast<double>(value) / option.initial;
         swprintf(text, 32, times < 1.0 ? L"%.2fx" : times < 10.0 ? L"%.1fx" : L"%.0fx", times);

@@ -43,6 +43,7 @@ if(DISRUPTOR_DEV_TOOLS AND DEFINED PSX_GAME_VERSION AND NOT PSX_GAME_VERSION STR
 endif()
 
 set(DISRUPTOR_EXTRA_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/achievements/game_client.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/backdrop_tiles.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/billboard_aspect.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/capsule.cpp"
@@ -52,6 +53,7 @@ set(DISRUPTOR_EXTRA_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/far_rendering.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/movie_smoothing.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/frame/frame_rate.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/frame/stock_frames.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/host.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/audio/bass_cut.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings/saved.cpp"
@@ -66,7 +68,9 @@ set(DISRUPTOR_EXTRA_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/restart.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/baton_choice.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/mouse_aim.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/list_message.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/name_entry.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/psionic_change.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/selection_wheel.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/weapon_list.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/precision_routes.cpp"
@@ -74,6 +78,8 @@ set(DISRUPTOR_EXTRA_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/grown_quad.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/hud_widgets.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/mover_motion.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/ddgi_view.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/ddgi_level.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/sprite_depth.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/vertical_camera.cpp")
 if(DISRUPTOR_DEV_TOOLS)
@@ -99,6 +105,7 @@ FetchContent_Declare(disruptor_imgui
         "SHA256=5b17c01f69545bde732b14936d89ce0f508adb83e8b56fa82448371845172bc3"
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
 FetchContent_MakeAvailable(disruptor_imgui)
+include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/achievements.cmake")
 
 if(DISRUPTOR_DEV_MENU)
 
@@ -138,6 +145,8 @@ if(DISRUPTOR_DEV_MENU)
         "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/tab_experimental.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/tab_debug.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/tab_cheats.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/tab_achievements.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/achievements_overlay.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/tab_system.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/tab_language.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/menu.cpp"
@@ -191,6 +200,8 @@ psxrecomp_add_runtime_target(psx-runtime
 )
 target_compile_definitions(psx-runtime PRIVATE
     PSX_HAS_GAME_HOST=1)
+disruptor_achievements_library(disruptor-achievements)
+target_link_libraries(psx-runtime PRIVATE disruptor-achievements)
 if(DISRUPTOR_DEV_TOOLS)
     target_compile_definitions(psx-runtime PRIVATE DISRUPTOR_DEV_TOOLS=1)
 endif()
@@ -234,6 +245,13 @@ endif()
 if(BUILD_TESTING)
     find_package(Python3 3.11 REQUIRED COMPONENTS Interpreter)
     include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/DisruptorTests.cmake")
+    if(TARGET disruptor-launcher)
+        # The launcher's keyboard and gamepad paths, driven hidden through its picture mode. 77: no display here.
+        add_test(NAME disruptor_launcher_navigation
+            COMMAND "${Python3_EXECUTABLE}" -B "${PROJECT_SOURCE_DIR}/tests/unit/launcher_navigation_test.py"
+                    "$<TARGET_FILE:disruptor-launcher>")
+        set_tests_properties(disruptor_launcher_navigation PROPERTIES SKIP_RETURN_CODE 77)
+    endif()
 
     disruptor_contract(backdrop_tiles RETAIL)
     disruptor_contract(depth24_sync)
@@ -260,6 +278,9 @@ if(BUILD_TESTING)
     disruptor_contract(fast_forward_key)
     disruptor_contract(grown_quad RETAIL)
     disruptor_contract(mover_steps RETAIL)
+    disruptor_contract(stock_frames RETAIL)
+    disruptor_contract(list_message RETAIL)
+    disruptor_contract(shot_lights RETAIL)
     disruptor_contract(sprite_range RETAIL)
     disruptor_contract(intro_skip RETAIL)
     disruptor_contract(language RETAIL)
@@ -275,6 +296,7 @@ if(BUILD_TESTING)
     disruptor_contract(world_texel)
     disruptor_contract(near_face)
     disruptor_contract(smooth_turn)
+    disruptor_contract(probe_lighting)
     disruptor_contract(ambient_occlusion)
     disruptor_contract(smooth_fade)
     disruptor_contract(antialiasing)
@@ -283,6 +305,7 @@ if(BUILD_TESTING)
     disruptor_contract(instruction_hooks)
     disruptor_contract(state_key)
     disruptor_contract(test_registration)
+    disruptor_contract(achievements)
 
     add_test(NAME disruptor_framework_tool
         COMMAND "${Python3_EXECUTABLE}" -B
@@ -414,6 +437,10 @@ disruptor_unit_test(disruptor_bass_cut tests/unit/disruptor_bass_cut_test.cpp
     disruptor_unit_test(disruptor_grown_quad tests/unit/disruptor_grown_quad_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_mover_steps tests/unit/disruptor_mover_steps_test.cpp)
     disruptor_unit_test(disruptor_object_steps tests/unit/disruptor_object_steps_test.cpp)
+    disruptor_unit_test(disruptor_stock_frames tests/unit/disruptor_stock_frames_test.cpp)
+    disruptor_unit_test(disruptor_list_message tests/unit/disruptor_list_message_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_shot_lights tests/unit/disruptor_shot_lights_test.cpp)
+    disruptor_unit_test(disruptor_psionic_change tests/unit/disruptor_psionic_change_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_sprite_depth tests/unit/disruptor_sprite_depth_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_billboard_aspect tests/unit/disruptor_billboard_aspect_test.cpp RUNTIME_HEADERS)
 
@@ -422,12 +449,17 @@ disruptor_unit_test(disruptor_bass_cut tests/unit/disruptor_bass_cut_test.cpp
     disruptor_unit_test(disruptor_gpu_ws_hud_scale tests/unit/gpu_ws_hud_scale_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_gpu_ws_hud_widget tests/unit/gpu_ws_hud_widget_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_gpu_ws_tag_match tests/unit/gpu_ws_tag_match_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_host_ui_flags tests/unit/host_ui_flags_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_gpu_temporal_sprite tests/unit/gpu_temporal_sprite_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_gpu_temporal_match tests/unit/gpu_temporal_match_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_gpu_temporal_mesh tests/unit/gpu_temporal_mesh_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_gpu_pinned_corner tests/unit/gpu_pinned_corner_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_gpu_turned_perspective tests/unit/gpu_turned_perspective_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_gpu_turn_clip tests/unit/gpu_turn_clip_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_gpu_ddgi_turn tests/unit/gpu_ddgi_turn_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_gpu_ddgi_bvh tests/unit/gpu_ddgi_bvh_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_gpu_ddgi_mask tests/unit/gpu_ddgi_mask_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_ddgi_level tests/unit/disruptor_ddgi_level_test.cpp RUNTIME_HEADERS INCLUDES src)
     disruptor_unit_test(disruptor_movie_filter tests/unit/movie_filter_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_gpu_world_depth tests/unit/gpu_world_depth_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_gpu_near_face tests/unit/gpu_near_face_test.cpp RUNTIME_HEADERS)

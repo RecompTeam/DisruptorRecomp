@@ -181,6 +181,10 @@ extern "C" int disruptor_frame_rate_unlocked(void) {
     return g_unlocked.load(std::memory_order_relaxed) ? 1 : 0;
 }
 
+extern "C" int disruptor_frame_rate_gameplay_unlocked(void) {
+    return g_unlocked.load(std::memory_order_relaxed) && simulation_follows_elapsed_vblanks() ? 1 : 0;
+}
+
 extern "C" void disruptor_frame_rate_set_unlocked(int enabled) {
     g_unlocked.store(enabled != 0, std::memory_order_relaxed);
 }

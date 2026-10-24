@@ -15,6 +15,8 @@ PSXModFunctionEntryCallback g_damage_callback = nullptr;
 std::uint32_t g_registered_address = 0;
 bool g_game_started = false;
 bool g_netplay = false;
+bool g_hardcore = false;
+int g_refusals = 0;
 std::vector<std::uint32_t> g_write_addresses;
 int g_failures = 0;
 
@@ -71,6 +73,12 @@ int psx_netplay_active(void) {
     return g_netplay ? 1 : 0;
 }
 
+int disruptor_achievements_allows(int) {
+    if (!g_hardcore) return 1;
+    ++g_refusals;
+    return 0;
+}
+
 std::uint8_t psx_mod_read_byte(std::uint32_t address) {
     return g_ram[physical(address)];
 }
@@ -116,6 +124,8 @@ void reset_state() {
     g_ram.fill(0);
     g_game_started = false;
     g_netplay = false;
+    g_hardcore = false;
+    g_refusals = 0;
     g_write_addresses.clear();
     g_god_mode = false;
 }
@@ -163,6 +173,16 @@ void test_registration_and_guards() {
                DISRUPTOR_CHEAT_NETPLAY_BLOCKED,
            "inventory grant rejects netplay");
     expect(g_write_addresses.empty(), "netplay rejection performs no writes");
+
+    reset_state();
+    seed_live_game();
+    g_hardcore = true;
+    expect(disruptor_cheats_set_god_mode(1) == DISRUPTOR_CHEAT_ACHIEVEMENTS_BLOCKED &&
+               !disruptor_cheats_god_mode_enabled(),
+           "God mode is refused in a hardcore achievements session");
+    expect(disruptor_cheats_grant_all_weapons() == DISRUPTOR_CHEAT_ACHIEVEMENTS_BLOCKED,
+           "so is the inventory grant");
+    expect(g_write_addresses.empty() && g_refusals == 2, "the refusals write nothing and each one is reported");
 }
 
 void test_god_mode_is_cpu_local_and_reversible() {

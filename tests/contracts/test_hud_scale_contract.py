@@ -83,6 +83,7 @@ require(
     "                if (ws_hud_user_scale(&x0, &y0, &scaled_w, &scaled_h)) {\n"
     "                    ws_w = scaled_w;\n"
     "                    ws_h = scaled_h;\n"
+    "                    shrunk = 1;\n"
     "                } else {\n"
     "                    x0 = ws_scale_about(x0, ws_hud_pivot(x0, w));\n"
     "                    ws_w = (int)ws_scale_len(w);\n"
@@ -117,7 +118,8 @@ require(
     "        mark_hud_scale(hud_scale);"
     in menu
     and 'slider("disruptor.hud_scale", "HUD size", 100,' in options
-    and '"The weapon keeps its size", 50, 100, Unit::percent,' in options,
+    and '"Shrinks the health and ammunition displays toward the edges\\nThe weapon keeps its size\\nSmaller text is drawn bolder, with a dark edge\\nWidescreen only", 50, 100,'
+    in options,
     "the settings menu must apply the size live and stage it for saving",
 )
 require(
@@ -138,6 +140,30 @@ require(
     and '            f << "hud_scale = " << s.hud_scale << "\\n";' in settings_loader
     and "        s.has_hud_scale) {" in settings_loader,
     "settings.toml must read and write a valid [disruptor] hud_scale",
+)
+
+renderer = read("psxrecomp/runtime/src/gpu_gl_renderer.c")
+widgets = read("src/game/render/hud_widgets.cpp")
+require(
+    "static inline int psx_ws_hud_glyph_code(int percent, uint32_t color24) {" in scale_header
+    and "void gpu_ws_set_hud_text_source(int clut_x, int clut_y, int page_x, int page_y);\n" in header
+    and "int gpu_current_hud_glyph(void);\n" in header
+    and "int gpu_current_hud_glyph(void) { return ws_hud_glyph; }\n" in gpu
+    and "    ws_hud_glyph = shrunk && clut_x == ws_hud_text_clut_x && clut_y == ws_hud_text_clut_y && (int)texpage_x == ws_hud_text_page_x &&\n"
+    "                           (int)texpage_y == ws_hud_text_page_y\n"
+    "                       ? psx_ws_hud_glyph_code(ws_hud_scale_percent, raw_texture ? 0x808080u : color24) : 0;\n" in gpu
+    and "        gr_draw_textured_rect(x0, y0, w, h, u0, v0, clut_x, clut_y, current_texpage());\n    ws_hud_glyph = 0;\n" in gpu
+    and gpu.count("shrunk = 1;") == 2
+    and "    const int packet_raw = packet_fade >= 0 ? 2 | (packet_fade << 2) : gpu_current_hud_glyph() << 2;\n" in renderer
+    and '"bool glyph_edge(vec2 at, int glyph, out vec3 rgb, out int stp){\\n"' in renderer
+    and '"  return t.x >= v_limits.x && t.x <= v_limits.z && t.y >= v_limits.y && t.y <= v_limits.w;\\n"' in renderer
+    and '"  if (!sample_texture(sample_uv, rgb, stp) && (glyph == 0 || !glyph_edge(sample_uv, glyph, rgb, stp))) discard;\\n"' in renderer
+    and "constexpr int kTextSource[4] = {512, 177, 8, 0};" in widgets
+    and "    if (!strokes || strokes[0] != '0') gpu_ws_set_hud_text_source(kTextSource[0], kTextSource[1], kTextSource[2], kTextSource[3]);\n"
+    in widgets,
+    "a line of text in the font's palette and on its print page that the HUD size shrinks keeps its strokes: the rectangle's glyph code reaches"
+    " the shader in the raw bits, which grows its strokes and draws a dark rim, none round dark text, inside the rectangle"
+    " only",
 )
 
 print("Disruptor HUD size source contract: PASS")

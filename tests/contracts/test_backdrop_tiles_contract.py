@@ -203,10 +203,16 @@ require(
     "                placed.pins = tile_pins;\n"
     "                tile_placed = 1;\n"
     in gpu
-    and "    setup_textured_draw(color24, semi_trans, raw_texture);\n    if (tile_placed) gr_set_screen_tile(&placed);\n    ws_hud_held_sides_send();\n    if (dw != w || dh != h)\n"
+    and "    setup_textured_draw(color24, semi_trans, raw_texture);\n    if (semi_trans)\n        ddgi_note_flash("
+    in gpu
+    and "                        raw_texture, 1.0f);\n    if (tile_placed) gr_set_screen_tile(&placed);\n    ws_hud_held_sides_send();\n"
+    "    ws_hud_glyph = shrunk && clut_x == ws_hud_text_clut_x && clut_y == ws_hud_text_clut_y && (int)texpage_x == ws_hud_text_page_x &&\n"
+    "                           (int)texpage_y == ws_hud_text_page_y\n"
+    "                       ? psx_ws_hud_glyph_code(ws_hud_scale_percent, raw_texture ? 0x808080u : color24) : 0;\n"
+    "    if (dw != w || dh != h)\n"
     in gpu
     and gpu.index(
-        "    if (draw_area_out_rect(x0, y0, dw, dh)) return;\n    setup_textured_draw(color24, semi_trans, raw_texture);\n    if (tile_placed)"
+        "    if (draw_area_out_rect(x0, y0, dw, dh)) return;\n    setup_textured_draw(color24, semi_trans, raw_texture);\n    if (semi_trans)"
     )
     > gpu.index("                tile_placed = 1;\n")
     and "void gr_set_screen_tile(const struct PsxWsPlacedTile *tile) {\n    if (g_b->set_screen_tile) g_b->set_screen_tile(tile);\n}\n"
@@ -268,14 +274,15 @@ require(
     in presenter
     and "    s->active = 1; s->bad = 0; s->nv = s->nt = s->nc = 0;\n    s->backdrop = 0; s->backdrop_back = 0.0f;\n"
     in presenter
-    and "    s->origin_y=y; s->height=h; s->matched=s->world=s->moving=0;\n    s->backdrop_back=0.0f;\n" in presenter
+    and "    s->origin_y=y; s->height=h; s->matched=s->world=s->moving=0;\n    s->ddgi=s_ddgi_frame_now;\n    s->backdrop_back=0.0f;\n"
+    in presenter
     and "    a->backdrop=s_temp_curr.backdrop; a->backdrop_origin=s_temp_curr.backdrop_origin;\n" in presenter
     and "        if (s->backdrop && a->backdrop)\n"
     "            s->backdrop_back=psx_ws_backdrop_back(a->backdrop_origin,s->backdrop_origin,s->backdrop_period,TEMP_BACKDROP_MOST);\n"
     in presenter
     and "#define TEMP_BACKDROP_MOST 12.0f" in presenter
     and "#define TEMP_BACKDROP_END_CARRY 2.0f" in presenter,
-    "a recorded frame keeps the panorama's numbers, takes a tile where the mirror put it with the slide folded into its "
+    "a recorded frame keeps the panorama's numbers and the lighting's frame, takes a tile where the mirror put it with the slide folded into its "
     "texture, and knows how far back the panorama stood in the frame before, bounded",
 )
 require(

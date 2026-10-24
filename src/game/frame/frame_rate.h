@@ -19,6 +19,9 @@ typedef struct DisruptorFrameRateWindow {
 int disruptor_frame_rate_unlocked(void);
 void disruptor_frame_rate_set_unlocked(int enabled);
 
+/* The unlock as the frame loop takes it now: off while the game steps a fixed count of ticks a frame. */
+int disruptor_frame_rate_gameplay_unlocked(void);
+
 /* Guest CPU speed inside the unlocked frame loop: 1, 2, 4 or 8. */
 int disruptor_frame_rate_cpu_multiplier(void);
 void disruptor_frame_rate_set_cpu_multiplier(int multiplier);

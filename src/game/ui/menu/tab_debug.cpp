@@ -157,6 +157,7 @@ void draw_debug_tab() {
     }
     if (detailed) ImGui::TextDisabled("Driver messages: %s", driver_words[disruptor_diagnostics_driver_state()]);
 
+#if DISRUPTOR_DEV_TOOLS
     ImGui::Separator();
     if (ImGui::Button("Record the screen") && !gl_renderer_recording_shown()) g_menu.record_shown = true;
     draw_status_badge("SESSION", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
@@ -180,12 +181,20 @@ void draw_debug_tab() {
         "next start");
 
     ImGui::Separator();
+    bool probes = gpu_ddgi_view() != 0;
+    if (ImGui::Checkbox("Show the probes", &probes)) gpu_ddgi_set_view(probes ? 1 : 0);
+    ImGui::TextDisabled("Dots at fixed places in the world, every 400 units\nThey must stay put while you walk and turn");
+    GpuDdgiStats probe_stats{};
+    gpu_ddgi_stats(&probe_stats);
+    if (probes || gl_renderer_ddgi() || gl_renderer_ddgi_shadows() || gl_renderer_ddgi_lamps())
+        ImGui::TextDisabled("World triangles in the last frame: %d", probe_stats.triangles);
+
+    ImGui::Separator();
     ImGui::TextDisabled("Vertical pitch asked for: %+.2f degrees, at most 30.94 either way",
                         disruptor_mouse_vertical_pitch() * (360.0 / 256.0));
     ImGui::TextDisabled("Mouse captured before this menu opened: %s\nThe menu releases it while open and gives it "
                         "back when closed", g_menu.restore_mouse_capture ? "yes" : "no");
 
-#if DISRUPTOR_DEV_TOOLS
     ImGui::Separator();
     draw_mission_select();
 #endif

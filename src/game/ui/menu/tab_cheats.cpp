@@ -12,6 +12,8 @@ const char *cheat_result_message(int result, const char *success) {
             return "Enter live gameplay before using this cheat";
         case DISRUPTOR_CHEAT_NETPLAY_BLOCKED:
             return "Cheats are disabled during netplay";
+        case DISRUPTOR_CHEAT_ACHIEVEMENTS_BLOCKED:
+            return "Cheats are off in a hardcore RetroAchievements session";
         case DISRUPTOR_CHEAT_UNVERIFIED_STATE:
             return "The game state did not match the verified USA executable; no changes were made";
         default:

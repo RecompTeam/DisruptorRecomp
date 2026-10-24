@@ -1,6 +1,7 @@
 #include "game_host.h"
 
 #include "config_loader.h"
+#include "game/achievements/game_client.h"
 #include "game/audio/bass_cut.h"
 #include "game/language/language.h"
 #include "game/input/baton_choice.h"
@@ -19,6 +20,7 @@
 #include "host_ui.h"
 #include "mod_plugins.h"
 #include "psx_keybinds.h"
+#include "savestate.h"
 
 #include <array>
 #include <cstddef>
@@ -36,6 +38,9 @@ extern "C" void disruptor_name_entry_keys_for_pad(const uint8_t *keys, uint8_t *
 extern "C" void disruptor_name_entry_state_loaded(void);
 extern "C" void disruptor_mover_motion_state_loaded(void);
 extern "C" void disruptor_mover_motion_state_saving(void);
+extern "C" void disruptor_stock_frames_state_loaded(void);
+extern "C" void disruptor_stock_frames_state_saving(void);
+extern "C" int disruptor_stock_frames_save_deferred(void);
 extern "C" int disruptor_grown_quad_sources(uint32_t command_address, const uint32_t *packet, uint32_t source_address[4],
                                             uint32_t source_word[4]);
 
@@ -75,6 +80,8 @@ bool psx_game_settings_loaded(const PSXRecompV4::UserSettings &settings) {
     disruptor_diagnostics_configure(settings.has_detailed_logging && settings.detailed_logging);
     (void)psx_host_audio_set_mute_in_background(settings.has_mute_in_background && settings.mute_in_background);
     disruptor_bass_cut_set(settings.has_bass_cut ? settings.bass_cut : 0);
+    disruptor_achievements_configure(!settings.has_achievements || settings.achievements);
+    disruptor::achievements::configure(settings);
     apply_pick_keys(settings);
     if (settings.has_language_disc && !std::getenv("PSX_DISRUPTOR_LANGUAGE_DISC"))
         disruptor_language_set_disc(settings.language_disc.c_str());
@@ -102,17 +109,27 @@ void psx_game_state_loaded(void) {
     disruptor_weapon_keys_state_loaded();
     disruptor_weapon_list_state_loaded();
     disruptor_mover_motion_state_loaded();
+    disruptor_stock_frames_state_loaded();
+    disruptor_list_message_state_loaded();
     disruptor_language_movie_sound_state_loaded();
+    disruptor_achievements_state_loaded(savestate_active_path());
     disruptor_far_rendering_abandon_metrics();
 }
 
 void psx_game_state_saving(void) {
     disruptor_mover_motion_state_saving();
+    disruptor_stock_frames_state_saving();
     disruptor_far_rendering_state_saving();
+    disruptor_achievements_state_saving(savestate_active_path());
 }
 
+void psx_game_state_saved(int written) { disruptor_achievements_state_saved(savestate_active_path(), written); }
+
+int psx_game_state_load_allowed(void) { return disruptor_achievements_allows(DISRUPTOR_ACHIEVEMENTS_LOAD_STATE); }
+
 int psx_game_state_save_deferred(void) {
-    return disruptor_far_rendering_save_deferred() || disruptor_language_movie_sound_save_deferred();
+    return disruptor_far_rendering_save_deferred() || disruptor_language_movie_sound_save_deferred() ||
+           disruptor_stock_frames_save_deferred() || disruptor_list_message_save_deferred();
 }
 
 int psx_game_packet_fade(uint32_t resolved_packet, uint32_t signature) {
@@ -149,9 +166,13 @@ void psx_game_before_input(void) { disruptor_capsule_before_input(); }
 void psx_game_after_input(void) {
     disruptor_capsule_after_input();
     disruptor_selection_wheel_guard_input();
+    disruptor_achievements_frame();
 }
 
-void psx_game_audio_output(int16_t *stereo, int frames, int rate) { disruptor::audio::shape_output(stereo, frames, rate); }
+void psx_game_audio_output(int16_t *stereo, int frames, int rate) {
+    disruptor::audio::shape_output(stereo, frames, rate);
+    disruptor_achievements_audio(stereo, frames, rate);
+}
 
 int psx_game_smooth_movies(void) { return disruptor_smooth_movies_enabled(); }
 

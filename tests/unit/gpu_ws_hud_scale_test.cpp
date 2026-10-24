@@ -292,6 +292,25 @@ void test_a_held_weapon_slides_to_the_edge_it_touches() {
            "an empty sprite or screen gives the centre");
 }
 
+void test_shrunk_text_keeps_its_strokes() {
+    const uint32_t grey = 0x808080u;
+    expect(psx_ws_hud_glyph_code(100, grey) == 0 && psx_ws_hud_glyph_code(120, grey) == 0 && psx_ws_hud_glyph_code(49, grey) == 0,
+           "the authored size and a size out of range draw text as the game does");
+    expect(psx_ws_hud_glyph_code(50, grey) == (16 | 32 << 8), "at half size each side of a stroke grows a quarter texel, the rim is half a texel");
+    expect(psx_ws_hud_glyph_code(75, grey) == (5 | 10 << 8), "at three quarters a twelfth and a sixth");
+    expect(psx_ws_hud_glyph_code(50, 0x0000FFu) == (16 | 32 << 8), "a red line keeps its rim");
+    expect(psx_ws_hud_glyph_code(50, 0u) == 16 && psx_ws_hud_glyph_code(50, 0x3F3F3Fu) == 16,
+           "dark text, a list's item name, grows its strokes without a rim");
+    int grow = 255, rim = 255;
+    for (int percent = PSX_WS_HUD_SCALE_MIN; percent <= PSX_WS_HUD_SCALE_MAX; ++percent) {
+        const int code = psx_ws_hud_glyph_code(percent, grey);
+        expect((code & 255) <= grow && (code >> 8) <= rim && (code >> 8) <= 255 && (code >> 8) >= (code & 255),
+               "a larger HUD never draws text bolder, and both reaches fit a byte");
+        grow = code & 255;
+        rim = code >> 8;
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -303,6 +322,7 @@ int main() {
     test_exact_values();
     test_a_held_weapon_slides_to_the_edge_it_touches();
     test_a_held_sprite_is_placed_between_pixels();
+    test_shrunk_text_keeps_its_strokes();
     if (g_failures) return 1;
     std::cout << "GPU widescreen HUD scale tests passed\n";
     return 0;

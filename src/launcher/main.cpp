@@ -16,6 +16,7 @@
 #include "imgui.h"
 #include "imgui_impl_sdl3.h"
 #include "imgui_impl_sdlrenderer3.h"
+#include "imgui_internal.h"
 
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
@@ -34,10 +35,12 @@
 #include <fstream>
 #include <functional>
 #include <optional>
+#include <sstream>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <utility>
 #include <vector>
 
 namespace fs = std::filesystem;
@@ -96,6 +99,10 @@ struct Arguments {
     int scroll = 0;
     int width = 0, height = 0; // a picture's size in pixels, 0 for the usual one
     float scale = 1.0f;
+    // A picture's steps before it is taken: keys, gamepad buttons, the pointer, pictures on the way. See drive().
+    std::vector<std::string> input;
+    std::optional<fs::path> nav_log;
+    bool virtual_pad = false;
 };
 
 Arguments parse(int count, char** values) {
@@ -133,6 +140,13 @@ Arguments parse(int count, char** values) {
             const auto factor = words[++i];
             std::from_chars(factor.data(), factor.data() + factor.size(), arguments.scale);
             if (!(arguments.scale >= 0.5f && arguments.scale <= 4.0f)) arguments.scale = 1.0f;
+        } else if (words[i] == "--input" && more) {
+            std::istringstream steps{std::string(words[++i])};
+            for (std::string step; steps >> step;) arguments.input.push_back(step);
+        } else if (words[i] == "--nav-log" && more) {
+            arguments.nav_log = from_utf8(std::string(words[++i]));
+        } else if (words[i] == "--virtual-pad") {
+            arguments.virtual_pad = true;
         } else {
             throw std::runtime_error("Usage: DisruptorLauncher.exe --verify IMAGE | --import IMAGE [--root FOLDER] | "
                                      "--check [--root FOLDER]");
@@ -143,6 +157,45 @@ Arguments parse(int count, char** values) {
 
 void wait_for(const Updater& updater) {
     while (updater.busy()) std::this_thread::sleep_for(std::chrono::milliseconds(20));
+}
+
+// The keys an --input step names, each with the name SDL gives it, which a key button that waits for a key takes.
+struct NamedKey {
+    std::string_view name;
+    ImGuiKey key;
+    const char* scancode;
+};
+constexpr NamedKey kNamedKeys[] = {
+    {"Tab", ImGuiKey_Tab, "Tab"},           {"Enter", ImGuiKey_Enter, "Return"},       {"Space", ImGuiKey_Space, "Space"},
+    {"Escape", ImGuiKey_Escape, "Escape"},  {"Up", ImGuiKey_UpArrow, "Up"},            {"Down", ImGuiKey_DownArrow, "Down"},
+    {"Left", ImGuiKey_LeftArrow, "Left"},   {"Right", ImGuiKey_RightArrow, "Right"},   {"PageUp", ImGuiKey_PageUp, "PageUp"},
+    {"PageDown", ImGuiKey_PageDown, "PageDown"}, {"Home", ImGuiKey_Home, "Home"},      {"End", ImGuiKey_End, "End"},
+    {"Delete", ImGuiKey_Delete, "Delete"},  {"F1", ImGuiKey_F1, "F1"},
+};
+// The gamepad buttons an --input step names: what ImGui's SDL backend makes of each, and SDL's own button for a capture.
+struct NamedButton {
+    std::string_view name;
+    ImGuiKey key;
+    SDL_GamepadButton button;
+};
+constexpr NamedButton kNamedButtons[] = {
+    {"A", ImGuiKey_GamepadFaceDown, SDL_GAMEPAD_BUTTON_SOUTH},       {"B", ImGuiKey_GamepadFaceRight, SDL_GAMEPAD_BUTTON_EAST},
+    {"X", ImGuiKey_GamepadFaceLeft, SDL_GAMEPAD_BUTTON_WEST},        {"Y", ImGuiKey_GamepadFaceUp, SDL_GAMEPAD_BUTTON_NORTH},
+    {"Up", ImGuiKey_GamepadDpadUp, SDL_GAMEPAD_BUTTON_DPAD_UP},      {"Down", ImGuiKey_GamepadDpadDown, SDL_GAMEPAD_BUTTON_DPAD_DOWN},
+    {"Left", ImGuiKey_GamepadDpadLeft, SDL_GAMEPAD_BUTTON_DPAD_LEFT}, {"Right", ImGuiKey_GamepadDpadRight, SDL_GAMEPAD_BUTTON_DPAD_RIGHT},
+    {"LB", ImGuiKey_GamepadL1, SDL_GAMEPAD_BUTTON_LEFT_SHOULDER},    {"RB", ImGuiKey_GamepadR1, SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER},
+    {"LT", ImGuiKey_GamepadL2, SDL_GAMEPAD_BUTTON_INVALID},          {"RT", ImGuiKey_GamepadR2, SDL_GAMEPAD_BUTTON_INVALID},
+    {"Start", ImGuiKey_GamepadStart, SDL_GAMEPAD_BUTTON_START},      {"Back", ImGuiKey_GamepadBack, SDL_GAMEPAD_BUTTON_BACK},
+};
+
+std::optional<NamedKey> named_key(std::string_view name) {
+    for (const NamedKey& key : kNamedKeys)
+        if (key.name == name) return key;
+    static constexpr const char* letters[] = {"A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M",
+                                              "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"};
+    if (name.size() == 1 && name[0] >= 'A' && name[0] <= 'Z')
+        return NamedKey{name, static_cast<ImGuiKey>(ImGuiKey_A + (name[0] - 'A')), letters[name[0] - 'A']};
+    return std::nullopt;
 }
 
 int closed(std::ofstream& file, int result) {
@@ -267,9 +320,11 @@ SDL_Renderer* make_renderer(SDL_Window* window) {
 int run_window(const Arguments& arguments, Updater& updater, Activity& activity, const fs::path& program,
                const fs::path& data) {
     g_unattended = arguments.screenshot.has_value();
+    // A picture where SDL finds no display to draw on ends with 5, which a test takes for a skip.
+    const int no_display = arguments.screenshot ? 5 : 1;
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         fail_window(SDL_GetError());
-        return 1;
+        return no_display;
     }
     float scale = SDL_GetDisplayContentScale(SDL_GetPrimaryDisplay());
     if (arguments.screenshot) scale = arguments.scale > 0.0f ? arguments.scale : 1.0f;
@@ -301,7 +356,21 @@ int run_window(const Arguments& arguments, Updater& updater, Activity& activity,
         SDL_Quit();
         return 1;
     }
-    SDL_SetWindowMinimumSize(window, static_cast<int>(900 * scale), static_cast<int>(620 * scale));
+    // 900 by 620 at the display's scale, at most its usable room: 125% on 1366 by 768 wants 775 rows of 728.
+    const auto fit_minimum = [&](float at_scale) {
+        int least_width = static_cast<int>(900 * at_scale), least_height = static_cast<int>(620 * at_scale);
+        if (SDL_Rect room{}; SDL_GetDisplayUsableBounds(SDL_GetDisplayForWindow(window), &room) && room.w > 0 && room.h > 0) {
+            least_width = std::min(least_width, room.w);
+            least_height = std::min(least_height, room.h);
+        }
+        // A picture of a smaller screen's room is drawn at that size, as the window there would be.
+        if (arguments.screenshot && arguments.width > 0 && arguments.height > 0) {
+            least_width = std::min(least_width, arguments.width);
+            least_height = std::min(least_height, arguments.height);
+        }
+        SDL_SetWindowMinimumSize(window, least_width, least_height);
+    };
+    fit_minimum(scale);
     SDL_SetRenderVSync(renderer, 1);
     shape_frame(window);
     if (placed) SDL_SetWindowPosition(window, saved->x, saved->y);
@@ -323,19 +392,41 @@ int run_window(const Arguments& arguments, Updater& updater, Activity& activity,
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.IniFilename = nullptr;
-    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
+    io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard | ImGuiConfigFlags_NavEnableGamepad;
+    // Ctrl+Tab steps through the launcher's pages instead of ImGui's window list: there is only one window.
+    GImGui->ConfigNavWindowingKeyNext = ImGuiKey_None;
+    GImGui->ConfigNavWindowingKeyPrev = ImGuiKey_None;
     Session session(program, data, activity);
     View view(session, updater, activity, choices_file);
     view.style(scale);
     view.show(arguments.screen, arguments.page, arguments.tab);
     if (arguments.screenshot) view.for_picture(static_cast<float>(arguments.scroll));
+    if (arguments.screenshot && arguments.virtual_pad) view.pretend_pad();
     if (arguments.updates_window) view.open_updates();
     view.attach(window, renderer);
     SDL_SetWindowHitTest(window, hit_test, &view);
     ImGui_ImplSDL3_InitForSDLRenderer(window, renderer);
-    // An open gamepad makes SDL poll every millisecond: the launcher only lists them.
-    ImGui_ImplSDL3_SetGamepadMode(ImGui_ImplSDL3_GamepadMode_Manual, nullptr, 0);
     ImGui_ImplSDLRenderer3_Init(renderer);
+    // A picture's steps may press a link: it opens nothing.
+    if (arguments.screenshot) ImGui::GetPlatformIO().Platform_OpenInShellFn = [](ImGuiContext*, const char*) { return false; };
+    // The first gamepad moves through the window while the window has the keyboard. In the background the game has it.
+    SDL_Gamepad* nav_pad = nullptr;
+    bool gamepads = false, gamepads_tried = false;
+    const auto choose_nav_pad = [&] {
+        const bool focused = arguments.screenshot || (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0;
+        if (nav_pad && (!focused || !SDL_GamepadConnected(nav_pad))) {
+            SDL_CloseGamepad(nav_pad);
+            nav_pad = nullptr;
+        }
+        if (!nav_pad && focused && gamepads) {
+            int count = 0;
+            SDL_JoystickID* found = SDL_GetGamepads(&count);
+            if (found && count > 0) nav_pad = SDL_OpenGamepad(found[0]);
+            SDL_free(found);
+        }
+        ImGui_ImplSDL3_SetGamepadMode(ImGui_ImplSDL3_GamepadMode_Manual, nav_pad ? &nav_pad : nullptr, nav_pad ? 1 : 0);
+    };
+    ImGui_ImplSDL3_SetGamepadMode(ImGui_ImplSDL3_GamepadMode_Manual, nullptr, 0);
 
     const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(window));
     session.open(mode ? mode->refresh_rate : 0.0);
@@ -354,10 +445,17 @@ int run_window(const Arguments& arguments, Updater& updater, Activity& activity,
         }
     }
 
+    bool drawing = false;
     const auto frame = [&] {
+        drawing = true;
         session.poll();
+        // A button pressed for the Gamepad page's capture must not also move or press in the window, held or let go.
+        if (view.pad_blocked()) io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableGamepad;
+        else io.ConfigFlags |= ImGuiConfigFlags_NavEnableGamepad;
         ImGui_ImplSDLRenderer3_NewFrame();
         ImGui_ImplSDL3_NewFrame();
+        // --virtual-pad: steps press a gamepad's buttons at ImGui's input, which the backend clears with no pad open.
+        if (arguments.virtual_pad) io.BackendFlags |= ImGuiBackendFlags_HasGamepad;
         ImGui::NewFrame();
         const bool leave = view.draw();
         ImGui::Render();
@@ -365,7 +463,110 @@ int run_window(const Arguments& arguments, Updater& updater, Activity& activity,
         SDL_SetRenderDrawColor(renderer, 11, 15, 12, 255);
         SDL_RenderClear(renderer);
         ImGui_ImplSDLRenderer3_RenderDrawData(ImGui::GetDrawData(), renderer);
+        drawing = false;
         return leave;
+    };
+
+    const auto save_picture = [&](const fs::path& path) {
+        SDL_Surface* pixels = SDL_RenderReadPixels(renderer, nullptr);
+        const std::u8string name = path.u8string();
+        const bool saved = pixels && SDL_SaveBMP(pixels, reinterpret_cast<const char*>(name.c_str()));
+        if (!saved) write_error(std::string("The picture was not saved: ") + SDL_GetError());
+        SDL_DestroySurface(pixels);
+        return saved;
+    };
+    // Where the keyboard and gamepad cursor is after a step: its window, place, whether it shows, the open popup, the view.
+    const auto note = [&](std::ofstream& log, std::string_view step) {
+        const ImGuiContext& g = *GImGui;
+        ImRect at;
+        if (g.NavWindow && g.NavId) at = ImGui::WindowRectRelToAbs(g.NavWindow, g.NavWindow->NavRectRel[g.NavLayer]);
+        const char* popup = g.OpenPopupStack.empty() || !g.OpenPopupStack.back().Window ? "-" : g.OpenPopupStack.back().Window->Name;
+        log << step << '\t' << (g.NavWindow ? g.NavWindow->Name : "-") << '\t' << static_cast<int>(at.Min.x) << ' '
+            << static_cast<int>(at.Min.y) << ' ' << static_cast<int>(at.GetWidth()) << ' ' << static_cast<int>(at.GetHeight()) << '\t'
+            << (g.NavCursorVisible ? "cursor" : "no-cursor") << '\t' << popup << '\t' << view.describe() << '\n';
+    };
+    // --input steps: a key ("Shift+Tab"), "Pad:A", "Hover:x,y", "Click:x,y", "Wheel:x,y,lines", "Sleep:ms" or "@name" for a picture on the way.
+    const auto drive = [&] {
+        std::ofstream log;
+        if (arguments.nav_log) log.open(*arguments.nav_log, std::ios::binary);
+        bool driven = true;
+        const auto number_after = [](std::string_view word, std::size_t from) {
+            float value = 0.0f;
+            std::from_chars(word.data() + from, word.data() + word.size(), value);
+            return value;
+        };
+        for (const std::string& step : arguments.input) {
+            const std::string_view word = step;
+            if (word.starts_with('@')) {
+                fs::path named = *arguments.screenshot;
+                named.replace_filename(from_utf8(utf8(named.stem()) + "-" + std::string(word.substr(1)) + ".bmp"));
+                driven = save_picture(named) && driven;
+                continue;
+            }
+            if (word.starts_with("Sleep:")) {
+                SDL_Delay(static_cast<Uint32>(number_after(word, 6)));
+                frame();
+            } else if (word.starts_with("Hover:") || word.starts_with("Click:") || word.starts_with("Wheel:")) {
+                const std::size_t comma = word.find(',');
+                io.AddMousePosEvent(number_after(word.substr(0, comma), 6), comma == std::string_view::npos ? 0.0f : number_after(word, comma + 1));
+                frame();
+                if (word.starts_with("Click:")) {
+                    io.AddMouseButtonEvent(ImGuiMouseButton_Left, true);
+                    frame();
+                    io.AddMouseButtonEvent(ImGuiMouseButton_Left, false);
+                    frame();
+                }
+                if (word.starts_with("Wheel:")) {
+                    io.AddMouseWheelEvent(0.0f, number_after(word, word.rfind(',') + 1));
+                    frame();
+                }
+                frame();
+            } else if (word.starts_with("Pad:")) {
+                const auto button = std::ranges::find(kNamedButtons, word.substr(4), &NamedButton::name);
+                if (!arguments.virtual_pad || button == std::end(kNamedButtons)) {
+                    write_error("No gamepad button named in the step " + step + ", or no --virtual-pad");
+                    driven = false;
+                    continue;
+                }
+                // As the main loop hands a capture a button's press before ImGui reads the pad.
+                if (view.listening_pad() && button->button != SDL_GAMEPAD_BUTTON_INVALID) view.take_pad_button(button->button);
+                io.AddKeyAnalogEvent(button->key, true, 1.0f);
+                frame();
+                io.AddKeyAnalogEvent(button->key, false, 0.0f);
+                frame();
+                frame();
+            } else {
+                std::string_view name = word;
+                ImGuiKeyChord held = ImGuiKey_None;
+                for (const auto& [prefix, modifier] : {std::pair{std::string_view("Ctrl+"), ImGuiMod_Ctrl}, std::pair{std::string_view("Shift+"), ImGuiMod_Shift}})
+                    if (name.starts_with(prefix)) {
+                        held |= modifier;
+                        name.remove_prefix(prefix.size());
+                    }
+                const auto key = named_key(name);
+                if (!key) {
+                    write_error("No key named in the step " + step);
+                    driven = false;
+                    continue;
+                }
+                if (view.listening()) {
+                    view.take_key(key->scancode);
+                    frame();
+                } else {
+                    for (const ImGuiKey modifier : {ImGuiMod_Ctrl, ImGuiMod_Shift})
+                        if (held & modifier) io.AddKeyEvent(modifier, true);
+                    io.AddKeyEvent(key->key, true);
+                    frame();
+                    io.AddKeyEvent(key->key, false);
+                    for (const ImGuiKey modifier : {ImGuiMod_Ctrl, ImGuiMod_Shift})
+                        if (held & modifier) io.AddKeyEvent(modifier, false);
+                    frame();
+                    frame();
+                }
+            }
+            if (log) note(log, step);
+        }
+        return driven;
     };
 
     int result = 0;
@@ -373,24 +574,37 @@ int run_window(const Arguments& arguments, Updater& updater, Activity& activity,
         result = 1;
         if (picture) {
             for (int i = 0; i < 4; ++i) frame();
-            SDL_Surface* pixels = SDL_RenderReadPixels(renderer, nullptr);
-            const std::u8string name = arguments.screenshot->u8string();
-            if (pixels && SDL_SaveBMP(pixels, reinterpret_cast<const char*>(name.c_str()))) result = 0;
-            else write_error(std::string("The picture was not saved: ") + SDL_GetError());
-            SDL_DestroySurface(pixels);
+            if (drive() && save_picture(*arguments.screenshot)) result = 0;
             SDL_SetRenderTarget(renderer, nullptr);
             SDL_DestroyTexture(picture);
         } else {
             write_error(std::string("There is no picture to draw into: ") + SDL_GetError());
         }
     } else {
+        // A drag of the window's edge keeps the loop inside Windows' own until the button is let go: draw from the event.
+        struct Live {
+            const decltype(frame)* draw;
+            const bool* drawing;
+            SDL_Window* window;
+            SDL_Renderer* renderer;
+        } live{&frame, &drawing, window, renderer};
+        const SDL_EventFilter redraw = [](void* data, SDL_Event* event) -> bool {
+            const Live& live = *static_cast<const Live*>(data);
+            const bool sized = event->type == SDL_EVENT_WINDOW_RESIZED || event->type == SDL_EVENT_WINDOW_EXPOSED;
+            if (sized && event->window.windowID == SDL_GetWindowID(live.window) && !*live.drawing) {
+                (*live.draw)();
+                SDL_RenderPresent(live.renderer);
+            }
+            return true;
+        };
+        SDL_AddEventWatch(redraw, &live);
         bool running = true;
         // Frames go on a while after the last event, so a tooltip shows at its own delay and not at the next 250 ms wake.
         constexpr Uint64 kLively = 700;
         Uint64 lively_until = SDL_GetTicks() + kLively;
         while (running) {
             SDL_Event event;
-            const bool working = session.busy() || updater.busy() || view.redraw();
+            const bool working = session.busy() || session.achievements().busy() || updater.busy() || view.redraw();
             if (SDL_WaitEventTimeout(&event, working || SDL_GetTicks() < lively_until ? 16 : 250)) {
                 do {
                     // Releases still reach ImGui, which saw the presses made before the key button listened.
@@ -421,8 +635,12 @@ int run_window(const Arguments& arguments, Updater& updater, Activity& activity,
                         view.dragging(false);
                     } else if (event.type == SDL_EVENT_DROP_FILE && event.drop.data) {
                         view.dropped(from_utf8(event.drop.data));
-                    } else if (event.type == SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED) {
+                    } else if (event.type == SDL_EVENT_GAMEPAD_ADDED || event.type == SDL_EVENT_GAMEPAD_REMOVED ||
+                               event.type == SDL_EVENT_WINDOW_FOCUS_GAINED || event.type == SDL_EVENT_WINDOW_FOCUS_LOST) {
+                        choose_nav_pad();
+                    } else if (event.type == SDL_EVENT_WINDOW_DISPLAY_SCALE_CHANGED || event.type == SDL_EVENT_WINDOW_DISPLAY_CHANGED) {
                         view.style(SDL_GetWindowDisplayScale(window));
+                        fit_minimum(SDL_GetWindowDisplayScale(window));
                     } else if (event.type == SDL_EVENT_WINDOW_MOVED || event.type == SDL_EVENT_WINDOW_RESIZED) {
                         note_normal();
                     }
@@ -436,7 +654,13 @@ int run_window(const Arguments& arguments, Updater& updater, Activity& activity,
             }
             if (frame()) running = false;
             SDL_RenderPresent(renderer);
+            // After the first frame is on screen: opening the gamepads made the start about 120 ms slower.
+            if (!std::exchange(gamepads_tried, true)) {
+                gamepads = SDL_InitSubSystem(SDL_INIT_GAMEPAD);
+                choose_nav_pad();
+            }
         }
+        SDL_RemoveEventWatch(redraw, &live);
     }
 
     if (!arguments.screenshot) {
@@ -451,6 +675,7 @@ int run_window(const Arguments& arguments, Updater& updater, Activity& activity,
     ImGui_ImplSDLRenderer3_Shutdown();
     ImGui_ImplSDL3_Shutdown();
     ImGui::DestroyContext();
+    if (nav_pad) SDL_CloseGamepad(nav_pad);
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     SDL_Quit();

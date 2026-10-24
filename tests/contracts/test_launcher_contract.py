@@ -74,8 +74,8 @@ ROW = r'\b(toggle|choice|slider)(?:<[^>]*>)?\(\s*"([\w.]+)", "([^"]+)", (-?\d+)'
 rows = re.findall(ROW, options)
 keys = [key for _, key, _, _ in rows]
 initial = {key: int(value) for _, key, _, value in rows}
-require(len(rows) == 39 and len(set(keys)) == 39, "the shared table must hold its 39 options, each key once")
-placed = re.findall(r'^    \{"([\w.]+)", Page::\w+(?:, (?:"[\w ]+"|nullptr)(?:, true)?)?\},$', table, re.MULTILINE)
+require(len(rows) == 61 and len(set(keys)) == 61, "the shared table must hold its 61 options, each key once")
+placed = re.findall(r'^    \{"([\w.]+)", Page::\w+(?:, (?:"[\w -]+"|nullptr)(?:, true)?)?\},$', table, re.MULTILINE)
 require(
     sorted(placed) == sorted(keys)
     and not re.findall(ROW, table)
@@ -293,24 +293,24 @@ require(
     and "        WriteFile(output.get(), launch.heading.data(), static_cast<DWORD>(launch.heading.size()), &written, nullptr);\n"
     in read("src/launcher/platform_windows.cpp")
     and "write(output, launch.heading.data(), launch.heading.size())" in read("src/launcher/platform_posix.cpp")
-    and '    if (small(icon::bug, "Report a problem", true, "Saves the game\'s logs, your settings and a note of the system for a bug report"))\n'
-    "        session_.make_problem_report();\n"
-    in window
     and "void Session::make_problem_report() {\n    try {\n"
     "        const Report report = make_report(data_, system_note(), report_stamp());\n"
     in window
-    and window.count("make_problem_report()") == 4
-    and '        if (button(icon::bug, "Report a problem")) session_.make_problem_report();\n' in window
+    and window.count("make_problem_report()") == 3
+    and '    if (button(icon::bug, "Report a problem", true) && !held_off("report")) session_.make_problem_report();\n'
+    in window
     and "editable"
     not in window[window.index("void Session::make_problem_report() {") : window.index("void Session::open_saves(")]
     and "BeginDisabled"
-    not in window[window.index("    const auto small = [&](") : window.index("    if (small(icon::bug,")].replace(
-        "ImGui::BeginDisabled(!enabled);", ""
-    )
-    and "        return clicked && enabled;\n"
-    in window[window.index("    const auto small = [&](") : window.index("    if (small(icon::bug,")],
+    not in window[
+        window.index("    const auto small = [&](") : window.index('    if (small(icon::folder_open, "Saves folder"')
+    ].replace("ImGui::BeginDisabled(!enabled);", "")
+    and "        return (clicked && enabled) || onward;\n"
+    in window[
+        window.index("    const auto small = [&](") : window.index('    if (small(icon::folder_open, "Saves folder"')
+    ],
     "the launcher keeps the log of the run before, heads a new log with the build and the system, and has a button that "
-    "makes a report at any time, an import or a running game included",
+    "makes a report at any time, an import or a running game included, on the Troubleshooting page",
 )
 require(
     '        std::printf("disruptor: mouse %s failed (%s): %s\\n", captured ? "capture" : "release", reason, SDL_GetError());\n'
@@ -328,8 +328,7 @@ require(
     and 'set_property(SOURCE report.cpp APPEND PROPERTY COMPILE_DEFINITIONS\n    "DISRUPTOR_BUILD_VERSION=\\"${DISRUPTOR_BUILD_VERSION}\\"")\n'
     in launcher_cmake
     and "    add_test(NAME disruptor_launcher_report COMMAND disruptor-launcher-report-test)\n" in launcher_cmake
-    and "Press **Report a problem** in the launcher, at the foot of its side bar or on its **Troubleshooting** page."
-    in playing
+    and "Press **Report a problem** on the launcher's **Troubleshooting** page." in playing
     and "your disc image, BIOS and saves are never included" in playing,
     "the report is built into the launcher with the build's version, its test is registered, and the guide tells a player "
     "of the button and of what it leaves out",

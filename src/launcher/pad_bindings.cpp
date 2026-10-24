@@ -58,6 +58,8 @@ std::string joined(const std::vector<std::string>& items) {
 
 void PadBindings::use_defaults() { std::copy(defaults.begin(), defaults.end(), sources_.begin()); }
 
+bool PadBindings::uses_defaults() const { return std::equal(sources_.begin(), sources_.end(), defaults.begin(), defaults.end()); }
+
 void PadBindings::load() {
     use_defaults();
     const auto lines = read_lines(file_);

@@ -17,6 +17,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <iostream>
 #include <optional>
 #include <sstream>
@@ -274,6 +275,23 @@ void one_instance(const fs::path& folder) {
     require(third.first(), "once the first is gone the folder is free again");
 }
 
+std::string contents(const fs::path& path) {
+    std::ifstream file(path, std::ios::binary);
+    return {std::istreambuf_iterator<char>(file), std::istreambuf_iterator<char>()};
+}
+
+void moving_new(const fs::path& folder) {
+    const fs::path from = folder / "settings.toml", taken = folder / "settings.unreadable.toml", free = folder / "settings.unreadable-2.toml";
+    std::ofstream(from, std::ios::binary) << "newest";
+    std::ofstream(taken, std::ios::binary) << "kept before";
+    require(platform::move_new(from, taken) == platform::Moved::taken && contents(from) == "newest" && contents(taken) == "kept before",
+            "a move onto a name that is taken replaces nothing and leaves both files as they were");
+    require(platform::move_new(from, free) == platform::Moved::done && !fs::exists(from) && contents(free) == "newest",
+            "a move onto a free name moves the file whole");
+    require(platform::move_new(folder / "missing.toml", folder / "other.toml") == platform::Moved::failed,
+            "a file that is not there is not moved and is no taken name");
+}
+
 } // namespace
 
 int main(int count, char** values) {
@@ -289,6 +307,7 @@ int main(int count, char** values) {
         refused_starts(folder);
         stopping(folder);
         one_instance(folder);
+        moving_new(folder);
     } catch (const std::exception& error) {
         std::cerr << "FAIL: " << error.what() << '\n';
         result = 1;

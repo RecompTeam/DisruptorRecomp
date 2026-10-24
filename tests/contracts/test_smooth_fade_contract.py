@@ -45,7 +45,8 @@ require(
     "and the palette's block of rows begins at the row a level's texture descriptor names, a palette no descriptor names keeps the game's row",
 )
 require(
-    '    "  if (!sample_texture(sample_uv, rgb, stp)) discard;\\n"\n'
+    '    "  int glyph = (v_raw & 2) == 0 && (u_twin.x | u_twin.y) == 0 ? v_raw >> 2 : 0;  /* a texture window samples past the limits */\\n"\n'
+    '    "  if (!sample_texture(sample_uv, rgb, stp) && (glyph == 0 || !glyph_edge(sample_uv, glyph, rgb, stp))) discard;\\n"\n'
     '    "  if (level >= 0.0 && int(level) < rows - 1) {\\n"\n'
     '    "    vec3 next; int next_stp; g_row += 1;\\n"\n'
     '    "    if (sample_texture(sample_uv, next, next_stp)) rgb = mix(rgb, next, fract(level));\\n"\n'

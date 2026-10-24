@@ -1,8 +1,8 @@
 diff --git a/runtime/src/gpu_gl_renderer.c b/runtime/src/gpu_gl_renderer.c
-index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..793f65edc4734c7475f3d72b9c0d2f4602308543 100644
+index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..418d935ab0f8164a9ed3ba8a5891fd8a190d6d41 100644
 --- a/runtime/src/gpu_gl_renderer.c
 +++ b/runtime/src/gpu_gl_renderer.c
-@@ -1,747 +1,1166 @@
+@@ -1,747 +1,1175 @@
 -/* gpu_gl_renderer.c — hardware OpenGL renderer backend.
 - *
 - * ARCHITECTURE (v2 — GPU-authoritative VRAM)
@@ -469,6 +469,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..793f65edc4734c7475f3d72b9c0d2f46
 +typedef void   (APIENTRY *PFN_glUniform2iv)(GLint, GLsizei, const GLint *);
 +typedef void   (APIENTRY *PFN_glUniform4i)(GLint, GLint, GLint, GLint, GLint);
 +typedef void   (APIENTRY *PFN_glUniform4f)(GLint, GLfloat, GLfloat, GLfloat, GLfloat);
++typedef void   (APIENTRY *PFN_glUniform4fv)(GLint, GLsizei, const GLfloat *);
 +typedef void   (APIENTRY *PFN_glBlendColor)(GLfloat, GLfloat, GLfloat, GLfloat);
 +typedef void   (APIENTRY *PFN_glBlendFuncSeparate)(GLenum, GLenum, GLenum, GLenum);
 +typedef void   (APIENTRY *PFN_glBlendEquationSeparate)(GLenum, GLenum);
@@ -539,6 +540,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..793f65edc4734c7475f3d72b9c0d2f46
 +static PFN_glUniform2iv        p_glUniform2iv;
 +static PFN_glUniform4i         p_glUniform4i;
 +static PFN_glUniform4f         p_glUniform4f;
++static PFN_glUniform4fv        p_glUniform4fv;
 +static PFN_glBlendColor        p_glBlendColor;
 +static PFN_glBlendFuncSeparate p_glBlendFuncSeparate;
 +static PFN_glBlendEquationSeparate p_glBlendEquationSeparate;
@@ -599,7 +601,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..793f65edc4734c7475f3d72b9c0d2f46
 +    LOAD(p_glGetUniformLocation, "glGetUniformLocation"); LOAD(p_glUniform1i, "glUniform1i");
 +    LOAD(p_glUniform1f, "glUniform1f");
 +    LOAD(p_glUniform2i, "glUniform2i"); LOAD(p_glUniform2iv, "glUniform2iv"); LOAD(p_glUniform4i, "glUniform4i");
-+    LOAD(p_glUniform4f, "glUniform4f");
++    LOAD(p_glUniform4f, "glUniform4f"); LOAD(p_glUniform4fv, "glUniform4fv");
 +    LOAD(p_glBlendColor, "glBlendColor");
 +    LOAD(p_glBlendFuncSeparate, "glBlendFuncSeparate");
 +    LOAD(p_glBlendEquationSeparate, "glBlendEquationSeparate");
@@ -1125,6 +1127,11 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..793f65edc4734c7475f3d72b9c0d2f46
 +static SDL_mutex    *s_interp_mutex = NULL;
 +static SDL_atomic_t  s_interp_thread_run;
 +static GLuint        s_interp_thread_vao = 0;
++/* UI that only shows, drawn on the main context into one layer while the presenter lays the other over its pictures. */
++static GLuint        s_layer_tex[2], s_layer_fbo[2], s_layer_prog = 0;
++static GLsync        s_layer_fence[2];
++static GLint         s_layer_uTex = -1, s_layer_uUvRect = -1;
++static int           s_layer_w = 0, s_layer_h = 0, s_layer_shown = -1, s_layer_next = 0, s_layer_failed = 0;
 +static void interp_reset_history_unlocked(void);
 +static void interp_reset_history(void);
 +static void interp_match_start(void);
@@ -1152,6 +1159,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..793f65edc4734c7475f3d72b9c0d2f46
 +#define temporal_invalidate_surface(...) ((void)0)
 +#define temporal_draw(...) ((void)0)
 +#define interp_capture(...) 0
++#define interp_layer_update(...) ((void)0)
 +#endif
 +
 +static int           s_raster_ok = 0;      /* full GPU pipeline available */
@@ -1858,8 +1866,9 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..793f65edc4734c7475f3d72b9c0d2f46
 +    "  if (dot(n, n) < 1e-12) return;\n"
 +    "  n = normalize(n); if (dot(n, p) > 0.0) n = -n;\n"
 +    "  float mark = texelFetch(u_tex, ivec2(v_uv*vec2(textureSize(u_tex, 0))), 0).a;\n"
-+    "  if (((mark > 0.2 && mark < 0.6) || (mark > 0.7 && mark < 0.8)) && u_span.z < 3.5) return;  /* a sprite stands in the floor it is drawn over, and under a blended fragment the depth is not its own */\n"
++    "  if (((mark > 0.2 && mark < 0.6) || (mark > 0.7 && mark < 0.8) || abs(mark - 0.95) < 0.02) && u_span.z < 3.5) return;  /* a sprite stands in the floor it is drawn over, under a blended fragment the depth is not its own, a flat picture has none */\n"
 +    "  if (u_span.z > 3.5) { frag = vec4(n*0.5 + 0.5, 1.0); return; }\n"
++    "  if (u_ao.y <= 0.0) return;\n"
 +    "  float reach = min(u_ao.x*u_proj.x/d, u_ao.z);\n"
 +    "  if (reach < u_ao.w) return;\n"
 +    "  float turn = 6.2831853*fract(52.9829189*fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));\n"
@@ -1901,7 +1910,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..793f65edc4734c7475f3d72b9c0d2f46
  static const char *INTERP_FS =
      "#version 330\n"
      "in vec2 v_uv; uniform sampler2D u_prev; uniform sampler2D u_curr;\n"
-@@ -757,2715 +1176,4808 @@
+@@ -757,2715 +1185,4950 @@
      "  }\n"
      "  frag=mix(prev,curr,alpha);\n"
      "}\n";
@@ -3771,7 +3780,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..793f65edc4734c7475f3d72b9c0d2f46
 +    "flat in ivec2 v_tpage;   /* texture page base, VRAM px */\n"
 +    "flat in ivec2 v_clut;    /* CLUT base, VRAM px */\n"
 +    "flat in int v_depth;     /* 0=4bit 1=8bit 2=15bit */\n"
-+    "flat in int v_raw;       /* bit 0: no color modulation, bit 1: a faded sprite, its share of the next row in 256ths above */\n"
++    "flat in int v_raw;       /* bit 0: no color modulation, bit 1: a faded sprite, its share of the next row in 256ths above; without it a shrunk line of text's psx_ws_hud_glyph_code */\n"
 +    "flat in ivec4 v_limits;  /* prim uv sampling bounds (inclusive, post-wrap) */\n"
 +    "flat in int v_semi;      /* GP0 command has semi-transparency enabled */\n"
 +    "uniform usampler2D u_vram;\n"
@@ -3851,6 +3860,22 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..793f65edc4734c7475f3d72b9c0d2f46
 +    "  }\n"
 +    "  return true;\n"
 +    "}\n"
++    "const vec2 kAround[8] = vec2[8](vec2(1.0, 0.0), vec2(-1.0, 0.0), vec2(0.0, 1.0), vec2(0.0, -1.0),\n"
++    "  vec2(0.7071, 0.7071), vec2(-0.7071, 0.7071), vec2(0.7071, -0.7071), vec2(-0.7071, -0.7071));\n"
++    "bool texel_in(vec2 at){\n"
++    "  ivec2 t = ivec2(floor(at));\n"
++    "  return t.x >= v_limits.x && t.x <= v_limits.z && t.y >= v_limits.y && t.y <= v_limits.w;\n"
++    "}\n"
++    "/* A clear texel of a shrunk line of text near a stroke: within the grow reach it takes the stroke, within the rim a dark\n"
++    " * edge. Both stay inside the rectangle, so a neighbour's letters are never covered. */\n"
++    "bool glyph_edge(vec2 at, int glyph, out vec3 rgb, out int stp){\n"
++    "  float grow = float(glyph & 255) / 64.0, rim = grow + float((glyph >> 8) & 255) / 64.0;\n"
++    "  if (grow > 0.0)\n"
++    "    for (int i = 0; i < 8; ++i) if (texel_in(at + kAround[i] * grow) && sample_texture(at + kAround[i] * grow, rgb, stp)) return true;\n"
++    "  if (rim > grow)\n"
++    "    for (int i = 0; i < 8; ++i) if (texel_in(at + kAround[i] * rim) && sample_texture(at + kAround[i] * rim, rgb, stp)) { rgb = vec3(0.0); return true; }\n"
++    "  return false;\n"
++    "}\n"
 +    "void main(){\n"
 +    "  vec2 sample_uv = v_uv;\n"
 +    "  if (v_perspective != 0 && v_uvq.z > 1.0e-12) sample_uv = v_uvq.xy/v_uvq.z;\n"
@@ -3866,7 +3891,8 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..793f65edc4734c7475f3d72b9c0d2f46
 +    "    if (u_dissolve.y > 0.5) dissolve = smoothstep(u_dissolve.x, u_dissolve.w, 1.0/(v_fade.x*u_fade_at.z));\n"
 +    "    g_row = first + int(level);\n"
 +    "  } else if ((v_raw & 2) != 0) level = float(v_raw >> 2)/256.0;  /* a sprite the game faded: its row, and the share of the next */\n"
-+    "  if (!sample_texture(sample_uv, rgb, stp)) discard;\n"
++    "  int glyph = (v_raw & 2) == 0 && (u_twin.x | u_twin.y) == 0 ? v_raw >> 2 : 0;  /* a texture window samples past the limits */\n"
++    "  if (!sample_texture(sample_uv, rgb, stp) && (glyph == 0 || !glyph_edge(sample_uv, glyph, rgb, stp))) discard;\n"
 +    "  if (level >= 0.0 && int(level) < rows - 1) {\n"
 +    "    vec3 next; int next_stp; g_row += 1;\n"
 +    "    if (sample_texture(sample_uv, next, next_stp)) rgb = mix(rgb, next, fract(level));\n"
@@ -5182,7 +5208,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..793f65edc4734c7475f3d72b9c0d2f46
 +    const float whole_q[3] = {pq[0], pq[1], pq[2]};
 +    turned_perspective(px, pq, visual_flags);
 +    const int packet_fade = gpu_current_packet_fade();
-+    const int packet_raw = packet_fade >= 0 ? 2 | (packet_fade << 2) : 0;
++    const int packet_raw = packet_fade >= 0 ? 2 | (packet_fade << 2) : gpu_current_hud_glyph() << 2;
 +    int lim_buf[4];
 +    int uv_buf[6];
 +    int plain_lim[4], marked_lim = 0;
@@ -6618,6 +6644,11 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..793f65edc4734c7475f3d72b9c0d2f46
 -    upload_present_tex(pixels, src_w, src_h, linear);
 -    p_glUseProgram(s_present_prog); p_glUniform1i(s_present_uTex, 0);
 -    if (crop) {
++            s_layer_prog = build_program(PRESENT_VS, PRESENT_FS);
++            if (s_layer_prog) {
++                s_layer_uTex = p_glGetUniformLocation(s_layer_prog, "u_tex");
++                s_layer_uUvRect = p_glGetUniformLocation(s_layer_prog, "u_uv_rect");
++            }
 +            glGenTextures(3, s_interp_tex);
 +            for (int i = 0; i < 3; i++) {
 +                glBindTexture(GL_TEXTURE_2D, s_interp_tex[i]);
@@ -6657,7 +6688,10 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..793f65edc4734c7475f3d72b9c0d2f46
 +    apply_swap_interval();
 +}
 +
++static void ddgi_level_stop(void);
++
 +void gl_renderer_shutdown(void) {
++    ddgi_level_stop();
 +#ifndef PSX_DISABLE_FRAME_INTERPOLATION
 +    if (s_interp_thread) {
 +        SDL_AtomicSet(&s_interp_thread_run, 0);
@@ -6681,6 +6715,15 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..793f65edc4734c7475f3d72b9c0d2f46
 +                s_interp_fence[i] = NULL;
 +            }
 +        }
++        for (int i = 0; i < 2; i++) {
++            if (s_layer_fence[i]) p_glDeleteSync(s_layer_fence[i]);
++            s_layer_fence[i] = NULL;
++            delete_scale_target(&s_layer_fbo[i], &s_layer_tex[i], NULL);
++        }
++        s_layer_prog = 0;
++        s_layer_w = s_layer_h = 0;
++        s_layer_shown = -1;
++        s_layer_failed = 0;
 +        ensure_cpu();
 +        temporal_release();
 +        SDL_GL_DeleteContext(s_ctx); s_ctx = NULL;
@@ -7719,6 +7762,33 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..793f65edc4734c7475f3d72b9c0d2f46
 +    s_cw_wide_ms += cw_ms() - t0;
 +}
 +
++/* The game copied a whole frame buffer onto another: video memory has the picture, the wide surface gets it too, or the rows
++ * keep what was drawn there before the copy (Abort mission draws a torn-down world, then copies the paused frame over it).
++ * Mask bits and depth go with the colour. Under a mask test or a forced mask bit video memory's rows are not the source's:
++ * left alone. */
++static void glb_wide_copy_frame(int src_base_x, int src_y, int dst_base_x, int dst_y, int h) {
++    if (!s_raster_ok || g_wide_w <= 0 || s_mask_check || s_mask_set || h <= 0 || src_y < 0 || dst_y < 0 ||
++        src_y + h > VRAM_H || dst_y + h > VRAM_H)
++        return;
++    flush_flat_batch();
++    flush_tex_batch();
++    GLuint from = 0;
++    for (int i = 0; i < WIDE_MAX_SURF; i++)
++        if (s_wide_fbo[i] && s_wide_base[i] == src_base_x) from = s_wide_fbo[i];
++    const GLuint to = from ? wide_fbo_for(dst_base_x) : 0;
++    if (!from || !to || (from == to && src_y < dst_y + h && dst_y < src_y + h)) return;
++    temporal_invalidate_surface(to);
++    const GLuint target = wide_drawn(to);  /* first: making a twin binds framebuffers of its own */
++    wide_resolved(from, src_y, h);
++    const int w = g_wide_w * s_scale;
++    p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, from);
++    p_glBindFramebuffer(PSXGL_DRAW_FRAMEBUFFER, target);
++    glDisable(GL_SCISSOR_TEST);
++    p_glBlitFramebuffer(0, src_y * s_scale, w, (src_y + h) * s_scale, 0, dst_y * s_scale, w, (dst_y + h) * s_scale,
++                        GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST);
++    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, 0);
++}
++
 +/* Clear only the two synthetic reveal strips, preserving the centred canonical
 + * framebuffer. This is an opt-in transition cleanup driven by gpu.c. */
 +static void glb_wide_clear_margins(int base_x, int y, int h, uint16_t color, int sides) {
@@ -8196,6 +8266,8 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..793f65edc4734c7475f3d72b9c0d2f46
 +    p_glUseProgram(0);
 +}
 +
++#include "gpu_gl_ddgi.c.inc"
++
 +/* What the shading draws through. Frame buffer objects belong to one GL context: the frame loop's and the in-between presenter's. */
 +typedef struct {
 +    GLuint depth_fbo, depth, shade_fbo, shade;
@@ -8281,12 +8353,16 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..793f65edc4734c7475f3d72b9c0d2f46
 +    p_glUniform4f(s_ssao_uUvRect, u0, v0, u1, v1);
 +    p_glUniform4f(s_ssao_uTexel, 1.0f / (float)w, 1.0f / (float)h, (float)s_ssao, 0.0f);
 +    p_glUniform4f(s_ssao_uProj, focal_x, focal_y, (u0 + u1) * 0.5f * (float)w, (v0 + v1) * 0.5f * (float)h);
-+    p_glUniform4f(s_ssao_uAo, s_ssao_radius, s_ssao_strength, 24.0f * (float)scale, (float)scale);
++    p_glUniform4f(s_ssao_uAo, s_ssao_radius, s_ssao_on || s_ssao_view ? s_ssao_strength : 0.0f, 24.0f * (float)scale, (float)scale);
 +    p_glUniform4f(s_ssao_uFade, s_ssao_fade_from, s_ssao_fade_to, s_ssao_tilt, 0.0f);
 +    p_glBindVertexArray(vao);
 +    glDrawArrays(GL_TRIANGLES, 0, 3);
 +
 +    const int thread = t == &s_ssao_thread;
++    ddgi_screen_measure(thread, color, depth, focal_x, focal_y, (u0 + u1) * 0.5f * (float)w, (v0 + v1) * 0.5f * (float)h, w, h,
++                        scale, u0, v0, u1, v1);
++    ddgi_lamp_pass(thread, color, depth, focal_x, focal_y, (u0 + u1) * 0.5f * (float)w, (v0 + v1) * 0.5f * (float)h, w, h, scale,
++                   u0, v0, u1, v1);
 +    const int grown = aa_begin(thread, (int)((v1 - v0) * (float)h + 0.5f), 1, lx, ly, lw, lh);
 +    p_glActiveTexture(PSXGL_TEXTURE0 + 1);
 +    glBindTexture(GL_TEXTURE_2D, t->shade);
@@ -8294,11 +8370,14 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..793f65edc4734c7475f3d72b9c0d2f46
 +    glBindTexture(GL_TEXTURE_2D, color);
 +    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, linear ? GL_LINEAR : GL_NEAREST);
 +    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, linear ? GL_LINEAR : GL_NEAREST);
-+    p_glUseProgram(s_ssao_mix_prog);
-+    p_glUniform1i(s_ssao_mix_uTex, 0);
-+    p_glUniform1i(s_ssao_mix_uShade, 1);
-+    p_glUniform4f(s_ssao_mix_uUvRect, u0, v0, u1, v1);
-+    p_glUniform4f(s_ssao_mix_uSpan, grown ? 0.0f : (float)lx, grown ? 0.0f : (float)ly, (float)s_ssao, (float)grown);
++    if (!ddgi_mix_begin(thread, color, depth, focal_x, focal_y, (u0 + u1) * 0.5f * (float)w, (v0 + v1) * 0.5f * (float)h, w, h, scale, u0, v0, u1,
++                        v1, grown ? 0.0f : (float)lx, grown ? 0.0f : (float)ly, (float)s_ssao, (float)grown)) {
++        p_glUseProgram(s_ssao_mix_prog);
++        p_glUniform1i(s_ssao_mix_uTex, 0);
++        p_glUniform1i(s_ssao_mix_uShade, 1);
++        p_glUniform4f(s_ssao_mix_uUvRect, u0, v0, u1, v1);
++        p_glUniform4f(s_ssao_mix_uSpan, grown ? 0.0f : (float)lx, grown ? 0.0f : (float)ly, (float)s_ssao, (float)grown);
++    }
 +    glDrawArrays(GL_TRIANGLES, 0, 3);
 +    p_glBindVertexArray(0);
 +    p_glUseProgram(0);
@@ -8411,6 +8490,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..793f65edc4734c7475f3d72b9c0d2f46
 +static void interp_reset_history_unlocked(void) {
 +    temporal_reset();
 +    s_interp_valid = 0;
++    s_layer_shown = -1;
 +    s_interp_w = s_interp_h = 0;
 +    s_interp_start = s_interp_last_capture = 0;
 +    s_interp_duration = 1;
@@ -8863,6 +8943,53 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..793f65edc4734c7475f3d72b9c0d2f46
 +    SDL_UnlockMutex(s_match_mutex);
 +}
 +
++/* After a capture: draws UI that only shows into the layer not shown and shows it, or shows none. The presenter's last
++ * draw may still sample the layer drawn into, so this context waits for it first. */
++static void interp_layer_update(int ww, int wh) {
++    const int drawn = !s_layer_failed && ww > 0 && wh > 0 && psx_host_ui_gl_visible() &&
++                      psx_host_ui_in_layer(psx_host_ui_capture_flags());
++    if (!drawn && s_layer_shown < 0) return;
++    if (drawn && !s_layer_prog) s_layer_failed = 1;
++    const int resized = ww != s_layer_w || wh != s_layer_h;
++    SDL_LockMutex(s_interp_mutex);
++    if (s_interp_draw_fence) p_glWaitSync(s_interp_draw_fence, 0, PSXGL_TIMEOUT_IGNORED);
++    if (!drawn || resized) s_layer_shown = -1;
++    SDL_UnlockMutex(s_interp_mutex);
++    if (!drawn) return;
++    if (resized) {
++        s_layer_w = s_layer_h = 0;
++        for (int i = 0; i < 2; i++) {
++            delete_scale_target(&s_layer_fbo[i], &s_layer_tex[i], NULL);
++            s_layer_tex[i] = make_tex(GL_RGBA8, ww, wh, GL_RGBA, GL_UNSIGNED_BYTE);
++            if (!make_fbo(&s_layer_fbo[i], s_layer_tex[i], 0)) {
++                s_layer_failed = 1;
++                return;
++            }
++        }
++        s_layer_w = ww;
++        s_layer_h = wh;
++    }
++    const int i = s_layer_next;
++    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, s_layer_fbo[i]);
++    glDisable(GL_SCISSOR_TEST);
++    glViewport(0, 0, ww, wh);
++    glClearColor(0.f, 0.f, 0.f, 0.f);
++    glClear(GL_COLOR_BUFFER_BIT);
++    render_host_ui_for_swap(ww, wh);
++    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, 0);  /* the helper binds nothing when the UI went away since `drawn` */
++    glViewport(0, 0, ww, wh);
++    if (s_layer_fence[i]) p_glDeleteSync(s_layer_fence[i]);
++    s_layer_fence[i] = p_glFenceSync(PSXGL_SYNC_GPU_COMMANDS_COMPLETE, 0);
++    glFlush();
++    SDL_LockMutex(s_interp_mutex);
++    s_layer_shown = i;
++    SDL_UnlockMutex(s_interp_mutex);
++    s_layer_next = 1 - i;
++}
++
++/* A layer that could not be made: the UI it would hold stops the interpolation instead (main.cpp). */
++int gl_renderer_host_ui_layer_failed(void) { return s_layer_failed; }
++
 +/* Copy a stable display image out of the mutable VRAM/wide render target.
 + * Returns true once both previous and current images are available. */
 +static int interp_capture(GLuint fbo, int x, int y, int w, int h,
@@ -8990,6 +9117,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..793f65edc4734c7475f3d72b9c0d2f46
 +    if (s_interp_blend_mode == 2 && alpha >= 1.0f && s_interp_depth[curr] &&
 +        s_interp_depth_w == s_interp_w && s_interp_depth_h == s_interp_h) {
 +        const float ix = 0.5f * s_interp_scale / s_interp_w, iy = 0.5f * s_interp_scale / s_interp_h;
++        ddgi_present_between(&s_temp_curr.ddgi, &s_temp_curr.ddgi, 1.0f);
 +        if (ssao_draw(&s_ssao_thread, s_interp_thread_vao, 0, s_interp_depth[curr], s_interp_tex[curr], s_interp_w, s_interp_h,
 +                      ix, iy, 1 - ix, 1 - iy, s_interp_scale, s_interp_linear, lx, ly, lw, lh))
 +            return alpha;
@@ -9324,6 +9452,28 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..793f65edc4734c7475f3d72b9c0d2f46
 +    if (--s_shown_left == 0) shown_write();
 +}
 +
++/* On the presenter, under its lock: the shown layer over the picture. ImGui's blending leaves its colours premultiplied. */
++static void interp_layer_draw(int ww, int wh) {
++    const int i = s_layer_shown;
++    if (i < 0 || !s_layer_tex[i]) return;
++    if (s_layer_fence[i]) p_glWaitSync(s_layer_fence[i], 0, PSXGL_TIMEOUT_IGNORED);
++    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, 0);
++    glDisable(GL_SCISSOR_TEST);
++    glViewport(0, 0, ww, wh);
++    glEnable(GL_BLEND);
++    glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
++    p_glActiveTexture(PSXGL_TEXTURE0);
++    glBindTexture(GL_TEXTURE_2D, s_layer_tex[i]);
++    p_glUseProgram(s_layer_prog);
++    p_glUniform1i(s_layer_uTex, 0);
++    p_glUniform4f(s_layer_uUvRect, 0.f, 1.f, 1.f, 0.f);
++    p_glBindVertexArray(s_interp_thread_vao);
++    glDrawArrays(GL_TRIANGLES, 0, 3);
++    p_glBindVertexArray(0);
++    p_glUseProgram(0);
++    glDisable(GL_BLEND);
++}
++
 +static int interp_present(void) {
 +    if (!s_ctx || !s_interp_enabled || s_interp_suspended || s_interp_valid < 2) return 0;
 +    uint64_t now = SDL_GetPerformanceCounter();
@@ -9349,6 +9499,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..793f65edc4734c7475f3d72b9c0d2f46
 +        glClear(GL_COLOR_BUFFER_BIT);
 +    }
 +    const float shown = interp_draw_quad((float)a, lx, ly, lw, lh);
++    interp_layer_draw(ww, wh);
 +    if (s_interp_draw_fence) p_glDeleteSync(s_interp_draw_fence);
 +    s_interp_draw_fence = p_glFenceSync(PSXGL_SYNC_GPU_COMMANDS_COMPLETE, 0);
 +    glFlush();
@@ -9391,7 +9542,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..793f65edc4734c7475f3d72b9c0d2f46
      uint64_t freq = SDL_GetPerformanceFrequency();
      uint64_t deadline = SDL_GetPerformanceCounter();
      uint64_t diag_start = deadline, diag_swaps = 0, diag_captures = 0;
-@@ -3473,11 +5985,12 @@
+@@ -3473,11 +6136,12 @@
      while (SDL_AtomicGet(&s_interp_thread_run)) {
          SDL_LockMutex(s_interp_mutex);
          double hz = s_interp_target_hz;
@@ -9405,7 +9556,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..793f65edc4734c7475f3d72b9c0d2f46
              uint64_t period = (uint64_t)((double)freq / hz);
              if (!period) period = 1;
              deadline += period;
-@@ -3492,235 +6005,427 @@
+@@ -3492,235 +6156,433 @@
              }
              while (SDL_GetPerformanceCounter() < deadline) {}
              now = SDL_GetPerformanceCounter();
@@ -9727,6 +9878,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..793f65edc4734c7475f3d72b9c0d2f46
 +void gl_renderer_set_interpolation_suspended(int suspended) { (void)suspended; }
 +void gl_renderer_set_hidden_rows(int rows) { (void)rows; }
 +void gl_renderer_set_host_ui_suspended(int suspended) { (void)suspended; }
++int gl_renderer_host_ui_layer_failed(void) { return 0; }
 +void gl_renderer_interpolation_diag(int *enabled, int *suspended,
 +                                    int *history_frames, double *host_hz,
 +                                    double *target_hz, uint64_t *swaps) {
@@ -9783,6 +9935,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..793f65edc4734c7475f3d72b9c0d2f46
 +        return;
 +    }
 +    gl_perf_present_enter();   /* per-frame backdrop-phase reset + dbg snapshot live in here */
++    ddgi_update(s_hr_tex, (float)VRAM_W, (float)VRAM_H, (float)disp_x + (float)w * 0.5f, (float)disp_y + (float)h * 0.5f);
 +    int ww = 0, wh = 0; gl_visible_size(&ww, &wh);
 +    int lx, ly, lw, lh;
 +    if (force_4_3)
@@ -9802,6 +9955,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..793f65edc4734c7475f3d72b9c0d2f46
 +    int interp_pair = interp_capture(s_hr_fbo, disp_x, disp_y, w, h,
 +                                     linear, force_4_3, GL_PRES_VRAM);
 +    if (interp_pair) {
++        interp_layer_update(ww, wh);
 +        gl_perf_present_exit(0);
 +        present_dirty_rect(disp_x, disp_y, disp_x + w - 1, disp_y + h - 1, 0);
 +        present_force_consumed();
@@ -9904,7 +10058,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..793f65edc4734c7475f3d72b9c0d2f46
 +int gl_renderer_world_depth(void) { return s_world_depth; }
 +
 +static void ssao_mode(void) {
-+    const int mode = s_uv_view ? 0 : s_ssao_view ? s_ssao_view + 1 : s_ssao_on;
++    const int mode = s_uv_view ? 0 : s_ssao_view ? s_ssao_view + 1 : (s_ssao_on || s_ddgi_light || s_ddgi_shadows || s_ddgi_lamps || ddgi_sun_active());
 +    if (mode && !s_ssao) memset(s_wide_depth_shown, 0xFF, sizeof s_wide_depth_shown);
 +    s_ssao = mode;
 +}
@@ -9958,6 +10112,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..793f65edc4734c7475f3d72b9c0d2f46
 +        return 1;
 +    }
 +    gl_perf_present_enter();
++    ddgi_update(tex, (float)g_wide_w, (float)VRAM_H, (float)g_wide_w * 0.5f, (float)disp_y + (float)disp_h * 0.5f);
 +    int ww = 0, wh = 0; gl_visible_size(&ww, &wh);
 +    int lx, ly, lw, lh;
 +    letterbox_rect(ww, wh, &lx, &ly, &lw, &lh);
@@ -9979,6 +10134,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..793f65edc4734c7475f3d72b9c0d2f46
 +    int interp_pair = interp_capture(fbo, 0, disp_y, g_wide_w, disp_h,
 +                                     linear, 0, GL_PRES_WIDE);
 +    if (interp_pair) {
++        interp_layer_update(ww, wh);
 +        gl_perf_present_exit(1);
 +        present_dirty_rect(0, disp_y, VRAM_W - 1, disp_y + disp_h - 1, 0);
 +        present_force_consumed();
@@ -10047,6 +10203,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..793f65edc4734c7475f3d72b9c0d2f46
 +    .wide_disable_target = glb_wide_disable_target,
 +    .wide_clear = glb_wide_clear,
 +    .wide_clear_margins = glb_wide_clear_margins,
++    .wide_copy_frame = glb_wide_copy_frame,
 +    .render_wide_display = glb_render_wide_display,
 +    .wide_dump_full = glb_wide_dump_full,
 +};
