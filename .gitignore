@@ -7,6 +7,7 @@
 /saves/
 /cache/
 /capture_history/
+/output/environment-textures/
 
 # User-owned game data
 /input/*
