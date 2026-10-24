@@ -108,7 +108,7 @@ private:
 };
 
 bool live() {
-#ifdef _WIN32
+#ifdef _MSC_VER
     char* value = nullptr;
     std::size_t length = 0;
     const bool set = _dupenv_s(&value, &length, "DISRUPTOR_ACHIEVEMENTS_LIVE") == 0 && value != nullptr;
@@ -464,7 +464,7 @@ private:
 };
 
 std::string environment(const char* name) {
-#ifdef _WIN32
+#ifdef _MSC_VER
     char* value = nullptr;
     std::size_t length = 0;
     std::string text;
