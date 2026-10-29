@@ -16,6 +16,8 @@ int disruptor_language_words(const char *text, char *words, uint32_t size);
 void disruptor_language_set_disc(const char *path);
 /* The strings of the language disc laid over the game disc, once it is. */
 int disruptor_language_disc_pack(const uint8_t **data, uint32_t *size);
+/* That disc's language in English, as a launcher lists it: empty while none is laid over. */
+const char *disruptor_language_disc_name(void);
 /* Whether that disc's hints are twice as tall as the US ones. */
 int disruptor_language_disc_tall_hints(void);
 /* Lays the named language disc over the disc in the drive now and not at the drive's first read: its save states have a folder of their own. */

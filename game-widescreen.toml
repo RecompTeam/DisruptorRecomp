@@ -15,7 +15,7 @@ out_dir = "generated"
 out_stem = "SLUS_002.24.code"
 strict = true
 discovery = "whole-image"
-mod_function_entry_funcs = ["0x80011888", "0x80011944", "0x80013544", "0x8001A46C", "0x8001C484", "0x80020DD8", "0x80032514", "0x80039450", "0x8003B78C", "0x8003FE6C", "0x80040E68", "0x800427D0", "0x800429DC", "0x80044A10", "0x80044BDC", "0x80046134", "0x8004B3D4", "0x8004D348", "0x8004D410", "0x8004D684"]
+mod_function_entry_funcs = ["0x80011888", "0x80011944", "0x80013544", "0x8001A46C", "0x8001C044", "0x8001C484", "0x80020DD8", "0x80032514", "0x80039450", "0x8003B78C", "0x8003FE6C", "0x80040E68", "0x800427D0", "0x800429DC", "0x80044A10", "0x80044BDC", "0x80046134", "0x8004B3D4", "0x8004D348", "0x8004D410", "0x8004D684"]
 
 [[recompiler.patch]]
 id = "disruptor-gameplay-frame-floor"
@@ -30,6 +30,26 @@ id = "disruptor-streamed-read-served"
 address = "0x8001199C"
 expected = "0xA2000000"
 replacement = "0x17200014"
+
+# EXIT under CREDITS on the main menu (src/game/session/main_menu_exit.cpp): the handler draws a ninth item, and its
+# cursor wraps past it. slti v0,s0,8, ori v0,zero,7 and slti v0,v0,8 count 9 items.
+[[recompiler.patch]]
+id = "disruptor-main-menu-items"
+address = "0x8001C178"
+expected = "0x2A020008"
+replacement = "0x2A020009"
+
+[[recompiler.patch]]
+id = "disruptor-main-menu-up-wrap"
+address = "0x8001C1A4"
+expected = "0x34020007"
+replacement = "0x34020008"
+
+[[recompiler.patch]]
+id = "disruptor-main-menu-down-wrap"
+address = "0x8001C1D0"
+expected = "0x28420008"
+replacement = "0x28420009"
 
 # Calls made after an instruction of the game that ran from RAM. A site is an address and the whole
 # instruction word expected there. Native code gets the same calls from the generator's own lists, which

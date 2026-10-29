@@ -108,6 +108,8 @@ extern "C" void disruptor_language_settle(void) {
     if (void *game = iso_game_disc(); game && !g_path.empty()) (void)laid_out(game);
 }
 
+extern "C" const char *disruptor_language_disc_name(void) { return g_state == State::kOn ? g_disc.language() : ""; }
+
 extern "C" int disruptor_language_disc_tall_hints(void) { return g_state == State::kOn && g_disc.tall_hints() ? 1 : 0; }
 
 extern "C" int disruptor_language_disc_sound_start(uint32_t movie) {

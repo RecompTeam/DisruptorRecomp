@@ -61,6 +61,7 @@ set(DISRUPTOR_EXTRA_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings/game_mark.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/intro_skip.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/streamed_reads.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/main_menu_exit.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/language.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/language_briefing.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/language_disc.cpp"
@@ -286,6 +287,7 @@ if(BUILD_TESTING)
     disruptor_contract(sprite_range RETAIL)
     disruptor_contract(intro_skip RETAIL)
     disruptor_contract(language RETAIL)
+    disruptor_contract(main_menu_exit RETAIL)
     disruptor_contract(language_disc RETAIL)
     disruptor_contract(frame_rate RETAIL)
     disruptor_contract(widescreen_cull RETAIL)
@@ -413,6 +415,17 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
     disruptor_unit_test(disruptor_far_rendering tests/unit/disruptor_far_rendering_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_sector_reach tests/unit/disruptor_sector_reach_test.cpp INCLUDES src)
     disruptor_unit_test(disruptor_streamed_reads tests/unit/disruptor_streamed_reads_test.cpp INCLUDES src)
+    disruptor_unit_test(disruptor_main_menu_exit tests/unit/disruptor_main_menu_exit_test.cpp INCLUDES src)
+    disruptor_unit_test(disruptor_main_menu_exit_hooks tests/unit/disruptor_main_menu_exit_hooks_test.cpp
+        SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/main_menu_exit.cpp"
+        INCLUDES tests/support/stubs src "${PSXRECOMP_ROOT}/runtime/include"
+        DEFINITIONS PSX_SDL3=1)
+    set_tests_properties(disruptor_main_menu_exit_hooks PROPERTIES
+        ENVIRONMENT_MODIFICATION "PSX_DISRUPTOR_CAPSULE_REPLAY=unset:")
+    add_test(NAME disruptor_main_menu_exit_hooks_replay
+        COMMAND disruptor-main-menu-exit-hooks-test --replay)
+    set_tests_properties(disruptor_main_menu_exit_hooks_replay PROPERTIES
+        ENVIRONMENT "PSX_DISRUPTOR_CAPSULE_REPLAY=capsule")
     disruptor_unit_test(disruptor_render_arena tests/unit/disruptor_render_arena_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_name_entry tests/unit/disruptor_name_entry_test.cpp RUNTIME_HEADERS)
 disruptor_unit_test(disruptor_baton_choice tests/unit/disruptor_baton_choice_test.cpp RUNTIME_HEADERS)
