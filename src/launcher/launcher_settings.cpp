@@ -40,7 +40,6 @@ constexpr Placement placed[] = {
     {"disruptor.occlusion_strength", Page::enhancements, nullptr, true},
     {"disruptor.movie_filter", Page::enhancements, "Movies"},
     {"disruptor.skip_intro", Page::enhancements, "Startup"},
-    {"disruptor.fast_disc_reads", Page::enhancements, "Loading"},
     {"disruptor.modern_controls", Page::controls, "Scheme"},
     {"disruptor.number_keys", Page::controls, "Weapons and psionics"},
     {"disruptor.psionic_keys_use", Page::controls, nullptr, true},
@@ -258,7 +257,7 @@ bool SettingsFile::reset(Page page) {
 
 bool experimental(const Option& option) {
     const std::string_view key = option.key;
-    return key == "disruptor.vertical_look" || key == "disruptor.selection_wheels" || key == "disruptor.fast_disc_reads";
+    return key == "disruptor.vertical_look" || key == "disruptor.selection_wheels";
 }
 
 std::vector<std::string> SettingsFile::language_discs() const {

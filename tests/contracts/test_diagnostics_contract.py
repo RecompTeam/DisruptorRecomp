@@ -139,7 +139,7 @@ require(
 require(
     '        std::printf("disruptor: first frame %.1f s after the start\\n", seconds);\n' in module
     and "    if (!session.detailed) {\n        session.announced = false;\n        return;\n    }\n" in module
-    and 'void say(const std::string& text) { std::printf("disruptor: +%.1fs %s\\n", g_session.now, text.c_str()); }\n'
+    and 'void say(const std::string& text) {\n    std::printf("disruptor: +%.1fs %s\\n", g_session.now, text.c_str());\n    std::fflush(stdout);\n}\n'
     in module
     and "void disruptor_diagnostics_note(const char *format, ...) {\n    if (!g_session.detailed) return;\n" in module
     and "    for (int taken = 0; taken < driver_messages_a_frame; ++taken) {\n" in module

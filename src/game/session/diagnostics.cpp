@@ -77,7 +77,10 @@ SoundSetup sound_setup(const Sound& sound) {
 Session g_session;
 const std::chrono::steady_clock::time_point g_began = std::chrono::steady_clock::now();
 
-void say(const std::string& text) { std::printf("disruptor: +%.1fs %s\n", g_session.now, text.c_str()); }
+void say(const std::string& text) {
+    std::printf("disruptor: +%.1fs %s\n", g_session.now, text.c_str());
+    std::fflush(stdout);
+}
 
 const char* device_name(int index) {
 #if defined(PSX_SDL3)

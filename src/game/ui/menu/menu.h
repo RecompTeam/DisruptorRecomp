@@ -32,7 +32,6 @@
 #include "game/settings/pad_layout.h"
 #include "game/settings/options.h"
 #include "game/ui/hint.h"
-#include "cdrom.h"
 #include "config_loader.h"
 #include "gpu.h"
 #include "gpu_ddgi.h"

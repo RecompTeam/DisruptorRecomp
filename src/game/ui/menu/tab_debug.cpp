@@ -7,14 +7,20 @@ constexpr const char *driver_words[] = {"off", "on", "from the next launch", "no
 #if DISRUPTOR_DEV_TOOLS
 void draw_mission_select() {
     static int mission = DISRUPTOR_FIRST_MISSION;
+    static int hard = 0;
     ImGui::TextUnformatted("Start a mission");
     draw_status_badge("DEV BUILD", ImVec4(1.0f, 0.73f, 0.25f, 1.0f));
     ImGui::SetNextItemWidth(160.0f);
     ImGui::SliderInt("##mission", &mission, DISRUPTOR_FIRST_MISSION, DISRUPTOR_LAST_MISSION, "Mission %d");
     ImGui::SameLine();
+    ImGui::SetNextItemWidth(100.0f);
+    ImGui::Combo("##difficulty", &hard, "Regular\0Hard\0");
+    ImGui::SameLine();
     const bool ready = disruptor_mission_select_ready() != 0;
     if (!ready) ImGui::BeginDisabled();
-    if (ImGui::Button("Start") && disruptor_mission_select_start(mission)) set_menu_open(false);
+    if (ImGui::Button("Start") &&
+        disruptor_mission_select_start(mission, hard ? DISRUPTOR_DIFFICULTY_HARD : DISRUPTOR_DIFFICULTY_REGULAR))
+        set_menu_open(false);
     if (!ready) ImGui::EndDisabled();
     ImGui::TextDisabled("Works from the game's main menu\nStarts as the mission's password would\nNo carried weapons or flags");
 }

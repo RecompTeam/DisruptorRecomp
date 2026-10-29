@@ -26,6 +26,7 @@ NOT_OFFERED = {
     # Withdrawn for now on the user's word: the game keeps both off whatever the file says.
     "disruptor.downscale_averaging",
     "disruptor.edge_smoothing",
+    "disruptor.fast_disc_reads",
     # game.toml routes Player 1 to the keyboard and the first gamepad together, and locks the pad mode.
     "controller.p1_device",
     "controller.p2_device",
@@ -81,7 +82,7 @@ ROW = r'\b(toggle|choice|slider)(?:<[^>]*>)?\(\s*"([\w.]+)", "([^"]+)", (-?\d+)'
 rows = re.findall(ROW, options)
 keys = [key for _, key, _, _ in rows]
 initial = {key: int(value) for _, key, _, value in rows}
-require(len(rows) == 66 and len(set(keys)) == 66, "the shared table must hold its 66 options, each key once")
+require(len(rows) == 65 and len(set(keys)) == 65, "the shared table must hold its 65 options, each key once")
 placed = re.findall(r'^    \{"([\w.]+)", Page::\w+(?:, (?:"[\w -]+"|nullptr)(?:, true)?)?\},$', table, re.MULTILINE)
 require(
     sorted(placed) == sorted(keys)

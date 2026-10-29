@@ -347,7 +347,7 @@ void placements() {
     std::vector<std::string> enhancements;
     for (const auto& row : rows)
         if (row.page == Page::enhancements) enhancements.emplace_back(row.key);
-    require(enhancements.size() == 17 && enhancements.front() == "disruptor.frame_unlock" && rows[5].group &&
+    require(enhancements.size() == 16 && enhancements.front() == "disruptor.frame_unlock" && rows[5].group &&
                 std::string_view(rows[5].key) == "disruptor.frame_unlock",
             "Enhancements opens with its frame rate group, 60 FPS gameplay first");
 }

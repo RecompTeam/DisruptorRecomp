@@ -175,13 +175,6 @@ constexpr Option toggle(const char* key, const char* label, int initial, const c
     return {key, Kind::toggle, label, saved, get, set, initial, 0, 1, {}, needs, Unit::none, hint};
 }
 
-/* A switch held off: shown, greyed, its notice saying why. */
-constexpr Option locked(Option option, const char* notice) {
-    option.highest = 0;
-    option.notice = notice;
-    return option;
-}
-
 constexpr Option choice(const char* key, const char* label, int initial, const char* hint,
                         std::span<const char* const> choices, Saved saved, Get get, Set set,
                         std::span<const char* const> needs = {}, int offered = 0, const char* notice = nullptr) {
@@ -263,10 +256,6 @@ constexpr Option option_list[] = {
     toggle<&Settings::has_skip_intro, &Settings::skip_intro>(
         "disruptor.skip_intro", "Skip the logos and the title movie", 0,
         "Escape skips a logo or a movie either way"),
-    locked(toggle<&Settings::has_fast_disc_reads, &Settings::fast_disc_reads>(
-               "disruptor.fast_disc_reads", "Fast disc reads", 0,
-               "The drive hands over data as fast as the game takes it\nLevels load sooner\nMovies and music keep their own speed"),
-           "Comes in a later release"),
 
     toggle<&Settings::has_mouse_aim, &Settings::mouse_aim>(
         "disruptor.mouse_aim", "Horizontal mouse aim", 1,
