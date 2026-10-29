@@ -2,6 +2,7 @@
 """Source/codegen contract for Disruptor's experimental far rendering."""
 
 import re
+import struct
 import sys
 from pathlib import Path
 
@@ -84,6 +85,11 @@ diagnostic_sites = {
 expected_sites = {
     **distance_sites,
     **diagnostic_sites,
+    0x80046C18: 0x3021003F,  # the mesh renderer's shared-sides drop test
+    0x8004791C: 0xACAD0004,  # the near split's middle point
+    0x80047AD0: 0xAF290030,  # the near split's quarters' texture words
+    0x80047B90: 0xAF290030,
+    0x80047D18: 0xAF290030,
     0x8004279C: 0x8FBF016C,
 }
 excluded_sites = {
@@ -257,7 +263,7 @@ require(
 )
 require(
     "        (psx_mod_widescreen_x_margin() == 0 && !disruptor_far_rendering_edge_margin() &&\n"
-    "         disruptor_far_rendering_get_preset() == DISRUPTOR_FAR_RENDERING_RETAIL)) {\n"
+    "         disruptor_far_rendering_get_preset() == DISRUPTOR_FAR_RENDERING_RETAIL && !disruptor_far_rendering_portal_reach())) {\n"
     in arena
     and "    disruptor_far_rendering_drawn_distances(&far_distance, &fade_start);\n" in arena
     and "kFadeStart" not in arena
@@ -281,15 +287,27 @@ require(
 
 writes = re.findall(r"psx_mod_write_word\(([^,]+),", source)
 require(
-    sorted(writes) == ["kFadeStart", "kFadeStart", "kFarDistance", "kFarDistance"]
-    and body(source, "void restore_distances").count("psx_mod_read_word(") == 2,
-    "far rendering writes only the two distance globals, and reads each before giving it back (the behaviour is the unit test's)",
+    sorted(writes) == ["address"] * 4 + ["kFadeStart", "kFadeStart", "kFarDistance", "kFarDistance", "kVisibleEnd"]
+    and body(source, "void restore_distances").count("psx_mod_read_word(") == 2
+    and body(source, "void close_spans").count("psx_mod_write_word(") == 1
+    and body(source, "void show_objects").count("psx_mod_write_word(") == 1
+    and body(source, "void open_spans").count("psx_mod_write_word(") == 1
+    and body(source, "void keep_game_rooms").count("psx_mod_write_word(") == 2,
+    "far rendering writes only the two distance globals, the visible list and the object lists of rooms only the wider "
+    "walk reached, and reads each before giving it back (the behaviour is the unit test's)",
+)
+require(
+    re.findall(r"psx_mod_write_(?:byte|half)\(", source) == ["psx_mod_write_byte("] * 2
+    and body(source, "void relist_room").count("psx_mod_write_byte(") == 1
+    and body(source, "void face_portal").count("psx_mod_write_byte(") == 1,
+    "the only byte far rendering writes is a room's place in the visible list, and it gives that back",
 )
 host = read("src/game/host.cpp")
 require(
     "    disruptor_far_rendering_state_saving();" in body(host, "void psx_game_state_saving")
     and "disruptor_far_rendering_abandon_metrics();" in body(host, "void psx_game_state_loaded")
     and "    restore_distances();" in body(source, 'extern "C" void disruptor_far_rendering_state_saving')
+    and "    show_objects();" in body(source, 'extern "C" void disruptor_far_rendering_state_saving')
     and "    g_written = WrittenDistances{};\n"
     in body(source, 'extern "C" void disruptor_far_rendering_abandon_metrics'),
     "a savestate never holds the written distances, and a loaded one is left as it holds them",
@@ -366,4 +384,56 @@ require(
     "under the smooth fade the meshes and rooms are kept a margin past the far plane seen, objects stop at it, never in a "
     "network game or the comparator",
 )
+reach_header = read("src/game/render/portal_reach.h")
+gpu = read("psxrecomp/runtime/src/gpu.c")
+sector_entry = body(source, 'extern "C" void disruptor_far_rendering_sector_entry')
+require(
+    "constexpr uint32_t kDrawSector = 0x80046134u;" in source
+    and '"disruptor.far_rendering.sector_edges", kDrawSector,\n            disruptor_far_rendering_sector_entry)'
+    in source
+    and "!gpu_geometry_correction_enabled()) return;" in sector_entry
+    and "cpu->read_word(span + 12u), right = cpu->read_word(span + 16u);" in sector_entry
+    and "inline constexpr int32_t kTurnGuard = 8;" in reach_header
+    and "return left == 0u ? static_cast<uint32_t>(-kTurnGuard) : left;" in reach_header
+    and "return right == kFrameEdge ? kFrameEdge + static_cast<uint32_t>(kTurnGuard) : right;" in reach_header
+    and "0x80046134" in configs[configs.index("mod_function_entry_funcs") :].split("\n", 1)[0],
+    "with geometry correction a sector span ending at the frame's edge reaches past it by the turn guard at the mesh "
+    "renderer's entry, so the game keeps what a part-step turn brings into view",
+)
+require(
+    sector_entry.index("disruptor::misplaced_riser::fixed_parts(guest, cpu->gpr[4]);")
+    < sector_entry.index("    if (!gpu_geometry_correction_enabled()) return;\n")
+    and '#include "game/render/misplaced_riser.h"' in source
+    and "disruptor_unit_test(disruptor_misplaced_riser tests/unit/disruptor_misplaced_riser_test.cpp INCLUDES src)"
+    in read("CMakeLists.txt"),
+    "the staircase's misplaced riser is moved at every room's mesh, whatever the picture settings, before the span guard "
+    "that only geometry correction asks for",
+)
+require(
+    "#define WS_TURN_GUARD_PIXELS 8\n" in gpu
+    and "    if (!ws_is_fb_base(draw_area_left)) return 0;\n"
+    "    if (ws_native_wide_active()) return (int32_t)ws_nw_offset();\n"
+    "    return ws_geometry_correction ? WS_TURN_GUARD_PIXELS : 0;\n"
+    in gpu,
+    "with geometry correction a primitive just past the frame's edge reaches the renderer, which can turn it into view",
+)
+image_path = ROOT / "input" / "SLUS_002.24.code"
+if image_path.exists():
+    image = image_path.read_bytes()
+    retail = {
+        0x8004617C: 0x8CA8000C,  # lw t0,12(a1): the span's left
+        0x80046180: 0x8CA90010,  # lw t1,16(a1): its right
+        0x80046268: 0x8CF6004C,  # lw s6,76(a3)
+        0x8004626C: 0x8CF70050,  # lw s7,80(a3)
+        0x80046390: 0x01767822,  # sub t7,t3,s6: signed against the left
+        0x8004639C: 0x01777822,  # sub t7,t3,s7: signed against the right
+        0x80046C1C: 0x1C20FFDE,  # a polygon whose outcodes share a side is dropped
+        0x8003A434: 0xAFA0002C,  # the walk's own call passes 0 ..
+        0x8003A430: 0x34020140,  # .. and 320
+        0x80041178: 0x96220002,  # the visible loop's left is unsigned: no negative span from the list
+    }
+    for address, instruction in retail.items():
+        found = struct.unpack_from("<I", image, 0x800 + address - 0x80011200)[0]
+        require(found == instruction, f"retail mesh renderer word changed at 0x{address:08X}")
+
 print("far rendering source/codegen contract: PASS")

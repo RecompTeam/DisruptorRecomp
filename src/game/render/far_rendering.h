@@ -163,12 +163,15 @@ int disruptor_far_rendering_packet_fraction(uint32_t resolved_packet, uint32_t s
 /* Nonzero when the frame's fog shaped the fade of the list body in `packet`: `rows` from range `from` to `to` by that fog. */
 int disruptor_far_rendering_list_fade_rows(uint32_t packet, int32_t from, int32_t to, int32_t *rows);
 
-/* Nonzero inside a frame drawn at the preset's distances: a savestate waits for its epilogue. */
+/* Nonzero inside a frame drawn at the preset's distances or with the rooms' spans opened: a savestate waits for its epilogue. */
 int disruptor_far_rendering_save_deferred(void);
+/* Nonzero unless PSX_DISRUPTOR_PORTAL_REACH=0: rooms seen beside their portals are drawn, the arena must hold them. */
+int disruptor_far_rendering_portal_reach(void);
 
 /* Version-pinned runtime seams for SLUS-00224. */
 void disruptor_far_rendering_renderer_entry(struct CPUState *cpu,
                                             uint32_t address);
+void disruptor_far_rendering_sector_entry(struct CPUState *cpu, uint32_t address);
 void disruptor_far_rendering_instruction_hook(
     struct CPUState *cpu, uint32_t pc, uint32_t instruction, int phase);
 

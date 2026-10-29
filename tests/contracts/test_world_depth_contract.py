@@ -66,9 +66,9 @@ require(
     "        if (s_tb_n > 0 && world != s_tb_world) flush_tex_batch();\n"
     in renderer
     and "            s_tb_world = world;\n" in renderer
-    and "static float s_world_margin = 0.03f;\n" in renderer
+    and "static float s_world_margin = 0.003f;\n" in renderer
     and "static int   s_world_depth = 0;\n" in renderer,
-    "a triangle's class comes from the header, is a key of the batch, and the setting starts off with a margin of 3 percent",
+    "a triangle's class comes from the header, is a key of the batch, and the setting starts off with a margin of 0.3 percent",
 )
 
 by_depth = between(renderer, "static void tex_batch_by_depth(int nverts, int semi) {", "\n}\n")

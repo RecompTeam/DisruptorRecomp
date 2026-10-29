@@ -139,6 +139,14 @@ sites = [
     ["0x800410E0", "0x93830310"],
     ["0x800410F8", "0x8F820680"],
     ["0x800411D8", "0x8F8301D4"],
+    # Mesh renderer: a face with a corner it marked is tested on that corner's real sides.
+    ["0x80046C18", "0x3021003F"],
+    # Mesh renderer: the split's middle point on the diagonal the whole polygon's triangles share.
+    ["0x8004791C", "0xACAD0004"],
+    # Mesh renderer: the split quarters' texture words meet at texel 16.
+    ["0x80047AD0", "0xAF290030"],
+    ["0x80047B90", "0xAF290030"],
+    ["0x80047D18", "0xAF290030"],
     # Common renderer epilogue.
     ["0x8004279C", "0x8FBF016C"],
 ]

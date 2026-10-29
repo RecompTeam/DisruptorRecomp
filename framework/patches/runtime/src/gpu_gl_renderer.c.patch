@@ -1,5 +1,5 @@
 diff --git a/runtime/src/gpu_gl_renderer.c b/runtime/src/gpu_gl_renderer.c
-index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..95427b1461ab7db16f00c809484537f52cbe3633 100644
+index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b49f3be684021180889cc2f393e28b086c457fb9 100644
 --- a/runtime/src/gpu_gl_renderer.c
 +++ b/runtime/src/gpu_gl_renderer.c
 @@ -1,747 +1,1417 @@
@@ -1610,7 +1610,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..95427b1461ab7db16f00c809484537f5
 + * another by more is not drawn over it. Measured between a coarse wall quad and the pieces the game draws over it: up to
 + * 0.1 percent. The in-between presenter gives a departed face the same clearance (TEMP_ORDER_CLEARANCE). */
 +static int   s_world_depth = 0;
-+static float s_world_margin = 0.03f;
++static float s_world_margin = 0.003f;
 +static int   s_tb_world = 0;     /* the open batch holds only such polygons */
 +static int   s_draw_world = 0;   /* the batch being recorded for the in-between presenter is such a batch */
 +static GLint s_tex_uPull = -1;

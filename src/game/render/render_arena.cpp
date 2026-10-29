@@ -48,6 +48,7 @@ constexpr uint32_t kDescriptorCount = 0x800717B4u;  /* gp+0x668, set at 0x80015B
 constexpr uint32_t kMostDescriptors = 1024u;        /* the mesh renderer's index (0x80046D14) reaches no further */
 constexpr int kFadeBlocks = 64;
 uint32_t g_arena_base = 0;
+bool g_relocated = false;  /* the frame entered last draws into the moved arena */
 
 /* The first rows of the level's palettes: the renderer adds the fade level to them (0x80046D44), the smooth fade starts
  * there. Two blocks of one column closer than twelve rows, or more blocks than the renderer holds, leave the game's rows. */
@@ -103,10 +104,15 @@ extern "C" void disruptor_render_arena_publish_fades(void) {
     gl_renderer_set_edge_sky(disruptor_backdrop_tiles_sky_behind(psx_mod_read_word(kVBlanks)));
 }
 
+/* Read by far_rendering.cpp: it opens the rooms' spans only into the moved arena. */
+extern "C" int disruptor_render_arena_relocated(void) { return g_relocated ? 1 : 0; }
+
 namespace {
 
 void renderer_entry(CPUState *cpu, uint32_t address) {
-    if (!cpu || address != kRendererEntry || !psx_mod_game_started()) return;
+    if (!cpu || address != kRendererEntry) return;
+    g_relocated = false;
+    if (!psx_mod_game_started()) return;
     const bool map = psx_mod_read_byte(kScreen) == kMapScreen;
     gpu_ws_tell_frame_kind(map);  /* before the margin below is read */
     disruptor_render_arena_publish_fades();
@@ -134,7 +140,7 @@ void renderer_entry(CPUState *cpu, uint32_t address) {
 
     if (g_ls_mode || g_ls_replay_active || psx_netplay_active() || map ||
         (psx_mod_widescreen_x_margin() == 0 && !disruptor_far_rendering_edge_margin() &&
-         disruptor_far_rendering_get_preset() == DISRUPTOR_FAR_RENDERING_RETAIL)) {
+         disruptor_far_rendering_get_preset() == DISRUPTOR_FAR_RENDERING_RETAIL && !disruptor_far_rendering_portal_reach())) {
         if ((current == relocated || current == earlier) && relocated)
             psx_mod_write_word(root_address, original);
         return;
@@ -144,6 +150,7 @@ void renderer_entry(CPUState *cpu, uint32_t address) {
         if (!g_arena_base) return;
     }
     const uint32_t destination = g_arena_base + kArenaOffsets[index];
+    g_relocated = true;
     if (current == destination) return;
 
     /* Preserve any retail packet templates on activation or a level reset.

@@ -57,9 +57,17 @@ extern "C" {
 int g_ls_replay_active = 0;
 int g_ls_mode = 0;
 
+PSXModFunctionEntryCallback g_sector_callback = nullptr;
+std::uint32_t g_sector_address = 0u;
+
 int psx_mod_register_function_entry_plugin(
         const char *id, std::uint32_t address,
         PSXModFunctionEntryCallback callback) {
+    if (id && std::string(id) == "disruptor.far_rendering.sector_edges" && address && callback && !g_sector_callback) {
+        g_sector_address = address;
+        g_sector_callback = callback;
+        return 1;
+    }
     if (!id || std::string(id) != "disruptor.far_rendering.renderer" ||
         address == 0u || !callback || g_renderer_callback) {
         return 0;
@@ -114,12 +122,17 @@ void psx_mod_write_word(std::uint32_t address, std::uint32_t value) {
 
 namespace {
 int g_smooth_fade = 0;
+int g_arena_relocated = 0;
 int g_published = 0;
 std::uint32_t g_published_far = 0u;
 std::int32_t g_published_fade = 0;
 }  // namespace
 
 extern "C" int gl_renderer_smooth_fade(void) { return g_smooth_fade; }
+int g_geometry_correction = 1;
+extern "C" int gpu_geometry_correction_enabled(void) { return g_geometry_correction; }
+extern "C" int psx_ws_project_x(int x) { return x; }
+extern "C" int disruptor_render_arena_relocated(void) { return g_arena_relocated; }
 
 extern "C" void disruptor_render_arena_publish_fades(void) {
     ++g_published;
@@ -202,6 +215,7 @@ void reset_state() {
     g_ls_replay_active = 0;
     g_writes.clear();
     g_smooth_fade = 0;
+    g_arena_relocated = 0;
 }
 
 void seed_live_game(CPUState *cpu, std::uint32_t far_distance = 1024u,
@@ -1211,6 +1225,311 @@ void test_far_plane_kept_inside_the_ordering_table() {
     exit_renderer(&cpu);
 }
 
+void walk_with(CPUState *cpu, std::int32_t left_x, std::int32_t left_z, std::int32_t right_x, std::int32_t right_z) {
+    cpu->gpr[31] = 0x800410E0u;
+    cpu->gpr[19] = 0u;
+    cpu->gpr[4] = static_cast<std::uint32_t>(left_x);
+    cpu->gpr[5] = static_cast<std::uint32_t>(left_z);
+    cpu->gpr[6] = static_cast<std::uint32_t>(right_x);
+    cpu->gpr[7] = static_cast<std::uint32_t>(right_z);
+    hook_after(cpu, kTraversalDepthLoad, kTraversalDepthLoadOpcode);
+}
+
+void reach_visible_loop(CPUState *cpu, std::uint32_t rooms) {
+    cpu->gpr[4] = kRendererContext;
+    hook_after(cpu, kAfterTraversal, kAfterTraversalOpcode);
+    cpu->gpr[2] = kReviewedVisibleSpanBase + rooms * kVisibleSpanStride;
+    hook_after(cpu, kBeforeVisibleLoop, kBeforeVisibleLoopOpcode);
+}
+
+void test_rooms_reach_past_their_portals() {
+    reset_state();
+    CPUState cpu{};
+    seed_live_game(&cpu);
+    constexpr std::uint32_t kNarrow = (100u << 16) | 200u, kWhole = 320u, kPast = 0xDEADBEEFu;
+    seed_word(kReviewedVisibleSpanBase, kNarrow);
+    seed_word(kReviewedVisibleSpanBase + kVisibleSpanStride, kWhole);
+    seed_word(kReviewedVisibleSpanBase + 2u * kVisibleSpanStride, kPast);
+
+    enter(&cpu);
+    walk_with(&cpu, -1448, 1448, 1448, 1448);
+    expect(cpu.gpr[4] == static_cast<std::uint32_t>(-1448), "into the retail arena the walk is the game's");
+    reach_visible_loop(&cpu, 2u);
+    expect(load_word(kReviewedVisibleSpanBase) == kNarrow, "and so are the spans");
+    exit_renderer(&cpu);
+
+    g_arena_relocated = 1;
+    enter(&cpu);
+    reach_visible_loop(&cpu, 2u);
+    expect(load_word(kReviewedVisibleSpanBase) == kWhole && load_word(kReviewedVisibleSpanBase + kVisibleSpanStride) == kWhole,
+           "the visible loop draws every listed room over the whole screen");
+    expect(load_word(kReviewedVisibleSpanBase + 2u * kVisibleSpanStride) == kPast, "the word past the list is not touched");
+    expect(disruptor_far_rendering_save_deferred() == 1, "a save waits while the spans are open");
+    exit_renderer(&cpu);
+    expect(load_word(kReviewedVisibleSpanBase) == kNarrow && disruptor_far_rendering_save_deferred() == 0,
+           "the epilogue puts the spans back and lets a save through");
+
+    enter(&cpu);
+    walk_with(&cpu, -1448, 1448, 1448, 1448);
+    const disruptor::portal_reach::Wedge turned{{static_cast<std::int32_t>(cpu.gpr[4]), static_cast<std::int32_t>(cpu.gpr[5])},
+                                                {static_cast<std::int32_t>(cpu.gpr[6]), static_cast<std::int32_t>(cpu.gpr[7])}};
+    expect(turned.left.x < -1448 && turned.right.x > 1448 && turned.left.z < 1448 && turned.right.z < 1448,
+           "both of the walk's rays turn outward");
+    expect(disruptor_far_rendering_save_deferred() == 1, "from the first turned ray a save waits for the frame's end");
+    reach_visible_loop(&cpu, 1u);
+    disruptor_far_rendering_state_saving();
+    expect(load_word(kReviewedVisibleSpanBase) == kNarrow, "a save taken inside the frame anyway finds the game's spans");
+    exit_renderer(&cpu);
+    expect(load_word(kReviewedVisibleSpanBase) == kNarrow, "and the epilogue has nothing left to put back");
+
+    enter(&cpu);
+    reach_visible_loop(&cpu, 1u);
+    seed_word(kReviewedVisibleSpanBase, kWhole);
+    disruptor_far_rendering_abandon_metrics();
+    exit_renderer(&cpu);
+    expect(load_word(kReviewedVisibleSpanBase) == kWhole, "after a state load the loaded list is not overwritten");
+
+    seed_word(kReviewedVisibleSpanBase, kNarrow);
+    enter(&cpu);
+    reach_visible_loop(&cpu, 1u);
+    enter(&cpu);
+    expect(load_word(kReviewedVisibleSpanBase) == kNarrow, "a frame abandoned by a nested entry puts the spans back");
+    exit_renderer(&cpu);
+
+    enter(&cpu);
+    cpu.gpr[2] = kReviewedVisibleSpanBase + kVisibleSpanStride;
+    hook_after(&cpu, kBeforeVisibleLoop, kBeforeVisibleLoopOpcode);
+    expect(load_word(kReviewedVisibleSpanBase) == kNarrow, "a visible loop the traversal's end did not precede opens nothing");
+    exit_renderer(&cpu);
+
+    g_netplay = true;
+    enter(&cpu);
+    walk_with(&cpu, -1448, 1448, 1448, 1448);
+    expect(cpu.gpr[4] == static_cast<std::uint32_t>(-1448), "netplay walks the game's way");
+    reach_visible_loop(&cpu, 1u);
+    expect(load_word(kReviewedVisibleSpanBase) == kNarrow, "and draws the game's way");
+    exit_renderer(&cpu);
+    g_netplay = false;
+
+    for (const auto& [address, value] : g_writes)
+        expect(address == kFarDistance || address == kFadeStart ||
+                   (address >= kReviewedVisibleSpanBase && address < kReviewedVisibleSpanBase + 2u * kVisibleSpanStride),
+               "the reach writes nothing but the listed spans");
+}
+
+using disruptor::portal_reach::Wedge;
+constexpr Wedge kScreenWedge{{-1448, 1448}, {1448, 1448}};
+constexpr Wedge kInnerWedge{{-500, 1448}, {500, 1448}};
+constexpr Wedge kMarginWedge{{1500, 1448}, {1726, 1448}};
+constexpr std::uint32_t kPortals = 0x80050000u, kSectorData = 0x80060000u;
+
+void seed_room(std::uint32_t room, bool loaded) {
+    const std::uint32_t sector = kSectorData + 0x100u * room;
+    seed_word(disruptor::sector_reach::kSectors + 4u * room, loaded ? sector : 0u);
+    seed_byte(sector + disruptor::portal_reach::kSectorDoor, 0xFFu);
+    seed_byte(sector + disruptor::portal_reach::kSectorCompanions, 0xFFu);
+    seed_byte(kPortals + 16u * room + disruptor::sector_reach::kPortalSector, static_cast<std::uint8_t>(room));
+}
+
+std::uint32_t portal_of(std::uint32_t room) { return kPortals + 16u * room; }
+
+void walk_into(CPUState *cpu, std::uint32_t depth, std::uint32_t portal, const Wedge &wedge) {
+    seed_word(cpu->gpr[29] + disruptor::sector_reach::kPortalOnStack, portal);
+    cpu->gpr[19] = depth;
+    cpu->gpr[31] = depth == 0u ? 0x800410E0u : 0x8003AE54u;
+    cpu->gpr[4] = static_cast<std::uint32_t>(wedge.left.x);
+    cpu->gpr[5] = static_cast<std::uint32_t>(wedge.left.z);
+    cpu->gpr[6] = static_cast<std::uint32_t>(wedge.right.x);
+    cpu->gpr[7] = static_cast<std::uint32_t>(wedge.right.z);
+    hook_after(cpu, kTraversalDepthLoad, kTraversalDepthLoadOpcode);
+}
+
+void test_rooms_only_the_wider_walk_reaches() {
+    reset_state();
+    CPUState cpu{};
+    seed_live_game(&cpu);
+    g_arena_relocated = 1;
+    seed_word(disruptor::portal_reach::kCosines, 256u);
+    for (std::uint32_t room = 1u; room <= 3u; ++room) seed_room(room, true);
+    constexpr std::uint32_t kListed[] = {1u, 3u, 2u};
+    for (std::uint32_t index = 0; index < 3u; ++index) {
+        seed_word(kReviewedVisibleSpanBase + kVisibleSpanStride * index, (10u * index << 16) | (200u + index));
+        seed_word(kReviewedVisibleSpanBase + kVisibleSpanStride * index + 4u, 0x7700u | kListed[index]);
+    }
+    seed_word(kVisibleEnd, kReviewedVisibleSpanBase + 3u * kVisibleSpanStride);
+    const std::uint32_t far_head = disruptor::portal_reach::kObjectTables[2] + 4u * 3u;
+    const std::uint32_t sector_head = kSectorData + 0x300u + disruptor::portal_reach::kSectorObjects;
+    const std::uint32_t near_head = disruptor::portal_reach::kObjectTables[2] + 4u * 2u;
+    seed_word(far_head, 0x80081000u);
+    seed_word(sector_head, 0x80082000u);
+    seed_word(near_head, 0x80083000u);
+
+    const auto walk = [&cpu] {
+        walk_into(&cpu, 0u, portal_of(1u), kScreenWedge);
+        walk_into(&cpu, 1u, portal_of(3u), kMarginWedge);
+        walk_into(&cpu, 1u, portal_of(2u), kInnerWedge);
+    };
+    enter(&cpu);
+    walk();
+    reach_visible_loop(&cpu, 3u);
+    expect(load_word(far_head) == 0u && load_word(sector_head) == 0u && load_word(near_head) == 0x80083000u,
+           "the room only the wider walk reached draws none of its objects, the others draw theirs");
+    hook_after(&cpu, kAfterVisibleLoop, kAfterVisibleLoopOpcode);
+    expect(load_word(far_head) == 0x80081000u && load_word(sector_head) == 0x80082000u, "after the visible loop its lists are back");
+    expect(load_word(kVisibleEnd) == kReviewedVisibleSpanBase + 2u * kVisibleSpanStride &&
+               load_word(kReviewedVisibleSpanBase + 4u) == 0x7701u &&
+               load_word(kReviewedVisibleSpanBase + kVisibleSpanStride + 4u) == 0x7702u,
+           "and the list the game reads afterwards holds the rooms of its own walk");
+    expect(load_word(kReviewedVisibleSpanBase) == 200u && load_word(kReviewedVisibleSpanBase + kVisibleSpanStride) == ((20u << 16) | 202u),
+           "each with the span the walk gave it");
+    exit_renderer(&cpu);
+    expect(load_word(kVisibleEnd) == kReviewedVisibleSpanBase + 2u * kVisibleSpanStride && disruptor_far_rendering_save_deferred() == 0,
+           "the epilogue leaves the game's list as it is");
+
+    seed_word(kVisibleEnd, kReviewedVisibleSpanBase + 3u * kVisibleSpanStride);
+    for (std::uint32_t index = 0; index < 3u; ++index)
+        seed_word(kReviewedVisibleSpanBase + kVisibleSpanStride * index + 4u, 0x7700u | kListed[index]);
+    enter(&cpu);
+    walk();
+    reach_visible_loop(&cpu, 3u);
+    disruptor_far_rendering_state_saving();
+    expect(load_word(far_head) == 0x80081000u, "a save inside the visible loop finds every list");
+    exit_renderer(&cpu);
+
+    enter(&cpu);
+    walk();
+    reach_visible_loop(&cpu, 3u);
+    enter(&cpu);
+    expect(load_word(far_head) == 0x80081000u, "a frame abandoned by a nested entry gives the lists back");
+    exit_renderer(&cpu);
+
+    enter(&cpu);
+    walk();
+    reach_visible_loop(&cpu, 3u);
+    exit_renderer(&cpu);
+    expect(load_word(far_head) == 0x80081000u, "an epilogue without the loop's end gives them back too");
+
+    enter(&cpu);
+    reach_visible_loop(&cpu, 3u);
+    expect(load_word(far_head) == 0x80081000u, "a frame without a walk of its own hides nothing");
+    exit_renderer(&cpu);
+
+    enter(&cpu);
+    walk();
+    reach_visible_loop(&cpu, 3u);
+    disruptor_far_rendering_abandon_metrics();
+    exit_renderer(&cpu);
+    expect(load_word(far_head) == 0u, "after a state load the loaded lists are not overwritten");
+    seed_word(far_head, 0x80081000u);
+
+    enter(&cpu);
+    walk_into(&cpu, 0u, portal_of(1u), kScreenWedge);
+    walk_into(&cpu, 1u, 0u, kInnerWedge);
+    reach_visible_loop(&cpu, 3u);
+    expect(load_word(far_head) == 0x80081000u, "a room the walk enters unread hides nothing");
+    exit_renderer(&cpu);
+
+    seed_room(4u, false);
+    seed_room(5u, false);
+    enter(&cpu);
+    walk_into(&cpu, 0u, portal_of(1u), kScreenWedge);
+    walk_into(&cpu, 1u, portal_of(4u), kMarginWedge);
+    expect(cpu.gpr[19] == disruptor::sector_reach::kDepthCap && cpu.gpr[4] == static_cast<std::uint32_t>(kMarginWedge.left.x),
+           "the wider walk turns back at once from a room out of memory the game's walk does not enter");
+    walk_into(&cpu, 1u, portal_of(5u), kInnerWedge);
+    expect(cpu.gpr[19] == 1u, "one the game's walk enters asks for its area as it does");
+    exit_renderer(&cpu);
+}
+
+void face(CPUState *cpu, std::uint32_t gate) {
+    cpu->gpr[18] = gate;
+    hook_after(cpu, kPortalFirstCandidate, kPortalFirstCandidateOpcode);
+}
+
+void test_portals_seen_edge_on() {
+    reset_state();
+    CPUState cpu{};
+    seed_live_game(&cpu);
+    g_arena_relocated = 1;
+    seed_word(disruptor::portal_reach::kCosines, 256u);
+    for (std::uint32_t room = 1u; room <= 3u; ++room) seed_room(room, true);
+    const std::uint32_t edge_on = portal_of(20u), slanted = portal_of(21u), back_home = portal_of(22u);
+    const auto seed_portal = [](std::uint32_t gate, std::uint32_t room, std::uint16_t second_z) {
+        seed_word(gate, 100u);
+        seed_word(gate + 4u, 200u | static_cast<std::uint32_t>(second_z) << 16);
+        seed_byte(gate + disruptor::sector_reach::kPortalSector, static_cast<std::uint8_t>(room));
+    };
+    seed_portal(edge_on, 3u, 0u);
+    seed_portal(slanted, 3u, 10u);
+    seed_portal(back_home, 1u, 0u);
+    const std::uint32_t listed_at = disruptor::portal_reach::kListedAt;
+    const std::uint32_t far_head = disruptor::portal_reach::kObjectTables[2] + 4u * 3u;
+    constexpr std::uint32_t kListed[] = {1u, 3u, 2u};
+    const auto list = [&] {
+        for (std::uint32_t index = 0; index < 3u; ++index) {
+            seed_word(kReviewedVisibleSpanBase + kVisibleSpanStride * index, 320u);
+            seed_word(kReviewedVisibleSpanBase + kVisibleSpanStride * index + 4u, kListed[index]);
+            seed_byte(listed_at + kListed[index], static_cast<std::uint8_t>(index));
+        }
+        seed_word(kVisibleEnd, kReviewedVisibleSpanBase + 3u * kVisibleSpanStride);
+        seed_word(far_head, 0x80081000u);
+    };
+
+    list();
+    enter(&cpu);
+    walk_into(&cpu, 0u, portal_of(1u), kScreenWedge);
+    walk_into(&cpu, 1u, portal_of(3u), kMarginWedge);
+    face(&cpu, slanted);
+    expect(load_word(listed_at) == 0x01020000u, "a portal not seen edge-on leaves the listed rooms alone");
+    face(&cpu, back_home);
+    expect(psx_mod_read_byte(listed_at + 1u) == 0u, "so does one into a room the game's walk listed");
+    face(&cpu, edge_on);
+    expect(psx_mod_read_byte(listed_at + 3u) == 0xFFu,
+           "the walk's test of a portal seen edge-on finds unlisted a room only the wider walk listed");
+    walk_into(&cpu, 1u, edge_on, kScreenWedge);
+    expect(psx_mod_read_byte(listed_at + 3u) == 1u, "the walk that goes in finds it listed again");
+    walk_into(&cpu, 1u, portal_of(2u), kInnerWedge);
+    reach_visible_loop(&cpu, 3u);
+    expect(load_word(far_head) == 0x80081000u, "the room the game's walk entered edge-on draws its objects");
+    hook_after(&cpu, kAfterVisibleLoop, kAfterVisibleLoopOpcode);
+    expect(load_word(kVisibleEnd) == kReviewedVisibleSpanBase + 3u * kVisibleSpanStride &&
+               load_word(kReviewedVisibleSpanBase + kVisibleSpanStride + 4u) == 3u,
+           "and stays in the list the game reads");
+    exit_renderer(&cpu);
+
+    for (const auto &[name, close] : {std::pair<const char *, int>{"the next portal", 0}, {"the traversal's end", 1},
+                                      {"the epilogue", 2}, {"a save", 3},
+                                      {"a nested entry", 4}}) {
+        list();
+        cpu.gpr[4] = kRendererContext;
+        enter(&cpu);
+        walk_into(&cpu, 0u, portal_of(1u), kScreenWedge);
+        walk_into(&cpu, 1u, portal_of(3u), kMarginWedge);
+        face(&cpu, edge_on);
+        expect(psx_mod_read_byte(listed_at + 3u) == 0xFFu, "the room is shown unlisted to the edge-on test");
+        if (close == 0) face(&cpu, slanted);
+        if (close == 1) hook_after(&cpu, kAfterTraversal, kAfterTraversalOpcode);
+        if (close == 3) disruptor_far_rendering_state_saving();
+        if (close == 4) {
+            cpu.gpr[4] = kRendererContext;
+            enter(&cpu);
+        }
+        if (close != 2) expect(psx_mod_read_byte(listed_at + 3u) == 1u, name);
+        exit_renderer(&cpu);
+        expect(psx_mod_read_byte(listed_at + 3u) == 1u, "a portal the walk then passed by leaves the room listed");
+    }
+
+    list();
+    cpu.gpr[4] = kRendererContext;
+    enter(&cpu);
+    walk_into(&cpu, 0u, portal_of(1u), kScreenWedge);
+    walk_into(&cpu, 1u, portal_of(3u), kMarginWedge);
+    face(&cpu, edge_on);
+    disruptor_far_rendering_abandon_metrics();
+    exit_renderer(&cpu);
+    expect(psx_mod_read_byte(listed_at + 3u) == 0xFFu, "after a state load the loaded table is not overwritten");
+}
+
 void test_visibility_recursion_and_packet_stages() {
     reset_state();
     CPUState cpu{};
@@ -1482,7 +1801,148 @@ void test_reset_and_versioned_snapshot() {
 
 }  // namespace
 
+/* A sector span's end at the frame's edge reaches past it by the turn guard, an end inside the frame stays. */
+void test_a_sector_span_reaches_past_the_frame_edge() {
+    constexpr std::uint32_t kSpan = 0x801FFD20u;
+    expect(g_sector_callback && g_sector_address == 0x80046134u, "the mesh renderer's entry is hooked");
+    CPUState cpu{};
+    cpu.read_word = psx_mod_read_word;
+    cpu.write_word = psx_mod_write_word;
+    cpu.gpr[5] = kSpan;
+    seed_word(kSpan + 12u, 0u);
+    seed_word(kSpan + 16u, 320u);
+    g_sector_callback(&cpu, 0x80046134u);
+    expect(load_word(kSpan + 12u) == static_cast<std::uint32_t>(-8) && load_word(kSpan + 16u) == 328u,
+           "a span over the whole frame reaches eight pixels past both edges");
+    seed_word(kSpan + 12u, 105u);
+    seed_word(kSpan + 16u, 210u);
+    g_sector_callback(&cpu, 0x80046134u);
+    expect(load_word(kSpan + 12u) == 105u && load_word(kSpan + 16u) == 210u, "a doorway's span inside the frame stays");
+    seed_word(kSpan + 12u, 0u);
+    g_sector_callback(&cpu, 0x80040E68u);
+    expect(load_word(kSpan + 12u) == 0u, "another entry leaves the span alone");
+    CPUState blind{};
+    blind.gpr[5] = kSpan;
+    g_sector_callback(&blind, 0x80046134u);
+    expect(load_word(kSpan + 12u) == 0u, "without memory access nothing is written");
+    g_geometry_correction = 0;
+    g_sector_callback(&cpu, 0x80046134u);
+    expect(load_word(kSpan + 12u) == 0u, "without geometry correction no turn is shown and the game keeps its span");
+    g_geometry_correction = 1;
+}
+
+void test_the_split_middle_moves_to_the_diagonal() {
+    constexpr std::uint32_t kMiddle = 0x1F8000C0u;
+    CPUState cpu{};
+    cpu.read_word = psx_mod_read_word;
+    cpu.write_word = psx_mod_write_word;
+    cpu.gpr[5] = kMiddle;
+    cpu.gpr[9] = 10u << 20 | 20u << 10 | 30u;
+    cpu.gpr[11] = 30u << 20 | 40u << 10 | 50u;
+    cpu.gpr[1] = 100u;
+    cpu.gpr[2] = 1000u;
+    cpu.gpr[3] = 2000u;
+    seed_word(kMiddle, 0x11111111u);
+    seed_word(kMiddle + 4u, 0x22222222u);
+    disruptor_far_rendering_instruction_hook(&cpu, 0x8004791Cu, 0xACAD0000u, DISRUPTOR_FAR_RENDERING_AFTER_INSTRUCTION);
+    expect(load_word(kMiddle) == 0x11111111u, "another instruction at that address leaves the point");
+    disruptor_far_rendering_instruction_hook(&cpu, 0x8004791Cu, 0xACAD0004u, DISRUPTOR_FAR_RENDERING_AFTER_INSTRUCTION);
+    expect(load_word(kMiddle) == 220u && load_word(kMiddle + 4u) == (520u | 1360u << 16),
+           "the split's middle point is the midpoint of corners 1 and 3");
+}
+
+void test_a_face_with_a_marked_corner_is_tested_on_its_real_sides() {
+    constexpr std::uint32_t kRecords = 0x8005BACCu;
+    CPUState cpu{};
+    cpu.read_word = psx_mod_read_word;
+    const std::uint32_t words[4] = {0x80000000u | 1u << 16 | 63u, 56u << 16 | 32u, 56u << 16 | 32u,
+                                    0x80000000u | 16u << 16 | 63u};
+    const std::uint32_t screen[4] = {695u << 16 | 1023u, 244u << 16 | 260u, 244u << 16 | 260u, 81u << 16 | 552u};
+    for (std::uint32_t corner = 0; corner < 4u; corner++) {
+        cpu.gpr[8 + corner] = kRecords + 12u * corner;
+        cpu.gpr[12 + corner] = words[corner];
+        seed_word(kRecords + 12u * corner, words[corner]);
+        seed_word(kRecords + 12u * corner + 4u, screen[corner]);
+    }
+    seed_word(0x1F80004Cu, static_cast<std::uint32_t>(-8));
+    seed_word(0x1F800050u, 328u);
+    const auto drop = [&cpu](std::uint32_t pc, std::uint32_t instruction) {
+        cpu.gpr[1] = 32u;
+        disruptor_far_rendering_instruction_hook(&cpu, pc, instruction, DISRUPTOR_FAR_RENDERING_AFTER_INSTRUCTION);
+        return cpu.gpr[1];
+    };
+    expect(drop(0x80046C18u, 0x3021003Fu) == 0u, "the floor under the wall button is kept");
+    expect(drop(0x80046C18u, 0x30210000u) == 32u, "another instruction at the address changes nothing");
+    seed_word(0x1F800050u, 200u);
+    cpu.gpr[15] = 0x80000000u | 100u << 16 | 63u;
+    expect(drop(0x80046C18u, 0x3021003Fu) == 0u, "the room's span is read from the scratch pad");
+    cpu.gpr[12] = 0x80000000u | 100u << 16 | 63u;
+    expect(drop(0x80046C18u, 0x3021003Fu) == 0u, "both marked corners right of a narrower span, the others below");
+    cpu.gpr[13] = cpu.gpr[14] = 56u << 16 | 8u;
+    expect(drop(0x80046C18u, 0x3021003Fu) == 8u, "four corners right of the span: the face is dropped on that side");
+    const auto place = [&](std::uint32_t corner, std::uint32_t word, std::uint32_t xy) {
+        cpu.gpr[12 + corner] = word;
+        seed_word(kRecords + 12u * corner, word);
+        seed_word(kRecords + 12u * corner + 4u, xy);
+    };
+    place(0u, 0x80000000u | 100u << 16 | 63u, 100u << 16 | 0xFED4u);
+    place(3u, 0x80000000u | 100u << 16 | 63u, 81u << 16 | 552u);
+    seed_word(0x1F800050u, 328u);
+    expect(drop(0x80046C18u, 0x3021003Fu) == 0u, "a marked corner left of the span is read from its record's place");
+    place(0u, 0x80000000u | 100u << 16 | 63u, 695u << 16 | 1023u);
+    cpu.gpr[13] = cpu.gpr[14] = 56u << 16 | 40u;
+    seed_word(0x1F800050u, 600u);
+    expect(drop(0x80046C18u, 0x3021003Fu) == 0u, "a corner inside a span reaching 600 is on no side");
+    cpu.gpr[12] = cpu.gpr[15] = 56u << 16 | 8u;
+    cpu.gpr[1] = 32u;
+    disruptor_far_rendering_instruction_hook(&cpu, 0x80046C18u, 0x3021003Fu, DISRUPTOR_FAR_RENDERING_AFTER_INSTRUCTION);
+    expect(cpu.gpr[1] == 32u, "a face with no marked corner keeps the game's answer");
+    cpu.gpr[12] = 0x80000000u | 1u << 16 | 63u;
+    cpu.gpr[1] = 0u;
+    disruptor_far_rendering_instruction_hook(&cpu, 0x80046C18u, 0x3021003Fu, DISRUPTOR_FAR_RENDERING_AFTER_INSTRUCTION);
+    expect(cpu.gpr[1] == 0u, "a face the game keeps stays kept");
+}
+
+void test_the_split_quarters_meet_at_texel_16() {
+    constexpr std::uint32_t kTable = 0x80100000u;
+    constexpr std::uint32_t kPacket = 0x80120000u;
+    CPUState cpu{};
+    cpu.read_word = psx_mod_read_word;
+    cpu.write_word = psx_mod_write_word;
+    cpu.gpr[6] = 7u << 22 | 9u << 12 | 4u;
+    cpu.gpr[24] = kTable;
+    cpu.gpr[25] = kPacket;
+    seed_word(kTable + 8u, 0x39142040u);
+    seed_word(kTable + 12u, 0x008E205Fu);
+    const auto quarter = [&cpu](std::uint32_t pc, std::uint32_t instruction, std::array<std::uint32_t, 4> words) {
+        for (std::uint32_t slot = 0; slot < 4u; slot++) seed_word(kPacket + 12u + 12u * slot, words[slot]);
+        disruptor_far_rendering_instruction_hook(&cpu, pc, instruction, DISRUPTOR_FAR_RENDERING_AFTER_INSTRUCTION);
+        std::array<std::uint32_t, 4> out{};
+        for (std::uint32_t slot = 0; slot < 4u; slot++) out[slot] = load_word(kPacket + 12u + 12u * slot);
+        return out;
+    };
+    const std::array<std::uint32_t, 4> first = {0x39142040u, 0x008E204Fu, 0x00002F40u, 0x00002F4Fu};
+    expect(quarter(0x80047AD0u, 0xAF290030u, first) ==
+               std::array<std::uint32_t, 4>{0x39142040u, 0x008E2050u, 0x00003040u, 0x00003050u},
+           "the corner-0 quarter");
+    expect(quarter(0x80047B90u, 0xAF290030u, {0x39142050u, 0x008E205Fu, 0x00002F50u, 0x00002F5Fu}) ==
+               std::array<std::uint32_t, 4>{0x39142050u, 0x008E205Fu, 0x00003050u, 0x0000305Fu},
+           "the corner-1 quarter");
+    expect(quarter(0x80047D18u, 0xAF290030u, {0x39143040u, 0x008E304Fu, 0x00003F40u, 0x00003F4Fu}) ==
+               std::array<std::uint32_t, 4>{0x39143040u, 0x008E3050u, 0x00003F40u, 0x00003F50u},
+           "the corner-3 quarter");
+    expect(quarter(0x80047AD0u, 0xAF290000u, first) == first, "another instruction at the address changes nothing");
+    expect(quarter(0x80047C54u, 0xAF290030u, first) == first, "nor does the corner-2 quarter's, which meets already");
+    seed_word(kTable + 12u, 0x008E204Fu);
+    expect(quarter(0x80047AD0u, 0xAF290030u, first) == first, "a tile that is not 32 by 32 keeps the game's quarters");
+    seed_word(kTable + 12u, 0x008E205Fu);
+}
+
 int main() {
+    test_a_sector_span_reaches_past_the_frame_edge();
+    test_the_split_middle_moves_to_the_diagonal();
+    test_a_face_with_a_marked_corner_is_tested_on_its_real_sides();
+    test_the_split_quarters_meet_at_texel_16();
     test_registration_and_written_distances();
     test_independent_depth_fade_modes();
     test_drawn_distances_are_the_globals();
@@ -1503,6 +1963,9 @@ int main() {
     test_presets_up_to_twice();
     test_edge_margin_under_the_smooth_fade();
     test_far_plane_kept_inside_the_ordering_table();
+    test_rooms_reach_past_their_portals();
+    test_rooms_only_the_wider_walk_reaches();
+    test_portals_seen_edge_on();
     test_visibility_recursion_and_packet_stages();
     test_portal_and_object_decision_observers();
     test_observer_safety_guards_and_abandon();

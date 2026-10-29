@@ -38,6 +38,13 @@ RETAIL_INSTRUCTIONS = {
     0x8003B580: 0xA63E0012,
     0x8003B5A0: 0x0C013180,
     0x8003B5A4: 0xA622000E,
+    0x8003AFA8: 0xAFA00050,
+    0x8003B2E0: 0xAFA30050,
+    0x8003B2E8: 0xAFB80050,
+    0x8003B2FC: 0xAFA00050,
+    0x8003B310: 0xAFB80050,
+    0x8003B584: 0x8FB80050,
+    0x8003B58C: 0x248407FC,
     0x8003B5C8: 0x26310014,
     0x8003B640: 0xAFB80038,
 }
@@ -133,7 +140,11 @@ require(
     "        psx_mod_gpu_dma_resolve_address(gp0_cmd_source_addr - 4u),\n"
     "        gp0_cmd_buf, (uint32_t)s_frame_count, pins);\n"
     in taking
-    and "static int ws_screen_tile_take(uint32_t *pins) {\n    *pins = 0u;\n" in taking,
+    and "static int ws_screen_tile_take(uint32_t *pins) {\n"
+    "    *pins = ws_screen_tile_kept >= 0 ? ws_screen_tile_kept_pins : 0u;\n"
+    "    if (ws_screen_tile_kept >= 0) return ws_screen_tile_kept;\n"
+    "    if (gp0_cmd_source_addr == 0xFFFFFFFFu) return 0;\n"
+    in taking,
     "a drawn packet must be matched by its tag address against the words it was marked with",
 )
 require(
@@ -327,6 +338,38 @@ require(
     and "    target->pins = pins;\n" in tile_header,
     "the tile header holds the arithmetic the unit test runs: the pins, an unrounded edge, a column's room, the slide and "
     "the way back round the period",
+)
+
+sky_rect = gpu[gpu.index("static void gp0_exec_sky_rect(void) {") : gpu.index("/* Execute 1x1 dot (GP0 0x68-0x6B) */")]
+require(
+    "constexpr uint32_t kFadeStepSlot = 80u;" in module
+    and "            if (address == kLoadLeftEdge && cpu->read_word)\n"
+    "                gpu_sky_fog_opening(static_cast<int32_t>(cpu->read_word(cpu->gpr[kStackRegister] + kFadeStepSlot)));\n"
+    in module
+    and "            gpu_ws_tag_screen_tile(cpu, cpu->gpr[kPacketRegister]);\n"
+    "            gpu_sky_fog_tile(cpu, cpu->gpr[kPacketRegister]);\n"
+    in module
+    and "void gpu_sky_fog_opening(int32_t step);\nvoid gpu_sky_fog_tile(CPUState *cpu, uint32_t primitive_addr);\n"
+    in gpu_header
+    and "        case 0x64: case 0x65: case 0x66: case 0x67:\n            gp0_exec_sky_rect();\n" in gpu
+    and "psx_sky_fog_tile(&sky_fog, psx_mod_gpu_dma_resolve_address(primitive_addr), words);" in gpu
+    and "    psx_sky_fog_reset(&sky_fog);\n\n    /* Reset GP0 state machine */" in gpu
+    and "the CPU copy is not it */\n    psx_sky_fog_reset(&sky_fog);\n" in gpu,
+    "each sky opening tells its fog step from the routine's own stack word at its first row, each tile its packet, "
+    "every variable-size textured rectangle goes through the sky's palette first, and a reset or a loaded state forgets the "
+    "records",
+)
+require(
+    sky_rect.index("psx_sky_fog_take(&sky_fog, psx_mod_gpu_dma_resolve_address(gp0_cmd_source_addr - 4u)")
+    < sky_rect.index("    const uint32_t game = gp0_cmd_buf[2];\n")
+    < sky_rect.index("    ws_screen_tile_kept = ws_screen_tile_take(&ws_screen_tile_kept_pins);\n")
+    < sky_rect.index("    gp0_cmd_buf[2] = (uint32_t)clut << 16 | (game & 0xFFFFu);\n")
+    < sky_rect.index("    gp0_exec_textured_rect();\n    ws_screen_tile_kept = -1;\n    gp0_cmd_buf[2] = game;\n")
+    and sky_rect.count("gp0_cmd_buf[") == 3
+    and "+runtime/include/gpu_sky_fog.h\n" in read("framework/FILES.txt")
+    and "disruptor_unit_test(disruptor_gpu_sky_fog tests/unit/gpu_sky_fog_test.cpp RUNTIME_HEADERS)\n" in cmake,
+    "a tile drawn with a clearer palette takes its widescreen mark from the game's words and hands it to the draw, only "
+    "the palette changes, and the game's words come back after",
 )
 
 checked = ", ".join(

@@ -11,6 +11,9 @@
  * so the loop emits the extra columns a wider view shows, and mark each tile
  * once its packet is complete. The renderer squashes marked tiles about the
  * display centre. Guest RAM is written only by the game's own code.
+ *
+ * Each opening is painted with the fog palette of its room's depth, and the
+ * renderer is told the step and the tiles so the clearest sky owns an overlap.
  */
 
 #include "cpu_state.h"
@@ -37,6 +40,8 @@ constexpr int32_t kPanoramaColumn = 64;  /* a tile is cut from one such column o
 constexpr int kScrollRegister = 3;   /* $v1 */
 constexpr int kPacketRegister = 17;  /* $s1 */
 constexpr int kEdgeRegister = 24;    /* $t8 */
+constexpr int kStackRegister = 29;   /* $sp */
+constexpr uint32_t kFadeStepSlot = 80u;  /* the stack word holding the opening's fog step */
 
 int32_t g_span_left = 0;
 bool g_sky_seen = false;
@@ -58,6 +63,8 @@ extern "C" void disruptor_backdrop_tiles_instruction_hook(
             if (instruction != kLoadLeftEdgeWord) return;
             cpu->gpr[kEdgeRegister] = widened(cpu->gpr[kEdgeRegister], false);
             g_span_left = static_cast<int32_t>(cpu->gpr[kEdgeRegister]);
+            if (address == kLoadLeftEdge && cpu->read_word)
+                gpu_sky_fog_opening(static_cast<int32_t>(cpu->read_word(cpu->gpr[kStackRegister] + kFadeStepSlot)));
             return;
         case kLoadRightEdge:
             if (instruction != kLoadRightEdgeWord) return;
@@ -77,6 +84,7 @@ extern "C" void disruptor_backdrop_tiles_instruction_hook(
             g_sky_seen = cpu->read_word != nullptr;
             if (g_sky_seen) g_sky_at = cpu->read_word(kVBlanks);
             gpu_ws_tag_screen_tile(cpu, cpu->gpr[kPacketRegister]);
+            gpu_sky_fog_tile(cpu, cpu->gpr[kPacketRegister]);
             return;
         default:
             return;

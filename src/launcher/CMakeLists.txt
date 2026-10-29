@@ -96,6 +96,7 @@ target_link_libraries(disruptor-launcher-model PUBLIC
 # A save state's stamp and header come from the framework's own definitions; the hash is made at build time.
 target_include_directories(disruptor-launcher-model PRIVATE "${PSXRECOMP_ROOT}/runtime/include")
 add_dependencies(disruptor-launcher-model psxrecomp_codegen_hash)
+set_property(SOURCE state_stamp.cpp APPEND PROPERTY OBJECT_DEPENDS "${PSXRECOMP_ROOT}/runtime/include/overlay_codegen_hash.h")
 
 # A release names its own version: it is tagged after its build, and its Linux build has no git checkout.
 # Anything else asks git at every build, so a new commit is named without a new configure.

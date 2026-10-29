@@ -41,6 +41,8 @@ bool g_widescreen = false;
 std::uint32_t g_now = 0;
 std::int32_t g_told_scroll = 0, g_told_period = 0, g_told_column = 0, g_told_left = 0, g_told_right = 0;
 int g_scrolls = 0, g_spans = 0;
+std::vector<std::int32_t> g_fog_steps;
+std::vector<std::uint32_t> g_fog_tiles;
 std::uint32_t g_taken_pins = 0;
 int g_failures = 0;
 
@@ -96,6 +98,10 @@ void gpu_ws_backdrop_scroll(std::int32_t scroll, std::int32_t period, std::int32
     g_told_column = column;
     ++g_scrolls;
 }
+
+void gpu_sky_fog_opening(std::int32_t step) { g_fog_steps.push_back(step); }
+
+void gpu_sky_fog_tile(CPUState *, std::uint32_t primitive_addr) { g_fog_tiles.push_back(primitive_addr); }
 
 void gpu_ws_backdrop_span(std::int32_t left, std::int32_t right) {
     g_told_left = left;
@@ -556,7 +562,32 @@ void test_sky_behind_the_world() {
     *g_marks = PsxWsScreenTiles{};
 }
 
+/* The routine keeps an opening's fog step at 80($sp): its first row tells it, a row after does not, and so does a tile. */
+void test_each_opening_tells_its_fog_step() {
+    constexpr std::uint32_t kStack = 0x801FFE00u;
+    g_fog_steps.clear();
+    g_fog_tiles.clear();
+    CPUState cpu = make_cpu();
+    cpu.gpr[29] = kStack;
+    seed_word(kStack + 80u, 7u);
+    run_seam(cpu, kLeftSeam, kLeftWord);
+    run_seam(cpu, kReloadSeam, kLeftWord);
+    seed_word(kStack + 80u, 0u);
+    run_seam(cpu, kLeftSeam, kLeftWord);
+    run_seam(cpu, kLeftSeam, kLeftWord ^ 1u);
+    expect(g_fog_steps == std::vector<std::int32_t>{7, 0}, "each opening's first row tells its fog step, read from the stack");
+    cpu.gpr[17] = kPacket;
+    run_seam(cpu, kQueuedSeam, kQueuedWord);
+    run_seam(cpu, kQueuedSeam, kQueuedWord ^ 1u);
+    expect(g_fog_tiles == std::vector<std::uint32_t>{kPacket}, "a queued tile is told with its packet");
+    CPUState blind{};
+    blind.gpr[29] = kStack;
+    run_seam(blind, kLeftSeam, kLeftWord);
+    expect(g_fog_steps.size() == 2u, "without a way to read memory no step is told");
+}
+
 int main() {
+    test_each_opening_tells_its_fog_step();
     test_sky_behind_the_world();
     test_widening_rounds_outward();
     test_measured_row_at_16_9();

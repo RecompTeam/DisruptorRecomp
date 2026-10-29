@@ -45,6 +45,8 @@ void gl_renderer_set_ssao_fade(float from, float to) { ssao_from = from; ssao_to
 void gl_renderer_set_palette_fade(int, float start, float step, float) { palette_start = start; palette_step = step; }
 int disruptor_far_rendering_get_preset(void) { return preset; }
 int disruptor_far_rendering_edge_margin(void) { return edge_margin; }
+int portal_reach = 0;
+int disruptor_far_rendering_portal_reach(void) { return portal_reach; }
 int32_t ramp_start = 512, ramp_length = 768;
 int ramp_power = 1, published_power = 0;
 void disruptor_far_rendering_fog_ramp(int32_t *start, int32_t *length, int *power) {
@@ -210,6 +212,20 @@ int main() {
     renderer_entry(&cpu, kRendererEntry);
     require(psx_mod_read_word(kContexts[1] + kArenaOffset) == moved,
             "a longer draw distance at 4:3 did not move the arena");
+    require(disruptor_render_arena_relocated() == 1, "a frame drawn into the moved arena says so");
+    preset = DISRUPTOR_FAR_RENDERING_RETAIL;
+    renderer_entry(&cpu, kRendererEntry);
+    require(disruptor_render_arena_relocated() == 0, "a frame drawn into the retail arena says so");
+    portal_reach = 1;
+    renderer_entry(&cpu, kRendererEntry);
+    require(psx_mod_read_word(kContexts[1] + kArenaOffset) == moved && disruptor_render_arena_relocated() == 1,
+            "rooms drawn beside their portals at 4:3 left the arena at the retail root");
+    netplay = true;
+    renderer_entry(&cpu, kRendererEntry);
+    require(psx_mod_read_word(kContexts[1] + kArenaOffset) == original[1] && disruptor_render_arena_relocated() == 0,
+            "netplay keeps the retail arena and says so");
+    netplay = false;
+    portal_reach = 0;
 
     sky_behind = 1;
     renderer_entry(&cpu, kRendererEntry);

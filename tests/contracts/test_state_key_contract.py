@@ -12,8 +12,8 @@ import sys
 from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parents[2]
-KEY_OF_BYTES = "3ef55e39"
-KEY_OF_TEXT = "dea5019d"
+KEY_OF_BYTES = "59d1144c"
+KEY_OF_TEXT = "89b66cf7"
 
 specification = importlib.util.spec_from_file_location("framework_tool", ROOT / "tools" / "framework.py")
 if specification is None or specification.loader is None:

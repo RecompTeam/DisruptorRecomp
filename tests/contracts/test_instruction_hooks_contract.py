@@ -16,7 +16,7 @@ GENERATOR_TABLES = {
     "disruptor_intro_skip_instruction_hook": "kDisruptorIntroSkipSites",
     "disruptor_weapon_list_instruction_hook": "kDisruptorWeaponListSites",
 }
-SITES = 73
+SITES = 78
 SHARED = {0x8004279C: ["disruptor_vertical_camera_instruction_hook", "disruptor_far_rendering_instruction_hook"]}
 
 
@@ -68,7 +68,7 @@ require(
 )
 require(
     list(hooks) == list(GENERATOR_TABLES) and sum(len(sites) for sites in hooks.values()) == SITES,
-    "the hooks are the seven the generator knows, in the order it writes them, at 73 sites",
+    "the hooks are the seven the generator knows, in the order it writes them, at 78 sites",
 )
 for callback, table in GENERATOR_TABLES.items():
     require(

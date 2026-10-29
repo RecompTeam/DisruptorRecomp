@@ -27,6 +27,7 @@ runtime/include/text_xlate.h
 runtime/include/gpu.h
 +runtime/include/gpu_ws_hud_scale.h
 +runtime/include/gpu_ws_hud_widget.h
++runtime/include/gpu_sky_fog.h
 +runtime/include/gpu_ws_screen_tile.h
 +runtime/include/gpu_ws_tag_match.h
 +runtime/include/gpu_ws_frame_kind.h

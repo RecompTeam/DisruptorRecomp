@@ -99,6 +99,9 @@ include_directories("${CMAKE_CURRENT_SOURCE_DIR}/src")
 include_directories("${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings")
 add_compile_definitions(PSX_HAS_GAME_USER_SETTINGS=1)
 include("${PSXRECOMP_ROOT}/runtime/runtime.cmake")
+# The depfile names the hash header by a relative path and its rule by an absolute one, so a new key was missed.
+set_property(SOURCE "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/capsule.cpp" APPEND
+             PROPERTY OBJECT_DEPENDS "${PSXRECOMP_ROOT}/runtime/include/overlay_codegen_hash.h")
 
 # The in-game menu and the launcher both draw with ImGui.
 include(FetchContent)
@@ -415,6 +418,10 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
     disruptor_unit_test(disruptor_vertical_camera tests/unit/disruptor_vertical_camera_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_far_rendering tests/unit/disruptor_far_rendering_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_sector_reach tests/unit/disruptor_sector_reach_test.cpp INCLUDES src)
+disruptor_unit_test(disruptor_portal_reach tests/unit/disruptor_portal_reach_test.cpp INCLUDES src)
+disruptor_unit_test(disruptor_misplaced_riser tests/unit/disruptor_misplaced_riser_test.cpp INCLUDES src)
+disruptor_unit_test(disruptor_near_split tests/unit/disruptor_near_split_test.cpp INCLUDES src)
+disruptor_unit_test(disruptor_marked_corners tests/unit/disruptor_marked_corners_test.cpp INCLUDES src)
     disruptor_unit_test(disruptor_streamed_reads tests/unit/disruptor_streamed_reads_test.cpp INCLUDES src)
     disruptor_unit_test(disruptor_main_menu_exit tests/unit/disruptor_main_menu_exit_test.cpp INCLUDES src)
     disruptor_unit_test(disruptor_main_menu_exit_hooks tests/unit/disruptor_main_menu_exit_hooks_test.cpp
@@ -471,6 +478,7 @@ disruptor_unit_test(disruptor_bass_cut tests/unit/disruptor_bass_cut_test.cpp
     disruptor_unit_test(disruptor_gpu_ws_frame_kind tests/unit/gpu_ws_frame_kind_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_gpu_ws_menu tests/unit/gpu_ws_menu_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_gpu_ws_hud_scale tests/unit/gpu_ws_hud_scale_test.cpp RUNTIME_HEADERS)
+disruptor_unit_test(disruptor_gpu_sky_fog tests/unit/gpu_sky_fog_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_gpu_ws_hud_widget tests/unit/gpu_ws_hud_widget_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_gpu_ws_tag_match tests/unit/gpu_ws_tag_match_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_host_ui_flags tests/unit/host_ui_flags_test.cpp RUNTIME_HEADERS)
