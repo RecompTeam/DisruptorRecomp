@@ -70,8 +70,9 @@ void table() {
         if (one.kind == Kind::choice && one.highest < static_cast<int>(one.choices.size()) - 1)
             require(std::string_view(one.key) == "disruptor.draw_distance" || std::string_view(one.key) == "disruptor.fog_shape",
                     "only the draw distance and the fog shape offer fewer choices than they name");
-        require(!one.notice || (one.kind == Kind::choice && one.highest < static_cast<int>(one.choices.size()) - 1),
-                "a notice stands only beside choices that are not all offered");
+        require(!one.notice || (one.kind == Kind::choice && one.highest < static_cast<int>(one.choices.size()) - 1) ||
+                    (one.kind == Kind::toggle && one.highest == 0),
+                "a notice stands only beside choices that are not all offered, or a switch held off");
         if (one.kind == Kind::toggle) require(one.initial == 0 || one.initial == 1, "a toggle starts as neither");
         for (const char* need : one.needs)
             require((option(need).kind == Kind::toggle || option(need).kind == Kind::choice) && &option(need) != &one,
@@ -346,7 +347,7 @@ void placements() {
     std::vector<std::string> enhancements;
     for (const auto& row : rows)
         if (row.page == Page::enhancements) enhancements.emplace_back(row.key);
-    require(enhancements.size() == 16 && enhancements.front() == "disruptor.frame_unlock" && rows[5].group &&
+    require(enhancements.size() == 17 && enhancements.front() == "disruptor.frame_unlock" && rows[5].group &&
                 std::string_view(rows[5].key) == "disruptor.frame_unlock",
             "Enhancements opens with its frame rate group, 60 FPS gameplay first");
 }
@@ -447,9 +448,10 @@ void round_trip(const fs::path& folder) {
         SettingsFile settings(file);
         settings.set_display_rate(240.0);
         require(settings.load(), "the file must load");
-        if (one.kind == Kind::choice && one.highest < static_cast<int>(one.choices.size()) - 1) {
+        if ((one.kind == Kind::choice && one.highest < static_cast<int>(one.choices.size()) - 1) ||
+            (one.kind == Kind::toggle && one.highest == 0)) {
             require(settings.set(one, one.highest + 1) && settings.shown(one) == one.initial,
-                    "a choice past the offered ones, written by an older build, shows as the first");
+                    "a value past the offered ones, written by an older build, shows as the first");
             fs::remove(file);
             continue;
         }

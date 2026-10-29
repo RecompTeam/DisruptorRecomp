@@ -32,9 +32,13 @@ bool applies(const char *key) {
 
 bool option_toggle(const char *key, bool *value) {
     const Option &option = *find_option(key);
+    const bool held = option.highest == 0;
+    if (held) ImGui::BeginDisabled();
     const bool moved = ImGui::Checkbox(option.label, value);
+    if (held) ImGui::EndDisabled();
     disruptor::ui::hint(option.hint);
-    return moved;
+    if (option.notice) ImGui::TextColored(ImVec4(0.878f, 0.643f, 0.227f, 1.0f), "%s", option.notice);
+    return moved && !held;
 }
 
 bool option_slider(const char *key, int *value) {

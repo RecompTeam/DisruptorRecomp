@@ -9,6 +9,8 @@ recompiler/tests/recompiler_patch_test.cpp
 recompiler/tests/test_reachable_discovery_codegen.py
 runtime/CMakeLists.txt
 runtime/chd_dependency.cmake
+runtime/include/cdrom.h
+runtime/include/mod_plugins.h
 runtime/include/cpu_state.h
 runtime/include/crash_trace.h
 runtime/include/dirty_ram_interp.h
@@ -58,6 +60,7 @@ runtime/include/ws_aspect_cone_math.h
 runtime/runtime.cmake
 runtime/src/boot_state.c
 runtime/src/card_data_writes.c
+runtime/src/cdrom.c
 runtime/src/parity_trace.c
 runtime/src/psx_sdl_audio.cpp
 runtime/src/savestate.c

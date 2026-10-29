@@ -190,6 +190,14 @@ void draw_enhancements_tab() {
         mark_skip_intro(skip_intro);
     }
     draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
+
+    ImGui::SeparatorText("Loading");
+    bool fast_disc = cdrom_fast_data_reads() != 0;
+    if (option_toggle("disruptor.fast_disc_reads", &fast_disc)) {
+        cdrom_set_fast_data_reads(fast_disc ? 1 : 0);
+        mark("disruptor.fast_disc_reads", fast_disc);
+    }
+    draw_status_badge("EXPERIMENTAL", ImVec4(1.0f, 0.73f, 0.25f, 1.0f));
 }
 
 }  // namespace disruptor::menu

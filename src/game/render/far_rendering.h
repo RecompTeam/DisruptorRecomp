@@ -37,7 +37,7 @@ enum DisruptorFarRenderingInstructionPhase {
     DISRUPTOR_FAR_RENDERING_AFTER_INSTRUCTION = 1,
 };
 
-enum { DISRUPTOR_FAR_RENDERING_DIAGNOSTICS_ABI_VERSION = 3 };
+enum { DISRUPTOR_FAR_RENDERING_DIAGNOSTICS_ABI_VERSION = 4 };
 
 typedef struct DisruptorFarRenderingDiagnostics {
     uint32_t abi_version;
@@ -114,6 +114,11 @@ typedef struct DisruptorFarRenderingDiagnostics {
     uint32_t packet_traversal_to_visible_start_last;
     uint32_t packet_visible_loop_last;
     uint32_t packet_post_visible_loop_last;
+
+    /* ABI v4: walks turned back from a sector out of memory past the game's own distance, and the times the copy of the
+     * game's portal test did not come out as the game's did. */
+    uint64_t sector_requests_held;
+    uint64_t portal_model_mismatches;
 } DisruptorFarRenderingDiagnostics;
 
 int disruptor_far_rendering_set_preset(int preset);

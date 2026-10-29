@@ -100,6 +100,8 @@ int main() {
         written.movie_filter = 0;
         written.has_mute_in_background = true;
         written.mute_in_background = true;
+        written.has_fast_disc_reads = true;
+        written.fast_disc_reads = true;
         written.has_achievements = true;
         written.achievements = false;
         written.has_bass_cut = true;
@@ -224,6 +226,7 @@ int main() {
                     loaded.has_skip_intro && loaded.skip_intro &&
                     loaded.has_movie_filter && loaded.movie_filter == 0 &&
                     loaded.has_mute_in_background && loaded.mute_in_background &&
+                    loaded.has_fast_disc_reads && loaded.fast_disc_reads &&
                     loaded.has_achievements && !loaded.achievements &&
                     loaded.has_bass_cut && loaded.bass_cut == 2 &&
                     loaded.has_stick_layout && loaded.stick_layout == 2 && loaded.has_look_speed && loaded.look_speed == 175 &&

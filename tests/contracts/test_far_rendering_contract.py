@@ -40,7 +40,7 @@ require(
 # The far renderer shares the generated renderer-entry fan-out: a second config entry would duplicate the guest callback.
 require(
     configs.count(
-        'mod_function_entry_funcs = ["0x80011888", "0x80013544", "0x8001A46C", "0x8001C484", "0x80020DD8", "0x80032514", "0x80039450", "0x8003B78C", "0x8003FE6C", "0x80040E68", "0x800427D0", "0x800429DC", "0x80044A10", "0x80044BDC", "0x80046134", "0x8004B3D4", "0x8004D348", "0x8004D410", "0x8004D684"]'
+        'mod_function_entry_funcs = ["0x80011888", "0x80011944", "0x80013544", "0x8001A46C", "0x8001C484", "0x80020DD8", "0x80032514", "0x80039450", "0x8003B78C", "0x8003FE6C", "0x80040E68", "0x800427D0", "0x800429DC", "0x80044A10", "0x80044BDC", "0x80046134", "0x8004B3D4", "0x8004D348", "0x8004D410", "0x8004D684"]'
     )
     == 2,
     "both configs must retain exactly one audited renderer-entry seam",
@@ -163,8 +163,13 @@ for token in (
 ):
     require(token in header and token in source, f"depth-fade diagnostic ABI is missing {token}")
 require(
-    "DISRUPTOR_FAR_RENDERING_DIAGNOSTICS_ABI_VERSION = 3" in header,
-    "portal and packet observations require diagnostics ABI version 3",
+    "DISRUPTOR_FAR_RENDERING_DIAGNOSTICS_ABI_VERSION = 4" in header,
+    "held sector requests and the portal copy's misses require diagnostics ABI version 4",
+)
+require(
+    "        if (entry.hold) {\n            cpu->gpr[19] = disruptor::sector_reach::kDepthCap;\n" in source
+    and "if (!g_written.active) return;\n        const disruptor::sector_reach::Entry entry" in source,
+    "only a walk at a written distance is turned back, by the walk's own depth cap",
 )
 for token in (
     "traversal_recursion_entries",
@@ -175,6 +180,8 @@ for token in (
     "packet_stage_samples",
     "packet_entry_to_traversal_end_last",
     "packet_post_visible_loop_last",
+    "sector_requests_held",
+    "portal_model_mismatches",
 ):
     require(token in header and token in source, f"portal diagnostics ABI is missing {token}")
 require(

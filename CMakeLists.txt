@@ -60,6 +60,7 @@ set(DISRUPTOR_EXTRA_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings/user_folder.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings/game_mark.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/intro_skip.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/streamed_reads.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/language.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/language_briefing.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/language_disc.cpp"
@@ -410,6 +411,8 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
     disruptor_unit_test(disruptor_cheats tests/unit/disruptor_cheats_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_vertical_camera tests/unit/disruptor_vertical_camera_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_far_rendering tests/unit/disruptor_far_rendering_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_sector_reach tests/unit/disruptor_sector_reach_test.cpp INCLUDES src)
+    disruptor_unit_test(disruptor_streamed_reads tests/unit/disruptor_streamed_reads_test.cpp INCLUDES src)
     disruptor_unit_test(disruptor_render_arena tests/unit/disruptor_render_arena_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_name_entry tests/unit/disruptor_name_entry_test.cpp RUNTIME_HEADERS)
 disruptor_unit_test(disruptor_baton_choice tests/unit/disruptor_baton_choice_test.cpp RUNTIME_HEADERS)

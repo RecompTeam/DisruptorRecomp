@@ -1,5 +1,6 @@
 #include "game_host.h"
 
+#include "cdrom.h"
 #include "config_loader.h"
 #include "game/achievements/game_client.h"
 #include "game/audio/bass_cut.h"
@@ -95,6 +96,7 @@ void psx_game_settings_defaults(PSXRecompV4::UserSettings &settings) {
 bool psx_game_settings_loaded(const PSXRecompV4::UserSettings &settings) {
     disruptor_diagnostics_configure(settings.has_detailed_logging && settings.detailed_logging);
     (void)psx_host_audio_set_mute_in_background(settings.has_mute_in_background && settings.mute_in_background);
+    cdrom_set_fast_data_reads(disruptor::settings::stored(settings, *disruptor::settings::find_option("disruptor.fast_disc_reads")));
     disruptor_bass_cut_set(settings.has_bass_cut ? settings.bass_cut : 0);
     disruptor_achievements_configure(!settings.has_achievements || settings.achievements);
     disruptor::achievements::configure(settings);

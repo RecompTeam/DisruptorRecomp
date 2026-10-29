@@ -1,5 +1,5 @@
 diff --git a/runtime/src/dma.c b/runtime/src/dma.c
-index 15e09455c97ffd19429f997c0cba334133267324..a79029e16fbfeb3e84853a00460a5ffe17781df7 100644
+index 15e09455c97ffd19429f997c0cba334133267324..d9736531fbb3661b6c93a2f23e292f93439c4de0 100644
 --- a/runtime/src/dma.c
 +++ b/runtime/src/dma.c
 @@ -653,6 +653,12 @@
@@ -64,3 +64,27 @@ index 15e09455c97ffd19429f997c0cba334133267324..a79029e16fbfeb3e84853a00460a5ffe
          }
          channels[2].madr = addr;
          actual_words = word_count;
+@@ -899,6 +905,23 @@
+            ((channels[3].chcr & 1u) == 0);
+ }
+ 
++int psx_mod_dma_write_ram(uint32_t address, const void* data, uint32_t bytes,
++                          int lba) {
++    const uint8_t* source = (const uint8_t*)data;
++    const uint32_t addr = address & 0x1FFFFCu;
++    (void)lba;
++    if (!source || (address & 3u) || (bytes & 3u) || bytes > 0x200000u - addr)
++        return 0;
++    overlay_capture_before_dma(addr, bytes);
++    for (uint32_t at = 0; at < bytes; at += 4u)
++        psx_write_word(addr + at, (uint32_t)source[at] |
++                                  ((uint32_t)source[at + 1u] << 8) |
++                                  ((uint32_t)source[at + 2u] << 16) |
++                                  ((uint32_t)source[at + 3u] << 24));
++    dirty_ram_mark_executable_range(addr, bytes);
++    return 1;
++}
++
+ /* Cycle-budgeted precise event slicing: guest CPU cycles until DMA raises a
+  * DELIVERABLE IRQ (bit3 unmasked in i_mask). UINT32_MAX if none. Conservative
+  * under-estimate: for async channels uses a 1-cycle/word floor minus cycles

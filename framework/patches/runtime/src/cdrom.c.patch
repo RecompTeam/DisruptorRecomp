@@ -1,0 +1,107 @@
+diff --git a/runtime/src/cdrom.c b/runtime/src/cdrom.c
+index 23cc5c9d6b5089d2ed804e6954475231d880eb14..cea7440797e8668f68e129950415751aba62251d 100644
+--- a/runtime/src/cdrom.c
++++ b/runtime/src/cdrom.c
+@@ -503,11 +503,21 @@
+     return d < CDROM_MIN_DELAY ? CDROM_MIN_DELAY : d;
+ }
+ 
++static int s_fast_data_reads;
++
++void cdrom_set_fast_data_reads(int enabled) { s_fast_data_reads = enabled != 0; }
++int cdrom_fast_data_reads(void) { return s_fast_data_reads; }
++
++static int fast_data_read(void) {
++    return s_fast_data_reads && !xa_stream_active && !(mode_reg & 0x48u);
++}
++
+ static int apply_read_speed(int delay) {
+     /* A route is an explicit DATA-read allowlist, never a blanket drive-speed
+      * change. XA filter/ADPCM modes are rejected before the first streaming
+      * sector can set xa_stream_active; established XA remains authentic too. */
+     if (xa_stream_active || (mode_reg & 0x48u)) return delay;
++    if (s_fast_data_reads) return instant_period();
+     if (s_warm_route_active) return warm_route_period();
+     return apply_speed(delay);
+ }
+@@ -589,7 +599,8 @@
+      * far SeekL/SeekP completes after roughly four 1x sector periods, while a
+      * near/already-settled seek returns quickly. */
+     int base = setloc_seek_far ? (CDROM_SINGLE_SPEED_SECTOR_CYCLES * 4) : 0x800;
+-    return apply_speed(base);
++    const int delay = apply_speed(base);
++    return fast_data_read() && instant_period() < delay ? instant_period() : delay;
+ }
+ 
+ /* Pending command */
+@@ -613,6 +624,19 @@
+ 
+ /* ISO reader */
+ static void* iso_handle = NULL;
++
++int cdrom_read_user_sectors(uint32_t lba, uint32_t count, uint8_t* out) {
++    uint8_t raw[RAW_SECTOR_SIZE];
++    if (!iso_handle || !out) return 0;
++    for (uint32_t i = 0; i < count; i++) {
++        uint8_t* user = out + (size_t)i * SECTOR_SIZE;
++        if (iso_read_raw_sector(iso_handle, lba + i, raw, RAW_SECTOR_SIZE))
++            memcpy(user, raw + RAW_USER_DATA_OFFSET, SECTOR_SIZE);
++        else if (!iso_read_sector(iso_handle, lba + i, user, SECTOR_SIZE))
++            return 0;
++    }
++    return 1;
++}
+ 
+ static CDROMTraceEntry cdrom_trace[CDROM_TRACE_CAP];
+ static uint64_t cdrom_trace_seq;
+@@ -2144,12 +2168,12 @@
+ static uint64_t s_read_hold_cycles;
+ static uint64_t s_read_hold_events;
+ 
+-/* Route-only HLE producer/consumer handshake. Do not overwrite a cached
+- * sector or data-ready callback: make the next sector eligible only after the
+- * guest consumes the FIFO and acknowledges the previous notification.
+- * Multi-sector DMA may refill while its original data-ready IRQ is active. */
+-static int warm_route_consumer_blocked(void) {
+-    if (!s_warm_route_active) return 0;
++/* Producer/consumer handshake of the accelerated reads (warm routes, fast data
++ * reads). Do not overwrite a cached sector or data-ready callback: make the
++ * next sector eligible only after the guest consumes the FIFO and acknowledges
++ * the previous notification. Multi-sector DMA may refill while its original
++ * data-ready IRQ is active. */
++static int guest_holds_last_sector(void) {
+     /* Tomba's raw-sector path intentionally consumes 12 header + 2048 data
+      * bytes from a 2340-byte FIFO and leaves the final 280 bytes unread. The
+      * IRQ ack (plus an inactive DMA channel), not sector_available, is the
+@@ -2159,6 +2183,14 @@
+     return 0;
+ }
+ 
++static int warm_route_consumer_blocked(void) {
++    return s_warm_route_active && guest_holds_last_sector();
++}
++
++static int fast_data_consumer_blocked(void) {
++    return fast_data_read() && (guest_holds_last_sector() || irq_flag != 0 || dma_cdrom_transfer_active());
++}
++
+ static void process_read_stream(uint32_t cycles) {
+     if (!reading) return;
+ 
+@@ -2167,6 +2199,7 @@
+         s_warm_route_consumer_wait_cycles += cycles;
+         return;
+     }
++    if (fast_data_consumer_blocked()) return;
+ 
+     /* Disc time NEVER pauses while the drive reads (Beetle cdc.cpp
+      * HandleSectorRead: the sector pipeline advances on cycle deadlines
+@@ -2466,7 +2499,7 @@
+     if (pending.pending && pending.delay > 0 && (uint32_t)pending.delay < best)
+         best = (uint32_t)pending.delay;
+     /* Active sector read: next data-ready in read_delay cycles. */
+-    if (reading && !warm_route_consumer_blocked() &&
++    if (reading && !warm_route_consumer_blocked() && !fast_data_consumer_blocked() &&
+         read_delay > 0 && (uint32_t)read_delay < best)
+         best = (uint32_t)read_delay;
+     return best;

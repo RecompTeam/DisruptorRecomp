@@ -114,6 +114,10 @@ void read_game_user_settings(const toml::value& doc, UserSettings& s) {
             s.skip_intro = toml::find<bool>(d, "skip_intro");
             s.has_skip_intro = true;
         });
+        if (d.contains("fast_disc_reads")) try_get([&]{
+            s.fast_disc_reads = toml::find<bool>(d, "fast_disc_reads");
+            s.has_fast_disc_reads = true;
+        });
         if (d.contains("mute_in_background")) try_get([&]{
             s.mute_in_background = toml::find<bool>(d, "mute_in_background");
             s.has_mute_in_background = true;
@@ -427,7 +431,7 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
         s.has_gap_filling || s.has_depth_sorted_world || s.has_movie_filter || s.has_draw_distance || s.has_fog_shape || s.has_diagnostic_view || s.has_detailed_logging ||
         s.has_language_discs || s.has_mute_in_background || s.has_achievements || s.has_bass_cut ||
         s.has_achievements_encore || s.has_achievements_unofficial || s.has_achievements_popups || s.has_achievements_progress || s.has_achievements_sound || s.has_achievements_popup_time || s.has_achievements_corner ||
-        s.has_language_disc || s.has_skip_intro ||
+        s.has_language_disc || s.has_skip_intro || s.has_fast_disc_reads ||
         s.has_hud_scale) {
         f << "\n[disruptor]\n";
         if (s.has_mouse_aim)
@@ -495,6 +499,8 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
             f << "frame_unlock = " << (s.frame_unlock ? "true" : "false") << "\n";
         if (s.has_skip_intro)
             f << "skip_intro = " << (s.skip_intro ? "true" : "false") << "\n";
+        if (s.has_fast_disc_reads)
+            f << "fast_disc_reads = " << (s.fast_disc_reads ? "true" : "false") << "\n";
         if (s.has_mute_in_background)
             f << "mute_in_background = " << (s.mute_in_background ? "true" : "false") << "\n";
         if (s.has_achievements)

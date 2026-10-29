@@ -1,0 +1,16 @@
+diff --git a/runtime/include/mod_plugins.h b/runtime/include/mod_plugins.h
+index 390891a9209701a72a9d668e689549fcdc56fe11..b65c4e38479fbb6a194ae26b00682e96c43ebed7 100644
+--- a/runtime/include/mod_plugins.h
++++ b/runtime/include/mod_plugins.h
+@@ -32,6 +32,11 @@
+ void psx_mod_write_byte(uint32_t address, uint8_t value);
+ uint16_t psx_mod_read_half(uint32_t address);
+ void psx_mod_write_half(uint32_t address, uint16_t value);
++/* Deliver disc sectors into RAM exactly as a completed CD-ROM DMA would
++ * (overlay capture, executable-page invalidation). Word-aligned address and
++ * length. Returns 0 when the span leaves RAM. */
++int psx_mod_dma_write_ram(uint32_t address, const void* data, uint32_t bytes,
++                          int lba);
+ uint32_t psx_mod_read_word(uint32_t address);
+ void psx_mod_write_word(uint32_t address, uint32_t value);
+ 

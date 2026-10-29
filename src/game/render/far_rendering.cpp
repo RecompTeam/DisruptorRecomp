@@ -19,6 +19,9 @@
 
 #include "game/render/far_rendering.h"
 
+#include "game/guest.h"
+#include "game/render/sector_reach.h"
+
 #include "cpu_state.h"
 #include "game/session/weapon_load.h"
 #include "lockstep.h"
@@ -277,6 +280,9 @@ struct SessionDiagnostics {
     uint32_t packet_visible_loop_last = 0u;
     uint32_t packet_post_visible_loop_last = 0u;
 
+    uint64_t sector_requests_held = 0u;
+    uint64_t portal_model_mismatches = 0u;
+
     std::array<double, kTimingHistory> render_wall_us{};
     size_t render_wall_us_count = 0u;
     size_t render_wall_us_next = 0u;
@@ -289,6 +295,7 @@ int g_depth_fade_mode = DISRUPTOR_FAR_RENDERING_DEPTH_FADE_RETAIL;
 ActiveFrame g_frame;
 PendingFarDecision g_pending_decision;
 SessionDiagnostics g_diagnostics;
+disruptor::sector_reach::Walk g_walk;
 
 /* Active only inside an active frame: every way a frame ends gives the values back. */
 struct WrittenDistances {
@@ -658,6 +665,19 @@ void observe_portal_candidate(const CPUState *cpu, uint32_t pc) {
     }
 }
 
+/* Caller owns g_mutex.  The portal is in $s2 at all three tests, the distance just squared in $v0. */
+void check_portal_copy(const CPUState *cpu, uint32_t pc) {
+    namespace reach = disruptor::sector_reach;
+    const disruptor::Guest guest;
+    const reach::Portal portal = reach::portal_at(guest, cpu->gpr[18]);
+    const int32_t x = static_cast<int32_t>(guest.word(reach::kCamera));
+    const int32_t z = static_cast<int32_t>(guest.word(reach::kCamera + 4u));
+    const int32_t copy = pc == kPortalFirstCandidate    ? reach::first_distance(portal, x, z)
+                         : pc == kPortalSecondCandidate ? reach::second_distance(portal, x, z)
+                                                        : reach::offset_distance(portal, x, z, reach::scale_at(guest, portal));
+    if (static_cast<uint32_t>(copy) != cpu->gpr[2]) ++g_diagnostics.portal_model_mismatches;
+}
+
 void observe_object_decision(const CPUState *cpu,
                              const ObjectDecisionSite& site) {
     if (!cpu || g_pending_decision.kind == PendingDecisionKind::None)
@@ -1021,6 +1041,14 @@ void observe_instruction(CPUState *cpu, uint32_t pc, uint32_t opcode) {
         g_frame.traversal_depth_seen = true;
         g_frame.traversal_max_depth =
             std::max(g_frame.traversal_max_depth, depth);
+        if (!g_written.active) return;
+        const disruptor::sector_reach::Entry entry = disruptor::sector_reach::enter(
+            disruptor::Guest{}, g_walk, cpu->gpr[29], depth, g_written.source_far, g_written.effective_far);
+        if (!entry.agrees) ++g_diagnostics.portal_model_mismatches;
+        if (entry.hold) {
+            cpu->gpr[19] = disruptor::sector_reach::kDepthCap;
+            ++g_diagnostics.sector_requests_held;
+        }
         return;
     }
 
@@ -1032,6 +1060,7 @@ void observe_instruction(CPUState *cpu, uint32_t pc, uint32_t opcode) {
 
     if (pc == kPortalFirstCandidate || pc == kPortalSecondCandidate ||
         pc == kPortalFinalCandidate) {
+        check_portal_copy(cpu, pc);
         observe_portal_candidate(cpu, pc);
         return;
     }
@@ -1255,6 +1284,8 @@ extern "C" int disruptor_far_rendering_get_diagnostics(
             g_diagnostics.packet_visible_loop_last;
         snapshot.packet_post_visible_loop_last =
             g_diagnostics.packet_post_visible_loop_last;
+        snapshot.sector_requests_held = g_diagnostics.sector_requests_held;
+        snapshot.portal_model_mismatches = g_diagnostics.portal_model_mismatches;
     }
 
     /* Readiness is sampled outside the diagnostics lock because it performs
@@ -1449,6 +1480,7 @@ static void begin_renderer_frame(CPUState *cpu) {
 
     g_frame = ActiveFrame{};
     g_pending_decision = PendingFarDecision{};
+    g_walk = disruptor::sector_reach::Walk{};
     g_frame.active = true;
     g_frame.primitive_start = primitive_start;
     g_frame.started = Clock::now();

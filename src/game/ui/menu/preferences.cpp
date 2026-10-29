@@ -372,6 +372,7 @@ void apply_saved_preferences(const PSXRecompV4::UserSettings &settings) {
     if (settings.has_hud_scale) gpu_ws_set_hud_scale(settings.hud_scale);
     if (!env_override_present("PSX_DISRUPTOR_FRAME_UNLOCK"))
         disruptor_frame_rate_set_unlocked(stored(settings, *find_option("disruptor.frame_unlock")));
+    cdrom_set_fast_data_reads(stored(settings, *find_option("disruptor.fast_disc_reads")));
     if (settings.has_skip_intro &&
         !env_override_present("PSX_DISRUPTOR_SKIP_INTRO"))
         disruptor_intro_skip_set_enabled(settings.skip_intro ? 1 : 0);
@@ -494,6 +495,8 @@ void apply_pending_preferences() {
         disruptor_frame_rate_set_unlocked(pending.frame_unlock ? 1 : 0);
     if (changed("disruptor.skip_intro"))
         disruptor_intro_skip_set_enabled(pending.skip_intro ? 1 : 0);
+    if (changed("disruptor.fast_disc_reads"))
+        cdrom_set_fast_data_reads(stored(pending, *find_option("disruptor.fast_disc_reads")));
     if (changed("disruptor.ambient_occlusion"))
         gl_renderer_set_ssao(pending.ambient_occlusion ? 1 : 0);
     if (changed("disruptor.occlusion_reach") ||

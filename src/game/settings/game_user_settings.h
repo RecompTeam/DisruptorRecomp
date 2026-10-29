@@ -31,6 +31,7 @@ struct GameUserSettings {
     bool has_high_precision_camera = false; bool high_precision_camera = false;
     bool has_frame_unlock = false; bool frame_unlock = false;
     bool has_skip_intro = false; bool skip_intro = false;
+    bool has_fast_disc_reads = false; bool fast_disc_reads = false;
     bool has_mute_in_background = false; bool mute_in_background = false;
     bool has_achievements = false; bool achievements = true;  // RetroAchievements with the launcher's account
     bool has_achievements_encore = false; bool achievements_encore = false;

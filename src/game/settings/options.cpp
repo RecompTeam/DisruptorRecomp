@@ -175,6 +175,13 @@ constexpr Option toggle(const char* key, const char* label, int initial, const c
     return {key, Kind::toggle, label, saved, get, set, initial, 0, 1, {}, needs, Unit::none, hint};
 }
 
+/* A switch held off: shown, greyed, its notice saying why. */
+constexpr Option locked(Option option, const char* notice) {
+    option.highest = 0;
+    option.notice = notice;
+    return option;
+}
+
 constexpr Option choice(const char* key, const char* label, int initial, const char* hint,
                         std::span<const char* const> choices, Saved saved, Get get, Set set,
                         std::span<const char* const> needs = {}, int offered = 0, const char* notice = nullptr) {
@@ -256,6 +263,10 @@ constexpr Option option_list[] = {
     toggle<&Settings::has_skip_intro, &Settings::skip_intro>(
         "disruptor.skip_intro", "Skip the logos and the title movie", 0,
         "Escape skips a logo or a movie either way"),
+    locked(toggle<&Settings::has_fast_disc_reads, &Settings::fast_disc_reads>(
+               "disruptor.fast_disc_reads", "Fast disc reads", 0,
+               "The drive hands over data as fast as the game takes it\nLevels load sooner\nMovies and music keep their own speed"),
+           "Comes in a later release"),
 
     toggle<&Settings::has_mouse_aim, &Settings::mouse_aim>(
         "disruptor.mouse_aim", "Horizontal mouse aim", 1,
@@ -446,6 +457,7 @@ const Option* find_option(const char* key) {
 }
 
 bool applies(const Option& option, const std::function<bool(const Option&)>& on) {
+    if (option.kind == Kind::toggle && option.highest == 0) return false;
     return std::all_of(option.needs.begin(), option.needs.end(), [&](const char* key) {
         const Option* needed = find_option(key);
         return needed && on(*needed) && applies(*needed, on);
@@ -455,7 +467,7 @@ bool applies(const Option& option, const std::function<bool(const Option&)>& on)
 int stored(const Settings& settings, const Option& option) {
     if (!option.saved(settings)) return option.initial;
     const int value = option.get(settings);
-    return option.kind == Kind::choice && value > option.highest ? option.initial : value;
+    return (option.kind == Kind::choice || option.kind == Kind::toggle) && value > option.highest ? option.initial : value;
 }
 
 Settings with_defaults(Settings settings) {

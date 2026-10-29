@@ -983,7 +983,7 @@ staged_keys = set(re.findall(r'\bmark\("([\w.]+)"', menu)) | set(
 )
 applied_keys = set(re.findall(r'\bchanged\("([\w.]+)"\)', function_body(menu, "apply_pending_preferences")))
 require(
-    len(shared_keys) == 65
+    len(shared_keys) == 66
     and staged_keys == shared_keys
     and applied_keys == shared_keys
     and set(re.findall(r'\bfind_option\("([\w.]+)"', menu)) <= shared_keys,
@@ -1028,9 +1028,13 @@ require(
 HELPERS = (
     "bool option_toggle(const char *key, bool *value) {\n"
     "    const Option &option = *find_option(key);\n"
+    "    const bool held = option.highest == 0;\n"
+    "    if (held) ImGui::BeginDisabled();\n"
     "    const bool moved = ImGui::Checkbox(option.label, value);\n"
+    "    if (held) ImGui::EndDisabled();\n"
     "    disruptor::ui::hint(option.hint);\n"
-    "    return moved;\n"
+    '    if (option.notice) ImGui::TextColored(ImVec4(0.878f, 0.643f, 0.227f, 1.0f), "%s", option.notice);\n'
+    "    return moved && !held;\n"
     "}\n"
     "\n"
     "bool option_slider(const char *key, int *value) {\n"
@@ -1079,7 +1083,7 @@ present = read("src/game/frame/present_rate.cpp")
 require(
     HELPERS in menu
     and "bool option_list(const char *key, int *index, size_t skipped = 0);\n" in menu
-    and len(shared_labels) == 65
+    and len(shared_labels) == 66
     and drawn_keys == shared_keys
     and not [text for text in [*shared_labels, *shared_choices] if f'"{text}"' in menu + present]
     and "    static constexpr int kScaleCount = 8;\n" in menu
@@ -1095,6 +1099,7 @@ require(
 
 RULE = (
     "bool applies(const Option& option, const std::function<bool(const Option&)>& on) {\n"
+    "    if (option.kind == Kind::toggle && option.highest == 0) return false;\n"
     "    return std::all_of(option.needs.begin(), option.needs.end(), [&](const char* key) {\n"
     "        const Option* needed = find_option(key);\n"
     "        return needed && on(*needed) && applies(*needed, on);\n"
@@ -1223,7 +1228,7 @@ shared_hints = [
 written = "".join(re.findall(LITERAL, menu + present))
 require(
     HINT in read("src/game/ui/hint.h")
-    and len(shared_hints) == 65
+    and len(shared_hints) == 66
     and all(not text or 20 <= len(text) <= 240 for text in shared_hints)
     and not [text for text in shared_hints if text and text[:32] in written]
     and "Also needs Exact-provenance geometry"

@@ -1,0 +1,22 @@
+diff --git a/runtime/include/cdrom.h b/runtime/include/cdrom.h
+index 7ef03f476d27edd35b231801be482cb5487d1925..967280883bcd37749643bb394f3b9967d0711e25 100644
+--- a/runtime/include/cdrom.h
++++ b/runtime/include/cdrom.h
+@@ -37,6 +37,17 @@
+  * command, and the turbo-through-loads predicate (step 4). */
+ void cdrom_set_instant_rate(int per_frame);
+ int  cdrom_get_instant_rate(void);
++
++/* Fast data reads: while on, a data sector (no XA mode bits, no XA stream) is
++ * due at the instant rate after the last and only once the guest has taken the
++ * one before it. A host policy, never saved in a state, so a load keeps it. */
++void cdrom_set_fast_data_reads(int enabled);
++int  cdrom_fast_data_reads(void);
++
++/* The 2048-byte user data of `count` sectors from `lba` on, read from the
++ * mounted image as the drive would read them (mod sector patches included),
++ * without touching the drive's state or timing. Returns 0 on a failed read. */
++int cdrom_read_user_sectors(uint32_t lba, uint32_t count, uint8_t* out);
+ 
+ /* Strict, config-driven warm-load route accelerator. Up to 16 routes may be
+  * registered after cdrom_init. A route arms only after arm_lba and activates
