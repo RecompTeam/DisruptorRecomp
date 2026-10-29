@@ -156,8 +156,7 @@ require(
     and "        gr_draw_textured_rect(x0, y0, w, h, u0, v0, clut_x, clut_y, current_texpage());\n    ws_hud_glyph = 0;\n"
     in gpu
     and gpu.count("shrunk = 1;") == 2
-    and "    const int packet_raw = packet_fade >= 0 ? 2 | (packet_fade << 2) : gpu_current_hud_glyph() << 2;\n"
-    in renderer
+    and "    const int packet_raw = packet_fade >= 0 ? 2 | (packet_fade << 2) : ctx_hud_glyph() << 2;\n" in renderer
     and '"bool glyph_edge(vec2 at, int glyph, out vec3 rgb, out int stp){\\n"' in renderer
     and '"  return t.x >= v_limits.x && t.x <= v_limits.z && t.y >= v_limits.y && t.y <= v_limits.w;\\n"' in renderer
     and '"  if (!sample_texture(sample_uv, rgb, stp) && (glyph == 0 || !glyph_edge(sample_uv, glyph, rgb, stp))) discard;\\n"'

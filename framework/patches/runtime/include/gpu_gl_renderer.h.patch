@@ -1,5 +1,5 @@
 diff --git a/runtime/include/gpu_gl_renderer.h b/runtime/include/gpu_gl_renderer.h
-index 895bd537f34518af1fdee2800300c6a94c01121c..2191ddd3342bcd282ac501161466d33e33e49de6 100644
+index 895bd537f34518af1fdee2800300c6a94c01121c..f56409991e37dc8a4a49c77fd673293be71f8f84 100644
 --- a/runtime/include/gpu_gl_renderer.h
 +++ b/runtime/include/gpu_gl_renderer.h
 @@ -42,9 +42,10 @@
@@ -15,3 +15,23 @@ index 895bd537f34518af1fdee2800300c6a94c01121c..2191ddd3342bcd282ac501161466d33e
  
  /* Clear to black + swap (display-disabled frame). */
  void gl_renderer_present_blank(void);
+@@ -163,6 +164,19 @@
+  * sets/frame avg, [17]=wide FBO creations/frame avg. GPU phases are true
+  * GL_TIME_ELAPSED times (CPU-overhead independent). Returns the count. */
+ int gl_renderer_perf_aggregate(int wide_filter, double out[18]);
++#define GL_RENDERER_GPU_ZONES 25
++const char *gl_renderer_gpu_zone_name(int zone);
++uint64_t gl_renderer_gpu_zones(int reset, double out[2][GL_RENDERER_GPU_ZONES], uint64_t frames[2], uint64_t *dropped);
++void gl_renderer_gpu_busy_enable(int enabled);
++double gl_renderer_gpu_busy_ms(void);
++/* The render thread (gpu_gl_render_thread.c.inc), off unless started. */
++int gl_renderer_render_thread_start(int max_frames);
++void gl_renderer_render_thread_stop(void);
++int gl_renderer_render_thread_active(void);
++void gl_renderer_render_thread_request(int on);
++void gl_renderer_render_thread_frame_boundary(void);
++void gl_renderer_render_thread_stats(uint64_t *frames, uint64_t *syncs, const char **last_sync);
++void gl_renderer_present_wide_or_vram(int disp_x, int disp_y, int disp_h, int linear, int w, int h, int force_4_3);
+ 
+ /* Native-wide mirror ablation (perf attribution, debug cmd gl_ws_ablate):
+  * 0 = normal, 1 = skip the whole mirror pass (incl. wide_clear), 2 = full mirror

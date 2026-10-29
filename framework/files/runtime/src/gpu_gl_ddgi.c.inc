@@ -880,6 +880,7 @@ static int ddgi_level_start(void) {
 
 /* Game thread: the faces are copied, the level thread makes their BVH. 0 when they could not be taken. */
 int gpu_ddgi_set_level(const GpuDdgiTriangle *tris, int count) {
+    GL_RT_SYNC(__func__);
     if (count < 0 || (!tris && count)) return 0;
     if (count > DDGI_LEVEL_TRIS) {
         fprintf(stdout, "psxrecomp: GL probe lighting got a level of %d faces, more than %d, the sun sees only the frame\n", count,
@@ -984,7 +985,7 @@ void gl_renderer_set_ddgi_lamp_strength(float strength);
 
 /* frame: the picture just drawn, w and h its size and cx, cy its shown centre, in native pixels. */
 static int s_ddgi_environment = 1;
-void gl_renderer_set_ddgi_environment(int taken) { s_ddgi_environment = taken != 0; }
+void gl_renderer_set_ddgi_environment(int taken) { GL_RT_SYNC(__func__); s_ddgi_environment = taken != 0; }
 
 static void ddgi_update(GLuint frame, float w, float h, float cx, float cy) {
     static int asked;
@@ -1060,7 +1061,7 @@ static void ddgi_update(GLuint frame, float w, float h, float cx, float cy) {
         glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
         /* The presenter may still have a draw queued that reads the BVH or level slot about to be written. */
         if (s_interp_mutex) SDL_LockMutex(s_interp_mutex);
-        if (s_interp_draw_fence) p_glWaitSync(s_interp_draw_fence, 0, PSXGL_TIMEOUT_IGNORED);
+        if (s_interp_draw_fence) gz_wait(0, s_interp_draw_fence);
         if (s_interp_mutex) SDL_UnlockMutex(s_interp_mutex);
         const int bvh = s_ddgi_bvh_next;
         s_ddgi_bvh_next ^= 1;
@@ -1127,7 +1128,7 @@ static void ddgi_update(GLuint frame, float w, float h, float cx, float cy) {
 
         /* The presenter samples the probes: these writes wait for its queued draws, and its next draws wait for s_ddgi_probe_fence. */
         if (s_interp_mutex) SDL_LockMutex(s_interp_mutex);
-        if (s_interp_draw_fence) p_glWaitSync(s_interp_draw_fence, 0, PSXGL_TIMEOUT_IGNORED);
+        if (s_interp_draw_fence) gz_wait(0, s_interp_draw_fence);
 
         /* Rays. */
         glDisable(GL_BLEND);
@@ -1374,12 +1375,19 @@ static void ddgi_screen_measure(int thread, GLuint color, GLuint depth, float fo
 
 /* The casters' shadows and the dynamic lights' light at half the picture's size, before the mix's target is bound. */
 static void ddgi_lamp_pass(int thread, GLuint color, GLuint depth, float focal_x, float focal_y, float centre_x, float centre_y,
-                           int w, int h, int scale, float u0, float v0, float u1, float v1) {
+                           int w, int h, int scale, float u0, float v0, float u1, float v1, int shown_w, int shown_h) {
     DdgiContext *ctx = s_ddgi_ready ? ddgi_context(thread) : NULL;
     if (ctx) ctx->lamp_ready = 0;
     if (!ctx || !ctx->frame.valid || !(s_ddgi_shadows || s_ddgi_lamps || ddgi_sun_active())) return;
     const DdgiFrame *f = &ctx->frame;
-    const int lw = (int)((u1 - u0) * (float)w * 0.5f + 0.5f), lh = (int)((v1 - v0) * (float)h * 0.5f + 0.5f);
+    int lw = (int)((u1 - u0) * (float)w * 0.5f + 0.5f), lh = (int)((v1 - v0) * (float)h * 0.5f + 0.5f);
+    static int full = -1;
+    if (full < 0) full = getenv("PSX_DDGI_LAMP_FULL") != NULL;
+    if (!full && (lw > shown_w / 2 || lh > shown_h / 2) && shown_w > 1 && shown_h > 1) {
+        /* Finer than half the screen the soft lamp light showed no difference, at up to four times the cost. */
+        const float fit = fminf((float)(shown_w / 2) / (float)lw, (float)(shown_h / 2) / (float)lh);
+        if (fit < 1.0f) { lw = (int)((float)lw * fit + 0.5f); lh = (int)((float)lh * fit + 0.5f); }
+    }
     if (lw <= 0 || lh <= 0) return;
     if (!ctx->lamp_fbo || ctx->lamp_w != lw || ctx->lamp_h != lh) {
         if (ctx->lamp_fbo) p_glDeleteFramebuffers(1, &ctx->lamp_fbo);
@@ -1518,7 +1526,7 @@ static int ddgi_mix_begin(int thread, GLuint color, GLuint depth, float focal_x,
     const int probes = s_ddgi_light && s_ddgi_applies && ctx->screen.frames,
               lamps = ctx->lamp_ready && (s_ddgi_shadows || s_ddgi_lamps || ddgi_sun_active());
     if (!probes && !lamps) return 0;
-    if (thread && s_ddgi_probe_fence) p_glWaitSync(s_ddgi_probe_fence, 0, PSXGL_TIMEOUT_IGNORED);
+    if (thread && s_ddgi_probe_fence) gz_wait(1, s_ddgi_probe_fence);
     ddgi_bind_probes(color, depth);
     p_glActiveTexture(PSXGL_TEXTURE0 + 5);
     glBindTexture(GL_TEXTURE_2D, ctx->screen.average_tex);
@@ -1574,6 +1582,7 @@ static void ddgi_capture_set(void) {
 }
 
 void gl_renderer_set_ddgi(int enabled) {
+    GL_RT_SYNC(__func__);
     s_ddgi_light = enabled != 0 && !s_ddgi_failed;
     s_ddgi_ctx[0].screen.frames = s_ddgi_ctx[1].screen.frames = 0;
     ddgi_capture_set();
@@ -1585,45 +1594,52 @@ void gl_renderer_set_ddgi(int enabled) {
     ssao_mode();
 }
 int gl_renderer_ddgi(void) { return s_ddgi_light; }
-void gl_renderer_set_ddgi_strength(float strength) { s_ddgi_strength = strength < 0.0f ? 0.0f : strength > 2.0f ? 2.0f : strength; }
+void gl_renderer_set_ddgi_strength(float strength) { GL_RT_SYNC(__func__); s_ddgi_strength = strength < 0.0f ? 0.0f : strength > 2.0f ? 2.0f : strength; }
 float gl_renderer_ddgi_strength(void) { return s_ddgi_strength; }
-void gl_renderer_set_ddgi_view(int enabled) { s_ddgi_light_view = enabled != 0; }
+void gl_renderer_set_ddgi_view(int enabled) { GL_RT_SYNC(__func__); s_ddgi_light_view = enabled != 0; }
 int gl_renderer_ddgi_view(void) { return s_ddgi_light_view; }
-void gl_renderer_set_ddgi_bounce(float bounce) { s_ddgi_bounce = bounce < 0.0f ? 0.0f : bounce > 1.0f ? 1.0f : bounce; }
+void gl_renderer_set_ddgi_bounce(float bounce) { GL_RT_SYNC(__func__); s_ddgi_bounce = bounce < 0.0f ? 0.0f : bounce > 1.0f ? 1.0f : bounce; }
 float gl_renderer_ddgi_bounce(void) { return s_ddgi_bounce; }
-void gl_renderer_set_ddgi_glow(float glow) { s_ddgi_glow = glow < 0.0f ? 0.0f : glow > 4.0f ? 4.0f : glow; }
+void gl_renderer_set_ddgi_glow(float glow) { GL_RT_SYNC(__func__); s_ddgi_glow = glow < 0.0f ? 0.0f : glow > 4.0f ? 4.0f : glow; }
 float gl_renderer_ddgi_glow(void) { return s_ddgi_glow; }
 void gl_renderer_set_ddgi_shadows(int enabled) {
+    GL_RT_SYNC(__func__);
     s_ddgi_shadows = enabled != 0 && !s_ddgi_failed;
     ddgi_capture_set();
     ssao_mode();
 }
 int gl_renderer_ddgi_shadows(void) { return s_ddgi_shadows; }
 void gl_renderer_set_ddgi_shadow_strength(float strength) {
+    GL_RT_SYNC(__func__);
     s_ddgi_shadow_strength = strength < 0.0f ? 0.0f : strength > 2.0f ? 2.0f : strength;
 }
 float gl_renderer_ddgi_shadow_strength(void) { return s_ddgi_shadow_strength; }
-void gl_renderer_set_ddgi_contact(float strength) { s_ddgi_contact = strength < 0.0f ? 0.0f : strength > 2.0f ? 2.0f : strength; }
+void gl_renderer_set_ddgi_contact(float strength) { GL_RT_SYNC(__func__); s_ddgi_contact = strength < 0.0f ? 0.0f : strength > 2.0f ? 2.0f : strength; }
 float gl_renderer_ddgi_contact(void) { return s_ddgi_contact; }
 void gl_renderer_set_ddgi_lamps(int enabled) {
+    GL_RT_SYNC(__func__);
     s_ddgi_lamps = enabled != 0 && !s_ddgi_failed;
     ddgi_capture_set();
     ssao_mode();
 }
 int gl_renderer_ddgi_lamps(void) { return s_ddgi_lamps; }
 void gl_renderer_set_ddgi_lamp_strength(float strength) {
+    GL_RT_SYNC(__func__);
     s_ddgi_lamp_strength = strength < 0.0f ? 0.0f : strength > 4.0f ? 4.0f : strength;
 }
 float gl_renderer_ddgi_lamp_strength(void) { return s_ddgi_lamp_strength; }
-void gl_renderer_set_ddgi_lamp_view(int enabled) { s_ddgi_lamp_view = enabled != 0; }
+void gl_renderer_set_ddgi_lamp_view(int enabled) { GL_RT_SYNC(__func__); s_ddgi_lamp_view = enabled != 0; }
 int gl_renderer_ddgi_lamp_view(void) { return s_ddgi_lamp_view; }
 void gl_renderer_set_ddgi_sun(int enabled) {
+    GL_RT_SYNC(__func__);
     s_ddgi_sun = enabled != 0 && !s_ddgi_failed;
     ddgi_capture_set();
     ssao_mode();
 }
 int gl_renderer_ddgi_sun(void) { return s_ddgi_sun; }
 void gl_renderer_set_ddgi_mission(int mission) {
+    const int32_t v[] = {mission};
+    if (rth_rec_call(RTH_DDGI_MISSION, v, 1)) return;
     if (mission == s_ddgi_mission) return;
     s_ddgi_mission = mission;
     if (getenv("PSX_DDGI")) fprintf(stdout, "psxrecomp: DDGI mission %d\n", mission);
@@ -1633,14 +1649,16 @@ void gl_renderer_set_ddgi_mission(int mission) {
 }
 int gl_renderer_ddgi_sun_here(void) { return s_ddgi_mission >= 0 && s_ddgi_mission < 16 && s_ddgi_suns[s_ddgi_mission].strength > 0.0f; }
 void gl_renderer_ddgi_sun_get(float sun[4]) {
+    GL_RT_SYNC(__func__);
     const DdgiSun *s = &s_ddgi_suns[s_ddgi_mission >= 0 && s_ddgi_mission < 16 ? s_ddgi_mission : 0];
     sun[0] = s->azimuth;
     sun[1] = s->elevation;
     sun[2] = s->strength;
     sun[3] = s->shade;
 }
-void gl_renderer_ddgi_sun_set(const float sun[4]) { gl_renderer_ddgi_sun_set_mission(s_ddgi_mission, sun); }
+void gl_renderer_ddgi_sun_set(const float sun[4]) { GL_RT_SYNC(__func__); gl_renderer_ddgi_sun_set_mission(s_ddgi_mission, sun); }
 void gl_renderer_ddgi_sun_set_mission(int mission, const float sun[4]) {
+    GL_RT_SYNC(__func__);
     if (mission < 0 || mission >= 16) return;
     DdgiSun *s = &s_ddgi_suns[mission];
     s->azimuth = sun[0];

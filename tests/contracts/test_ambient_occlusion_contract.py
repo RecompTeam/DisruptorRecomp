@@ -59,19 +59,23 @@ require(
     s_ssao = mode;
 }
 void gl_renderer_set_ssao(int enabled) {
+    GL_RT_SYNC(__func__);
     s_ssao_on = enabled != 0;
     ssao_mode();
 }
 void gl_renderer_set_ssao_view(int view) {
+    GL_RT_SYNC(__func__);
     s_ssao_view = view >= 1 && view <= 4 ? view : 0;
     ssao_mode();
 }
 """
     in renderer
     and """void gl_renderer_set_ssao_tilt(float tilt) {
+    GL_RT_SYNC(__func__);
     if (tilt >= 0.0f && tilt < 0.95f) s_ssao_tilt = tilt;
 }
 void gl_renderer_set_ssao_shape(float radius, float strength) {
+    GL_RT_SYNC(__func__);
     if (radius > 0.0f) s_ssao_radius = radius;
     if (strength >= 0.0f) s_ssao_strength = strength;
 }

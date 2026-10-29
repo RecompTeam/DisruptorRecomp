@@ -1,5 +1,5 @@
 diff --git a/runtime/runtime.cmake b/runtime/runtime.cmake
-index 11c4368cd3d3bcdfa4e6c62a97530017bfd6b381..fca2f296da79e43a0bd1a35e492b930d77013a2e 100644
+index 11c4368cd3d3bcdfa4e6c62a97530017bfd6b381..c2ad7aaa87579a33004a4e8b292f29805210daac 100644
 --- a/runtime/runtime.cmake
 +++ b/runtime/runtime.cmake
 @@ -1,4 +1,4 @@
@@ -25,3 +25,12 @@ index 11c4368cd3d3bcdfa4e6c62a97530017bfd6b381..fca2f296da79e43a0bd1a35e492b930d
              ${_psx_sdl3_timestamp_args})
          FetchContent_MakeAvailable(SDL3)
      endif()
+@@ -233,6 +233,8 @@
+     ${PSXRECOMP_ROOT}/runtime/src/psx_icache.c
+     ${PSXRECOMP_ROOT}/runtime/src/starvation_ring.c
+     ${PSXRECOMP_ROOT}/runtime/src/latency_ring.c
++    ${PSXRECOMP_ROOT}/runtime/src/dynamic_resolution.c
++    ${PSXRECOMP_ROOT}/runtime/src/render_thread.c
+     ${PSXRECOMP_ROOT}/runtime/src/data_shards.c
+     ${PSXRECOMP_ROOT}/runtime/src/load_accel.c
+     ${PSXRECOMP_ROOT}/runtime/src/card_read_summary.c

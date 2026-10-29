@@ -41,15 +41,17 @@ require(
     "            hidden = psx_borderless_hidden_rows(window, screen, pixels_high);\n"
     in keep
     and keep.rstrip().endswith("    gl_renderer_set_hidden_rows(hidden);\n}\n#else")
-    and "static void sdl_vblank_present(void) {\n    psx_borderless_keep_windowed();\n" in host
+    and "static void sdl_vblank_present(void) {\n    if (g_gl_active) gl_renderer_render_thread_frame_boundary();\n    psx_borderless_keep_windowed();\n"
+    in host
     and "#endif\n    psx_borderless_keep_windowed(); /* at once: a present may come before the next vblank */\n"
+    "    psx_refresh_swap_interval();\n"
     "    return psx_window_fullscreen_mode(window) == mode ? 1 : 0;\n"
     in host,
     "every frame the renderer is told how many rows are above the screen, none in any other mode: SDL fits the window "
     "to the screen again when it is restored",
 )
 require(
-    "void gl_renderer_set_hidden_rows(int rows) { s_hidden_rows = rows > 0 ? rows : 0; }\n"
+    "void gl_renderer_set_hidden_rows(int rows) {\n    const int32_t v[] = {rows};\n    if (rth_rec_call(RTH_HIDDEN_ROWS, v, 1)) return;\n    s_hidden_rows = rows > 0 ? rows : 0;\n}\n"
     "static void gl_visible_size(int *w, int *h) {\n    SDL_GL_GetDrawableSize(s_win, w, h);\n"
     "    if (*h > s_hidden_rows) *h -= s_hidden_rows;\n}\n"
     in renderer

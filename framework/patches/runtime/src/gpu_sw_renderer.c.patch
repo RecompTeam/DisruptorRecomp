@@ -1,0 +1,14 @@
+diff --git a/runtime/src/gpu_sw_renderer.c b/runtime/src/gpu_sw_renderer.c
+index 86b8459c5f8075e7faf9e1d33fedbb94f18639e7..de7b204648ddf3edddfd331523f06edf69701f74 100644
+--- a/runtime/src/gpu_sw_renderer.c
++++ b/runtime/src/gpu_sw_renderer.c
+@@ -444,6 +444,9 @@
+ /* Public API: init                                                   */
+ /* ------------------------------------------------------------------ */
+ 
++/* Where the rasterizer reads and writes VRAM, its state kept: the render thread's own copy or gpu.c's array. */
++void sw_renderer_rebind_vram(uint16_t *vram) { g_vram = vram; }
++
+ void sw_renderer_init(uint16_t *vram) {
+     g_vram = vram;
+     g_clip_x1 = 0;

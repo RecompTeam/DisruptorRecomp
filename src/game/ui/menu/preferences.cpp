@@ -144,6 +144,13 @@ void mark_occlusion_shape(int reach, int strength) {
 }
 
 void mark_smooth_fade(bool value) { mark("disruptor.smooth_fade", value); }
+void mark_dynamic_resolution(bool value) { mark("disruptor.dynamic_resolution", value); }
+void mark_resolution(int index) { mark("disruptor.resolution", index); }
+void mark_render_thread(bool value) { mark("disruptor.render_thread", value); }
+int apply_resolution(std::string_view text) {
+    const disruptor::resolution::Size size = disruptor::resolution::parse(text);
+    return psx_host_video_set_resolution(size.width, size.height);
+}
 
 void mark_antialiasing(int level) { mark("disruptor.multisampling", level); }
 
@@ -358,7 +365,10 @@ void apply_saved_preferences(const PSXRecompV4::UserSettings &settings) {
                 ? 1 : 0);
     }
     if (settings.has_supersampling)
-        (void)psx_host_video_set_internal_scale(settings.supersampling);
+        (void)disruptor_adaptive_resolution_set_scale(settings.supersampling);
+    if (settings.has_dynamic_resolution) disruptor_adaptive_resolution_set_enabled(settings.dynamic_resolution ? 1 : 0);
+    if (settings.has_resolution) (void)apply_resolution(settings.resolution);
+    if (settings.has_render_thread) gl_renderer_render_thread_request(settings.render_thread ? 1 : 0);
     if (settings.has_fullscreen)
         g_menu.fullscreen_apply_failed =
             psx_host_video_set_fullscreen_mode(settings.fullscreen) == 0;
@@ -469,7 +479,13 @@ void apply_pending_preferences() {
                 pending.aspect_num, pending.aspect_den);
     }
     if (changed("video.supersampling"))
-        (void)psx_host_video_set_internal_scale(pending.supersampling);
+        (void)disruptor_adaptive_resolution_set_scale(pending.supersampling);
+    if (changed("disruptor.dynamic_resolution"))
+        disruptor_adaptive_resolution_set_enabled(pending.dynamic_resolution ? 1 : 0);
+    if (changed("disruptor.resolution"))
+        (void)apply_resolution(pending.resolution);
+    if (changed("disruptor.render_thread"))
+        gl_renderer_render_thread_request(pending.render_thread ? 1 : 0);
     if (changed("video.fullscreen"))
         g_menu.fullscreen_apply_failed =
             psx_host_video_set_fullscreen_mode(pending.fullscreen) == 0;

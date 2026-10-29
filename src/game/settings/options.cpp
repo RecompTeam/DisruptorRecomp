@@ -1,6 +1,7 @@
 #include "game/settings/options.h"
 
 #include "game/frame/present_rate.h"
+#include "game/settings/resolution.h"
 
 #include <algorithm>
 #include <cmath>
@@ -44,7 +45,7 @@ void set_aspect(Settings& settings, int index) {
 int scale(const Settings& settings) { return settings.supersampling - 1; }
 void set_scale(Settings& settings, int index) { settings.has_supersampling = true; settings.supersampling = index + 1; }
 // One list over two saved keys: the samples a pixel, then the same counts with every sample shaded.
-constexpr int sample_levels = 4;
+constexpr int sample_levels = 3;
 bool antialiasing_saved(const Settings& settings) { return settings.has_multisampling || settings.has_sample_shading; }
 int antialiasing(const Settings& settings) {
     const auto found = std::ranges::find(PSXRecompV4::kDisruptorSampleCounts, settings.multisampling);
@@ -70,6 +71,11 @@ void set_draw_distance(Settings& settings, int index) {
 }
 int vsync(const Settings& settings) { return std::clamp(settings.vsync + 1, 0, 2); }
 void set_vsync(Settings& settings, int index) { settings.has_vsync = true; settings.vsync = index - 1; }
+int resolution(const Settings& settings) { return disruptor::resolution::index_of(settings.resolution); }
+void set_resolution(Settings& settings, int index) {
+    settings.has_resolution = true;
+    settings.resolution = std::string(disruptor::resolution::at(index));
+}
 // settings.toml keeps the dead zone in the stick's raw units, 0 to 32767: shown as a share of the stick's travel.
 constexpr int runtime_deadzone = 12000;
 int percent_of(int raw) { return static_cast<int>(std::lround(raw * 100.0 / 32767.0)); }
@@ -99,8 +105,7 @@ constexpr const char* aspects[] = {"4:3", "16:9", "21:9", "32:9", "Match window 
 constexpr const char* scales[] = {"1x (native)", "2x", "3x", "4x", "5x", "6x", "7x", "8x"};
 constexpr const char* vsyncs[] = {"Adaptive", "Immediate", "Synchronised"};
 constexpr const char* schemes[] = {"Classic", "Modern"};
-constexpr const char* antialiasing_levels[] = {"Off",     "2x MSAA", "4x MSAA", "8x MSAA", "16x MSAA",
-                                               "2x SSAA", "4x SSAA", "8x SSAA", "16x SSAA"};
+constexpr const char* antialiasing_levels[] = {"Off", "2x MSAA", "4x MSAA", "8x MSAA", "2x SSAA", "4x SSAA", "8x SSAA"};
 constexpr const char* draw_distances[] = {"Original", "1.25x", "1.5x", "2x"};
 constexpr const char* fog_shapes[] = {"Original", "Soft", "Late"};
 constexpr int distances_offered = 2;  /* Original and 1.25x for now */
@@ -200,6 +205,18 @@ constexpr Option option_list[] = {
     choice("video.supersampling", "Internal resolution scale", 3,
            "Higher is sharper\nDoubling the scale makes four times the graphics card's work", scales,
            saved<&Settings::has_supersampling>, scale, set_scale),
+    toggle<&Settings::has_dynamic_resolution, &Settings::dynamic_resolution>(
+        "disruptor.dynamic_resolution", "Dynamic resolution", 0,
+        "Lowers the internal resolution while the graphics card cannot keep up\nRaises it back to the scale above when it can\n"
+        "Meant for weaker graphics cards, integrated ones above all"),
+    choice("disruptor.resolution", "Resolution", 0,
+           "An exclusive fullscreen's display mode, the nearest the display has\nAn ordinary window's size\nBorderless fullscreen keeps the desktop's",
+           disruptor::resolution::kChoices, saved<&Settings::has_resolution>, resolution, set_resolution),
+    toggle<&Settings::has_render_thread, &Settings::render_thread>(
+        "disruptor.render_thread", "Render thread", 0,
+        "Can make the game smoother on slower processors and integrated graphics\n"
+        "Sends the drawing to the graphics card from a thread of its own\n"
+        "Has no effect with in-between frames or lighting on"),
     choice("video.vsync", "VSync", 2,
            "Synchronised: waits for the display, the picture never tears\n"
            "Immediate: does not wait\n"

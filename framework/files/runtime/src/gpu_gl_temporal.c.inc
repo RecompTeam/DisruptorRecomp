@@ -1014,10 +1014,11 @@ static int temporal_present(float alpha,int lx,int ly,int lw,int lh) {
         !temporal_target(s->width,s->scale)) return 0;
     for (first_world=0;first_world<s->nt && !s->triangles[first_world].world;++first_world) {}
     for (last_world=s->nt-1;last_world>=0 && !s->triangles[last_world].world;--last_world) {}
-    if (s_interp_fence[s_interp_cur]) p_glWaitSync(s_interp_fence[s_interp_cur],0,PSXGL_TIMEOUT_IGNORED);
+    if (s_interp_fence[s_interp_cur]) gz_wait(1,s_interp_fence[s_interp_cur]);
     if (s_temp_shading!=s_ssaa) sample_shading(s_temp_shading=s_ssaa);
     p_glBindFramebuffer(PSXGL_FRAMEBUFFER,s_temp_ms_fbo ? s_temp_ms_fbo : s_temp_fbo);
     glViewport(0,0,s->width*s->scale,VRAM_H*s->scale);
+    gz_begin(GZ_BETWEEN_CLEAR);
     glDisable(GL_SCISSOR_TEST); glDisable(GL_BLEND);
     glDisable(GL_CULL_FACE); glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
     glStencilMask(0xFF); glClearStencil(s->clear[3]>0.5f ? 1:0);
@@ -1025,6 +1026,8 @@ static int temporal_present(float alpha,int lx,int ly,int lw,int lh) {
     glEnable(GL_DEPTH_TEST); glDepthFunc(GL_ALWAYS); glDepthMask(GL_TRUE); glClearDepth(1.0);
     glEnable(PSXGL_DEPTH_CLAMP);
     glClear(GL_COLOR_BUFFER_BIT|GL_STENCIL_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+    gz_end(GZ_BETWEEN_CLEAR);
+    gz_begin(GZ_BETWEEN_DRAW);
     s_temp_scene_depth=1;
     s_temp_shown_stats=s->mesh_stats; s_temp_shown_faces=s->nt;
     p_glActiveTexture(PSXGL_TEXTURE0);
@@ -1116,6 +1119,8 @@ static int temporal_present(float alpha,int lx,int ly,int lw,int lh) {
     }
     if (underlaid && s_world_depth) { s_temp_fill=1; temporal_underlay(alpha,0); s_temp_fill=0; }
     if (underlaid) temporal_underlay(alpha,1);
+    gz_end(GZ_BETWEEN_DRAW);
+    gz_begin(GZ_BETWEEN_RESOLVE);
     s_temp_scene_depth=0;
     glDisable(GL_DEPTH_TEST);
     if (s_temp_ms_fbo) {
@@ -1125,9 +1130,12 @@ static int temporal_present(float alpha,int lx,int ly,int lw,int lh) {
                             GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT,GL_NEAREST);
         p_glBindFramebuffer(PSXGL_FRAMEBUFFER,s_temp_fbo);
     }
+    gz_end(GZ_BETWEEN_RESOLVE);
+    gz_begin(GZ_BETWEEN_RIMS);
     if (s_temp_marked)
         grown_rims_erase(&s_rims_thread,s_interp_thread_vao,s_temp_fbo,s->width*s->scale,VRAM_H*s->scale,0,
                          s->height*s->scale,s->scale,s->clear);
+    gz_end(GZ_BETWEEN_RIMS);
     p_glBindFramebuffer(PSXGL_FRAMEBUFFER,s_temp_fbo);
 #ifndef PSX_NO_DEBUG_TOOLS
     temporal_dump_frame(0,0,s->width*s->scale,s->height*s->scale,alpha,s->mesh_stats.departed_faces);
@@ -1140,9 +1148,12 @@ static int temporal_present(float alpha,int lx,int ly,int lw,int lh) {
 #endif
     glDisable(GL_STENCIL_TEST); glDisable(GL_SCISSOR_TEST); glDisable(GL_BLEND);
     ddgi_present_between(&s_temp_prev.ddgi,&s->ddgi,alpha);
-    if (ssao_draw(&s_ssao_thread,s_interp_thread_vao,s_temp_fbo,0,s_temp_tex,s->width*s->scale,VRAM_H*s->scale,
-                  0.5f/s->width,0.5f/VRAM_H,1-0.5f/s->width,(s->height-0.5f)/VRAM_H,
-                  s->scale,s_interp_linear,lx,ly,lw,lh)) {
+    gz_begin_at(1,GZ_SHADE);
+    const int shaded=ssao_draw(&s_ssao_thread,s_interp_thread_vao,s_temp_fbo,0,s_temp_tex,s->width*s->scale,VRAM_H*s->scale,
+                               0.5f/s->width,0.5f/VRAM_H,1-0.5f/s->width,(s->height-0.5f)/VRAM_H,
+                               s->scale,s_interp_linear,lx,ly,lw,lh);
+    gz_end_at(1);
+    if (shaded) {
         ++s_temp_replays;
         return 1;
     }

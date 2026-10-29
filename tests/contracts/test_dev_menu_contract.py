@@ -241,7 +241,7 @@ layer_update = function_body(gl, "interp_layer_update")
 require(
     "psx_host_ui_in_layer(psx_host_ui_capture_flags())" in layer_update
     and "psx_host_ui_render_gl" not in layer_update
-    and layer_update.index("p_glWaitSync(s_interp_draw_fence")
+    and layer_update.index("gz_wait(0, s_interp_draw_fence")
     < layer_update.index(f"{host_ui_helper}(ww, wh);")
     < layer_update.index("s_layer_fence[i] = p_glFenceSync(")
     < layer_update.index("s_layer_shown = i;"),
@@ -377,7 +377,7 @@ for token in (
     "new_hr_tex",
     "new_scratch_tex",
     "new_wide_tex",
-    "p_glBlitFramebuffer",
+    "rescale_into",
     "rebuild_target_stencil",
     "u_shift",
     "gl_renderer_invalidate_present",
@@ -431,7 +431,7 @@ for token in (
     "gpu_texture_correction_set",
     "psx_host_video_set_vsync",
     "psx_host_video_set_display_aspect",
-    "psx_host_video_set_internal_scale",
+    "disruptor_adaptive_resolution_set_scale",
     "psx_host_video_set_fullscreen_mode",
 ):
     require(token in menu, f"developer menu is missing {token}")
@@ -703,7 +703,7 @@ for token in (
     'option_list("video.supersampling", &selected)',
     "kScaleCount = 8",
     "psx_host_video_get_internal_scale",
-    "psx_host_video_set_internal_scale",
+    "disruptor_adaptive_resolution_set_scale",
     "mark_supersampling",
     'draw_status_badge("LIVE"',
 ):
@@ -719,7 +719,7 @@ require(
 )
 require(
     'changed("video.supersampling")' in function_body(menu, "apply_pending_preferences")
-    and "psx_host_video_set_internal_scale" in function_body(menu, "apply_pending_preferences"),
+    and "disruptor_adaptive_resolution_set_scale" in function_body(menu, "apply_pending_preferences"),
     "a pending internal scale must survive a soft runtime session",
 )
 require(
@@ -983,7 +983,7 @@ staged_keys = set(re.findall(r'\bmark\("([\w.]+)"', menu)) | set(
 )
 applied_keys = set(re.findall(r'\bchanged\("([\w.]+)"\)', function_body(menu, "apply_pending_preferences")))
 require(
-    len(shared_keys) == 65
+    len(shared_keys) == 68
     and staged_keys == shared_keys
     and applied_keys == shared_keys
     and set(re.findall(r'\bfind_option\("([\w.]+)"', menu)) <= shared_keys,
@@ -1083,7 +1083,7 @@ present = read("src/game/frame/present_rate.cpp")
 require(
     HELPERS in menu
     and "bool option_list(const char *key, int *index, size_t skipped = 0);\n" in menu
-    and len(shared_labels) == 65
+    and len(shared_labels) == 68
     and drawn_keys == shared_keys
     and not [text for text in [*shared_labels, *shared_choices] if f'"{text}"' in menu + present]
     and "    static constexpr int kScaleCount = 8;\n" in menu
@@ -1228,7 +1228,7 @@ shared_hints = [
 written = "".join(re.findall(LITERAL, menu + present))
 require(
     HINT in read("src/game/ui/hint.h")
-    and len(shared_hints) == 65
+    and len(shared_hints) == 68
     and all(not text or 20 <= len(text) <= 240 for text in shared_hints)
     and not [text for text in shared_hints if text and text[:32] in written]
     and "Also needs Exact-provenance geometry"

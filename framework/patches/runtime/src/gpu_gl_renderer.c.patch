@@ -1,8 +1,8 @@
 diff --git a/runtime/src/gpu_gl_renderer.c b/runtime/src/gpu_gl_renderer.c
-index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318c796bcdd 100644
+index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..e1774e1f8d23433b66d130f7a0d3357e76505421 100644
 --- a/runtime/src/gpu_gl_renderer.c
 +++ b/runtime/src/gpu_gl_renderer.c
-@@ -1,747 +1,1176 @@
+@@ -1,747 +1,1373 @@
 -/* gpu_gl_renderer.c — hardware OpenGL renderer backend.
 - *
 - * ARCHITECTURE (v2 — GPU-authoritative VRAM)
@@ -405,6 +405,34 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +#include <stdlib.h>
 +#include <string.h>
 +
++#include "render_thread.h"
++/* The render thread (gpu_gl_render_thread.c.inc): replay-side copies of the guest state the drawing reads. */
++static int s_rth_on = 0;
++static int s_rthx_tagged = 0, s_rthx_backdrop = 0, s_rthx_flat = 0, s_rthx_fade = -1, s_rthx_glyph = 0;
++static int32_t s_rthx_squash[2] = {1, 1};
++static inline int rth_replaying(void) { return s_rth_on && rt_on_render_thread(); }
++static int ctx_prim_tagged(void);
++static int ctx_prim_in_backdrop(void);
++static int ctx_drawing_flat(void);
++static int ctx_packet_fade(void);
++static int ctx_hud_glyph(void);
++static int ctx_depth24(void);
++static void ctx_x_squash(int32_t *num, int32_t *den);
++static void gl_rth_acquire(const char *reason);
++static int rth_rec_call(uint16_t op, const int32_t *v, int n);
++static int rth_record_mode(void);
++enum {
++    RTH_INIT_UNUSED = 1, RTH_TEXTURE_FILTER, RTH_SEMI, RTH_MASK, RTH_TWIN, RTH_MOD, RTH_GEOMETRY, RTH_WORLD, RTH_PRECISE,
++    RTH_UNPINNED, RTH_PERSP, RTH_TEMPORAL_DEPTH, RTH_SURFACE_DEPTH, RTH_TILE, RTH_FLAT_SIDES, RTH_NEAR, RTH_IDENTITY,
++    RTH_SPRITE, RTH_YAW, RTH_FILL, RTH_COPY, RTH_FLAT_TRI, RTH_GOURAUD_TRI, RTH_TEX_TRI, RTH_SHADED_TEX_TRI, RTH_FLAT_RECT,
++    RTH_TEX_RECT, RTH_TEX_RECT_SCALED, RTH_LINE, RTH_SHADED_LINE, RTH_VRAM_WRITE, RTH_XFER_IN, RTH_AREA, RTH_OFFSET,
++    RTH_WIDE_CONFIGURE, RTH_WIDE_TARGET, RTH_WIDE_DISABLE, RTH_WIDE_CLEAR, RTH_WIDE_CLEAR_MARGINS, RTH_WIDE_COPY_FRAME,
++    RTH_WIDE_COPY_ROWS, RTH_PRESENT_WIDE, RTH_PRESENT_VRAM, RTH_PRESENT_BLANK, RTH_EDGE_SKY, RTH_EDGE_DEPTH, RTH_FADE,
++    RTH_FADE_POWER, RTH_FADE_BLOCKS, RTH_SSAO_FADE, RTH_HIDDEN_ROWS, RTH_INTERP_SUSPENDED, RTH_UI_SUSPENDED,
++    RTH_DDGI_MISSION, RTH_INVALIDATE_PRESENT
++};
++#define GL_RT_SYNC(reason) do { if (s_rth_on && !rt_on_render_thread()) gl_rth_acquire(reason); } while (0)
++
 +#ifndef GL_BGRA
 +#define GL_BGRA 0x80E1
 +#endif
@@ -573,7 +601,173 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +static void gl_perf_init(void);   /* frame_perf — defined below, called from init_gpu_raster */
 +static void gl_perf_mirror_begin(void); /* frame_perf: GPU-time bracket around ONE native-wide */
 +static void gl_perf_mirror_end(void);   /* mirror pass (timestamp pair; splits scene canonical/mirror) */
-+/* Native-wide mirror ABLATION (perf attribution, debug cmd gl_ws_ablate):
++
++/* GPU time by pass: timestamp pairs read a few frames late, by context (0 the game's, 1 the in-between presenter's). With
++ * PSX_GL_ZONES=1 every zone is timed for the debug server's gpu_zones; asked by dynamic resolution, the outermost alone. */
++enum { GZ_CANON, GZ_MIRROR, GZ_DDGI, GZ_WIDE_RESOLVE, GZ_WIDE_RIMS, GZ_CAPTURE, GZ_SHADE, GZ_SHADE_DEPTH,
++       GZ_SHADE_AO, GZ_SHADE_MEASURE, GZ_SHADE_LAMPS, GZ_SHADE_MIX, GZ_PLAIN, GZ_UI, GZ_MIRROR_OUTLINE, GZ_MIRROR_FILLERS,
++       GZ_MIRROR_DRAW, GZ_MIRROR_DEPTH, GZ_BETWEEN, GZ_BETWEEN_CLEAR, GZ_BETWEEN_DRAW, GZ_BETWEEN_RESOLVE,
++       GZ_BETWEEN_RIMS, GZ_LAYER, GZ_WAIT, GZ_COUNT };
++static const char *const s_gz_names[GZ_COUNT] = {"canon", "mirror", "ddgi", "wide_resolve", "wide_rims", "capture", "shade",
++    "shade_depth", "shade_ao", "shade_measure", "shade_lamps", "shade_mix", "plain", "ui", "mirror_outline", "mirror_fillers",
++    "mirror_draw", "mirror_depth", "between", "between_clear", "between_draw", "between_resolve",
++    "between_rims", "layer", "wait"};
++#define GZ_NBUF 8
++#define GZ_PAIRS 2048
++#define GZ_DEPTH 8
++typedef struct {
++    GLuint q[GZ_NBUF][GZ_PAIRS * 2];
++    unsigned char zone[GZ_NBUF][GZ_PAIRS], outer[GZ_NBUF][GZ_PAIRS];
++    int n[GZ_NBUF], b, made, open[GZ_DEPTH], depth, pending_reset;
++    int on, every, busy;  /* the owner thread's, taken at its frame end */
++    uint64_t frames, dropped, dropped_shown;
++    double sum[GZ_COUNT];
++} GpuZones;
++static GpuZones s_gz[2];
++/* The outermost passes' GPU spans of both contexts, for gl_renderer_gpu_busy_ms. */
++#define GZ_SPANS 4096
++typedef struct { uint64_t t0, t1; } GpuSpan;
++static GpuSpan s_gz_ring[GZ_SPANS];
++static unsigned s_gz_head, s_gz_tail;
++static SDL_SpinLock s_gz_lock;
++static int s_gz_every = -1;
++static SDL_atomic_t s_gz_busy_wanted;
++static void gz_begin_at(int context, int zone) {
++    GpuZones *z = &s_gz[context != 0];
++    if (!z->on) return;
++    if (!z->made) { for (int i = 0; i < GZ_NBUF; i++) p_glGenQueries(GZ_PAIRS * 2, z->q[i]); z->made = 1; }
++    if (z->depth >= GZ_DEPTH) { z->depth++; z->dropped++; return; }
++    if (z->n[z->b] >= GZ_PAIRS || (!z->every && z->depth > 0)) { z->open[z->depth++] = -1; z->dropped += z->depth == 1; return; }
++    const int pair = z->n[z->b]++;
++    z->zone[z->b][pair] = (unsigned char)zone;
++    z->outer[z->b][pair] = z->depth == 0;
++    p_glQueryCounter(z->q[z->b][pair * 2], GL_TIMESTAMP);
++    z->open[z->depth++] = pair;
++}
++static void gz_end_at(int context) {
++    GpuZones *z = &s_gz[context != 0];
++    if (z->depth <= 0) return;
++    const int pair = --z->depth < GZ_DEPTH ? z->open[z->depth] : -1;
++    if (pair >= 0) p_glQueryCounter(z->q[z->b][pair * 2 + 1], GL_TIMESTAMP);
++}
++/* At a context's frame end: the oldest buffer's pairs are summed and it becomes the next frame's. Asking for the zones
++ * takes effect here, so no pair is left half issued. */
++static void gz_frame(int context) {
++    GpuZones *z = &s_gz[context];
++    if (s_gz_every < 0) { const char *env = getenv("PSX_GL_ZONES"); s_gz_every = env && env[0] == '1'; }
++    const int busy = SDL_AtomicGet(&s_gz_busy_wanted) != 0;
++    double add[GZ_COUNT] = {0};
++    if (z->made) {
++        const int rd = (z->b + 1) % GZ_NBUF;
++        for (int i = 0; i < z->n[rd]; i++) {
++            GLuint64 t0 = 0, t1 = 0;
++            p_glGetQueryObjectui64v(z->q[rd][i * 2], GL_QUERY_RESULT, &t0);
++            p_glGetQueryObjectui64v(z->q[rd][i * 2 + 1], GL_QUERY_RESULT, &t1);
++            if (t1 <= t0) continue;
++            add[z->zone[rd][i]] += (double)(t1 - t0) / 1.0e6;
++            if (!z->busy || !z->outer[rd][i] || z->zone[rd][i] == GZ_WAIT) continue;
++            SDL_AtomicLock(&s_gz_lock);
++            if (s_gz_head - s_gz_tail < GZ_SPANS) s_gz_ring[s_gz_head++ % GZ_SPANS] = (GpuSpan){t0, t1};
++            SDL_AtomicUnlock(&s_gz_lock);
++        }
++        z->n[rd] = 0;
++        z->b = rd;
++    }
++    z->depth = 0;
++    z->every = s_gz_every;
++    z->busy = busy;
++    SDL_AtomicLock(&s_gz_lock);
++    if (z->pending_reset) { memset(z->sum, 0, sizeof z->sum); z->frames = z->dropped = 0; z->pending_reset = 0; }
++    if (z->made) {
++        for (int i = 0; i < GZ_COUNT; i++) z->sum[i] += add[i];
++        z->frames++;
++    }
++    z->dropped_shown = z->dropped;
++    z->on = (s_gz_every || busy) && p_glQueryCounter && p_glGetQueryObjectui64v;
++    SDL_AtomicUnlock(&s_gz_lock);
++}
++static void gz_begin(int zone) { gz_begin_at(zone >= GZ_BETWEEN && zone != GZ_WAIT, zone); }
++/* A GPU wait on the other context's fence: the outermost pass around it is split, the wait is the other context's work. */
++static void gz_wait(int context, GLsync fence) {
++    GpuZones *z = &s_gz[context != 0];
++    const int outer = z->on && z->depth > 0 ? z->open[0] : -1;
++    if (outer >= 0) p_glQueryCounter(z->q[z->b][outer * 2 + 1], GL_TIMESTAMP);
++    gz_begin_at(context, GZ_WAIT);
++    p_glWaitSync(fence, 0, PSXGL_TIMEOUT_IGNORED);
++    gz_end_at(context);
++    if (outer < 0) return;
++    if (z->n[z->b] >= GZ_PAIRS) { z->open[0] = -1; return; }
++    const int pair = z->n[z->b]++;
++    z->zone[z->b][pair] = z->zone[z->b][outer];
++    z->outer[z->b][pair] = 1;
++    p_glQueryCounter(z->q[z->b][pair * 2], GL_TIMESTAMP);
++    z->open[0] = pair;
++}
++static void gz_end(int zone) { gz_end_at(zone >= GZ_BETWEEN && zone != GZ_WAIT); }
++const char *gl_renderer_gpu_zone_name(int zone) { return zone >= 0 && zone < GZ_COUNT ? s_gz_names[zone] : NULL; }
++/* Average milliseconds a frame of each context for every zone since the last reset; the reset lands at its next frame. */
++uint64_t gl_renderer_gpu_zones(int reset, double out[2][GL_RENDERER_GPU_ZONES], uint64_t frames[2], uint64_t *dropped) {
++    for (int c = 0; c < 2; c++) for (int i = 0; i < GL_RENDERER_GPU_ZONES; i++) out[c][i] = 0.0;
++    frames[0] = frames[1] = 0; *dropped = 0;
++    SDL_AtomicLock(&s_gz_lock);
++    const int on = s_gz[0].on || s_gz[1].on;
++    for (int c = 0; c < 2 && on; c++) {
++        for (int i = 0; i < GZ_COUNT && i < GL_RENDERER_GPU_ZONES; i++)
++            out[c][i] = s_gz[c].frames ? s_gz[c].sum[i] / (double)s_gz[c].frames : 0.0;
++        frames[c] = s_gz[c].frames; *dropped += s_gz[c].dropped_shown;
++        if (reset) s_gz[c].pending_reset = 1;
++    }
++    SDL_AtomicUnlock(&s_gz_lock);
++    return on ? frames[0] + frames[1] : 0;
++}
++void gl_renderer_gpu_busy_enable(int enabled) { SDL_AtomicSet(&s_gz_busy_wanted, enabled != 0); }
++/* Milliseconds the GPU spent in either context's outermost passes since the start, overlaps counted once: the contexts take
++ * turns on one card and a pass of one spans the other's work. Spans older than half a second, or past the room, are
++ * folded into the total, and a later span is cut where the folded time ends, so nothing counts twice. One reader. */
++double gl_renderer_gpu_busy_ms(void) {
++    static GpuSpan kept[GZ_SPANS];
++    static int count = 0;
++    static double done_ms = 0.0;
++    static uint64_t done_until = 0;
++    SDL_AtomicLock(&s_gz_lock);
++    while (s_gz_tail != s_gz_head) {
++        GpuSpan span = s_gz_ring[s_gz_tail++ % GZ_SPANS];
++        if (span.t0 < done_until) span.t0 = done_until;
++        if (span.t1 <= span.t0) continue;
++        if (count == GZ_SPANS) {
++            const int folded = GZ_SPANS / 2;
++            for (int i = 0; i < folded; i++) done_ms += (double)(kept[i].t1 - kept[i].t0) / 1.0e6;
++            done_until = kept[folded - 1].t1;
++            memmove(kept, &kept[folded], (size_t)(count - folded) * sizeof kept[0]);
++            count -= folded;
++            if (span.t0 < done_until) span.t0 = done_until;
++            if (span.t1 <= span.t0) continue;
++        }
++        int at = 0;
++        while (at < count && kept[at].t1 < span.t0) at++;
++        int end = at;
++        while (end < count && kept[end].t0 <= span.t1) {
++            if (kept[end].t0 < span.t0) span.t0 = kept[end].t0;
++            if (kept[end].t1 > span.t1) span.t1 = kept[end].t1;
++            end++;
++        }
++        memmove(&kept[at + 1], &kept[end], (size_t)(count - end) * sizeof kept[0]);
++        kept[at] = span;
++        count += 1 - (end - at);
++    }
++    SDL_AtomicUnlock(&s_gz_lock);
++    int folded = 0;
++    while (folded < count && kept[folded].t1 + 500000000ull < kept[count - 1].t1) {
++        done_ms += (double)(kept[folded].t1 - kept[folded].t0) / 1.0e6;
++        done_until = kept[folded].t1;
++        folded++;
++    }
++    memmove(kept, &kept[folded], (size_t)(count - folded) * sizeof kept[0]);
++    count -= folded;
++    double ms = done_ms;
++    for (int i = 0; i < count; i++) ms += (double)(kept[i].t1 - kept[i].t0) / 1.0e6;
++    return ms;
++}/* Native-wide mirror ABLATION (perf attribution, debug cmd gl_ws_ablate):
 + * 0 = normal, 1 = skip the whole mirror pass, 2 = full mirror state churn but no
 + * draw calls, 3 = mirror draws land in the hr FBO (no per-pass FBO rebind; wide
 + * margins go stale + hr gets garbage — perf probe only). */
@@ -1218,7 +1412,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +#define GEOV 10
 +#define TEXV 24
 +static GLuint s_blit_prog = 0, s_blit_vao = 0, s_blit_vbo = 0;
-+static GLuint s_pack_prog = 0, s_stencil_prog = 0, s_empty_vao = 0;
++static GLuint s_pack_prog = 0, s_stencil_prog = 0, s_rescale_prog = 0, s_empty_vao = 0;
 +
 +/* TEX program uniforms. */
 +static GLint s_uVram = -1, s_uTpage = -1, s_uClut = -1, s_uDepth = -1;
@@ -1277,7 +1471,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +static GLint s_uBlitSrcDiv = -1, s_uBlitSrcOff = -1;
 +/* PACK program uniforms. */
 +static GLint s_uPackHr = -1, s_uPackScale = -1;
-+static GLint s_uStencilSrc = -1;
++static GLint s_uStencilSrc = -1, s_uRescaleSrc = -1, s_uRescaleScales = -1;
 +
 +static uint32_t     *s_conv = NULL;        /* RGBA8 staging for uploads      */
 +static int           s_gpu_dirty = 0;      /* CPU VRAM array may be stale    */
@@ -1318,6 +1512,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +}
 +
 +void gl_renderer_runtime_diag(uint64_t out[6]) {
++    GL_RT_SYNC(__func__);
 +    for (int i = 0; i < 6; i++) out[i] = s_rt_up_diag[i];
 +}
 +
@@ -1413,7 +1608,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +static int s_world_begun = 0, s_frame_drawn = 0;
 +extern int gpu_ws_drawing_flat(void);
 +static float flat_picture_flags(int visual_flags) {
-+    return visual_flags == 0 && (s_world_begun || gpu_ws_drawing_flat()) ? -1.0f : (float)visual_flags;
++    return visual_flags == 0 && (s_world_begun || ctx_drawing_flat()) ? -1.0f : (float)visual_flags;
 +}
 +
 +/* A placed backdrop tile's corner at whole pixel x with texture coordinate u, `across` texels from the tile's other
@@ -1669,6 +1864,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +
 +uint64_t gl_renderer_coh_total(void) { return s_coh_seq; }
 +int gl_renderer_coh_get(uint64_t seq, GlCohEvent *out) {
++    GL_RT_SYNC(__func__);
 +    if (seq >= s_coh_seq) return 0;
 +    if (s_coh_seq - seq > GL_COH_RING_CAP) return 0;  /* evicted */
 +    *out = s_coh_ring[seq % GL_COH_RING_CAP];
@@ -1732,6 +1928,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +
 +uint64_t gl_renderer_pres_total(void) { return s_pres_seq; }
 +int gl_renderer_pres_get(uint64_t seq, GlPresEvent *out) {
++    GL_RT_SYNC(__func__);
 +    if (seq >= s_pres_seq) return 0;
 +    if (s_pres_seq - seq > GL_PRES_RING_CAP) return 0;  /* evicted */
 +    *out = s_pres_ring[seq % GL_PRES_RING_CAP];
@@ -1911,7 +2108,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
  static const char *INTERP_FS =
      "#version 330\n"
      "in vec2 v_uv; uniform sampler2D u_prev; uniform sampler2D u_curr;\n"
-@@ -757,2715 +1186,4981 @@
+@@ -757,2715 +1383,5120 @@
      "  }\n"
      "  frag=mix(prev,curr,alpha);\n"
      "}\n";
@@ -3894,14 +4091,14 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +    "  } else if ((v_raw & 2) != 0) level = float(v_raw >> 2)/256.0;  /* a sprite the game faded: its row, and the share of the next */\n"
 +    "  int glyph = (v_raw & 2) == 0 && (u_twin.x | u_twin.y) == 0 ? v_raw >> 2 : 0;  /* a texture window samples past the limits */\n"
 +    "  if (!sample_texture(sample_uv, rgb, stp) && (glyph == 0 || !glyph_edge(sample_uv, glyph, rgb, stp))) discard;\n"
-+    "  if (level >= 0.0 && int(level) < rows - 1) {\n"
++    "  if (level >= 0.0 && int(level) < rows - 1 && u_semipass < 3) {  /* passes 3 and 4 write depth alone */\n"
 +    "    vec3 next; int next_stp; g_row += 1;\n"
 +    "    if (sample_texture(sample_uv, next, next_stp)) rgb = mix(rgb, next, fract(level));\n"
 +    "  }\n"
 +    "  if (u_semipass == 1 && stp == 1) discard;\n"
 +    "  if (u_semipass == 2 && stp == 0) discard;\n"
 +    "  if ((v_raw & 1) == 0) rgb = clamp(rgb * v_col.rgb * 2.0, 0.0, 1.0);\n"
-+    "  if (dissolve > 0.0 && u_dissolve.z < 0.5) {\n"
++    "  if (dissolve > 0.0 && u_dissolve.z < 0.5 && (u_semipass < 3 || u_visual_options.w > 0.0)) {\n"
 +    "    vec3 last; int last_stp; int row = g_row; g_row = first + rows - 1;\n"
 +    "    bool same = u_clear.w > 0.5 && sample_texture(sample_uv, last, last_stp);\n"
 +    "    g_row = row;\n"
@@ -3978,6 +4175,13 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +    "uniform sampler2D u_src; out vec4 frag;\n"
 +    "void main(){ vec4 c=texelFetch(u_src,ivec2(gl_FragCoord.xy),0);\n"
 +    "  if(c.a<0.5 || (c.a>0.7 && c.a<0.8)) discard; frag=vec4(0.0); }\n";  /* 0.75: the mirror's mark of a flat picture with no mask bit */
++
++/* A surface at another scale keeping each native pixel's first sample, the pack's (a nearest blit took 3x+1 going 3 to 1). */
++static const char *RESCALE_FS =
++    "#version 330\n"
++    "uniform sampler2D u_src; uniform ivec2 u_scales; out vec4 frag;\n"
++    "void main(){ ivec2 p = ivec2(gl_FragCoord.xy), native = p / u_scales.y;\n"
++    "  frag = texelFetch(u_src, native * u_scales.x + (p - native * u_scales.y) * u_scales.x / u_scales.y, 0); }\n";
 +
 +static GLuint compile_shader(GLenum type, const char *src) {
 +    GLuint s = p_glCreateShader(type);
@@ -4290,9 +4494,9 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +static GLint s_msaa_most = 0;
 +static GLuint s_wide_ms_fbo[WIDE_MAX_SURF], s_wide_ms_rb[WIDE_MAX_SURF][2];
 +static int s_wide_ms_fresh[WIDE_MAX_SURF][2];  /* the rows resolved since the twin was last drawn into: the first and how many */
-+void gl_renderer_set_multisampling(int samples) { s_msaa_asked = samples >= 2 ? samples : 0; }
++void gl_renderer_set_multisampling(int samples) { GL_RT_SYNC(__func__); s_msaa_asked = samples >= 2 ? samples : 0; }
 +int gl_renderer_multisampling(void) { return s_msaa_asked; }
-+void gl_renderer_set_sample_shading(int enabled) { s_ssaa_asked = enabled != 0; }
++void gl_renderer_set_sample_shading(int enabled) { GL_RT_SYNC(__func__); s_ssaa_asked = enabled != 0; }
 +int gl_renderer_sample_shading(void) { return s_ssaa_asked; }
 +/* Supersampling: every sample of a multisample surface runs the fragment shader, so texels and cut-out outlines are smoothed
 + * with the polygons' edges. It is a GL context's own state and does nothing where a surface has one sample. */
@@ -4621,11 +4825,11 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +     * remains byte-for-byte 4:3, while the flat backdrop reaches the reveal
 +     * margins. Opt-in because flat foreground geometry is title-dependent. */
 +    if (!textured && gpu_ws_nw_flat_backdrop_enabled()) return 1;
-+    if (g_ws_bd_phase_mode != 0) return psx_ws_prim_in_backdrop();  /* default: precise address gate */
++    if (g_ws_bd_phase_mode != 0) return ctx_prim_in_backdrop();  /* default: precise address gate */
 +    /* mode 0: legacy tag+narrow heuristic (kept for comparison) */
 +    int native_w = g_wide_w - 2 * g_wide_off;
 +    if (native_w <= 0) return 0;
-+    if (psx_ws_prim_is_tagged()) return 0;
++    if (ctx_prim_tagged()) return 0;
 +    int base = g_wide_cur_base, lo = xs[0], hi = xs[0];
 +    for (int i = 1; i < n; i++) { if (xs[i] < lo) lo = xs[i]; if (xs[i] > hi) hi = xs[i]; }
 +    if (lo < base - g_ws_bd_phase_thresh) return 0;             /* into left margin -> GTE-wide */
@@ -4647,7 +4851,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 + * conservative strict-inside test. 4:3 never runs any of this (g_wide_cur == 0).
 + * Toggle via gl_wide_fast for A/B; default ON. */
 +static int s_wide_fast = 1;
-+void gl_renderer_set_wide_fast(int on) { s_wide_fast = on ? 1 : 0; }
++void gl_renderer_set_wide_fast(int on) { GL_RT_SYNC(__func__); s_wide_fast = on ? 1 : 0; }
 +int  gl_renderer_get_wide_fast(void) { return s_wide_fast; }
 +static void wide_blit_center(GLuint wide_fbo, int base_x, int disp_y, int disp_h); /* def below */
 +/* True if [lo,hi] (canonical draw-x) lies strictly inside the 4:3 frame, so the
@@ -4713,6 +4917,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +static uint64_t s_batch_total = 0, s_batch_reason[7];
 +
 +void gl_renderer_batch_diag(uint64_t out[8]) {
++    GL_RT_SYNC(__func__);
 +    out[0] = s_batch_total;
 +    for (int i = 0; i < 7; i++) out[i + 1] = s_batch_reason[i];
 +}
@@ -4731,8 +4936,17 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +static float s_edge_depth = 0.0f;
 +static int s_clear_known = 0;
 +static float s_clear_rgb[3];
-+void gl_renderer_set_edge_sky(int sky) { s_edge_sky = sky != 0; }
-+void gl_renderer_set_edge_depth(float depth) { s_edge_depth = depth; }
++void gl_renderer_set_edge_sky(int sky) {
++    const int32_t v[] = {sky};
++    if (rth_rec_call(RTH_EDGE_SKY, v, 1)) return;
++    s_edge_sky = sky != 0;
++}
++void gl_renderer_set_edge_depth(float depth) {
++    int32_t v[1];
++    memcpy(v, &depth, sizeof v);
++    if (rth_rec_call(RTH_EDGE_DEPTH, v, 1)) return;
++    s_edge_depth = depth;
++}
 +static int edge_dissolving(void) {
 +    return s_smooth_fade && (s_edge_sky || s_clear_known) && s_fade_rows > 1 && s_edge_depth > EDGE_DISSOLVE_BAND && !s_uv_view;
 +}
@@ -4766,7 +4980,9 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +    p_glUniform1i(s_uSemimode, semi < 0 ? 0 : semi);
 +    if (semi < 0) {
 +        opaque_blend();
-+        mask_stencil(s_tb_mask);
++        /* Stencil the line below declares stale is not written: no stencil write lets the card test depth before shading. */
++        if (!s_mask_check && !s_tb_mask && s_fill_pass <= 0.0f) glDisable(GL_STENCIL_TEST);
++        else mask_stencil(s_tb_mask);
 +        p_glUniform1i(s_uSemipass, 0);                 /* all texels, one ordered colour pass */
 +        glDrawArrays(GL_TRIANGLES, 0, nverts);
 +        if (s_mask_check) {
@@ -4892,17 +5108,31 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +}
 +
 +static float s_fade_start = 0.0f, s_fade_step = 1.0f, s_fade_side = 0.0f;
-+void gl_renderer_set_smooth_fade(int enabled) { s_smooth_fade = enabled != 0; }
++void gl_renderer_set_smooth_fade(int enabled) { GL_RT_SYNC(__func__); s_smooth_fade = enabled != 0; }
 +int gl_renderer_smooth_fade(void) { return s_smooth_fade; }
 +static int s_fade_power = 1;
 +void gl_renderer_set_palette_fade(int rows, float start, float step, float side) {
++    int32_t v[4] = {rows};
++    memcpy(&v[1], &start, 4); memcpy(&v[2], &step, 4); memcpy(&v[3], &side, 4);
++    if (rth_rec_call(RTH_FADE, v, 4)) return;
 +    s_fade_rows = rows; s_fade_start = start; s_fade_step = step > 0.0f ? step : 1.0f; s_fade_side = side;
 +}
-+void gl_renderer_set_palette_fade_power(int power) { s_fade_power = power < 1 ? 1 : power > 3 ? 3 : power; }
++void gl_renderer_set_palette_fade_power(int power) {
++    const int32_t v[] = {power};
++    if (rth_rec_call(RTH_FADE_POWER, v, 1)) return;
++    s_fade_power = power < 1 ? 1 : power > 3 ? 3 : power;
++}
 +#define FADE_BLOCKS 64
 +static GLint s_fade_blocks[2 * FADE_BLOCKS];
 +static int s_fade_block_count = 0;
 +void gl_renderer_set_palette_blocks(const int *blocks, int count) {
++    {
++        int32_t v[1 + 2 * 64];
++        const int n = count < 0 ? 0 : count > 64 ? 64 : count;
++        v[0] = n;
++        for (int i = 0; i < 2 * n; ++i) v[1 + i] = blocks[i];
++        if (rth_rec_call(RTH_FADE_BLOCKS, v, 1 + 2 * n)) return;
++    }
 +    count = count < 0 ? 0 : count > FADE_BLOCKS ? FADE_BLOCKS : count;
 +    for (int i = 0; i < 2 * count; ++i) s_fade_blocks[i] = blocks[i];
 +    s_fade_block_count = count;
@@ -4954,7 +5184,9 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +    p_glBindBuffer(PSXGL_ARRAY_BUFFER, s_tex_vbo);
 +    p_glBufferData(PSXGL_ARRAY_BUFFER, (ptrdiff_t)(nverts * TEXV * sizeof(float)), s_tb, PSXGL_STREAM_DRAW);
 +
++    gz_begin(GZ_CANON);
 +    tex_batch_draw_passes(nverts, semi);
++    gz_end(GZ_CANON);
 +
 +    /* Native-wide mirror — skipped for a batch fully inside the 4:3 frame (its
 +     * centre content comes from the present-time canonical blit; nothing to add
@@ -4974,15 +5206,22 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +                      s_tb_filter, s_tb_twin, s_tb_gate, 0);
 +        s_draw_filler = s_draw_world = 0;
 +        if (s_ws_ablate != 2) {
++            gz_begin(GZ_MIRROR_OUTLINE);
 +            if (mirror_depth() && s_crack_fill > 0.0f) tex_batch_outline(nverts, semi);
++            gz_end(GZ_MIRROR_OUTLINE);
++            gz_begin(GZ_MIRROR_FILLERS);
 +            if (mirror_depth() && fillers) {  /* in sequence each copy would break the batch: 135 batches a frame against 2 */
 +                filler_pass_begin(GROWN_COPY_PASS);
 +                tex_batch_draw_passes(nverts, semi);
 +                filler_pass_end();
 +            }
++            gz_end(GZ_MIRROR_FILLERS);
++            gz_begin(GZ_MIRROR_DRAW);
 +            if (world && mirror_depth()) tex_batch_by_depth(nverts, semi);
 +            else tex_batch_draw_passes(nverts, semi);
++            gz_end(GZ_MIRROR_DRAW);
 +        }
++        gz_begin(GZ_MIRROR_DEPTH);
 +        if (mirror_depth() && !world && s_ws_ablate != 2) {  /* the depth of the opaque fragments alone */
 +            glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
 +            glDisable(GL_BLEND);
@@ -4992,6 +5231,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +            glDrawArrays(GL_TRIANGLES, 0, nverts);
 +            glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 +        }
++        gz_end(GZ_MIRROR_DEPTH);
 +        wide_clear_bd_scale(s_tex_uXscale, s_tex_uXcenter);
 +        geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 0);
 +        wide_target_end(s_tex_uXoff, s_tex_uXhalf);
@@ -5035,7 +5275,9 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +    p_glBindBuffer(PSXGL_ARRAY_BUFFER, s_geo_vbo);
 +    p_glBufferData(PSXGL_ARRAY_BUFFER, (ptrdiff_t)(nverts * GEOV * sizeof(float)),
 +                   s_fb, PSXGL_STREAM_DRAW);
++    gz_begin(GZ_CANON);
 +    glDrawArrays(GL_TRIANGLES, 0, nverts);
++    gz_end(GZ_CANON);
 +
 +    if (g_wide_cur && !s_wide_suppress && s_ws_ablate != 1 &&
 +        !(!g_ws_bd_stretch_on && mirror_flat_batch_center_only(nverts))) {
@@ -5208,8 +5450,8 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +    const int cut_corners = near_face ? -1 : turn_clip(px, py, visual_flags, cut);
 +    const float whole_q[3] = {pq[0], pq[1], pq[2]};
 +    turned_perspective(px, pq, visual_flags);
-+    const int packet_fade = gpu_current_packet_fade();
-+    const int packet_raw = packet_fade >= 0 ? 2 | (packet_fade << 2) : gpu_current_hud_glyph() << 2;
++    const int packet_fade = ctx_packet_fade();
++    const int packet_raw = packet_fade >= 0 ? 2 | (packet_fade << 2) : ctx_hud_glyph() << 2;
 +    int lim_buf[4];
 +    int uv_buf[6];
 +    int plain_lim[4], marked_lim = 0;
@@ -5848,7 +6090,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +static DirtyRect s_d24_skip_fb; /* union of skipped MDEC FB rects (VRAM halfwords) */
 +
 +static int depth24_is_fb_transfer(int w, int h) {
-+    if (!gpu_display_is_depth24() || w <= 0 || h <= 0) return 0;
++    if (!ctx_depth24() || w <= 0 || h <= 0) return 0;
 +    GpuDisplayInfo di;
 +    gpu_get_display_info(&di);
 +    int fb_w = (int)((di.width * 3u + 1u) / 2u); /* RGB W → halfwords */
@@ -5894,7 +6136,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +}
 +
 +static void depth24_upload_policy(void) {
-+    int d24 = gpu_display_is_depth24();
++    int d24 = ctx_depth24();
 +    if (d24 && !s_depth24_skip_up) {
 +        s_up_nrects = 0;
 +        rect_clear(&s_d24_skip_fb);
@@ -5950,6 +6192,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +static int s_aspect_num = 4, s_aspect_den = 3;
 +
 +void gl_renderer_set_display_aspect(int num, int den) {
++    GL_RT_SYNC(__func__);
 +    if (num <= 0 || den <= 0) { num = 4; den = 3; }
 +    s_aspect_num = num; s_aspect_den = den;
 +}
@@ -6008,6 +6251,28 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 + * reconstructed from the copied bit-15 alpha.  Native-wide surfaces are
 + * migrated too, avoiding a black/stale transition when the game does not
 + * repaint every framebuffer pixel on the following frame. */
++static void rescale_into(GLuint from_fbo, GLuint from_tex, GLuint to_fbo, int native_w, int old_scale, int scale) {
++    if (!s_rescale_prog) {
++        p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, from_fbo);
++        p_glBindFramebuffer(PSXGL_DRAW_FRAMEBUFFER, to_fbo);
++        p_glBlitFramebuffer(0, 0, native_w * old_scale, VRAM_H * old_scale, 0, 0, native_w * scale, VRAM_H * scale,
++                            GL_COLOR_BUFFER_BIT, GL_NEAREST);
++        return;
++    }
++    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, to_fbo);
++    glViewport(0, 0, native_w * scale, VRAM_H * scale);
++    glDisable(GL_DEPTH_TEST);
++    p_glUseProgram(s_rescale_prog);
++    p_glActiveTexture(PSXGL_TEXTURE0);
++    glBindTexture(GL_TEXTURE_2D, from_tex);
++    p_glUniform1i(s_uRescaleSrc, 0);
++    p_glUniform2i(s_uRescaleScales, old_scale, scale);
++    p_glBindVertexArray(s_empty_vao);
++    glDrawArrays(GL_TRIANGLES, 0, 3);
++    p_glBindVertexArray(0);
++    p_glUseProgram(0);
++}
++
 +static int resize_gpu_raster(int scale) {
 +    if (!s_raster_ok || scale == s_scale) return 1;
 +    if (scale < 1 || scale > GL_MAX_INTERNAL_SCALE) return 0;
@@ -6064,20 +6329,9 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +    glDisable(GL_BLEND);
 +    glDisable(GL_STENCIL_TEST);
 +    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
-+    p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, s_hr_fbo);
-+    p_glBindFramebuffer(PSXGL_DRAW_FRAMEBUFFER, new_hr_fbo);
-+    p_glBlitFramebuffer(0, 0, VRAM_W * old_scale, VRAM_H * old_scale,
-+                        0, 0, new_hw, new_hh,
-+                        GL_COLOR_BUFFER_BIT, GL_NEAREST);
-+    for (int i = 0; i < WIDE_MAX_SURF; ++i) {
-+        if (!new_wide_fbo[i]) continue;
-+        p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, s_wide_fbo[i]);
-+        p_glBindFramebuffer(PSXGL_DRAW_FRAMEBUFFER, new_wide_fbo[i]);
-+        p_glBlitFramebuffer(0, 0, g_wide_w * old_scale,
-+                            VRAM_H * old_scale,
-+                            0, 0, g_wide_w * scale, new_hh,
-+                            GL_COLOR_BUFFER_BIT, GL_NEAREST);
-+    }
++    rescale_into(s_hr_fbo, s_hr_tex, new_hr_fbo, VRAM_W, old_scale, scale);
++    for (int i = 0; i < WIDE_MAX_SURF; ++i)
++        if (new_wide_fbo[i]) rescale_into(s_wide_fbo[i], s_wide_tex[i], new_wide_fbo[i], g_wide_w, old_scale, scale);
 +
 +    {
 +        GLuint old_hr_tex = s_hr_tex, old_hr_fbo = s_hr_fbo,
@@ -6170,6 +6424,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +    s_blit_prog = build_program(BLIT_VS, BLIT_FS);
 +    s_pack_prog = build_program(PACK_VS, PACK_FS);
 +    s_stencil_prog = build_program(PACK_VS, STENCIL_FS);
++    s_rescale_prog = build_program(PACK_VS, RESCALE_FS);
 +    if (!s_geo_prog || !s_tex_prog || !s_blit_prog || !s_pack_prog || !s_stencil_prog) return 0;
 +
 +    s_conv = (uint32_t *)malloc((size_t)VRAM_W * VRAM_H * sizeof(uint32_t));
@@ -6224,6 +6479,10 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +    s_uPackHr    = p_glGetUniformLocation(s_pack_prog, "u_hr");
 +    s_uPackScale = p_glGetUniformLocation(s_pack_prog, "u_scale");
 +    s_uStencilSrc = p_glGetUniformLocation(s_stencil_prog, "u_src");
++    if (s_rescale_prog) {
++        s_uRescaleSrc = p_glGetUniformLocation(s_rescale_prog, "u_src");
++        s_uRescaleScales = p_glGetUniformLocation(s_rescale_prog, "u_scales");
++    }
 +    s_geo_uXoff  = p_glGetUniformLocation(s_geo_prog, "u_xoff");
 +    s_geo_uXhalf = p_glGetUniformLocation(s_geo_prog, "u_xhalf");
 +    s_tex_uXoff  = p_glGetUniformLocation(s_tex_prog, "u_xoff");
@@ -6405,11 +6664,14 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +    glEnable(0x92E0 /* GL_DEBUG_OUTPUT */);
 +    control(GL_DONT_CARE, GL_DONT_CARE, 0x826B /* GL_DEBUG_SEVERITY_NOTIFICATION */, 0, NULL, GL_FALSE);
 +    control(GL_DONT_CARE, GL_DONT_CARE, 0x9148 /* GL_DEBUG_SEVERITY_LOW */, 0, NULL, GL_FALSE);
++    /* Intel warns at every wide line, thousands a second: the width is checked once at start (s_line_width_max). */
++    control(0x8246 /* GL_DEBUG_SOURCE_API */, 0x824D /* GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR */, GL_DONT_CARE, 0, NULL, GL_FALSE);
 +    callback(debug_message, presenter ? &s_presenter_tag : NULL);
 +    s_debug_active = 1;
 +}
 +
 +int gl_renderer_init_context(SDL_Window *win) {
++    GL_RT_SYNC(__func__);
 +    s_win = win;
 +    s_present_w = 0;
 +    s_present_h = 0;
@@ -6669,12 +6931,34 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +    return 1;
 +}
 +
++/* Windows composes a window that is not exclusive fullscreen: a swap interval there only holds the GPU queue (upstream 594b507e). */
++static int swap_composed(void) {
++#ifdef _WIN32
++    const char *trust = getenv("PSX_TRUST_DRIVER_VSYNC");
++    if ((trust && trust[0] && trust[0] != '0') || !s_win) return 0;
++    if (!(SDL_GetWindowFlags(s_win) & SDL_WINDOW_FULLSCREEN)) return 1;
++#if defined(PSX_SDL3)
++    return SDL_GetWindowFullscreenMode(s_win) == NULL;
++#else
++    return (SDL_GetWindowFlags(s_win) & SDL_WINDOW_FULLSCREEN_DESKTOP) == SDL_WINDOW_FULLSCREEN_DESKTOP;
++#endif
++#else
++    return 0;
++#endif
++}
++
 +static void apply_swap_interval(void) {
 +    if (!s_ctx) return;
 +    /* The interpolation thread owns host-refresh presentation and requires
 +     * immediate swaps.  Preserve the user's requested interval separately so
 +     * disabling interpolation can restore it without a renderer restart. */
-+    int effective = s_interp_enabled ? 0 : s_swap_interval;
++    const int composed = !s_interp_enabled && s_swap_interval != 0 && swap_composed();
++    int effective = s_interp_enabled || composed ? 0 : s_swap_interval;
++    static int logged = -1;
++    if (composed != logged) {
++        logged = composed;
++        if (composed) fprintf(stdout, "psxrecomp: swaps immediate under the wall-clock pacer, the window is composed (PSX_TRUST_DRIVER_VSYNC=1 keeps VSync)\n");
++    }
 +    if (SDL_GL_SetSwapInterval(effective) != 0 && effective < 0) {
 +        SDL_GL_SetSwapInterval(1);
 +        s_swap_interval = 1;
@@ -6685,6 +6969,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 + * Safe before or after context creation.  While interpolation is active the
 + * request is remembered and physical swapping stays immediate. */
 +void gl_renderer_set_swap_interval(int interval) {
++    GL_RT_SYNC(__func__);
 +    s_swap_interval = interval;
 +    apply_swap_interval();
 +}
@@ -6692,6 +6977,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +static void ddgi_level_stop(void);
 +
 +void gl_renderer_shutdown(void) {
++    gl_renderer_render_thread_stop();
 +    ddgi_level_stop();
 +#ifndef PSX_DISABLE_FRAME_INTERPOLATION
 +    if (s_interp_thread) {
@@ -6775,7 +7061,11 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 + * widescreen presents them pillarboxed instead of distorted. */
 +/* Rows of the window above the screen (host_borderless.h): the picture goes in the rest, which starts at the bottom row as OpenGL counts. */
 +static int s_hidden_rows;
-+void gl_renderer_set_hidden_rows(int rows) { s_hidden_rows = rows > 0 ? rows : 0; }
++void gl_renderer_set_hidden_rows(int rows) {
++    const int32_t v[] = {rows};
++    if (rth_rec_call(RTH_HIDDEN_ROWS, v, 1)) return;
++    s_hidden_rows = rows > 0 ? rows : 0;
++}
 +static void gl_visible_size(int *w, int *h) {
 +    SDL_GL_GetDrawableSize(s_win, w, h);
 +    if (*h > s_hidden_rows) *h -= s_hidden_rows;
@@ -6783,6 +7073,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +
 +void gl_renderer_present(const uint32_t *pixels, int src_w, int src_h, int linear,
 +                         int force_4_3, int content_w, int movie) {
++    GL_RT_SYNC(__func__);
 +    if (!s_ctx) return;
 +    interp_reset_history();
 +    int ww = 0, wh = 0; gl_visible_size(&ww, &wh);
@@ -7503,6 +7794,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +}
 +
 +void gl_renderer_present_blank(void) {
++    if (rth_rec_call(RTH_PRESENT_BLANK, NULL, 0)) return;
 +    if (!s_ctx) return;
 +    interp_reset_history();
 +    int ww = 0, wh = 0; gl_visible_size(&ww, &wh);
@@ -7521,10 +7813,12 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +/* Sync the authoritative FBO down into CPU VRAM (no-op when current).
 + * Screenshots / debug server. Not for 24-bit FMV scanout (see flush). */
 +void gl_renderer_sync_cpu(void) {
++    GL_RT_SYNC(__func__);
 +    ensure_cpu();
 +}
 +
 +void gl_renderer_invalidate_present(void) {
++    if (rth_rec_call(RTH_INVALIDATE_PRESENT, NULL, 0)) return;
 +    for (int i = 0; i < PRES_ROWS; i++) s_present_dirty[i] = ~0ull;
 +    s_last_present_path = -1;
 +    s_force_present_remaining = 8;
@@ -7532,6 +7826,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +}
 +
 +void gl_renderer_flush_cpu_uploads(void) {
++    GL_RT_SYNC(__func__);
 +    if (!s_raster_ok) return;
 +    flush_flat_batch();
 +    flush_tex_batch();
@@ -7543,6 +7838,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 + * VRAM — lets a probe diff FBO truth against CPU truth. Returns 0 when the
 + * GL pipeline is inactive (software backend). */
 +int gl_renderer_fbo_peek(int x, int y, int w, int h, uint16_t *out) {
++    GL_RT_SYNC(__func__);
 +    if (!s_raster_ok || !s_ctx) return 0;
 +    if (x < 0 || y < 0 || w < 1 || h < 1 ||
 +        x + w > VRAM_W || y + h > VRAM_H) return 0;
@@ -7565,6 +7861,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 + * at upload-only scenes the two must match exactly. */
 +int gl_renderer_vram_diff(uint32_t *count, int bbox[4],
 +                          int samples[8][2], uint16_t samples_px[8][2]) {
++    GL_RT_SYNC(__func__);
 +    if (!s_raster_ok || !s_ctx) return 0;
 +    uint16_t *tmp = (uint16_t *)malloc((size_t)VRAM_W * VRAM_H * 2);
 +    if (!tmp) return 0;
@@ -7602,6 +7899,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +
 +/* Diagnostic state for the debug server: coherency flags + dirty rects. */
 +void gl_renderer_diag(int *gpu_dirty, int pending[5], int pack[5]) {
++    GL_RT_SYNC(__func__);
 +    if (gpu_dirty) *gpu_dirty = s_gpu_dirty;
 +    if (pending) {
 +        /* [0] = pending rect count; [1..4] = union bbox (diagnostic only —
@@ -8068,6 +8366,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +/* Bracket ONE native-wide mirror pass (called from the wide-mirror draw sites).
 + * Timestamp pairs, not TIME_ELAPSED — see the pool comment above. */
 +static void gl_perf_mirror_begin(void) {
++    gz_begin(GZ_MIRROR);
 +    if (!s_pf_on || !s_mq_ok) return;
 +    int b = s_pf_b;
 +    if (s_mq_n[b] >= GLPERF_MIRQ) { s_mq_over[b]++; return; }
@@ -8075,6 +8374,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +    s_mq_open = 1;
 +}
 +static void gl_perf_mirror_end(void) {
++    gz_end(GZ_MIRROR);
 +    if (!s_pf_on || !s_mq_ok || !s_mq_open) return;
 +    int b = s_pf_b;
 +    p_glQueryCounter(s_mq_q[b][s_mq_n[b] * 2 + 1], GL_TIMESTAMP);
@@ -8117,6 +8417,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +
 +/* End of present (after SwapWindow). wide = native-wide path. */
 +static void gl_perf_present_exit(int wide) {
++    gz_frame(0);
 +    if (!s_pf_on) return;
 +    uint64_t now = SDL_GetPerformanceCounter();
 +    p_glEndQuery(GL_TIME_ELAPSED);   /* end present_q[b] */
@@ -8169,11 +8470,13 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +/* Cumulative textured fraction of scene prims (decides flat vs textured batching
 + * priority). out_tex_frac = textured/total since boot; returns total prim count. */
 +uint64_t gl_renderer_perf_prim_split(double *out_tex_frac) {
++    GL_RT_SYNC(__func__);
 +    if (out_tex_frac) *out_tex_frac = s_scene_prims ? (double)s_scene_prims_tex / (double)s_scene_prims : 0.0;
 +    return s_scene_prims;
 +}
 +
 +int gl_renderer_perf_aggregate(int wide_filter, double out[18]) {
++    GL_RT_SYNC(__func__);
 +    for (int i = 0; i < 18; i++) out[i] = 0.0;
 +    if (!s_pf_on) return 0;
 +    int navail = (int)(s_pf_ring_seq < (uint64_t)GLPERF_RING ? s_pf_ring_seq : GLPERF_RING);
@@ -8207,7 +8510,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +}
 +
 +/* Native-wide mirror ablation (perf attribution): see s_ws_ablate. */
-+void gl_renderer_set_ws_ablate(int mode) { interp_reset_history(); s_ws_ablate = (mode >= 0 && mode <= 3) ? mode : 0; }
++void gl_renderer_set_ws_ablate(int mode) { GL_RT_SYNC(__func__); interp_reset_history(); s_ws_ablate = (mode >= 0 && mode <= 3) ? mode : 0; }
 +int  gl_renderer_get_ws_ablate(void)     { return s_ws_ablate; }
 +
 +extern void gte_ws_x_squash(int32_t *num, int32_t *den);
@@ -8217,11 +8520,11 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +typedef struct { GLuint fbo, tex; int w, h; } AaTarget;
 +static AaTarget s_aa_target[2];
 +static int s_aa_average = 0, s_aa_edges = 0;
-+void gl_renderer_set_downscale_averaging(int enabled) { s_aa_average = enabled != 0; }
++void gl_renderer_set_downscale_averaging(int enabled) { GL_RT_SYNC(__func__); s_aa_average = enabled != 0; }
 +int gl_renderer_downscale_averaging(void) { return s_aa_average; }
-+void gl_renderer_set_edge_smoothing(int enabled) { s_aa_edges = enabled != 0; }
++void gl_renderer_set_edge_smoothing(int enabled) { GL_RT_SYNC(__func__); s_aa_edges = enabled != 0; }
 +int gl_renderer_edge_smoothing(void) { return s_aa_edges; }
-+void gl_renderer_set_debug_messages(int enabled) { s_debug_asked = enabled != 0; }
++void gl_renderer_set_debug_messages(int enabled) { GL_RT_SYNC(__func__); s_debug_asked = enabled != 0; }
 +int gl_renderer_debug_messages(void) { return s_debug_asked; }
 +int gl_renderer_debug_messages_active(void) { return s_debug_active; }
 +/* The oldest queued message, 0 when there is none. `lost` gets how many found the queue full since the last call. */
@@ -8359,14 +8662,19 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +        s_ssao = s_ssao_on = s_ssao_view = 0;
 +        return 0;
 +    }
++    const int thread = t == &s_ssao_thread;
 +    glDisable(GL_SCISSOR_TEST);
 +    if (!depth) {
++        gz_begin_at(thread, GZ_SHADE_DEPTH);
++        const int margin = 32 * scale, y0 = (int)(v0 * (float)h) - margin, y1 = (int)(v1 * (float)h + 1.0f) + margin;
++        const int from_y = y0 > 0 ? y0 : 0, to_y = y1 < h ? y1 : h;
 +        p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, from);
 +        p_glBindFramebuffer(PSXGL_DRAW_FRAMEBUFFER, t->depth_fbo);
-+        p_glBlitFramebuffer(0, 0, w, h, 0, 0, w, h, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
++        p_glBlitFramebuffer(0, from_y, w, to_y, 0, from_y, w, to_y, GL_DEPTH_BUFFER_BIT, GL_NEAREST);
++        gz_end_at(thread);
 +        depth = t->depth;
 +    }
-+    gte_ws_x_squash(&num, &den);
++    ctx_x_squash(&num, &den);
 +    focal_x = s_yaw_focal_x * (float)scale;
 +    focal_y = num > 0 && den > 0 ? focal_x * (float)den / (float)num : focal_x;
 +    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, t->shade_fbo);
@@ -8388,13 +8696,19 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +    p_glUniform4f(s_ssao_uAo, s_ssao_radius, s_ssao_on || s_ssao_view ? s_ssao_strength : 0.0f, 24.0f * (float)scale, (float)scale);
 +    p_glUniform4f(s_ssao_uFade, s_ssao_fade_from, s_ssao_fade_to, s_ssao_tilt, 0.0f);
 +    p_glBindVertexArray(vao);
++    gz_begin_at(thread, GZ_SHADE_AO);
 +    glDrawArrays(GL_TRIANGLES, 0, 3);
++    gz_end_at(thread);
 +
-+    const int thread = t == &s_ssao_thread;
++    gz_begin_at(thread, GZ_SHADE_MEASURE);
 +    ddgi_screen_measure(thread, color, depth, focal_x, focal_y, (u0 + u1) * 0.5f * (float)w, (v0 + v1) * 0.5f * (float)h, w, h,
 +                        scale, u0, v0, u1, v1);
++    gz_end_at(thread);
++    gz_begin_at(thread, GZ_SHADE_LAMPS);
 +    ddgi_lamp_pass(thread, color, depth, focal_x, focal_y, (u0 + u1) * 0.5f * (float)w, (v0 + v1) * 0.5f * (float)h, w, h, scale,
-+                   u0, v0, u1, v1);
++                   u0, v0, u1, v1, lw, lh);
++    gz_end_at(thread);
++    gz_begin_at(thread, GZ_SHADE_MIX);
 +    const int grown = aa_begin(thread, (int)((v1 - v0) * (float)h + 0.5f), 1, lx, ly, lw, lh);
 +    p_glActiveTexture(PSXGL_TEXTURE0 + 1);
 +    glBindTexture(GL_TEXTURE_2D, t->shade);
@@ -8414,6 +8728,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +    p_glBindVertexArray(0);
 +    p_glUseProgram(0);
 +    aa_end(thread, vao, grown, 1, lx, ly, lw, lh);
++    gz_end_at(thread);
 +    return 1;
 +}
 +
@@ -8538,6 +8853,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +
  void gl_renderer_set_interpolation(int enabled, double host_hz, double target_hz,
                                     int blend_mode) {
++    GL_RT_SYNC(__func__);
      double effective_hz = target_hz < 0.0
          ? -1.0
 -        : (target_hz >= 60.0 ? target_hz : host_hz);
@@ -8764,6 +9080,8 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +}
 +
 +void gl_renderer_set_interpolation_suspended(int suspended) {
++    const int32_t v[] = {suspended};
++    if (rth_rec_call(RTH_INTERP_SUSPENDED, v, 1)) return;
 +    interp_set_suspended(&s_interp_content_suspended, suspended);
 +}
 +
@@ -8771,6 +9089,8 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 + * reasons prevents closing a menu during an FMV from briefly waking the
 + * interpolation thread on the shared window. */
 +void gl_renderer_set_host_ui_suspended(int suspended) {
++    const int32_t v[] = {suspended};
++    if (rth_rec_call(RTH_UI_SUSPENDED, v, 1)) return;
 +    interp_set_suspended(&s_interp_host_ui_suspended, suspended);
 +}
 +
@@ -8789,6 +9109,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +}
 +
 +void gl_renderer_geometry_interpolation_diag(uint64_t out[6]) {
++    GL_RT_SYNC(__func__);
 +    if (!out) return;
 +    if (s_interp_mutex) SDL_LockMutex(s_interp_mutex);
 +    out[0] = s_temp_published;
@@ -8984,7 +9305,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +    if (drawn && !s_layer_prog) s_layer_failed = 1;
 +    const int resized = ww != s_layer_w || wh != s_layer_h;
 +    SDL_LockMutex(s_interp_mutex);
-+    if (s_interp_draw_fence) p_glWaitSync(s_interp_draw_fence, 0, PSXGL_TIMEOUT_IGNORED);
++    if (s_interp_draw_fence) gz_wait(0, s_interp_draw_fence);
 +    if (!drawn || resized) s_layer_shown = -1;
 +    SDL_UnlockMutex(s_interp_mutex);
 +    if (!drawn) return;
@@ -9062,7 +9383,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +     * copy after that draw before recycling a texture.  glWaitSync keeps the
 +     * dependency on the GPU; unlike glFinish it does not stall the guest CPU. */
 +    if (s_interp_draw_fence) {
-+        p_glWaitSync(s_interp_draw_fence, 0, PSXGL_TIMEOUT_IGNORED);
++        gz_wait(0, s_interp_draw_fence);
 +        p_glDeleteSync(s_interp_draw_fence);
 +        s_interp_draw_fence = NULL;
 +    }
@@ -9143,16 +9464,18 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +    }
 +    int prev = s_interp_prev, curr = s_interp_cur;
 +    if (s_interp_fence[prev])
-+        p_glWaitSync(s_interp_fence[prev], 0, PSXGL_TIMEOUT_IGNORED);
++        gz_wait(1, s_interp_fence[prev]);
 +    if (s_interp_fence[curr])
-+        p_glWaitSync(s_interp_fence[curr], 0, PSXGL_TIMEOUT_IGNORED);
++        gz_wait(1, s_interp_fence[curr]);
 +    if (s_interp_blend_mode == 2 && alpha >= 1.0f && s_interp_depth[curr] &&
 +        s_interp_depth_w == s_interp_w && s_interp_depth_h == s_interp_h) {
 +        const float ix = 0.5f * s_interp_scale / s_interp_w, iy = 0.5f * s_interp_scale / s_interp_h;
 +        ddgi_present_between(&s_temp_curr.ddgi, &s_temp_curr.ddgi, 1.0f);
-+        if (ssao_draw(&s_ssao_thread, s_interp_thread_vao, 0, s_interp_depth[curr], s_interp_tex[curr], s_interp_w, s_interp_h,
-+                      ix, iy, 1 - ix, 1 - iy, s_interp_scale, s_interp_linear, lx, ly, lw, lh))
-+            return alpha;
++        gz_begin_at(1, GZ_SHADE);
++        const int shaded = ssao_draw(&s_ssao_thread, s_interp_thread_vao, 0, s_interp_depth[curr], s_interp_tex[curr],
++                                     s_interp_w, s_interp_h, ix, iy, 1 - ix, 1 - iy, s_interp_scale, s_interp_linear, lx, ly, lw, lh);
++        gz_end_at(1);
++        if (shaded) return alpha;
 +    }
 +    const int edges = aa_edges_of(s_interp_source_path), grown = aa_begin(1, s_interp_h, edges, lx, ly, lw, lh);
 +    p_glActiveTexture(PSXGL_TEXTURE0);
@@ -9232,6 +9555,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +static struct ShownMeta { uint64_t tick; float alpha; int kind; int placed[7]; } *s_shown_meta = NULL;
 +
 +int gl_renderer_record_shown(const char *folder, int skip, int count, int width) {
++    GL_RT_SYNC(__func__);
 +    if (!folder || !folder[0] || strlen(folder) >= sizeof s_shown_dir || count <= 0 || count > 2000 || width < 160 ||
 +        width > 3840 || s_shown_left > 0) return 0;
 +    snprintf(s_shown_dir, sizeof s_shown_dir, "%s", folder);
@@ -9311,6 +9635,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +static uint8_t     *s_snap_pixels = NULL;
 +
 +int gl_renderer_snap_shown(int width) {
++    GL_RT_SYNC(__func__);
 +    int asked = 0;
 +    if (width < 64 || width > 1920) return 0;
 +    SDL_AtomicLock(&s_snap_lock);
@@ -9325,6 +9650,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +
 +/* A picture asked for and no longer wanted is not handed over: one being read is dropped when its reading ends. */
 +void gl_renderer_snap_cancel(void) {
++    GL_RT_SYNC(__func__);
 +    SDL_AtomicLock(&s_snap_lock);
 +    if (s_snap_state == SNAP_READING) s_snap_dropped = 1;
 +    else s_snap_state = SNAP_NONE;
@@ -9332,6 +9658,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +}
 +
 +int gl_renderer_snap_taken(unsigned char *rgb, int room, int *width, int *height) {
++    GL_RT_SYNC(__func__);
 +    int taken = 0;
 +    if (!rgb || !width || !height) return 0;
 +    SDL_AtomicLock(&s_snap_lock);
@@ -9384,6 +9711,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +
 +/* A picture for the host's menu to show, made in the context that calls: 0 when it cannot be made. */
 +unsigned gl_renderer_picture(const unsigned char *rgb, int width, int height) {
++    GL_RT_SYNC(__func__);
 +    GLint bound = 0;
 +    GLuint texture = 0;
 +    if (!rgb || width <= 0 || height <= 0 || width > 4096 || height > 4096) return 0;
@@ -9400,6 +9728,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +}
 +
 +void gl_renderer_picture_free(unsigned picture) {
++    GL_RT_SYNC(__func__);
 +    GLuint texture = picture;
 +    if (texture) glDeleteTextures(1, &texture);
 +}
@@ -9411,6 +9740,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +static int          s_shown_counting = 0;
 +
 +void gl_renderer_set_shown_count(int enabled) {
++    GL_RT_SYNC(__func__);
 +    SDL_AtomicLock(&s_shown_count_lock);
 +    s_shown_counting = enabled != 0;
 +    s_shown_pictures = s_shown_between = 0;
@@ -9430,6 +9760,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +}
 +
 +void gl_renderer_shown_count_take(unsigned *pictures, unsigned *between, double *longest_ms) {
++    GL_RT_SYNC(__func__);
 +    SDL_AtomicLock(&s_shown_count_lock);
 +    *pictures = s_shown_pictures;
 +    *between = s_shown_between;
@@ -9488,7 +9819,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +static void interp_layer_draw(int ww, int wh) {
 +    const int i = s_layer_shown;
 +    if (i < 0 || !s_layer_tex[i]) return;
-+    if (s_layer_fence[i]) p_glWaitSync(s_layer_fence[i], 0, PSXGL_TIMEOUT_IGNORED);
++    if (s_layer_fence[i]) gz_wait(1, s_layer_fence[i]);
 +    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, 0);
 +    glDisable(GL_SCISSOR_TEST);
 +    glViewport(0, 0, ww, wh);
@@ -9530,8 +9861,12 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +        glClearColor(0.f, 0.f, 0.f, 1.f);
 +        glClear(GL_COLOR_BUFFER_BIT);
 +    }
++    gz_begin(GZ_BETWEEN);
 +    const float shown = interp_draw_quad((float)a, lx, ly, lw, lh);
++    gz_end(GZ_BETWEEN);
++    gz_begin(GZ_LAYER);
 +    interp_layer_draw(ww, wh);
++    gz_end(GZ_LAYER);
 +    if (s_interp_draw_fence) p_glDeleteSync(s_interp_draw_fence);
 +    s_interp_draw_fence = p_glFenceSync(PSXGL_SYNC_GPU_COMMANDS_COMPLETE, 0);
 +    glFlush();
@@ -9539,6 +9874,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +                lx, ly, lw, lh);
 +    shown_capture(1, shown);
 +    SDL_GL_SwapWindow(s_win);
++    gz_frame(1);
 +    s_interp_swaps++;
 +    if (s_interp_diag) {
 +        const uint64_t swapped = SDL_GetPerformanceCounter();
@@ -9574,7 +9910,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
      uint64_t freq = SDL_GetPerformanceFrequency();
      uint64_t deadline = SDL_GetPerformanceCounter();
      uint64_t diag_start = deadline, diag_swaps = 0, diag_captures = 0;
-@@ -3473,11 +6168,12 @@
+@@ -3473,11 +6504,12 @@
      while (SDL_AtomicGet(&s_interp_thread_run)) {
          SDL_LockMutex(s_interp_mutex);
          double hz = s_interp_target_hz;
@@ -9588,7 +9924,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
              uint64_t period = (uint64_t)((double)freq / hz);
              if (!period) period = 1;
              deadline += period;
-@@ -3492,235 +6188,434 @@
+@@ -3492,235 +6524,485 @@
              }
              while (SDL_GetPerformanceCounter() < deadline) {}
              now = SDL_GetPerformanceCounter();
@@ -9922,6 +10258,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +    if (swaps) *swaps = 0;
 +}
 +void gl_renderer_geometry_interpolation_diag(uint64_t out[6]) {
++    GL_RT_SYNC(__func__);
 +    if (out) memset(out, 0, 6 * sizeof(*out));
 +}
 +#endif
@@ -9952,6 +10289,12 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +
 +void gl_renderer_present_vram(int disp_x, int disp_y, int w, int h, int linear,
 +                              int force_4_3) {
++    if (rth_record_mode()) {
++        int32_t num = 1, den = 1;
++        gte_ws_x_squash(&num, &den);
++        const int32_t v[] = {disp_x, disp_y, w, h, linear, force_4_3, num, den};
++        if (rth_rec_call(RTH_PRESENT_VRAM, v, 8)) return;
++    }
 +    if (!s_ctx || !s_raster_ok) return;
 +    flush_flat_batch();
 +    flush_tex_batch();
@@ -9967,7 +10310,9 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +        return;
 +    }
 +    gl_perf_present_enter();   /* per-frame backdrop-phase reset + dbg snapshot live in here */
++    gz_begin(GZ_DDGI);
 +    ddgi_update(s_hr_tex, (float)VRAM_W, (float)VRAM_H, (float)disp_x + (float)w * 0.5f, (float)disp_y + (float)h * 0.5f);
++    gz_end(GZ_DDGI);
 +    int ww = 0, wh = 0; gl_visible_size(&ww, &wh);
 +    int lx, ly, lw, lh;
 +    if (force_4_3)
@@ -10064,14 +10409,16 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +    return 1;
 +}
 +
-+void gl_renderer_set_mesh_view(int enabled) { s_mesh_view = enabled != 0; }
++void gl_renderer_set_mesh_view(int enabled) { GL_RT_SYNC(__func__); s_mesh_view = enabled != 0; }
 +int gl_renderer_mesh_view(void) { return s_mesh_view; }
 +void gl_renderer_set_full_yaw(int enabled) {
++    GL_RT_SYNC(__func__);
 +    if (s_raster_ok) { flush_flat_batch(); flush_tex_batch(); }
 +    if ((enabled != 0) != s_geometry_full_yaw) interp_reset_history();
 +    s_geometry_full_yaw = enabled != 0;
 +}
 +void gl_renderer_set_gap_fill(int enabled) {
++    GL_RT_SYNC(__func__);
 +    if (s_raster_ok) { flush_flat_batch(); flush_tex_batch(); }
 +    const float width = enabled ? s_crack_width : 0.0f;
 +    if ((enabled != 0) != s_grown_under || width != s_crack_fill) interp_reset_history();
@@ -10082,6 +10429,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +int gl_renderer_gap_fill(void) { return s_grown_under || s_crack_fill > 0.0f; }
 +
 +void gl_renderer_set_world_depth(int enabled) {
++    GL_RT_SYNC(__func__);
 +    if (s_raster_ok) { flush_flat_batch(); flush_tex_batch(); }
 +    if ((enabled != 0) != s_world_depth) interp_reset_history();
 +    if (enabled && !mirror_depth()) memset(s_wide_depth_shown, 0xFF, sizeof s_wide_depth_shown);
@@ -10095,14 +10443,17 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +    s_ssao = mode;
 +}
 +void gl_renderer_set_ssao(int enabled) {
++    GL_RT_SYNC(__func__);
 +    s_ssao_on = enabled != 0;
 +    ssao_mode();
 +}
 +void gl_renderer_set_ssao_view(int view) {
++    GL_RT_SYNC(__func__);
 +    s_ssao_view = view >= 1 && view <= 4 ? view : 0;
 +    ssao_mode();
 +}
 +void gl_renderer_set_uv_view(int enabled) {
++    GL_RT_SYNC(__func__);
 +    s_uv_view = enabled != 0;
 +    ssao_mode();
 +}
@@ -10110,15 +10461,22 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +int gl_renderer_ssao_view(void) { return s_ssao_view; }
 +float gl_renderer_ssao_tilt(void) { return s_ssao_tilt; }
 +void gl_renderer_set_ssao_tilt(float tilt) {
++    GL_RT_SYNC(__func__);
 +    if (tilt >= 0.0f && tilt < 0.95f) s_ssao_tilt = tilt;
 +}
 +void gl_renderer_set_ssao_shape(float radius, float strength) {
++    GL_RT_SYNC(__func__);
 +    if (radius > 0.0f) s_ssao_radius = radius;
 +    if (strength >= 0.0f) s_ssao_strength = strength;
 +}
 +float gl_renderer_ssao_radius(void) { return s_ssao_radius; }
 +/* The camera depths between which the game fades its world out: the shading goes with it. */
-+void gl_renderer_set_ssao_fade(float from, float to) { s_ssao_fade_from = from; s_ssao_fade_to = to; }
++void gl_renderer_set_ssao_fade(float from, float to) {
++    int32_t v[2];
++    memcpy(&v[0], &from, 4); memcpy(&v[1], &to, 4);
++    if (rth_rec_call(RTH_SSAO_FADE, v, 2)) return;
++    s_ssao_fade_from = from; s_ssao_fade_to = to;
++}
 +float gl_renderer_ssao_strength(void) { return s_ssao_strength; }
 +int gl_renderer_ssao(void) { return s_ssao_on; }
 +
@@ -10144,18 +10502,24 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +        return 1;
 +    }
 +    gl_perf_present_enter();
++    gz_begin(GZ_DDGI);
 +    ddgi_update(tex, (float)g_wide_w, (float)VRAM_H, (float)g_wide_w * 0.5f, (float)disp_y + (float)disp_h * 0.5f);
++    gz_end(GZ_DDGI);
 +    int ww = 0, wh = 0; gl_visible_size(&ww, &wh);
 +    int lx, ly, lw, lh;
 +    letterbox_rect(ww, wh, &lx, &ly, &lw, &lh);
++    gz_begin(GZ_WIDE_RESOLVE);
 +    wide_blit_center(fbo, disp_x, disp_y, disp_h);   /* fast-path: authoritative centre */
 +    wide_resolved(fbo, disp_y, disp_h);
++    gz_end(GZ_WIDE_RESOLVE);
++    gz_begin(GZ_WIDE_RIMS);
 +    {
 +        const int i = wide_surface_of(fbo);
 +        if (i >= 0 && mirror_depth())
 +            grown_rims_erase(&s_rims_main, s_present_vao, fbo, g_wide_w * s_scale, VRAM_H * s_scale, disp_y * s_scale,
 +                             (disp_y + disp_h) * s_scale, s_scale, s_wide_fill[i]);
 +    }
++    gz_end(GZ_WIDE_RIMS);
 +
 +    p_glBindFramebuffer(PSXGL_DRAW_FRAMEBUFFER, 0);
 +    glDisable(GL_SCISSOR_TEST);
@@ -10163,8 +10527,10 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +    if (lx != 0 || ly != 0 || lw != ww || lh != wh) {
 +        glClearColor(0.f, 0.f, 0.f, 1.f); glClear(GL_COLOR_BUFFER_BIT);
 +    }
++    gz_begin(GZ_CAPTURE);
 +    int interp_pair = interp_capture(fbo, 0, disp_y, g_wide_w, disp_h,
 +                                     linear, 0, GL_PRES_WIDE);
++    gz_end(GZ_CAPTURE);
 +    if (interp_pair) {
 +        interp_layer_update(ww, wh);
 +        gl_perf_present_exit(1);
@@ -10176,11 +10542,18 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +        return 1;
 +    }
 +    wide_depth_shown(fbo, disp_y, disp_h);
-+    if (!ssao_present(fbo, tex, disp_y, disp_h, linear, lx, ly, lw, lh))
++    gz_begin(GZ_SHADE);
++    const int shaded = ssao_present(fbo, tex, disp_y, disp_h, linear, lx, ly, lw, lh);
++    gz_end(GZ_SHADE);
++    gz_begin(GZ_PLAIN);
++    if (!shaded)
 +        present_target_quad(tex, g_wide_w, VRAM_H,
 +                            0, disp_y, g_wide_w, disp_h, linear, lx, ly, lw, lh, GL_PRES_WIDE);
++    gz_end(GZ_PLAIN);
 +    pres_record(GL_PRES_WIDE, disp_x, disp_y, g_wide_w, disp_h, lx, ly, lw, lh);
++    gz_begin(GZ_UI);
 +    render_host_ui_for_swap(ww, wh);
++    gz_end(GZ_UI);
 +    shown_capture(0, 1.0f);
 +    latency_ring_mark(LAT_SWAP_BEGIN);
 +    SDL_GL_SwapWindow(s_win);
@@ -10241,4 +10614,18 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318
 +    .wide_dump_full = glb_wide_dump_full,
 +};
 +
-+const GpuRenderBackend *gl_backend_get(void) { return &GL_BACKEND; }
++/* The native-wide present, or the canonical one where the displayed buffer has no wide surface yet. */
++void gl_renderer_present_wide_or_vram(int disp_x, int disp_y, int disp_h, int linear, int w, int h, int force_4_3) {
++    if (rth_record_mode()) {
++        int32_t num = 1, den = 1;
++        gte_ws_x_squash(&num, &den);
++        const int32_t v[] = {disp_x, disp_y, disp_h, linear, w, h, force_4_3, num, den};
++        if (rth_rec_call(RTH_PRESENT_WIDE, v, 9)) return;
++    }
++    if (!gl_renderer_present_wide_fbo(disp_x, disp_y, disp_h, linear))
++        gl_renderer_present_vram(disp_x, disp_y, w, h, linear, force_4_3);
++}
++
++#include "gpu_gl_render_thread.c.inc"
++
++const GpuRenderBackend *gl_backend_get(void) { return s_rth_on ? &GL_RT_BACKEND : &GL_BACKEND; }

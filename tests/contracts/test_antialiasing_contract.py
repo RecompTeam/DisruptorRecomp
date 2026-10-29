@@ -122,8 +122,9 @@ require(
     "where it is the world's picture and not a full-2D frame's",
 )
 require(
-    "    const int thread = t == &s_ssao_thread;\n    ddgi_screen_measure(thread, " in renderer
-    and "                   u0, v0, u1, v1);\n"
+    "    const int thread = t == &s_ssao_thread;\n    glDisable(GL_SCISSOR_TEST);\n" in renderer
+    and "    gz_begin_at(thread, GZ_SHADE_MEASURE);\n    ddgi_screen_measure(thread, " in renderer
+    and "                   u0, v0, u1, v1, lw, lh);\n    gz_end_at(thread);\n    gz_begin_at(thread, GZ_SHADE_MIX);\n"
     "    const int grown = aa_begin(thread, (int)((v1 - v0) * (float)h + 0.5f), 1, lx, ly, lw, lh);\n"
     in renderer
     and "                        v1, grown ? 0.0f : (float)lx, grown ? 0.0f : (float)ly, (float)s_ssao, (float)grown)) {\n"
@@ -145,7 +146,7 @@ require(
     "static int s_world_begun = 0, s_frame_drawn = 0;\n"
     "extern int gpu_ws_drawing_flat(void);\n"
     "static float flat_picture_flags(int visual_flags) {\n"
-    "    return visual_flags == 0 && (s_world_begun || gpu_ws_drawing_flat()) ? -1.0f : (float)visual_flags;\n"
+    "    return visual_flags == 0 && (s_world_begun || ctx_drawing_flat()) ? -1.0f : (float)visual_flags;\n"
     "}\n"
     in renderer
     and "    if (world || sprite) s_world_begun = 1;\n    s_frame_drawn = 1;\n" in renderer
@@ -177,7 +178,8 @@ require(
 )
 require(
     "static int s_msaa_asked = 0, s_msaa = 0;\n" in renderer
-    and "void gl_renderer_set_multisampling(int samples) { s_msaa_asked = samples >= 2 ? samples : 0; }\n" in renderer
+    and "void gl_renderer_set_multisampling(int samples) { GL_RT_SYNC(__func__); s_msaa_asked = samples >= 2 ? samples : 0; }\n"
+    in renderer
     and "    int want = s_geometry_correction && p_glRenderbufferStorageMultisample ? s_msaa_asked : 0;\n"
     "    if (want > s_msaa_most) want = s_msaa_most;\n"
     "    if (want < 2) want = 0;\n"
@@ -195,7 +197,8 @@ require(
 )
 require(
     "static int s_ssaa_asked = 0, s_ssaa = 0;\n" in renderer
-    and "void gl_renderer_set_sample_shading(int enabled) { s_ssaa_asked = enabled != 0; }\n" in renderer
+    and "void gl_renderer_set_sample_shading(int enabled) { GL_RT_SYNC(__func__); s_ssaa_asked = enabled != 0; }\n"
+    in renderer
     and "static void sample_shading(int on) {\n"
     "    if (!on) { glDisable(PSXGL_SAMPLE_SHADING); return; }\n"
     "    glEnable(PSXGL_SAMPLE_SHADING);\n"
@@ -288,9 +291,8 @@ require(
     "shown or read: a twin that cannot be made leaves the plain surface in use",
 )
 require(
-    "inline constexpr int kDisruptorSampleCounts[] = {0, 2, 4, 8, 16};\n" in fields
-    and 'constexpr const char* antialiasing_levels[] = {"Off",     "2x MSAA", "4x MSAA", "8x MSAA", "16x MSAA",\n'
-    '                                               "2x SSAA", "4x SSAA", "8x SSAA", "16x SSAA"};\n'
+    "inline constexpr int kDisruptorSampleCounts[] = {0, 2, 4, 8};\n" in fields
+    and 'constexpr const char* antialiasing_levels[] = {"Off", "2x MSAA", "4x MSAA", "8x MSAA", "2x SSAA", "4x SSAA", "8x SSAA"};\n'
     in options
     and '    choice("disruptor.multisampling", "Anti-aliasing (MSAA / SSAA)", 0,\n' in options
     and "           antialiasing_saved, antialiasing, set_antialiasing, needs_geometry),\n" in options
@@ -310,7 +312,8 @@ require(
     "correction, and the two filters are withdrawn from the shared table",
 )
 require(
-    '            const int samples = toml::find<int>(d, "multisampling");\n'
+    '            const int read = toml::find<int>(d, "multisampling");\n'
+    "            const int samples = read == 16 ? 8 : read;  // 16 was offered once: 40% more GPU work than 8 at 8x scale, no edge seen\n"
     "            if (std::ranges::find(kDisruptorSampleCounts, samples) != std::end(kDisruptorSampleCounts)) {\n"
     "                s.multisampling = samples;\n                s.has_multisampling = true;\n"
     in saved
@@ -375,8 +378,10 @@ require(
     and 'changed("disruptor.downscale_averaging")' not in menu
     and 'changed("disruptor.edge_smoothing")' not in menu
     and 'void mark_antialiasing(int level) { mark("disruptor.multisampling", level); }\n' in menu
-    and "void gl_renderer_set_downscale_averaging(int enabled) { s_aa_average = enabled != 0; }\n" in renderer
-    and "void gl_renderer_set_edge_smoothing(int enabled) { s_aa_edges = enabled != 0; }\n" in renderer,
+    and "void gl_renderer_set_downscale_averaging(int enabled) { GL_RT_SYNC(__func__); s_aa_average = enabled != 0; }\n"
+    in renderer
+    and "void gl_renderer_set_edge_smoothing(int enabled) { GL_RT_SYNC(__func__); s_aa_edges = enabled != 0; }\n"
+    in renderer,
     "the Enhancements tab switches anti-aliasing at once and stages it for saving through the shared table's own reading of "
     "the samples and their shading, a start with it saved applies it, and every start keeps the two withdrawn filters off "
     "whatever an older file says",

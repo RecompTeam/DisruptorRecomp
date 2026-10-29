@@ -15,6 +15,15 @@ void draw_fullscreen_controls() {
             mark_fullscreen(mode);
     }
     draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
+    int width = 0, height = 0;
+    psx_host_video_get_resolution(&width, &height);
+    const std::string asked = width > 0 ? std::to_string(width) + "x" + std::to_string(height) : std::string();
+    int resolution = disruptor::resolution::index_of(asked);
+    if (mode == 1) ImGui::BeginDisabled();
+    if (option_list("disruptor.resolution", &resolution) &&
+        apply_resolution(disruptor::resolution::at(resolution)))
+        mark_resolution(resolution);
+    if (mode == 1) ImGui::EndDisabled();
     if (g_menu.fullscreen_apply_failed) {
         ImGui::TextColored(
             ImVec4(1.0f, 0.35f, 0.25f, 1.0f),
@@ -116,17 +125,23 @@ void draw_aspect_controls() {
 void draw_internal_resolution_controls() {
     static constexpr int kScaleCount = 8;
     int selected = std::clamp(
-        psx_host_video_get_internal_scale(), 1, kScaleCount) - 1;
+        disruptor_adaptive_resolution_scale(), 1, kScaleCount) - 1;
 
     ImGui::SeparatorText("Rendering resolution");
     if (option_list("video.supersampling", &selected)) {
         const int requested = selected + 1;
         g_menu.internal_scale_apply_failed =
-            psx_host_video_set_internal_scale(requested) == 0;
+            disruptor_adaptive_resolution_set_scale(requested) == 0;
         if (!g_menu.internal_scale_apply_failed)
             mark_supersampling(requested);
     }
     draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
+    bool dynamic = disruptor_adaptive_resolution_enabled() != 0;
+    if (option_toggle("disruptor.dynamic_resolution", &dynamic)) {
+        disruptor_adaptive_resolution_set_enabled(dynamic ? 1 : 0);
+        mark_dynamic_resolution(dynamic);
+    }
+    if (dynamic) ImGui::TextDisabled("Drawn at %dx now", psx_host_video_get_internal_scale());
     if (g_menu.internal_scale_apply_failed) {
         ImGui::TextColored(
             ImVec4(1.0f, 0.35f, 0.25f, 1.0f),
@@ -146,6 +161,12 @@ void draw_sync_controls() {
         const int requested = vsync_index - 1;
         if (psx_host_video_set_vsync(requested)) mark_vsync(requested);
     }
+    bool threaded = gl_renderer_render_thread_active() != 0;
+    if (option_toggle("disruptor.render_thread", &threaded)) {
+        gl_renderer_render_thread_request(threaded ? 1 : 0);
+        mark_render_thread(threaded);
+    }
+    draw_status_badge("EXPERIMENTAL", ImVec4(1.0f, 0.73f, 0.25f, 1.0f));
 }
 
 }  // namespace

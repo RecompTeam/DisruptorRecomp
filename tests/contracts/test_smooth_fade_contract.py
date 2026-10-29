@@ -49,7 +49,7 @@ require(
 require(
     '    "  int glyph = (v_raw & 2) == 0 && (u_twin.x | u_twin.y) == 0 ? v_raw >> 2 : 0;  /* a texture window samples past the limits */\\n"\n'
     '    "  if (!sample_texture(sample_uv, rgb, stp) && (glyph == 0 || !glyph_edge(sample_uv, glyph, rgb, stp))) discard;\\n"\n'
-    '    "  if (level >= 0.0 && int(level) < rows - 1) {\\n"\n'
+    '    "  if (level >= 0.0 && int(level) < rows - 1 && u_semipass < 3) {  /* passes 3 and 4 write depth alone */\\n"\n'
     '    "    vec3 next; int next_stp; g_row += 1;\\n"\n'
     '    "    if (sample_texture(sample_uv, next, next_stp)) rgb = mix(rgb, next, fract(level));\\n"\n'
     '    "  }\\n"\n'
@@ -140,16 +140,16 @@ require(
     and '    s_tex_uDissolve = p_glGetUniformLocation(s_tex_prog, "u_dissolve");\n    s_tex_uClear = p_glGetUniformLocation(s_tex_prog, "u_clear");\n'
     in renderer
     and '    "uniform vec4 u_clear;' in renderer
-    and '    "  if (dissolve > 0.0 && u_dissolve.z < 0.5) {\\n"\n'
+    and '    "  if (dissolve > 0.0 && u_dissolve.z < 0.5 && (u_semipass < 3 || u_visual_options.w > 0.0)) {\\n"\n'
     '    "    vec3 last; int last_stp; int row = g_row; g_row = first + rows - 1;\\n"\n'
     '    "    bool same = u_clear.w > 0.5 && sample_texture(sample_uv, last, last_stp);\\n"\n'
     '    "    g_row = row;\\n"\n'
     '    "    if (same && (v_raw & 1) == 0) last = clamp(last * v_col.rgb * 2.0, 0.0, 1.0);\\n"\n'
     '    "    if (!same || any(greaterThan(abs(last - u_clear.rgb), vec3(1.5/31.0)))) dissolve = 0.0;\\n"\n'
     in renderer
-    and renderer.index('"  if (dissolve > 0.0 && u_dissolve.z < 0.5) {')
+    and renderer.index('"  if (dissolve > 0.0 && u_dissolve.z < 0.5 && (u_semipass < 3 || u_visual_options.w > 0.0)) {')
     > renderer.index('"  if ((v_raw & 1) == 0) rgb = clamp(rgb * v_col.rgb * 2.0, 0.0, 1.0);\\n"')
-    and renderer.index('"  if (dissolve > 0.0 && u_dissolve.z < 0.5) {')
+    and renderer.index('"  if (dissolve > 0.0 && u_dissolve.z < 0.5 && (u_semipass < 3 || u_visual_options.w > 0.0)) {')
     < renderer.index('"  if (dissolve > 0.0 && dst_factor == 0.0) {')
     and "    if (w >= EDGE_CLEAR_WIDTH && h >= EDGE_CLEAR_HEIGHT && x <= s_area_x1 && y <= s_area_y1 && x + w - 1 >= s_area_x2 &&\n        y + h - 1 >= s_area_y2) {\n        s_clear_rgb[0] = r; s_clear_rgb[1] = g; s_clear_rgb[2] = b;\n        s_clear_known = 1;\n    }\n"
     in renderer
@@ -166,8 +166,10 @@ require(
     and "u_semipass >= 3) discard" not in renderer
     and renderer.index('"  if (dissolve > 0.0 && dst_factor == 0.0) {')
     > renderer.index('"  if (u_semimode == 4 && v_semi != 0 && stp != 0) {\\n"')
-    and "void gl_renderer_set_edge_sky(int sky) { s_edge_sky = sky != 0; }\n" in renderer
-    and "void gl_renderer_set_edge_depth(float depth) { s_edge_depth = depth; }\n" in renderer
+    and "void gl_renderer_set_edge_sky(int sky) {\n    const int32_t v[] = {sky};\n    if (rth_rec_call(RTH_EDGE_SKY, v, 1)) return;\n    s_edge_sky = sky != 0;\n}\n"
+    in renderer
+    and "void gl_renderer_set_edge_depth(float depth) {\n    int32_t v[1];\n    memcpy(v, &depth, sizeof v);\n    if (rth_rec_call(RTH_EDGE_DEPTH, v, 1)) return;\n    s_edge_depth = depth;\n}\n"
+    in renderer
     and "    return s_smooth_fade && (s_edge_sky || s_clear_known) && s_fade_rows > 1 && s_edge_depth > EDGE_DISSOLVE_BAND && !s_uv_view;\n"
     in renderer
     and "    if (!edge_dissolving()) { glDisable(GL_BLEND); return; }\n    glEnable(GL_BLEND);\n" in renderer

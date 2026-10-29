@@ -61,6 +61,7 @@ runtime/runtime.cmake
 runtime/src/boot_state.c
 runtime/src/card_data_writes.c
 runtime/src/cdrom.c
+runtime/src/debug_server.c
 runtime/src/parity_trace.c
 runtime/src/psx_sdl_audio.cpp
 runtime/src/savestate.c
@@ -90,3 +91,11 @@ runtime/src/ws_aspect_cone_math.c
 runtime/tests/test_ws_aspect_cone_math.c
 recompiler/seeds/openbios_elf_seeds.json
 recompiler/src/full_function_emitter.cpp
++runtime/include/dynamic_resolution.h
++runtime/src/dynamic_resolution.c
++runtime/tests/test_dynamic_resolution.c
++runtime/tests/test_dynamic_resolution_rt.c
++runtime/include/render_thread.h
++runtime/src/render_thread.c
++runtime/src/gpu_gl_render_thread.c.inc
+runtime/src/gpu_sw_renderer.c

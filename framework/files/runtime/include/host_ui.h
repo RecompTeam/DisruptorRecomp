@@ -86,6 +86,8 @@ int psx_host_video_get_internal_scale(void);
 int psx_host_video_set_internal_scale(int scale);
 int psx_host_video_get_fullscreen_mode(void);
 int psx_host_video_set_fullscreen_mode(int mode);
+void psx_host_video_get_resolution(int *width, int *height);
+int psx_host_video_set_resolution(int width, int height);
 int psx_host_video_get_vsync(void);
 int psx_host_video_set_vsync(int mode);
 void psx_host_video_get_interpolation(int *enabled, int *target_fps,

@@ -114,6 +114,18 @@ void read_game_user_settings(const toml::value& doc, UserSettings& s) {
             s.skip_intro = toml::find<bool>(d, "skip_intro");
             s.has_skip_intro = true;
         });
+        if (d.contains("render_thread")) try_get([&]{
+            s.render_thread = toml::find<bool>(d, "render_thread");
+            s.has_render_thread = true;
+        });
+        if (d.contains("resolution")) try_get([&]{
+            s.resolution = toml::find<std::string>(d, "resolution");
+            s.has_resolution = true;
+        });
+        if (d.contains("dynamic_resolution")) try_get([&]{
+            s.dynamic_resolution = toml::find<bool>(d, "dynamic_resolution");
+            s.has_dynamic_resolution = true;
+        });
         if (d.contains("fast_disc_reads")) try_get([&]{
             s.fast_disc_reads = toml::find<bool>(d, "fast_disc_reads");
             s.has_fast_disc_reads = true;
@@ -224,7 +236,8 @@ void read_game_user_settings(const toml::value& doc, UserSettings& s) {
             s.has_smooth_fade = true;
         });
         if (d.contains("multisampling")) try_get([&]{
-            const int samples = toml::find<int>(d, "multisampling");
+            const int read = toml::find<int>(d, "multisampling");
+            const int samples = read == 16 ? 8 : read;  // 16 was offered once: 40% more GPU work than 8 at 8x scale, no edge seen
             if (std::ranges::find(kDisruptorSampleCounts, samples) != std::end(kDisruptorSampleCounts)) {
                 s.multisampling = samples;
                 s.has_multisampling = true;
@@ -423,7 +436,7 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
         s.has_probe_lighting || s.has_probe_strength || s.has_probe_bounce || s.has_probe_glow ||
         s.has_dynamic_shadows || s.has_shadow_strength || s.has_shadow_underneath ||
         s.has_shot_lights || s.has_shot_light_strength || s.has_sun_lighting || s.has_sun_direction ||
-        s.has_sun_height || s.has_sun_strength || s.has_sun_shade ||
+        s.has_sun_height || s.has_sun_strength || s.has_sun_shade || s.has_dynamic_resolution || s.has_resolution || s.has_render_thread ||
         s.has_high_precision_camera || s.has_geometry_correction ||
         s.has_perspective_textures || s.has_frame_unlock ||
         s.has_ambient_occlusion || s.has_occlusion_reach || s.has_occlusion_strength || s.has_smooth_fade ||
@@ -499,6 +512,12 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
             f << "frame_unlock = " << (s.frame_unlock ? "true" : "false") << "\n";
         if (s.has_skip_intro)
             f << "skip_intro = " << (s.skip_intro ? "true" : "false") << "\n";
+        if (s.has_render_thread)
+            f << "render_thread = " << (s.render_thread ? "true" : "false") << "\n";
+        if (s.has_resolution)
+            f << "resolution = " << quoted(s.resolution) << "\n";
+        if (s.has_dynamic_resolution)
+            f << "dynamic_resolution = " << (s.dynamic_resolution ? "true" : "false") << "\n";
         if (s.has_fast_disc_reads)
             f << "fast_disc_reads = " << (s.fast_disc_reads ? "true" : "false") << "\n";
         if (s.has_mute_in_background)

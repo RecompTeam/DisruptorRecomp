@@ -14,6 +14,8 @@
 #include "game/audio/bass_cut.h"
 #include "game/session/cheats.h"
 #include "game/render/billboard_aspect.h"
+#include "game/render/adaptive_resolution.h"
+#include "game/settings/resolution.h"
 #include "game/render/far_rendering.h"
 #include "game/render/movie_smoothing.h"
 #include "game/frame/frame_rate.h"
@@ -195,6 +197,12 @@ void mark_hud_scale(int value);
 void mark_frame_unlock(bool value);
 void mark_occlusion(bool value);
 void mark_smooth_fade(bool value);
+void mark_dynamic_resolution(bool value);
+void mark_resolution(int index);
+void mark_render_thread(bool value);
+extern "C" void gl_renderer_render_thread_request(int on);
+extern "C" int gl_renderer_render_thread_active(void);
+int apply_resolution(std::string_view text);
 void mark_antialiasing(int level);
 void mark_draw_distance(int preset);
 void mark_fog_shape(int shape);

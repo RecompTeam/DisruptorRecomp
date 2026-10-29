@@ -82,6 +82,7 @@ set(DISRUPTOR_EXTRA_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/hud_widgets.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/mover_motion.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/ddgi_view.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/adaptive_resolution.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/ddgi_level.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/sprite_depth.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/vertical_camera.cpp")
@@ -226,7 +227,7 @@ if(MSVC)
     # audio_trace.c is the sole runtime source using C11 atomics. Keep the
     # generated C in MSVC's extension-compatible C mode: its static tables use
     # address constants that strict /std:c11 rejects.
-    set_property(SOURCE "${PSXRECOMP_ROOT}/runtime/src/audio_trace.c"
+    set_property(SOURCE "${PSXRECOMP_ROOT}/runtime/src/audio_trace.c" "${PSXRECOMP_ROOT}/runtime/src/render_thread.c"
         APPEND PROPERTY COMPILE_OPTIONS
         "/std:c11" "/experimental:c11atomics")
 endif()
@@ -493,6 +494,20 @@ disruptor_unit_test(disruptor_bass_cut tests/unit/disruptor_bass_cut_test.cpp
     disruptor_unit_test(disruptor_gte_precision_store_pc tests/unit/gte_precision_store_pc_test.cpp RUNTIME_HEADERS
         SOURCES "${PSXRECOMP_ROOT}/runtime/src/gte.cpp"
         DEFINITIONS PSX_NO_DEBUG_TOOLS=1 PSX_GTE_REGISTER_TEST=1 PSX_ENABLE_BLOCK_CYCLES=1)
+    disruptor_unit_test(disruptor_resolution tests/unit/resolution_test.cpp INCLUDES "${CMAKE_CURRENT_SOURCE_DIR}/src")
+    disruptor_unit_test(psxrecomp_render_thread_core tests/unit/render_thread_core_test.cpp RUNTIME_HEADERS
+        SOURCES "${PSXRECOMP_ROOT}/runtime/src/render_thread.c")
+    disruptor_unit_test(disruptor_adaptive_resolution_hooks tests/unit/adaptive_resolution_hooks_test.cpp
+        INCLUDES tests/support/stubs src "${PSXRECOMP_ROOT}/runtime/include" SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/adaptive_resolution.cpp"
+        "${PSXRECOMP_ROOT}/runtime/src/dynamic_resolution.c" DEFINITIONS PSX_SDL3=1)
+    set_tests_properties(disruptor_adaptive_resolution_hooks PROPERTIES
+        ENVIRONMENT_MODIFICATION "PSX_DYNRES=unset:;PSX_DYNRES_WORK_SCALE=unset:;PSX_DISRUPTOR_CAPSULE_REPLAY=unset:")
+    disruptor_unit_test(disruptor_adaptive_resolution tests/unit/adaptive_resolution_test.cpp RUNTIME_HEADERS
+        INCLUDES "${CMAKE_CURRENT_SOURCE_DIR}/src" SOURCES "${PSXRECOMP_ROOT}/runtime/src/dynamic_resolution.c")
+    disruptor_unit_test(psxrecomp_dynamic_resolution psxrecomp/runtime/tests/test_dynamic_resolution.c RUNTIME_HEADERS
+        SOURCES "${PSXRECOMP_ROOT}/runtime/src/dynamic_resolution.c")
+    disruptor_unit_test(psxrecomp_dynamic_resolution_rt psxrecomp/runtime/tests/test_dynamic_resolution_rt.c RUNTIME_HEADERS
+        SOURCES "${PSXRECOMP_ROOT}/runtime/src/dynamic_resolution.c")
 
     disruptor_unit_test(host_pick_slot tests/unit/host_pick_slot_test.cpp)
     disruptor_unit_test(host_borderless tests/unit/host_borderless_test.cpp)

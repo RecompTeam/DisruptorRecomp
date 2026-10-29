@@ -69,7 +69,7 @@ require(
 )
 policy = body(renderer, "static void depth24_upload_policy(void)")
 require(
-    "    int d24 = gpu_display_is_depth24();\n    if (d24 && !s_depth24_skip_up) {\n        s_up_nrects = 0;" in policy,
+    "    int d24 = ctx_depth24();\n    if (d24 && !s_depth24_skip_up) {\n        s_up_nrects = 0;" in policy,
     "the GL backend drops pending uploads only once the display is 24-bit, which is after the sync above",
 )
 

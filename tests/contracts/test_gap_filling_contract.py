@@ -137,6 +137,7 @@ require(
 
 require(
     """void gl_renderer_set_gap_fill(int enabled) {
+    GL_RT_SYNC(__func__);
     if (s_raster_ok) { flush_flat_batch(); flush_tex_batch(); }
     const float width = enabled ? s_crack_width : 0.0f;
     if ((enabled != 0) != s_grown_under || width != s_crack_fill) interp_reset_history();

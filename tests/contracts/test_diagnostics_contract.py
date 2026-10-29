@@ -123,6 +123,8 @@ require(
     and "    if (!callback || !control) return;\n    glEnable(0x92E0 /* GL_DEBUG_OUTPUT */);\n"
     "    control(GL_DONT_CARE, GL_DONT_CARE, 0x826B /* GL_DEBUG_SEVERITY_NOTIFICATION */, 0, NULL, GL_FALSE);\n"
     "    control(GL_DONT_CARE, GL_DONT_CARE, 0x9148 /* GL_DEBUG_SEVERITY_LOW */, 0, NULL, GL_FALSE);\n"
+    "    /* Intel warns at every wide line, thousands a second: the width is checked once at start (s_line_width_max). */\n"
+    "    control(0x8246 /* GL_DEBUG_SOURCE_API */, 0x824D /* GL_DEBUG_TYPE_DEPRECATED_BEHAVIOR */, GL_DONT_CARE, 0, NULL, GL_FALSE);\n"
     "    callback(debug_message, presenter ? &s_presenter_tag : NULL);\n    s_debug_active = 1;\n"
     in renderer
     and "    SDL_AtomicLock(&s_debug_lock);\n    if (s_debug_count < DEBUG_QUEUE) {\n" in renderer

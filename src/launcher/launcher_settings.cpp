@@ -20,8 +20,11 @@ constexpr const char* rate_key = "video.frame_interpolation_fps";
 
 constexpr Placement placed[] = {
     {"video.fullscreen", Page::display},
+    {"disruptor.resolution", Page::display},
     {"video.aspect_ratio", Page::display},
     {"video.supersampling", Page::display},
+    {"disruptor.dynamic_resolution", Page::display},
+    {"disruptor.render_thread", Page::display},
     {"video.vsync", Page::display},
     {"disruptor.hud_scale", Page::display},
     {"disruptor.frame_unlock", Page::enhancements, "Frame rate"},

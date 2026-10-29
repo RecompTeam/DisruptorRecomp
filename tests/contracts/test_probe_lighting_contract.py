@@ -137,7 +137,7 @@ require(
     "an in-between frame moves the camera whenever the camera moved, and takes the inverse and the eye of the rows it shows",
 )
 require(
-    update.index("        if (s_interp_draw_fence) p_glWaitSync(s_interp_draw_fence, 0, PSXGL_TIMEOUT_IGNORED);\n")
+    update.index("        if (s_interp_draw_fence) gz_wait(0, s_interp_draw_fence);\n")
     < update.index("        const int bvh = s_ddgi_bvh_next;\n")
     < update.index("        ddgi_build(tris, count, bvh, now->eye);\n")
     < update.index("        if (sun) ddgi_level_update();\n"),
@@ -153,11 +153,11 @@ probe_fence = update.find("        s_ddgi_probe_fence = p_glFenceSync(PSXGL_SYNC
 require(
     len(probe_writes) == 3
     and any(
-        lock < update.find("p_glWaitSync(s_interp_draw_fence, 0, PSXGL_TIMEOUT_IGNORED);", lock) < min(probe_writes)
+        lock < update.find("gz_wait(0, s_interp_draw_fence);", lock) < min(probe_writes)
         and max(probe_writes) < probe_fence < update.find("        glFlush();\n", probe_fence) < unlock
         for lock, unlock in held
     )
-    and mix.index("    if (thread && s_ddgi_probe_fence) p_glWaitSync(s_ddgi_probe_fence, 0, PSXGL_TIMEOUT_IGNORED);\n")
+    and mix.index("    if (thread && s_ddgi_probe_fence) gz_wait(1, s_ddgi_probe_fence);\n")
     < mix.index("    ddgi_bind_probes(color, depth);\n"),
     "the probes' state, irradiance and distances are written under the presenter's lock after its last draw, with a fence "
     "made and flushed before the lock is let go, and the presenter waits for that fence before it samples them",

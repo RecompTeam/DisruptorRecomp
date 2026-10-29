@@ -105,6 +105,7 @@ require(
 
 require(
     """void gl_renderer_set_world_depth(int enabled) {
+    GL_RT_SYNC(__func__);
     if (s_raster_ok) { flush_flat_batch(); flush_tex_batch(); }
     if ((enabled != 0) != s_world_depth) interp_reset_history();
     if (enabled && !mirror_depth()) memset(s_wide_depth_shown, 0xFF, sizeof s_wide_depth_shown);

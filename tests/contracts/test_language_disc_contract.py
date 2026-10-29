@@ -357,7 +357,8 @@ require(
     "    bool has_language_disc = false; std::string language_disc;" in settings_header
     and '            s.language_disc = toml::find<std::string>(d, "language_disc");\n            s.has_language_disc = true;'
     in settings_loader
-    and "        s.has_language_disc || s.has_skip_intro || s.has_fast_disc_reads ||\n        s.has_hud_scale) {" in settings_loader
+    and "        s.has_language_disc || s.has_skip_intro || s.has_fast_disc_reads ||\n        s.has_hud_scale) {"
+    in settings_loader
     and '            f << "language_disc = " << quoted(s.language_disc) << "\\n";' in settings_loader
     and "            if (letter == '\\\\' || letter == '\"') std::snprintf(escape, sizeof(escape), \"\\\\%c\", letter);\n"
     '            else if (code < 0x20 || code == 0x7F) std::snprintf(escape, sizeof(escape), "\\\\u%04X", code);'

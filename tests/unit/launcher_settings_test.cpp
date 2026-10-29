@@ -144,8 +144,9 @@ void needed() {
 void antialiasing_from_file(const fs::path& folder) {
     const Option& list = option("disruptor.multisampling");
     const std::pair<const char*, int> files[] = {
-        {"[disruptor]\nmultisampling = 8\nsample_shading = true\n", 7},
-        {"[disruptor]\nmultisampling = 16\n", 4},
+        {"[disruptor]\nmultisampling = 8\nsample_shading = true\n", 6},
+        {"[disruptor]\nmultisampling = 16\n", 3},
+        {"[disruptor]\nmultisampling = 16\nsample_shading = true\n", 6},
         {"[disruptor]\nsample_shading = true\n", 0},
         {"[disruptor]\nmultisampling = 5\nsample_shading = true\n", 0},
     };
@@ -236,19 +237,19 @@ void fog_shape_list() {
 
 void antialiasing_list() {
     const Option& list = option("disruptor.multisampling");
-    require(list.kind == Kind::choice && list.initial == 0 && list.choices.size() == 9 &&
+    require(list.kind == Kind::choice && list.initial == 0 && list.choices.size() == 7 &&
                 std::string_view(list.choices[0]) == "Off" && std::string_view(list.choices[1]) == "2x MSAA" &&
-                std::string_view(list.choices[4]) == "16x MSAA" && std::string_view(list.choices[5]) == "2x SSAA" &&
-                std::string_view(list.choices[8]) == "16x SSAA",
-            "anti-aliasing is one list: off, four counts of MSAA, the same four of SSAA");
+                std::string_view(list.choices[3]) == "8x MSAA" && std::string_view(list.choices[4]) == "2x SSAA" &&
+                std::string_view(list.choices[6]) == "8x SSAA",
+            "anti-aliasing is one list: off, three counts of MSAA, the same three of SSAA");
     Settings fresh;
     require(!list.saved(fresh) && list.get(fresh) == 0, "a file that names neither key is off");
-    const int samples[] = {0, 2, 4, 8, 16};
-    for (int level = 0; level <= 8; ++level) {
+    const int samples[] = {0, 2, 4, 8};
+    for (int level = 0; level <= 6; ++level) {
         Settings chosen;
         list.set(chosen, level);
         require(chosen.has_multisampling && chosen.has_sample_shading && list.saved(chosen) &&
-                    chosen.multisampling == samples[level > 4 ? level - 4 : level] && chosen.sample_shading == (level > 4) &&
+                    chosen.multisampling == samples[level > 3 ? level - 3 : level] && chosen.sample_shading == (level > 3) &&
                     list.get(chosen) == level,
                 "each level is written as the two saved keys and read back as itself");
     }
@@ -256,7 +257,7 @@ void antialiasing_list() {
     old.has_multisampling = old.has_sample_shading = true;
     old.multisampling = 8;
     old.sample_shading = true;
-    require(list.get(old) == 7, "a file of the two settings before the list reads as the level they make");
+    require(list.get(old) == 6, "a file of the two settings before the list reads as the level they make");
     old.sample_shading = false;
     require(list.get(old) == 3, "and without shading as that count of MSAA");
     old.multisampling = 0;
@@ -270,7 +271,7 @@ void antialiasing_list() {
     odd.multisampling = 3;
     require(list.get(odd) == 0, "a count the list does not have reads as off");
     list.set(odd, 42);
-    require(odd.multisampling == 16 && odd.sample_shading, "a level past the list is its last");
+    require(odd.multisampling == 8 && odd.sample_shading, "a level past the list is its last");
     list.set(odd, -3);
     require(odd.multisampling == 0 && !odd.sample_shading, "and one before it is off");
 }
@@ -347,8 +348,8 @@ void placements() {
     std::vector<std::string> enhancements;
     for (const auto& row : rows)
         if (row.page == Page::enhancements) enhancements.emplace_back(row.key);
-    require(enhancements.size() == 16 && enhancements.front() == "disruptor.frame_unlock" && rows[5].group &&
-                std::string_view(rows[5].key) == "disruptor.frame_unlock",
+    require(enhancements.size() == 16 && enhancements.front() == "disruptor.frame_unlock" && rows[8].group &&
+                std::string_view(rows[8].key) == "disruptor.frame_unlock",
             "Enhancements opens with its frame rate group, 60 FPS gameplay first");
 }
 

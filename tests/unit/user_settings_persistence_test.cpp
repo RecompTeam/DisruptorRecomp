@@ -130,6 +130,12 @@ int main() {
         written.occlusion_strength = 70;
         written.has_smooth_fade = true;
         written.smooth_fade = true;
+        written.has_dynamic_resolution = true;
+        written.dynamic_resolution = true;
+        written.has_render_thread = true;
+        written.render_thread = true;
+        written.has_resolution = true;
+        written.resolution = "1920x1200";
         written.has_draw_distance = true;
         written.draw_distance = 125;
         written.has_fog_shape = true;
@@ -238,6 +244,9 @@ int main() {
                     loaded.has_occlusion_reach && loaded.occlusion_reach == 120 &&
                     loaded.has_occlusion_strength && loaded.occlusion_strength == 70 &&
                     loaded.has_smooth_fade && loaded.smooth_fade &&
+                    loaded.has_dynamic_resolution && loaded.dynamic_resolution &&
+                    loaded.has_resolution && loaded.resolution == "1920x1200" &&
+                    loaded.has_render_thread && loaded.render_thread &&
                     loaded.has_draw_distance && loaded.draw_distance == 125 &&
                     loaded.has_fog_shape && loaded.fog_shape == 2 &&
                     loaded.has_multisampling && loaded.multisampling == 8 &&

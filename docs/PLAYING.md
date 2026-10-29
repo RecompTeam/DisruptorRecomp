@@ -345,8 +345,8 @@ The page is in five groups, in the launcher and in the game alike.
 - **Depth-sorted world** draws world polygons by their depth where the game's
   own order puts a far one over a near one.
 - **Anti-aliasing (MSAA / SSAA)** smooths edges.
-  - MSAA at 2x, 4x, 8x or 16x smooths the edges of polygons and of the HUD's
-    rectangles.
+  - MSAA at 2x, 4x or 8x smooths the edges of polygons and of the HUD's
+    rectangles. A saved 16x reads as 8x: at 8x internal resolution with in-between frames 16x took about 40% more of the graphics card's work, with no difference we could see.
   - SSAA at the same counts also smooths textures and cut-out outlines, the
     HUD's among them, and costs the graphics card that many times the shading.
     It needs OpenGL 4.0 or its sample shading extension. Without it the card

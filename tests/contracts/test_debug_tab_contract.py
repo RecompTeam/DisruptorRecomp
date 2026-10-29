@@ -68,7 +68,8 @@ require(
 }
 """
     in menu
-    and "void gl_renderer_set_mesh_view(int enabled) { s_mesh_view = enabled != 0; }\n" in renderer
+    and "void gl_renderer_set_mesh_view(int enabled) { GL_RT_SYNC(__func__); s_mesh_view = enabled != 0; }\n"
+    in renderer
     and "    s_ssao_view = view >= 1 && view <= 4 ? view : 0;\n" in renderer,
     "views 1 to 4 are layers of the occlusion pass and view 5 is the mesh, never two at once",
 )
@@ -131,6 +132,7 @@ require(
 
 require(
     """int gl_renderer_record_shown(const char *folder, int skip, int count, int width) {
+    GL_RT_SYNC(__func__);
     if (!folder || !folder[0] || strlen(folder) >= sizeof s_shown_dir || count <= 0 || count > 2000 || width < 160 ||
         width > 3840 || s_shown_left > 0) return 0;
 """
@@ -149,7 +151,7 @@ require(
 flush = body(renderer, "static void flush_tex_batch(void) {")
 require(
     "static int s_uv_view = 0;\n" in renderer
-    and "void gl_renderer_set_uv_view(int enabled) {\n    s_uv_view = enabled != 0;\n    ssao_mode();\n}\nint gl_renderer_uv_view(void) { return s_uv_view; }\n"
+    and "void gl_renderer_set_uv_view(int enabled) {\n    GL_RT_SYNC(__func__);\n    s_uv_view = enabled != 0;\n    ssao_mode();\n}\nint gl_renderer_uv_view(void) { return s_uv_view; }\n"
     in renderer
     and "    const int mode = s_uv_view ? 0 : s_ssao_view ? s_ssao_view + 1 : (s_ssao_on || s_ddgi_light || s_ddgi_shadows ||"
     in renderer

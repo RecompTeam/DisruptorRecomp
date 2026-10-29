@@ -1,0 +1,48 @@
+diff --git a/runtime/src/debug_server.c b/runtime/src/debug_server.c
+index 073ebd846862865163b389c7604af390ca282f8a..634526c407a53922ee595924d35735367c6f10f0 100644
+--- a/runtime/src/debug_server.c
++++ b/runtime/src/debug_server.c
+@@ -7148,6 +7148,24 @@
+ #endif
+ }
+ 
++static void handle_gpu_zones(int id, const char *json)
++{
++    double ms[2][GL_RENDERER_GPU_ZONES];
++    uint64_t frames[2], dropped;
++    if (!gl_renderer_gpu_zones(json_get_int(json, "reset", 0), ms, frames, &dropped)) {
++        send_err(id, "no gpu_zones samples (start with PSX_GL_ZONES=1 in a debug build)");
++        return;
++    }
++    char body[3072];
++    int at = snprintf(body, sizeof body, "{\"id\":%d,\"ok\":true,\"frames\":[%llu,%llu],\"dropped\":%llu,\"ms\":{", id,
++                      (unsigned long long)frames[0], (unsigned long long)frames[1], (unsigned long long)dropped);
++    for (int i = 0; i < GL_RENDERER_GPU_ZONES && at < (int)sizeof body; i++)
++        at += snprintf(body + at, sizeof body - (size_t)at, "%s\"%s\":[%.4f,%.4f]", i ? "," : "",
++                       gl_renderer_gpu_zone_name(i), ms[0][i], ms[1][i]);
++    if (at < (int)sizeof body) snprintf(body + at, sizeof body - (size_t)at, "}}");
++    send_fmt("%s", body);
++}
++
+ static void handle_frame_perf(int id, const char *json)
+ {
+     (void)json;
+@@ -7935,6 +7953,10 @@
+     if (h > DISP_RING_MAX_H) h = DISP_RING_MAX_H;
+     e->w = (uint16_t)w; e->h = (uint16_t)h;
+     e->depth24 = (uint8_t)(di.depth24 ? 1 : 0);
++    {   /* a readback every frame would hold the render thread back for good */
++        extern int gl_renderer_render_thread_active(void);
++        if (gl_renderer_render_thread_active()) return;
++    }
+     /* GPU-side truth when the GL raster pipeline is live (scissored pack of
+      * just the display rect + one small readback); CPU VRAM otherwise (the
+      * software backend's authoritative surface). Runs on the present thread,
+@@ -12519,6 +12541,7 @@
+     { "gl_present_ring",   handle_gl_present_ring },
+     { "present_ring",      handle_present_ring },
+     { "frame_perf",        handle_frame_perf },
++    { "gpu_zones",         handle_gpu_zones },
+     { "gl_ws_ablate",      handle_gl_ws_ablate },
+     { "gl_interp",         handle_gl_interp },
+     { "gl_wide_fast",      handle_gl_wide_fast },
