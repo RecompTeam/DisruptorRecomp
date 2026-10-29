@@ -166,7 +166,6 @@ void draw_sync_controls() {
         gl_renderer_render_thread_request(threaded ? 1 : 0);
         mark_render_thread(threaded);
     }
-    draw_status_badge("EXPERIMENTAL", ImVec4(1.0f, 0.73f, 0.25f, 1.0f));
 }
 
 }  // namespace

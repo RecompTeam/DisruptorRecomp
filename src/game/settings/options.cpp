@@ -216,7 +216,7 @@ constexpr Option option_list[] = {
         "disruptor.render_thread", "Render thread", 0,
         "Can make the game smoother on slower processors and integrated graphics\n"
         "Sends the drawing to the graphics card from a thread of its own\n"
-        "Has no effect with in-between frames or lighting on"),
+        "Has no effect with in-between frames on"),
     choice("video.vsync", "VSync", 2,
            "Synchronised: waits for the display, the picture never tears\n"
            "Immediate: does not wait\n"
