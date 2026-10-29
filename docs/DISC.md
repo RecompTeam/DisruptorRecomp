@@ -19,6 +19,12 @@ make an image compatible: cooked ISOs are rejected. Only one MODE2/2352 track
 at INDEX 01 `00:00:00` is supported. No loose executable extraction is needed
 for players using the launcher.
 
+A CHD that chdman made of this dump is taken too. The launcher checks the SHA-256
+of its decoded sectors against the BIN's above and installs the CHD as it is,
+with `disc.chd.verified` beside it: the SHA-256 of the CHD file and of its
+sectors. Later checks hash the file and compare it with the first of the two, and
+decode the sectors again only when it differs.
+
 For source builds, place the executable, `Disruptor (USA).cue`, and its referenced BIN in `input/`.
 The CUE's `FILE` entry must match the BIN filename. Verify the supplied files in
 PowerShell with:

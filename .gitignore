@@ -16,6 +16,7 @@
 *.iso
 *.img
 *.chd
+!/tests/fixtures/chd/*.chd
 *.mcd
 *.mcr
 

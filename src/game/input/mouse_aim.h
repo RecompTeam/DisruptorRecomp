@@ -1,6 +1,8 @@
 #ifndef DISRUPTOR_MOUSE_AIM_H
 #define DISRUPTOR_MOUSE_AIM_H
 
+#include <stdint.h>
+
 /*
  * Live, host-side control settings for Disruptor.  These functions are safe
  * to call from the runtime thread after SDL has been initialised.  Boolean
@@ -24,6 +26,11 @@ void disruptor_weapon_keys_state_loaded(void);
 /* Fifteen first keys, ten weapons then five psionic powers, then the fifteen second, SDL scancodes, 0 for none.
  * Null or short gives the number row and the keypad to the weapons, nothing to the powers. */
 void disruptor_pick_keys_set(const int *scancodes, int count);
+/* Every keybinds.ini field's second key under each scheme, codes as second_keys.h makes them. Null keeps the defaults. */
+void disruptor_second_keys_set(const int *modern, const int *classic, int count);
+/* Whether a field's second key is held: `keys` SDL's key state, `mouse` its buttons while the game holds the mouse. */
+int  disruptor_second_key_held(int field, const uint8_t *keys, int key_total, uint32_t mouse);
+int  disruptor_second_key_bound(int scancode);
 
 int  disruptor_high_precision_camera_enabled(void);
 void disruptor_high_precision_camera_set_enabled(int enabled);

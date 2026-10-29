@@ -14,3 +14,6 @@
 
 # A patch must reach every machine byte for byte: one framework file has CRLF lines.
 framework/patches/** -text
+
+# The CHD test images are chdman's bytes.
+*.chd binary

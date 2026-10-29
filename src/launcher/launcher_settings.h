@@ -2,6 +2,7 @@
 
 #include "game/settings/options.h"
 #include "game/settings/pick_keys.h"
+#include "game/settings/second_keys.h"
 
 #include <filesystem>
 #include <span>
@@ -77,6 +78,13 @@ public:
         return {settings_.weapon_keys, settings_.weapon_keys_second, settings_.psionic_keys, settings_.psionic_keys_second};
     }
     bool set_pick_keys(const settings::PickKeys& keys);
+    // Every keybinds.ini field's second key: the file's list, or the scheme's own where it has none.
+    settings::KeyLayout second_keys(bool modern) const {
+        return settings::second_keys_from(settings_.key_second, settings_.has_key_second, modern,
+                                          [](std::string_view) { return true; });
+    }
+    // The scheme's own leaves no list, so the second keys follow a change of scheme.
+    bool set_second_keys(const settings::KeyLayout& second, bool modern);
 
     std::filesystem::path saves_folder() const;
 

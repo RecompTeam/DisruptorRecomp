@@ -1,8 +1,8 @@
 #include "region_disc.h"
 
+#include "chd_image.h"
 #include "disc_import.h"
 #include "game/language/language_disc.h"
-#include "raw_image.h"
 
 #include <cstdint>
 #include <exception>
@@ -18,24 +18,22 @@ std::wstring wide(const std::string& ascii) { return {ascii.begin(), ascii.end()
 
 std::optional<RegionDisc> region_disc(const fs::path& selected) {
     try {
-        RawImage image(resolve_image(selected));
+        const auto image = open_image(resolve_image(selected));
         KnownDisc known{};
-        if (known_disc(image, known)) return RegionDisc{known.language, known.words};
+        if (known_disc(*image, known)) return RegionDisc{known.language, known.words};
     } catch (const std::exception&) {
     }
     return std::nullopt;
 }
 
 RegionDisc check_region_disc(const fs::path& home_data, const fs::path& selected) {
-    RawImage home(home_data), other(resolve_image(selected));
-    if (!other.sectors())
-        throw std::runtime_error("The image is not a raw disc image of 2352-byte sectors");
+    const auto home = open_image(home_data), other = open_image(resolve_image(selected));
     KnownDisc known{};
-    if (!known_disc(other, known))
+    if (!known_disc(*other, known))
         throw std::runtime_error("The image is not a Disruptor disc of another region that this build knows");
     LanguageDisc laid_out;
     std::string why;
-    if (!laid_out.build(home, other, why))
+    if (!laid_out.build(*home, *other, why))
         throw std::runtime_error(std::string("The ") + known.language + " disc does not fit the US disc: " + why);
     return {known.language, known.words};
 }

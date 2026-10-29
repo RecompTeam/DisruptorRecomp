@@ -1,6 +1,7 @@
 #include "psx_sdl.h"
 #include "psx_keybinds.h"
 #include "game/session/capsule.h"
+#include "game/settings/second_keys.h"
 
 #include <array>
 #include <cstring>
@@ -48,6 +49,12 @@ void disruptor_name_entry_keys_for_pad(const uint8_t *keys, uint8_t *kept, int c
 }
 SDL_Scancode psx_keybinds_get_button(int, int button) { return button == PSX_KB_L1 ? g_weapon_key : g_psionic_key; }
 int disruptor_key_bound(int scancode) { return g_bound[static_cast<size_t>(scancode)] ? 1 : 0; }
+int disruptor_second_key_held(int field, const uint8_t *keys, int key_total, uint32_t mouse) {
+    namespace keys_of = disruptor::settings;
+    const keys_of::SecondCodes codes =
+        keys_of::second_codes(keys_of::default_second_keys(g_modern != 0), [](std::string_view) { return 0; });
+    return keys_of::second_held(codes[static_cast<size_t>(field)], keys, static_cast<size_t>(key_total), mouse) ? 1 : 0;
+}
 }
 
 const Uint8 *SDL_GetKeyboardState(int *) { return g_keys.data(); }

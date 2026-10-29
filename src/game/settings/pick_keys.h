@@ -123,14 +123,16 @@ struct PickKeyChange {
     enum class Kind { assigned, cleared, unchanged, fixed, modifier, taken };
     Kind kind = Kind::unchanged;
     std::size_t field = 0;            // taken: the pad field with the key
+    std::size_t column = 0;           // and whether its first or its second key
     std::optional<PickSlot> swapped;  // assigned: the row that had the key
     std::string given;                // what that row has now
 };
 
-/* The Controls page's edit of one key. Delete clears it. A fixed key, a modifier or a key any pad field of `pad` has is
- * refused. A key another row has swaps, but a key an action has never moves: that row is left with none. */
+/* The Controls page's edit of one key. Delete clears it. A fixed key, a modifier or a key any pad field of `pad` or of
+ * `second` has is refused. A key another row has swaps, but a key an action has never moves: that row is left with none. */
 inline PickKeyChange change_pick_key(PickKeys& keys, std::size_t row, std::size_t which, std::string_view name,
-                                     const KeyLayout& pad, const std::vector<std::size_t>& shown_first = {}) {
+                                     const KeyLayout& pad, const std::vector<std::size_t>& shown_first = {},
+                                     const KeyLayout& second = {}) {
     PickKeyChange change;
     if (row >= pick_count || which > 1) return change;
     if (folded_key(name) == "delete") {
@@ -141,15 +143,17 @@ inline PickKeyChange change_pick_key(PickKeys& keys, std::size_t row, std::size_
     if (reserved_key(name)) change.kind = PickKeyChange::Kind::fixed;
     else if (modifier_key(name)) change.kind = PickKeyChange::Kind::modifier;
     if (change.kind != PickKeyChange::Kind::unchanged) return change;
-    if (const auto field = field_with(pad, name, shown_first)) {
-        change.kind = PickKeyChange::Kind::taken;
-        change.field = *field;
-        return change;
-    }
+    for (const std::size_t column : {0u, 1u})
+        if (const auto field = field_with(column ? second : pad, name, shown_first)) {
+            change.kind = PickKeyChange::Kind::taken;
+            change.field = *field;
+            change.column = column;
+            return change;
+        }
     const auto other = pick_with(keys, name);
     if (other && other->row == row && other->which == which) return change;
     std::string previous = keys[row][which];
-    if (field_with(pad, previous)) previous = "None";
+    if (field_with(pad, previous) || field_with(second, previous)) previous = "None";
     if (other) {
         keys[other->row][other->which] = previous;
         change.swapped = other;

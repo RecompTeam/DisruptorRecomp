@@ -17,6 +17,7 @@ bool prerequisite_on(const Option &option) {
     if (key == "disruptor.sun_lighting") return gl_renderer_ddgi_sun() != 0;
     if (key == "disruptor.vertical_look") return disruptor_mouse_vertical_look_enabled() != 0;
     if (key == "disruptor.number_keys") return disruptor_number_keys_enabled() != 0;
+    if (key == "disruptor.stick_layout") return disruptor::sticks::tuning().layout != disruptor::sticks::Layout::classic;
     if (key == "disruptor.achievements_popups") return disruptor::achievements::presentation().popups;
     if (key == "disruptor.separate_vertical_speed")
         return disruptor_mouse_vertical_follows_horizontal() == 0;

@@ -32,8 +32,14 @@ NOT_OFFERED = {
     "controller.p1_mode",
     "controller.p2_mode",
 }
-# Keys written together with a launcher row, or by the language row.
-COVERED = {"video.adaptive_view", "disruptor.language_disc", "disruptor.language_discs", "disruptor.sample_shading"}
+# Keys written together with a launcher row, by the language row, or by the Keys table's second column.
+COVERED = {
+    "video.adaptive_view",
+    "disruptor.language_disc",
+    "disruptor.language_discs",
+    "disruptor.sample_shading",
+    "disruptor.key_second",
+}
 SHOWN_SECTIONS = ("video", "audio", "disruptor", "controller")
 UTF8_PAGE = '<activeCodePage xmlns="http://schemas.microsoft.com/SMI/2019/WindowsSettings">UTF-8</activeCodePage>'
 
@@ -64,6 +70,7 @@ window = "".join(
 )
 session = read("src/launcher/session.cpp")
 region = read("src/launcher/region_disc.cpp")
+chd_image = read("src/launcher/chd_image.cpp")
 launcher_cmake = read("src/launcher/CMakeLists.txt")
 cmake = read("CMakeLists.txt")
 loader = read("psxrecomp/recompiler/src/config_loader.cpp")
@@ -74,7 +81,7 @@ ROW = r'\b(toggle|choice|slider)(?:<[^>]*>)?\(\s*"([\w.]+)", "([^"]+)", (-?\d+)'
 rows = re.findall(ROW, options)
 keys = [key for _, key, _, _ in rows]
 initial = {key: int(value) for _, key, _, value in rows}
-require(len(rows) == 61 and len(set(keys)) == 61, "the shared table must hold its 61 options, each key once")
+require(len(rows) == 65 and len(set(keys)) == 65, "the shared table must hold its 65 options, each key once")
 placed = re.findall(r'^    \{"([\w.]+)", Page::\w+(?:, (?:"[\w -]+"|nullptr)(?:, true)?)?\},$', table, re.MULTILINE)
 require(
     sorted(placed) == sorted(keys)
@@ -189,8 +196,15 @@ require(
     "the launcher must read and write settings.toml with the game's code, and never over a file it could not read",
 )
 require(
-    "    if (!known_disc(other, known))" in region and "    if (!laid_out.build(home, other, why))" in region,
+    "    if (!known_disc(*other, known))" in region and "    if (!laid_out.build(*home, *other, why))" in region,
     "a language disc must be checked with the game's own layout code",
+)
+require(
+    "${PSXRECOMP_ROOT}/runtime/src/iso_reader.cpp" in launcher_cmake
+    and "reader_(std::make_unique<PS1::ISOReader>())" in chd_image
+    and "!reader_->Open(name)" in chd_image
+    and "reader_->ReadRawSector(lba, raw)" in chd_image,
+    "a CHD must be checked and read with the game's own reader, so the launcher takes none the game would not mount",
 )
 worker = session[session.index("    worker_ = std::thread(") : session.index("void Session::finish(")]
 require(
@@ -203,13 +217,23 @@ require(
     "        begin(Task::import, outcome.image, outcome.launch);\n        return;" in window
     and "    if (step.disc == DiscAfter::cleared) verified_ = {};\n"
     "    else if (step.disc == DiscAfter::taken) verified_ = std::move(outcome.disc);\n"
-    "    if (step.save_language && !settings_.choose_language_disc(utf8(outcome.image))) step.status = settings_error();\n"
+    "    if (step.save_language && game_running())\n"
+    '        step.status = L"The game started meanwhile, so the language is not saved\\nChoose it again once the game closes";\n'
+    "    else if (step.save_language && !settings_.choose_language_disc(utf8(outcome.image))) step.status = settings_error();\n"
     "    if (!step.status.empty()) say(step.status);\n"
-    "    if (step.launch) launch();\n"
+    "    if (step.launch && !game_running()) launch();\n"
     in window
     and "        say(running_text(environment_overrides()));" in window
     and "complete()" not in window,
     "the window must do each thing a step names, and write no settings of its own before the game starts",
+)
+require(
+    "        static const disruptor::game_mark::Mark mark(folder);\n" in read("src/game/host.cpp")
+    and "    bool game_running() const { return game_ != nullptr || other_game_; }\n" in read("src/launcher/session.h")
+    and "void Session::poll() {\n    watch_other_game();\n" in window
+    and "    if (game_ || game_mark::marked(data_) == other_game_) return;\n" in window,
+    "a game marks the folder of the player's files, and a launcher opened after it holds the same things back as for "
+    "a game it started itself",
 )
 require(
     '    if (code == 0) {\n        show({});\n        activity_.add("Game closed");\n    } else {\n' in window
@@ -240,7 +264,7 @@ require(
 )
 require(
     "    settings_.load(); // the in-game menu writes the same file" in window
-    and "    bool editable() const { return !busy_ && !game_ && settings_.readable(); }" in window
+    and "    bool editable() const { return !busy_ && !game_running() && settings_.readable(); }" in window
     and "    if (!editable()) return;\n    saved(settings_.set(option, value));\n" in window,
     "the launcher must not write settings while the game runs and must read them again after it",
 )
@@ -324,9 +348,10 @@ require(
 )
 require(
     "    report.cpp\n" in launcher_cmake
-    and "execute_process(COMMAND git describe --tags --always --dirty\n" in launcher_cmake
-    and 'set_property(SOURCE report.cpp APPEND PROPERTY COMPILE_DEFINITIONS\n    "DISRUPTOR_BUILD_VERSION=\\"${DISRUPTOR_BUILD_VERSION}\\"")\n'
-    in launcher_cmake
+    and "execute_process(COMMAND git describe --tags --always --dirty\n" in read("cmake/build_version.cmake")
+    and "add_custom_target(disruptor-build-version\n" in launcher_cmake
+    and "add_dependencies(disruptor-launcher-model disruptor-build-version)\n" in launcher_cmake
+    and '#include "build_version.h"\n' in report
     and "    add_test(NAME disruptor_launcher_report COMMAND disruptor-launcher-report-test)\n" in launcher_cmake
     and "Press **Report a problem** on the launcher's **Troubleshooting** page." in playing
     and "your disc image, BIOS and saves are never included" in playing,
@@ -405,7 +430,7 @@ require(
     and 'own_or_shipped("mouse-aim.ini")' in read("src/game/input/mouse_aim.cpp")
     and 'in_user_folder("disruptor-mouse-aim.log")' in read("src/game/input/mouse_aim.cpp")
     and 'in_user_folder("disruptor-control-probe.log")' in read("src/game/input/control_probe.cpp")
-    and "return disruptor::user_folder::prepare(program);" in read("src/game/host.cpp"),
+    and "std::filesystem::path folder = disruptor::user_folder::prepare(program);" in read("src/game/host.cpp"),
     "in the source, each writable path of the game, from settings to the notes of a crash, is named in the user folder "
     "the game host gives before anything else runs, a configured memory card folder is moved there by the rule the "
     "user folder test checks, also from the binary's own folder (an AppImage's read-only mount), and exe_dir_from_argv "

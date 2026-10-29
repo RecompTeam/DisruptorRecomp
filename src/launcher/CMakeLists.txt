@@ -1,11 +1,52 @@
-add_library(disruptor-disc-import STATIC disc_import.cpp)
+# A CHD is read with the game's own reader and libchdr. Under MSVC the launcher builds its own libchdr on the static C
+# runtime, with the options the game's chd_dependency.cmake sets, which its headers must agree with.
+if(MSVC)
+    include(ExternalProject)
+    set(DISRUPTOR_LAUNCHER_CHDR "${CMAKE_BINARY_DIR}/launcher-chdr")
+    set(DISRUPTOR_LAUNCHER_CHDR_LIBRARIES "")
+    foreach(library chdr-static chdr-lzma miniz zstd)
+        list(APPEND DISRUPTOR_LAUNCHER_CHDR_LIBRARIES "${DISRUPTOR_LAUNCHER_CHDR}/lib/${library}.lib")
+    endforeach()
+    ExternalProject_Add(disruptor-launcher-chdr-build
+        SOURCE_DIR "${psx_libchdr_SOURCE_DIR}"
+        BINARY_DIR "${DISRUPTOR_LAUNCHER_CHDR}/build"
+        INSTALL_DIR "${DISRUPTOR_LAUNCHER_CHDR}"
+        CMAKE_ARGS
+            "-DCMAKE_BUILD_TYPE=$<CONFIG>"
+            "-DCMAKE_C_COMPILER=${CMAKE_C_COMPILER}"
+            "-DCMAKE_INSTALL_PREFIX=<INSTALL_DIR>"
+            -DCMAKE_INSTALL_LIBDIR=lib
+            -DCMAKE_POLICY_DEFAULT_CMP0091=NEW
+            "-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded$<$<CONFIG:Debug>:Debug>"
+            -DBUILD_SHARED_LIBS=OFF -DINSTALL_STATIC_LIBS=ON -DCHDR_WANT_TESTS=OFF
+            -DWITH_SYSTEM_ZLIB=OFF -DWITH_SYSTEM_ZSTD=OFF -DCHDR_WANT_RAW_DATA_SECTOR=ON -DCHDR_WANT_SUBCODE=ON
+            -DCHDR_VERIFY_BLOCK_CRC=ON -DCHDR_LOWRAM_TARGET=OFF
+        BUILD_BYPRODUCTS ${DISRUPTOR_LAUNCHER_CHDR_LIBRARIES})
+    list(POP_FRONT DISRUPTOR_LAUNCHER_CHDR_LIBRARIES chdr_library)
+    add_library(disruptor-launcher-chdr STATIC IMPORTED)
+    set_target_properties(disruptor-launcher-chdr PROPERTIES
+        IMPORTED_LOCATION "${chdr_library}"
+        INTERFACE_INCLUDE_DIRECTORIES "${psx_libchdr_SOURCE_DIR}/include"
+        INTERFACE_LINK_LIBRARIES "${DISRUPTOR_LAUNCHER_CHDR_LIBRARIES}")
+    add_dependencies(disruptor-launcher-chdr disruptor-launcher-chdr-build)
+    set(DISRUPTOR_LAUNCHER_CHDR_LIBRARY disruptor-launcher-chdr)
+else()
+    set(DISRUPTOR_LAUNCHER_CHDR_LIBRARY chdr-static)
+endif()
+add_library(disruptor-launcher-disc-reader STATIC
+    "${PSXRECOMP_ROOT}/runtime/src/iso_reader.cpp" "${PSXRECOMP_ROOT}/runtime/src/cue_sheet.cpp")
+target_compile_features(disruptor-launcher-disc-reader PUBLIC cxx_std_20)
+target_include_directories(disruptor-launcher-disc-reader PUBLIC "${PSXRECOMP_ROOT}/runtime/include")
+target_link_libraries(disruptor-launcher-disc-reader PRIVATE ${DISRUPTOR_LAUNCHER_CHDR_LIBRARY})
+
+add_library(disruptor-disc-import STATIC disc_import.cpp chd_image.cpp)
 target_compile_features(disruptor-disc-import PUBLIC cxx_std_20)
-target_include_directories(disruptor-disc-import PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}")
+target_include_directories(disruptor-disc-import PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}" "${PROJECT_SOURCE_DIR}/src")
 if(WIN32)
     target_compile_definitions(disruptor-disc-import PUBLIC
         UNICODE _UNICODE NOMINMAX WIN32_LEAN_AND_MEAN _WIN32_WINNT=0x0A00)
 endif()
-target_link_libraries(disruptor-disc-import PUBLIC $<$<BOOL:${WIN32}>:bcrypt>)
+target_link_libraries(disruptor-disc-import PUBLIC $<$<BOOL:${WIN32}>:bcrypt> PRIVATE disruptor-launcher-disc-reader)
 
 # settings.toml goes through the game's own reader and writer.
 add_library(disruptor-launcher-config STATIC
@@ -43,7 +84,8 @@ add_library(disruptor-launcher-model STATIC
     startup_log.cpp
     "${PROJECT_SOURCE_DIR}/src/game/language/language_disc.cpp"
     "${PROJECT_SOURCE_DIR}/src/game/settings/options.cpp"
-    "${PROJECT_SOURCE_DIR}/src/game/settings/user_folder.cpp")
+    "${PROJECT_SOURCE_DIR}/src/game/settings/user_folder.cpp"
+    "${PROJECT_SOURCE_DIR}/src/game/settings/game_mark.cpp")
 target_include_directories(disruptor-launcher-model PUBLIC "${PROJECT_SOURCE_DIR}/src")
 if(DISRUPTOR_DEV_TOOLS)
     target_compile_definitions(disruptor-launcher-model PUBLIC DISRUPTOR_DEV_TOOLS=1)
@@ -55,20 +97,15 @@ target_link_libraries(disruptor-launcher-model PUBLIC
 target_include_directories(disruptor-launcher-model PRIVATE "${PSXRECOMP_ROOT}/runtime/include")
 add_dependencies(disruptor-launcher-model psxrecomp_codegen_hash)
 
-# What a report calls this build: a release's own version, the tag it was cut from, or the commits after it.
-# A release is tagged only when it is published, after its build, and its Linux build has no git checkout.
-if(PSX_GAME_VERSION)
-    set(DISRUPTOR_BUILD_VERSION "v${PSX_GAME_VERSION}")
-else()
-    execute_process(COMMAND git describe --tags --always --dirty
-        WORKING_DIRECTORY "${PROJECT_SOURCE_DIR}" OUTPUT_VARIABLE DISRUPTOR_BUILD_VERSION
-        OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET RESULT_VARIABLE DISRUPTOR_DESCRIBE_FAILED)
-    if(DISRUPTOR_DESCRIBE_FAILED OR NOT DISRUPTOR_BUILD_VERSION)
-        set(DISRUPTOR_BUILD_VERSION "unknown")
-    endif()
-endif()
-set_property(SOURCE report.cpp APPEND PROPERTY COMPILE_DEFINITIONS
-    "DISRUPTOR_BUILD_VERSION=\"${DISRUPTOR_BUILD_VERSION}\"")
+# A release names its own version: it is tagged after its build, and its Linux build has no git checkout.
+# Anything else asks git at every build, so a new commit is named without a new configure.
+add_custom_target(disruptor-build-version
+    COMMAND "${CMAKE_COMMAND}" "-DRELEASE=${PSX_GAME_VERSION}" "-DSOURCE_DIR=${PROJECT_SOURCE_DIR}"
+        "-DOUTPUT=${CMAKE_CURRENT_BINARY_DIR}/version/build_version.h" -P "${PROJECT_SOURCE_DIR}/cmake/build_version.cmake"
+    BYPRODUCTS "${CMAKE_CURRENT_BINARY_DIR}/version/build_version.h"
+    VERBATIM)
+target_include_directories(disruptor-launcher-model PUBLIC "${CMAKE_CURRENT_BINARY_DIR}/version")
+add_dependencies(disruptor-launcher-model disruptor-build-version)
 
 # The window draws with ImGui through SDL3's renderer. Under MSVC the launcher has its own SDL3 with the window, its
 # events, dialogs and the Direct3D 11 and software renderers alone, built on the static C runtime with the rest.
@@ -169,8 +206,7 @@ set_target_properties(disruptor-launcher PROPERTIES
 target_link_libraries(disruptor-launcher PRIVATE
     disruptor-launcher-model disruptor-launcher-imgui ${DISRUPTOR_LAUNCHER_SDL_LIBRARY} $<$<BOOL:${WIN32}>:shell32 dwmapi>)
 target_include_directories(disruptor-launcher PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}")
-set_property(SOURCE view.cpp APPEND PROPERTY COMPILE_DEFINITIONS
-    "DISRUPTOR_BUILD_VERSION=\"${DISRUPTOR_BUILD_VERSION}\"")
+add_dependencies(disruptor-launcher disruptor-build-version)
 file(GLOB DISRUPTOR_LAUNCHER_ASSETS CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/assets/*")
 set(DISRUPTOR_LAUNCHER_EMBEDDED
     "${DISRUPTOR_LAUNCHER_ASSETS};${PROJECT_SOURCE_DIR}/docs/PLAYING.md;${PROJECT_SOURCE_DIR}/CHANGELOG.md")
@@ -200,9 +236,10 @@ endif()
 if(MSVC)
     target_sources(disruptor-launcher PRIVATE launcher.manifest)
     # Setup itself must open even before the VC++ redistributable is installed.
-    set_property(TARGET disruptor-disc-import disruptor-launcher-config
+    set_property(TARGET disruptor-launcher-disc-reader disruptor-disc-import disruptor-launcher-config
                         disruptor-launcher-model disruptor-launcher-imgui disruptor-launcher freetype
         PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
+    target_compile_options(disruptor-launcher-disc-reader PRIVATE /utf-8)
     target_compile_options(disruptor-disc-import PRIVATE /W4 /utf-8)
     target_compile_options(disruptor-launcher-config PRIVATE /utf-8)
     target_compile_options(disruptor-launcher-model PRIVATE /W4 /utf-8)
@@ -230,6 +267,13 @@ if(BUILD_TESTING)
     set_target_properties(disruptor-disc-import-test PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
     target_link_libraries(disruptor-disc-import-test PRIVATE disruptor-disc-import)
+    target_compile_definitions(disruptor-disc-import-test PRIVATE "DISRUPTOR_SOURCE_DIR=LR\"(${PROJECT_SOURCE_DIR})\"")
+    # A CHD is opened by its narrow name, so the test runs under the launcher's UTF-8 code page.
+    if(MSVC)
+        target_sources(disruptor-disc-import-test PRIVATE launcher.manifest)
+    elseif(MINGW)
+        target_sources(disruptor-disc-import-test PRIVATE launcher.rc)
+    endif()
     if(MSVC)
         set_property(TARGET disruptor-disc-import-test
             PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")

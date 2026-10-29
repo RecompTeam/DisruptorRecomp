@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cctype>
+#include <span>
 #include <string_view>
 
 namespace disruptor::settings {
@@ -48,6 +49,20 @@ inline const char* printed(const PadSource& source, PadFamily family) {
     if (family == PadFamily::playstation3 && name == "start") return "Start";
     if (family == PadFamily::playstation4 && name == "back") return "Share";
     return source.playstation;
+}
+
+struct StickUse {
+    const char* where;
+    const char* use;
+};
+// What the sticks and the D-pad do in play under a Stick layout, an index into its list.
+inline std::span<const StickUse> stick_uses(int layout) {
+    static constexpr StickUse classic[] = {{"Left stick or D-pad", "Move and turn"}};
+    static constexpr StickUse dual_analog[] = {{"Left stick", "Move and strafe"}, {"Right stick", "Turn"}, {"D-pad", "Move and turn"}};
+    static constexpr StickUse southpaw[] = {{"Right stick", "Move and strafe"}, {"Left stick", "Turn"}, {"D-pad", "Move and turn"}};
+    if (layout == 1) return dual_analog;
+    if (layout == 2) return southpaw;
+    return classic;
 }
 
 struct PadAction {

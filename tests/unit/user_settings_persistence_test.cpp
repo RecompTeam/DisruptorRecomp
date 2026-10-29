@@ -104,6 +104,14 @@ int main() {
         written.achievements = false;
         written.has_bass_cut = true;
         written.bass_cut = 2;
+        written.has_stick_layout = true;
+        written.stick_layout = 2;
+        written.has_look_speed = true;
+        written.look_speed = 175;
+        written.has_look_deadzone = true;
+        written.look_deadzone = 0;
+        written.has_invert_look = true;
+        written.invert_look = true;
         written.has_language_disc = true;
         written.language_disc = "C:\\Games \"old\"\\Disruptor (France).cue";
         written.has_language_discs = true;
@@ -218,6 +226,8 @@ int main() {
                     loaded.has_mute_in_background && loaded.mute_in_background &&
                     loaded.has_achievements && !loaded.achievements &&
                     loaded.has_bass_cut && loaded.bass_cut == 2 &&
+                    loaded.has_stick_layout && loaded.stick_layout == 2 && loaded.has_look_speed && loaded.look_speed == 175 &&
+                    loaded.has_look_deadzone && loaded.look_deadzone == 0 && loaded.has_invert_look && loaded.invert_look &&
                     loaded.has_language_disc && loaded.language_disc == "C:\\Games \"old\"\\Disruptor (France).cue" &&
                     loaded.has_language_discs && loaded.language_discs == written.language_discs &&
                     loaded.has_hud_scale && loaded.hud_scale == 70 &&

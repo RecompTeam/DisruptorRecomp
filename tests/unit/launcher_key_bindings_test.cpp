@@ -1,7 +1,10 @@
 #include "key_bindings.h"
 
 #include "game/settings/pick_keys.h"
+#include "game/settings/second_keys.h"
 
+#include <array>
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -286,6 +289,104 @@ void file_round_trip(const fs::path& folder) {
     fs::remove(file);
 }
 
+void second_keys_read() {
+    namespace keys = disruptor::settings;
+    const auto known = [](std::string_view name) { return name != "Nonsense"; };
+    const keys::KeyLayout modern = keys::default_second_keys(true), classic = keys::default_second_keys(false);
+    require(modern[*keys::key_field("cross")] == "Left click" && modern[*keys::key_field("square")] == "Right click" &&
+                modern[*keys::key_field("l1")] == "Mouse 4" && modern[*keys::key_field("r1")] == "Mouse 5" &&
+                modern[*keys::key_field("up")] == "None" && classic == layout_of(std::array<const char*, 24>{
+                    "None", "None", "None", "None", "None", "None", "None", "None", "None", "None", "None", "None",
+                    "None", "None", "None", "None", "None", "None", "None", "None", "None", "None", "None", "None"}),
+            "the modern scheme's second keys are its mouse buttons, the classic one has none");
+    require(keys::second_keys_from({}, false, true, known) == modern && keys::second_keys_from({}, false, false, known) == classic,
+            "without a list each scheme has its own");
+    std::vector<std::string> list(24, "None");
+    list[0] = "Up";
+    list[4] = "Nonsense";
+    list[6] = "right CLICK";
+    list.resize(10);
+    const keys::KeyLayout read = keys::second_keys_from(list, true, true, known);
+    require(read[0] == "Up" && read[4] == "None" && read[6] == "right CLICK" && read[8] == "None" && read[12] == "None" &&
+                keys::second_keys_from(list, true, false, known) == read,
+            "a written list stays whatever the scheme: an unknown name and a missing entry are no key");
+    require(keys::mouse_button("Mouse 5") == 5 && !keys::mouse_button("Middle click"),
+            "the middle button, which takes and frees the mouse, is no second key");
+    std::vector<std::string> sticks(24, "None");
+    sticks[*keys::key_field("ls_up")] = "Up";
+    sticks[*keys::key_field("l3")] = "Up";
+    const keys::KeyLayout without_sticks = keys::second_keys_from(sticks, true, true, known);
+    require(without_sticks[*keys::key_field("ls_up")] == "None" && without_sticks[*keys::key_field("l3")] == "Up",
+            "a stick's field, which no button presses, takes no second key");
+
+    const keys::SecondCodes codes = keys::second_codes(read, [](std::string_view name) { return name == "Up" ? 82 : 0; });
+    require(codes[0] == 82 && codes[6] == -3 && codes[4] == 0 && keys::any_mouse(codes) &&
+                !keys::any_mouse(keys::second_codes(classic, [](std::string_view) { return 0; })),
+            "a key becomes its scancode and a mouse button its number below zero");
+    std::array<std::uint8_t, 512> held{};
+    held[82] = 1;
+    require(keys::second_press(codes, held.data(), held.size(), 0) == (1u << 4) &&
+                keys::second_press(codes, nullptr, 0, 1u << 2) == (1u << 15) &&
+                keys::second_press(codes, nullptr, 0, 1u << 1) == 0 && keys::second_press(codes, held.data(), 10, 0) == 0,
+            "a held second key presses its field's button, the right button Square, the middle one nothing");
+}
+
+void second_column(const fs::path& folder) {
+    namespace keys = disruptor::settings;
+    KeyBindings bindings(folder / "second.ini");
+    bindings.use(layout_of(modern_keys));
+    bindings.use_second(keys::default_second_keys(true));
+    require(!bindings.assign("cross", 0, "Left click") && bindings.key("cross") == "Return" &&
+                bindings.key("cross", 1) == "Left click",
+            "a mouse button never becomes a first key");
+    auto swapped = bindings.assign("cross", 1, "Right click");
+    require(swapped && swapped->field == "square" && swapped->which == 1 && bindings.key("square", 1) == "Left click" &&
+                bindings.key("cross", 1) == "Right click",
+            "two second keys swap");
+    swapped = bindings.assign("up", 1, "Q");
+    require(swapped && swapped->field == "l1" && swapped->which == 0 && bindings.key("l1") == "None" &&
+                bindings.key("up", 1) == "Q",
+            "a first key moves to a second one, and its action takes the old second key");
+    swapped = bindings.assign("triangle", 1, "E");
+    require(swapped && swapped->field == "triangle" && swapped->which == 0 && bindings.key("triangle") == "None" &&
+                bindings.key("triangle", 1) == "E",
+            "an action's own first key may become its second");
+    swapped = bindings.assign("cross", 1, "W");
+    require(swapped && swapped->field == "up" && bindings.key("up") == "None" && bindings.key("cross", 1) == "W",
+            "a mouse button that would go first leaves that place with no key");
+    require(bindings.holder("Q") && bindings.holder("Q")->field == "up" && bindings.holder("Q")->which == 1 &&
+                !bindings.holder("None") && !bindings.holder("Right click"),
+            "the holder of a key is found among the second keys too");
+    bindings.release("Left click");
+    bindings.clear("up", 1);
+    require(bindings.key("square", 1) == "None" && bindings.key("up", 1) == "None" && bindings.key("down") == "S",
+            "release and clear reach the second keys");
+
+    const auto known = [](std::string_view name) { return name != "Nonsense"; };
+    const fs::path profile = folder / "keys-1.ini";
+    require(save_profile(profile, {bindings.layout(), keys::default_pick_keys(), bindings.second()}),
+            "a profile with second keys is written");
+    const auto loaded = load_profile(profile, known);
+    require(loaded && loaded->second && *loaded->second == bindings.second() && loaded->layout == bindings.layout(),
+            "and read back with them");
+    require(save_profile(profile, {bindings.layout(), keys::default_pick_keys(), std::nullopt}) &&
+                !load_profile(profile, known)->second,
+            "a profile saved without second keys has none, so loading it keeps those in use");
+    fs::remove(profile);
+
+    keys::PickKeys picks = keys::default_pick_keys();
+    bindings.assign("square", 1, "Z");
+    const keys::PickKeyChange change = keys::change_pick_key(picks, 2, 0, "Z", bindings.layout(), {}, bindings.second());
+    require(change.kind == keys::PickKeyChange::Kind::taken && keys::key_fields[change.field] == std::string_view("square") &&
+                change.column == 1,
+            "a weapon cannot take a key an action has as its second");
+    give_to_pick(bindings, picks, 2, 0, "square", 1);
+    require(picks[2][0] == "Z" && bindings.key("square", 1) == "3" && !bindings.holder("Z"),
+            "Take it gives a second key to the weapon, and the action takes the weapon's old key");
+    give_to_action(bindings, picks, "square", "Z", 1);
+    require(bindings.key("square", 1) == "Z" && picks[2][0] == "3", "and back to the action's second key");
+}
+
 } // namespace
 
 int main() {
@@ -299,6 +400,8 @@ int main() {
         failed_files(folder);
         file_round_trip(folder);
         taking_keys(folder);
+        second_keys_read();
+        second_column(folder);
         fs::remove_all(folder);
     } catch (const std::exception& error) {
         std::cerr << "FAIL: " << error.what() << '\n';

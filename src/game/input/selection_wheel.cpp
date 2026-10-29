@@ -223,16 +223,15 @@ extern "C" int disruptor_selection_wheel_frame(void) {
     const bool guarded = g_wheel.guarded && pad == g_wheel.guarded_output;
     uint16_t pressed = static_cast<uint16_t>(~(guarded ? g_wheel.guarded_pad : pad));
     g_wheel.guarded = false;
-    if (key_down(keys.data(), psx_keybinds_get_button(1, PSX_KB_L1))) pressed |= kWeapon;
-    if (key_down(keys.data(), psx_keybinds_get_button(1, PSX_KB_R1))) pressed |= kPsionic;
     const uint32_t mouse = mouse_buttons();
+    const uint32_t held_mouse = disruptor_mouse_captured() ? mouse : 0u;
+    for (const auto [field, selector] : {std::pair{PSX_KB_L1, kWeapon}, std::pair{PSX_KB_R1, kPsionic}})
+        if (key_down(keys.data(), psx_keybinds_get_button(1, field)) ||
+            disruptor_second_key_held(field, keys.data(), static_cast<int>(keys.size()), held_mouse))
+            pressed |= selector;
     if (disruptor_modern_controls_enabled()) {
         if (key_down(keys.data(), SDL_SCANCODE_UP) && !disruptor_key_bound(SDL_SCANCODE_UP)) pressed |= kUp;
         if (key_down(keys.data(), SDL_SCANCODE_DOWN) && !disruptor_key_bound(SDL_SCANCODE_DOWN)) pressed |= kDown;
-        if (disruptor_mouse_captured()) {
-            if (mouse & SDL_BUTTON_X1MASK) pressed |= kWeapon;
-            if (mouse & SDL_BUTTON_X2MASK) pressed |= kPsionic;
-        }
     }
     if (mouse & SDL_BUTTON_LMASK) pressed |= kConfirm;
     if (mouse & SDL_BUTTON_RMASK) pressed |= kCancel | kPsionicAttack;

@@ -47,6 +47,10 @@ int g_vertical_recenter_calls = 0;
 int g_netplay_active = 0;
 int g_vertical_input_allowed = 1;
 bool g_wheel_consuming = false;
+bool g_pad_open = false;
+std::array<std::int16_t, 4> g_sticks{};
+int g_game_sticks = -1;
+int g_deadzone = 12000;
 
 constexpr std::uint32_t kTestYawAddress = 0x80077624u;
 constexpr std::uint32_t kTestHeldWeaponAddress = 0x80071484u;
@@ -148,6 +152,14 @@ int disruptor_vertical_camera_input_allowed() {
 int psx_netplay_active() {
     return g_netplay_active;
 }
+
+int psx_input_pad_sticks(int slot, std::int16_t out[4]) {
+    if (slot != 0 || !g_pad_open) return 0;
+    std::copy(g_sticks.begin(), g_sticks.end(), out);
+    return 1;
+}
+void psx_input_set_game_sticks(int owned) { g_game_sticks = owned; }
+int psx_input_deadzone(void) { return g_deadzone; }
 
 int disruptor_selection_wheel_frame() { return g_wheel_consuming ? 1 : 0; }
 std::uint16_t disruptor_selection_wheel_filter_press(std::uint16_t press) { return press; }
@@ -257,6 +269,10 @@ void reset_state() {
     g_netplay_active = 0;
     g_vertical_input_allowed = 1;
     g_wheel_consuming = false;
+    g_pad_open = false;
+    g_sticks.fill(0);
+    g_game_sticks = -1;
+    g_deadzone = 12000;
     g_noted_at = 0;
     g_noted = 0;
     g_notes = 0;
@@ -1124,6 +1140,45 @@ void test_modern_mouse_buttons_require_capture() {
     expect_pressed(kPadR1, "mouse X2 maps to psionic selection");
 }
 
+void test_second_keys_in_either_scheme() {
+    reset_state();
+    const auto field = [](std::string_view name) { return static_cast<int>(*disruptor::settings::key_field(name)); };
+    disruptor::settings::SecondCodes modern{}, classic{};
+    modern[static_cast<size_t>(field("cross"))] = -3;
+    modern[static_cast<size_t>(field("square"))] = SDL_SCANCODE_Z;
+    classic[static_cast<size_t>(field("up"))] = SDL_SCANCODE_KP_8;
+    disruptor_second_keys_set(modern.data(), classic.data(), static_cast<int>(modern.size()));
+
+    g_keys[SDL_SCANCODE_KP_8] = 1;
+    apply_modern_controls(g_keys.data(), 0);
+    expect_pressed(kPadUp, "a classic second key presses its action");
+    expect(disruptor_second_key_bound(SDL_SCANCODE_KP_8) == 1 && disruptor_second_key_bound(SDL_SCANCODE_Z) == 0,
+           "a second key is bound under its own scheme only");
+
+    g_pad_buttons = 0xFFFFu;
+    g_keys.fill(0);
+    g_mouse.modern_controls_enabled = true;
+    apply_modern_controls(g_keys.data(), SDL_BUTTON_RMASK);
+    expect_released(kPadCross | kPadSquare, "a second mouse button waits for the game to hold the mouse");
+    g_mouse.captured = true;
+    apply_modern_controls(g_keys.data(), SDL_BUTTON_RMASK | SDL_BUTTON_LMASK | SDL_BUTTON_X1MASK);
+    expect_pressed(kPadCross, "the right button fires once it is fire's second key");
+    expect_released(kPadSquare | kPadL1, "and the buttons no action has press nothing");
+    g_pad_buttons = 0xFFFFu;
+    g_keys[SDL_SCANCODE_Z] = 1;
+    apply_modern_controls(g_keys.data(), 0);
+    expect_pressed(kPadSquare, "a modern second key presses its action");
+    expect(disruptor_second_key_held(field("cross"), g_keys.data(), static_cast<int>(g_keys.size()), SDL_BUTTON_RMASK) == 1 &&
+               disruptor_second_key_held(field("l1"), g_keys.data(), static_cast<int>(g_keys.size()), SDL_BUTTON_X1MASK) == 0,
+           "the wheels ask the same second keys");
+
+    disruptor_second_keys_set(nullptr, nullptr, 0);
+    g_pad_buttons = 0xFFFFu;
+    g_keys.fill(0);
+    apply_modern_controls(g_keys.data(), SDL_BUTTON_X1MASK);
+    expect_pressed(kPadL1, "no list brings the modern mouse buttons back");
+}
+
 void test_the_click_that_takes_the_mouse_is_no_shot() {
     reset_state();
     g_mouse.enabled = true;
@@ -1563,18 +1618,103 @@ void test_gameplay_gate_discards_new_vertical_motion() {
                  "scripted/non-gameplay gate discards new mouse Y");
 }
 
+void test_gamepad_sticks() {
+    reset_state();
+    g_mouse.configured = true;
+    g_pad_open = true;
+    psx_write_byte(kTestYawAddress, 100);
+    g_sticks = {-32767, 0, 32767, 0};
+    mouse_aim_frame();
+    expect_pressed(kPadL2, "with every mouse option off the left stick still strafes in Dual analog");
+    expect_released(kPadLeft, "and does not turn");
+    expect(psx_read_byte(kTestYawAddress) == 98 && g_noted_at == kTestYawAddress && g_noted == 98,
+           "a full push of the right stick turns two steps a VBlank, as the D-pad, and a recording is told");
+
+    g_pad_buttons = 0xFFFFu;
+    psx_write_byte(kSceneModeAddress, 4u);
+    mouse_aim_frame();
+    expect_pressed(kPadLeft, "in the pause the left stick is the D-pad");
+    expect_released(kPadL2, "and strafes nowhere");
+    expect(psx_read_byte(kTestYawAddress) == 98, "and the right stick turns nothing");
+    psx_write_byte(kSceneModeAddress, 0u);
+
+    g_pad_buttons = 0xFFFFu;
+    psx_write_byte(kMenuStateAddress, kMainMenu);
+    mouse_aim_frame();
+    expect_pressed(kPadLeft, "the main menu runs in scene mode 0, and there the left stick is the D-pad too");
+    expect(psx_read_byte(kTestYawAddress) == 98, "and nothing turns");
+    psx_write_byte(kMenuStateAddress, 1u);
+
+    g_pad_buttons = 0xFFFFu;
+    g_vertical_input_allowed = 0;
+    mouse_aim_frame();
+    expect_pressed(kPadLeft, "so it is wherever the player is not in live play, a cutscene or a death among them");
+    g_vertical_input_allowed = 1;
+
+    g_pad_buttons = 0xFFFFu;
+    g_mouse.sticks.layout = disruptor::sticks::Layout::classic;
+    mouse_aim_frame();
+    expect_pressed(kPadLeft, "Classic: the left stick turns as the D-pad does");
+    expect(psx_read_byte(kTestYawAddress) == 98, "and the right stick does nothing");
+    g_mouse.sticks.layout = disruptor::sticks::Layout::dual_analog;
+
+    g_pad_buttons = 0xFFFFu;
+    g_netplay_active = 1;
+    mouse_aim_frame();
+    expect(g_pad_buttons == 0xFFFFu && psx_read_byte(kTestYawAddress) == 98,
+           "a network game leaves the sticks to the runtime's map: the game presses and turns nothing");
+    g_netplay_active = 0;
+
+    g_pad_open = false;
+    mouse_aim_frame();
+    expect(g_pad_buttons == 0xFFFFu && psx_read_byte(kTestYawAddress) == 98, "without a gamepad nothing presses or turns");
+}
+
+void test_mouse_and_stick_turn_together() {
+    reset_state();
+    g_mouse.enabled = g_mouse.mouse_aim_enabled = g_mouse.captured = g_mouse.configured = true;
+    g_mouse.horizontal_sensitivity = 0.08;
+    g_mouse.log = std::tmpfile();
+    g_pad_open = true;
+    psx_write_byte(kTestYawAddress, 100);
+    g_sticks = {0, 0, 32767, 0};
+    g_relative_x = 25.0f;
+    g_notes = 0;
+    mouse_aim_frame();
+    expect(psx_read_byte(kTestYawAddress) == 96 && g_notes == 1, "the mouse and the stick turn in one write and one note");
+}
+
+void test_stick_turn_is_smooth() {
+    reset_state();
+    g_mouse.configured = g_mouse.high_precision_camera = true;
+    g_pad_open = true;
+    psx_write_byte(kTestYawAddress, 100);
+    g_sticks = {0, 0, 16383, 0};
+    const double rest = (16383 / 32767.0 - 0.2) / 0.8, step = -disruptor::sticks::kTurnUnits * rest * rest;
+    mouse_aim_frame();
+    mouse_aim_frame();
+    expect(psx_read_byte(kTestYawAddress) == 99, "two VBlanks of a half push make one step");
+    expect_close(g_camera_yaw_residual, step, "the picture turns between the steps without the mouse");
+}
+
 }  // namespace
 
 int main(int argc, char **argv) {
     if (argc == 2 && std::strcmp(argv[1], "--replay") == 0) {
-        const bool given_up = g_mouse.given_up;
+        const bool given_up = g_mouse.given_up, replaying = g_mouse.replaying;
         reset_state();
         g_mouse.given_up = given_up;
+        g_mouse.replaying = replaying;
+        g_pad_open = true;
+        g_sticks = {-32767, 0, 32767, 0};
+        psx_write_byte(kTestYawAddress, 100);
         g_mouse.enabled = g_mouse.mouse_aim_enabled = g_mouse.configured = true;
         g_mouse.log = std::tmpfile();
         mouse_aim_frame();
         mouse_aim_frame();
         expect(!g_mouse.captured && !g_relative_mode, "a capsule's replay leaves the mouse alone though its window has focus");
+        expect(replaying && g_pad_buttons == 0xFFFFu && psx_read_byte(kTestYawAddress) == 100,
+               "and the live sticks press and turn nothing: the recording moves");
         g_buttons = SDL_BUTTON_MMASK;
         mouse_aim_frame();
         expect(g_mouse.captured && g_relative_mode, "until the viewer clicks for it");
@@ -1584,6 +1724,7 @@ int main(int argc, char **argv) {
     } else {
         expect(g_registered_hook != nullptr,
                "normal launch installs a dormant hook for live settings");
+        expect(g_game_sticks == 1, "the game takes the sticks before the first sample: the runtime's map folds none");
         g_mouse.vertical_pitch = 4.0;
         disruptor_mouse_set_vertical_pitch(-12.5);
         expect(disruptor_mouse_vertical_pitch() == -12.5, "a replay puts the pitch back");
@@ -1608,6 +1749,7 @@ int main(int argc, char **argv) {
         test_weapon_selection_with_mouse_aim();
         test_wheel_consumes_camera_and_keyboard_input();
         test_modern_mouse_buttons_require_capture();
+        test_second_keys_in_either_scheme();
         test_the_click_that_takes_the_mouse_is_no_shot();
         test_rebound_weapon_keys();
     test_waiting_pick_forgotten();
@@ -1619,6 +1761,9 @@ int main(int argc, char **argv) {
         test_host_ui_escape_close_restores_capture();
         test_netplay_recenters_and_blocks_vertical_motion();
         test_gameplay_gate_discards_new_vertical_motion();
+        test_gamepad_sticks();
+        test_mouse_and_stick_turn_together();
+        test_stick_turn_is_smooth();
     }
 
     if (g_mouse.log) {

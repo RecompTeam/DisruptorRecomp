@@ -26,6 +26,8 @@
 #include "game/input/selection_wheel.h"
 #include "game/input/weapon_list.h"
 #include "game/input/psionic_change.h"
+#include "game/input/sticks.h"
+#include "game/settings/second_keys.h"
 #include "../../../psxrecomp/runtime/include/gpu.h"
 
 #include <algorithm>
@@ -55,6 +57,9 @@ extern "C" int psx_host_ui_game_input_captured(void);
 extern "C" int psx_netplay_active(void);
 extern "C" void disruptor_name_entry_keys_for_pad(const uint8_t *keys, uint8_t *kept, int count);
 extern "C" int disruptor_key_bound(int scancode);
+extern "C" int psx_input_pad_sticks(int slot, int16_t out[4]);
+extern "C" void psx_input_set_game_sticks(int owned);
+extern "C" int psx_input_deadzone(void);
 
 namespace {
 
@@ -65,6 +70,8 @@ constexpr uint32_t kWeaponOwnershipBase = 0x800770F4u;
 constexpr uint32_t kSceneModeAddress = 0x8007145Cu;
 constexpr uint32_t kGameModeAddress = 0x800716F0u;  // gp + 0x5A4: the menu's idle timer sets 3 for a demo (0x80020848)
 constexpr uint8_t kDemoMode = 3u;
+constexpr uint32_t kMenuStateAddress = 0x800715FCu;
+constexpr uint8_t kMainMenu = 0x18u;  // the main menu runs in scene mode 0 too
 /* Retail weapon IDs follow the HUD names: baton, 18mm Semi, 18mm Auto,
  * Phase Rifle, Phase Repeater, Lockon Cannon, AM Blaster, AM Cyclone,
  * Zodiac, Plasma Lance. The last slot is on 0, as in other PC shooters. */
@@ -116,6 +123,13 @@ constexpr uint16_t kPadCircle   = 1u << 13;
 constexpr uint16_t kPadCross    = 1u << 14;
 constexpr uint16_t kPadSquare   = 1u << 15;
 
+using disruptor::settings::SecondCodes;
+
+SecondCodes default_second_codes(bool modern) {
+    return disruptor::settings::second_codes(disruptor::settings::default_second_keys(modern),
+                                             [](std::string_view) { return 0; });
+}
+
 struct MouseAimState {
     bool enabled = false;
     bool mouse_aim_enabled = false;
@@ -133,12 +147,16 @@ struct MouseAimState {
     std::array<int, kPickKeys.size()> pick_keys = kPickKeys;
     std::array<bool, kPickKeys.size()> pick_was_down{};
     std::array<bool, kPickKeys.size()> pick_held{};  // down where it may pick: not an action's key
+    SecondCodes second_modern = default_second_codes(true);
+    SecondCodes second_classic = default_second_codes(false);
     int pending_weapon = -1;   // picked while the game was still changing weapons
     int pending_psionic = -1;  // and a power picked while it changed powers
     bool psionic_keys_use = false;
     int using_power = -1;      // a power's key asked to use it
     int use_waited = 0;
     int use_ready = 0;         // frames that power has been ready
+    disruptor::sticks::Tuning sticks;
+    bool replaying = false;  // a capsule's replay turns and moves as its recording did: the sticks leave it alone
     bool invert_horizontal = false;
     bool invert_vertical = false;
     double horizontal_sensitivity = kDefaultHorizontalSensitivity;
@@ -379,7 +397,7 @@ void set_capture(bool captured, const char *reason) {
     std::printf("disruptor: mouse %s (%s)\n", captured ? "captured" : "released", reason);
     if (captured) {
         set_title(g_mouse.modern_controls_enabled
-            ? "CAPTURED - LMB fire, RMB psionic; middle-click or Esc releases"
+            ? "CAPTURED - middle-click or Esc releases"
             : "CAPTURED - move to aim; middle-click or Esc releases");
     } else {
         set_title("released - left-click in the window to capture");
@@ -387,6 +405,10 @@ void set_capture(bool captured, const char *reason) {
 }
 
 bool key_bound(int scancode) { return disruptor_key_bound(scancode) != 0; }
+
+const SecondCodes &second_keys() {
+    return g_mouse.modern_controls_enabled ? g_mouse.second_modern : g_mouse.second_classic;
+}
 
 // A demo plays its own recording: the mouse and the number keys leave it alone, its pad buttons end it as before.
 bool demo_playing() { return psx_read_byte(kGameModeAddress) == kDemoMode; }
@@ -528,26 +550,21 @@ void apply_number_keys(const Uint8 *keys, bool focused) {
     press_psionic_use();
 }
 
-void apply_modern_controls(const Uint8 *keys, uint32_t mouse_buttons) {
-    if (!g_mouse.modern_controls_enabled) return;
-
+void apply_modern_controls(const Uint8 *keys, uint32_t mouse_buttons, uint16_t stick_press = 0) {
     std::array<Uint8, 512> pad_keys{};  /* SDL's scancode count, in 2 and 3 alike */
     if (keys) {
         disruptor_name_entry_keys_for_pad(keys, pad_keys.data(), static_cast<int>(pad_keys.size()));
         keys = pad_keys.data();
     }
 
-    /* keybinds.ini holds the keys. The arrows also walk forward and back where the player left them free. */
-    uint16_t press = 0;
-    for (const auto [arrow, button] : {std::pair{SDL_SCANCODE_UP, kPadUp}, std::pair{SDL_SCANCODE_DOWN, kPadDown}})
-        if (key_down(keys, arrow) && !key_bound(arrow) && !weapon_key(arrow)) press |= button;
-
-    if (g_mouse.captured) {
-        if ((mouse_buttons & SDL_BUTTON_LMASK) != 0)  press |= kPadCross;
-        if ((mouse_buttons & SDL_BUTTON_RMASK) != 0)  press |= kPadSquare;
-        if ((mouse_buttons & SDL_BUTTON_X1MASK) != 0) press |= kPadL1;
-        if ((mouse_buttons & SDL_BUTTON_X2MASK) != 0) press |= kPadR1;
-    }
+    /* keybinds.ini holds the first keys, settings.toml the second, which press in either scheme. A mouse button presses
+     * only while the game holds the mouse. */
+    uint16_t press = disruptor::settings::second_press(second_keys(), keys, pad_keys.size(), g_mouse.captured ? mouse_buttons : 0u) |
+                     stick_press;
+    /* The arrows also walk forward and back where the player left them free. */
+    if (g_mouse.modern_controls_enabled)
+        for (const auto [arrow, button] : {std::pair{SDL_SCANCODE_UP, kPadUp}, std::pair{SDL_SCANCODE_DOWN, kPadDown}})
+            if (key_down(keys, arrow) && !key_bound(arrow) && !weapon_key(arrow)) press |= button;
 
     press = disruptor_selection_wheel_filter_press(press);
     if (press != 0) {
@@ -561,12 +578,13 @@ double vertical_speed() {
     return g_mouse.vertical_follows_horizontal ? g_mouse.horizontal_sensitivity : g_mouse.vertical_sensitivity;
 }
 
-void apply_mouse_x(double raw_x) {
-    if (raw_x == 0.0) return;
+// The mouse's motion and the stick's heading units of a VBlank: one write and one note for both.
+void apply_turn(double raw_x, double stick) {
+    if (raw_x == 0.0 && stick == 0.0) return;
     raw_x = std::clamp(raw_x, -kMaximumMotionPerFrame, kMaximumMotionPerFrame);
     const double direction = g_mouse.invert_horizontal ? 1.0 : -1.0;
     g_mouse.fractional_yaw +=
-        raw_x * g_mouse.horizontal_sensitivity * direction;
+        raw_x * g_mouse.horizontal_sensitivity * direction + stick;
 
     /* Quantize to the nearest retail yaw byte and carry the signed error into
      * the next sample.  The previous toward-zero extraction could retain
@@ -592,20 +610,22 @@ void apply_mouse_x(double raw_x) {
     g_mouse.interval_yaw_steps += yaw_steps;
 }
 
+void apply_mouse_x(double raw_x) { apply_turn(raw_x, 0.0); }
+
 void reset_vertical_pitch(const char *event) {
     g_mouse.vertical_pitch = 0.0;
     disruptor_vertical_camera_recenter();
     if (event) log_event(event);
 }
 
-void apply_mouse_y(double raw_y) {
-    if (raw_y == 0.0) return;
+void apply_tilt(double raw_y, double stick) {
+    if (raw_y == 0.0 && stick == 0.0) return;
     raw_y = std::clamp(raw_y, -kMaximumMotionPerFrame,
                        kMaximumMotionPerFrame);
     const double direction = g_mouse.invert_vertical ? 1.0 : -1.0;
     const double old_pitch = g_mouse.vertical_pitch;
     const double new_pitch = std::clamp(
-        old_pitch + raw_y * vertical_speed() * direction,
+        old_pitch + raw_y * vertical_speed() * direction + stick,
         -kMaximumPitchUnits, kMaximumPitchUnits);
 
     g_mouse.interval_mouse_y += raw_y;
@@ -614,6 +634,8 @@ void apply_mouse_y(double raw_y) {
     g_mouse.vertical_pitch = new_pitch;
     disruptor_vertical_camera_set_requested_pitch(new_pitch);
 }
+
+void apply_mouse_y(double raw_y) { apply_tilt(raw_y, 0.0); }
 
 void log_u64_array(std::FILE *log, const char *key,
                    const uint64_t *values, size_t count) {
@@ -732,7 +754,11 @@ void mouse_aim_frame() {
         gpu_geometry_camera_yaw_residual_set(0.0);
         return;
     }
-    if (!g_mouse.enabled || !sdl_window) return;
+    // A network game's pads are the runtime's alone: there the map's stick sources press, as in Classic.
+    const bool netplay = psx_netplay_active() != 0;
+    int16_t axes[4] = {};
+    const bool pad = !netplay && !g_mouse.replaying && psx_input_pad_sticks(0, axes) != 0;
+    if ((!g_mouse.enabled && !pad) || !sdl_window) return;
     ++g_mouse.frame;
 #ifndef PSX_NO_DEBUG_TOOLS
     if (g_mouse.sweep_counts != 0.0)
@@ -741,7 +767,7 @@ void mouse_aim_frame() {
     load_configuration();
     open_log();
 
-    const bool vertical_netplay_blocked = psx_netplay_active() != 0;
+    const bool vertical_netplay_blocked = netplay;
     if (vertical_netplay_blocked && g_mouse.vertical_pitch != 0.0)
         reset_vertical_pitch("netplay-vertical-recenter");
 
@@ -777,7 +803,8 @@ void mouse_aim_frame() {
 
     const bool focused =
         (SDL_GetWindowFlags(sdl_window) & SDL_WINDOW_INPUT_FOCUS) != 0;
-    const bool usable = g_mouse.mouse_aim_enabled || g_mouse.vertical_look_enabled || g_mouse.modern_controls_enabled;
+    const bool usable = g_mouse.mouse_aim_enabled || g_mouse.vertical_look_enabled || g_mouse.modern_controls_enabled ||
+                        disruptor::settings::any_mouse(second_keys());
     const bool was_captured = g_mouse.captured;
     /* The mouse is held whenever the window has focus, with no click asked for. The player's key and clicks come before the
      * focus branches: on the frame focus goes or comes back those would take them. */
@@ -804,23 +831,30 @@ void mouse_aim_frame() {
     g_mouse.escape_was_down = escape_down;
     g_mouse.left_was_down = left_down;
 
-    apply_number_keys(keys, focused);
-    apply_modern_controls(keys, g_mouse.swallow_left ? buttons & ~static_cast<uint32_t>(SDL_BUTTON_LMASK) : buttons);
     // Scene mode 0 is play: the pause (4), the game's own lists and a demo leave the camera to the game, the motion is dropped.
     const bool demo = demo_playing();
+    const bool playing = psx_read_byte(kSceneModeAddress) == 0u && !demo;
+    const bool live = disruptor_vertical_camera_input_allowed() != 0;
+    const bool tilting = g_mouse.vertical_look_enabled && !vertical_netplay_blocked && live;
+    const bool steering = playing && live && psx_read_byte(kMenuStateAddress) != kMainMenu;
+    const disruptor::sticks::Reading stick =
+        pad ? disruptor::sticks::read(g_mouse.sticks, {axes[0], axes[1], axes[2], axes[3]}, psx_input_deadzone(), steering, tilting)
+            : disruptor::sticks::Reading{};
+    apply_number_keys(keys, focused);
+    apply_modern_controls(keys, g_mouse.swallow_left ? buttons & ~static_cast<uint32_t>(SDL_BUTTON_LMASK) : buttons, stick.press);
     if (demo) g_mouse.fractional_yaw = 0.0;
-    if (g_mouse.captured && psx_read_byte(kSceneModeAddress) == 0u && !demo &&
-        (g_mouse.mouse_aim_enabled || g_mouse.vertical_look_enabled)) {
+    double mouse_x = 0.0, mouse_y = 0.0;
+    if (g_mouse.captured && playing && (g_mouse.mouse_aim_enabled || g_mouse.vertical_look_enabled)) {
         /* SDL drains both relative axes in one call.  Keep this a single
          * coherent sample so enabling one axis can never consume the other. */
         const RelativeMotion motion = take_relative_motion();
-        if (g_mouse.mouse_aim_enabled) apply_mouse_x(motion.x);
-        if (g_mouse.vertical_look_enabled && !vertical_netplay_blocked &&
-            disruptor_vertical_camera_input_allowed())
-            apply_mouse_y(motion.y);
+        if (g_mouse.mouse_aim_enabled) mouse_x = motion.x;
+        if (tilting) mouse_y = motion.y;
     } else if (g_mouse.captured) {
         discard_relative_motion();
     }
+    apply_turn(mouse_x, stick.turn);
+    apply_tilt(mouse_y, stick.tilt);
 
     /* The retail yaw byte remains authoritative for gameplay.  The sub-byte
      * remainder is presentation metadata only, consumed by the independent
@@ -829,9 +863,9 @@ void mouse_aim_frame() {
     // The game draws a written yaw a frame later: handed over at once, a steady turn stepped back 3.2 and forward 5.1 pixels of 960 at every whole step.
     const double shown = g_mouse.shown_yaw_fraction;
     g_mouse.shown_yaw_fraction = g_mouse.fractional_yaw;
+    const bool stick_turns = pad && g_mouse.sticks.layout != disruptor::sticks::Layout::classic;
     gpu_geometry_camera_yaw_residual_set(
-        g_mouse.high_precision_camera && g_mouse.captured &&
-                g_mouse.mouse_aim_enabled
+        g_mouse.high_precision_camera && ((g_mouse.captured && g_mouse.mouse_aim_enabled) || stick_turns)
             ? shown
             : 0.0);
 
@@ -890,7 +924,8 @@ void mouse_aim_frame() {
 struct MouseAimRegistration {
     MouseAimRegistration() {
         // A replay's turns are the recording's: its run takes the mouse only when the viewer clicks for it.
-        g_mouse.given_up = std::getenv("PSX_DISRUPTOR_CAPSULE_REPLAY") != nullptr;
+        g_mouse.given_up = g_mouse.replaying = std::getenv("PSX_DISRUPTOR_CAPSULE_REPLAY") != nullptr;
+        psx_input_set_game_sticks(1);
         g_mouse.mouse_aim_enabled =
             env_enabled("PSX_DISRUPTOR_MOUSE_AIM");
         g_mouse.vertical_look_enabled =
@@ -990,6 +1025,25 @@ extern "C" void disruptor_pick_keys_set(const int *scancodes, int count) {
         g_mouse.pick_keys[i] = scancodes && i < static_cast<size_t>(count) ? scancodes[i] : kPickKeys[i];
     forget_picks();
     sample_weapon_keys(SDL_GetKeyboardState(nullptr), nullptr);
+}
+
+extern "C" void disruptor_second_keys_set(const int *modern, const int *classic, int count) {
+    g_mouse.second_modern = default_second_codes(true);
+    g_mouse.second_classic = default_second_codes(false);
+    for (size_t i = 0; i < g_mouse.second_modern.size() && i < static_cast<size_t>(std::max(count, 0)); ++i) {
+        if (modern) g_mouse.second_modern[i] = modern[i];
+        if (classic) g_mouse.second_classic[i] = classic[i];
+    }
+}
+
+extern "C" int disruptor_second_key_held(int field, const uint8_t *keys, int key_total, uint32_t mouse) {
+    if (field < 0 || static_cast<size_t>(field) >= second_keys().size()) return 0;
+    return disruptor::settings::second_held(second_keys()[static_cast<size_t>(field)], keys,
+                                            static_cast<size_t>(std::max(key_total, 0)), mouse) ? 1 : 0;
+}
+
+extern "C" int disruptor_second_key_bound(int scancode) {
+    return scancode > 0 && std::find(second_keys().begin(), second_keys().end(), scancode) != second_keys().end() ? 1 : 0;
 }
 
 extern "C" int disruptor_number_keys_enabled(void) {
@@ -1158,3 +1212,7 @@ extern "C" int disruptor_mouse_set_captured(int captured) {
     }
     return g_mouse.captured == next ? 1 : 0;
 }
+
+disruptor::sticks::Tuning disruptor::sticks::tuning() { return g_mouse.sticks; }
+
+void disruptor::sticks::tune(const Tuning &tuning) { g_mouse.sticks = tuning; }

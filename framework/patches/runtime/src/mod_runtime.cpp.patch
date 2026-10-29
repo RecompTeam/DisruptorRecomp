@@ -1,0 +1,52 @@
+diff --git a/runtime/src/mod_runtime.cpp b/runtime/src/mod_runtime.cpp
+index acfaf51d7a30fba962f2bd682971fbe399fafa49..426da47a68092f73227169e6e43b2e904075eec1 100644
+--- a/runtime/src/mod_runtime.cpp
++++ b/runtime/src/mod_runtime.cpp
+@@ -509,6 +509,21 @@
+     std::fprintf(stdout, "psxrecomp: cached derived disc %s\n", cached.string().c_str());
+     out = cached;
+     return true;
++}
++
++/* Only an enabled package matches the image's digest: hashing it for none cost 6 s a start on a CHD, 1.7 s on a BIN. */
++const std::string& disc_digest() {
++    RuntimeMods& s = state();
++    if (!s.disc_sha256.empty() || s.disc_path.empty()) return s.disc_sha256;
++    for (const auto& [id, versions] : s.manager.packages()) {
++        (void)versions;
++        const ModPackage* package = selected_package(id);
++        if (!package || !package_has_enabled_feature(*package)) continue;
++        std::string hash_error;
++        if (!sha256_file(s.disc_path, s.disc_sha256, &hash_error)) s.disc_sha256.clear();
++        break;
++    }
++    return s.disc_sha256;
+ }
+ 
+ #if defined(RECOMP_LAUNCHER)
+@@ -806,7 +821,7 @@
+     }
+     if (!state().disc_path.empty())
+         state().validation = state().manager.resolve(
+-            state().game_id, state().exe_sha256, state().disc_sha256);
++            state().game_id, state().exe_sha256, disc_digest());
+     else
+         state().validation = {};
+     state().error.clear();
+@@ -939,14 +954,11 @@
+     RuntimeMods& s = state();
+     if (!s.initialized) return true;
+     if (disc_path != s.disc_path) {
+-        std::string hash_error;
+-        std::string digest;
+-        if (!sha256_file(disc_path, digest, &hash_error)) digest.clear();
+         s.disc_path = disc_path;
+-        s.disc_sha256 = std::move(digest);
++        s.disc_sha256.clear();
+     }
+     ModResolution plan =
+-        s.manager.resolve(s.game_id, s.exe_sha256, s.disc_sha256);
++        s.manager.resolve(s.game_id, s.exe_sha256, disc_digest());
+     s.validation = plan;
+     if (!plan.ok) {
+         s.error.clear();

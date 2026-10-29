@@ -52,7 +52,11 @@ constexpr Placement placed[] = {
     {"disruptor.invert_vertical", Page::controls, nullptr, true},
     {"disruptor.separate_vertical_speed", Page::controls, nullptr, true},
     {"disruptor.vertical_sensitivity", Page::controls, nullptr, true},
-    {"controller.deadzone", Page::controls, "Gamepad"},
+    {"disruptor.stick_layout", Page::controls, "Gamepad"},
+    {"disruptor.look_speed", Page::controls, nullptr, true},
+    {"disruptor.look_deadzone", Page::controls, nullptr, true},
+    {"disruptor.invert_look", Page::controls, nullptr, true},
+    {"controller.deadzone", Page::controls},
     {"audio.master_volume", Page::audio},
     {"disruptor.bass_cut", Page::audio},
     {"disruptor.mute_in_background", Page::audio},
@@ -293,6 +297,14 @@ bool SettingsFile::set_pick_keys(const settings::PickKeys& keys) {
         settings.weapon_keys_second = pick_key_list(keys, 1, 0, weapon_count);
         settings.psionic_keys = pick_key_list(keys, 0, weapon_count, psionic_count);
         settings.psionic_keys_second = pick_key_list(keys, 1, weapon_count, psionic_count);
+    });
+}
+
+bool SettingsFile::set_second_keys(const settings::KeyLayout& second, bool modern) {
+    return change([&](Settings& settings) {
+        settings.has_key_second = second != settings::default_second_keys(modern);
+        settings.key_second = settings.has_key_second ? std::vector<std::string>(second.begin(), second.end())
+                                                      : std::vector<std::string>();
     });
 }
 // As the game decides: the settings' folder, else game.toml's, else the build folder itself.

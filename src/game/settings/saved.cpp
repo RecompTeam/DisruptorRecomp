@@ -48,6 +48,10 @@ void read_game_user_settings(const toml::value& doc, UserSettings& s) {
                 *entry.second = toml::find<std::vector<std::string>>(d, entry.first);
                 s.has_pick_keys = true;
             });
+        if (d.contains("key_second")) try_get([&]{
+            s.key_second = toml::find<std::vector<std::string>>(d, "key_second");
+            s.has_key_second = true;
+        });
         if (d.contains("horizontal_sensitivity")) try_get([&]{
             double n = 0.0;
             try {
@@ -155,6 +159,33 @@ void read_game_user_settings(const toml::value& doc, UserSettings& s) {
                     s.has_achievements_corner = true;
                 }
             }
+        });
+        if (d.contains("stick_layout")) try_get([&]{
+            const std::string layout = toml::find<std::string>(d, "stick_layout");
+            for (int index = 0; index < kDisruptorStickLayoutCount; ++index) {
+                if (layout == kDisruptorStickLayouts[index]) {
+                    s.stick_layout = index;
+                    s.has_stick_layout = true;
+                }
+            }
+        });
+        if (d.contains("look_speed")) try_get([&]{
+            const int percent = toml::find<int>(d, "look_speed");
+            if (percent >= kDisruptorLookSpeedLowest && percent <= kDisruptorLookSpeedHighest) {
+                s.look_speed = percent;
+                s.has_look_speed = true;
+            }
+        });
+        if (d.contains("look_deadzone")) try_get([&]{
+            const int percent = toml::find<int>(d, "look_deadzone");
+            if (percent >= 0 && percent <= kDisruptorLookDeadzoneHighest) {
+                s.look_deadzone = percent;
+                s.has_look_deadzone = true;
+            }
+        });
+        if (d.contains("invert_look")) try_get([&]{
+            s.invert_look = toml::find<bool>(d, "invert_look");
+            s.has_invert_look = true;
         });
         if (d.contains("bass_cut")) try_get([&]{
             const std::string cut = toml::find<std::string>(d, "bass_cut");
@@ -380,10 +411,11 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
     };
 
     if (s.has_mouse_aim || s.has_modern_controls || s.has_selection_wheels || s.has_number_keys || s.has_pick_keys ||
-        s.has_psionic_keys_use ||
+        s.has_key_second || s.has_psionic_keys_use ||
         s.has_horizontal_sensitivity || s.has_invert_horizontal ||
         s.has_vertical_look || s.has_vertical_sensitivity ||
         s.has_invert_vertical || s.has_separate_vertical_speed ||
+        s.has_stick_layout || s.has_look_speed || s.has_look_deadzone || s.has_invert_look ||
         s.has_probe_lighting || s.has_probe_strength || s.has_probe_bounce || s.has_probe_glow ||
         s.has_dynamic_shadows || s.has_shadow_strength || s.has_shadow_underneath ||
         s.has_shot_lights || s.has_shot_light_strength || s.has_sun_lighting || s.has_sun_direction ||
@@ -416,6 +448,11 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
                 f << "]\n";
             }
         }
+        if (s.has_key_second) {
+            f << "key_second = [";
+            for (size_t index = 0; index < s.key_second.size(); ++index) f << (index ? ", " : "") << quoted(s.key_second[index]);
+            f << "]\n";
+        }
         if (s.has_horizontal_sensitivity &&
             std::isfinite(s.horizontal_sensitivity) &&
             s.horizontal_sensitivity >= 0.005 &&
@@ -440,6 +477,14 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
             f << "invert_vertical = " << (s.invert_vertical ? "true" : "false") << "\n";
         if (s.has_separate_vertical_speed)
             f << "separate_vertical_speed = " << (s.separate_vertical_speed ? "true" : "false") << "\n";
+        if (s.has_stick_layout && s.stick_layout >= 0 && s.stick_layout < kDisruptorStickLayoutCount)
+            f << "stick_layout = " << quoted(kDisruptorStickLayouts[s.stick_layout]) << "\n";
+        if (s.has_look_speed && s.look_speed >= kDisruptorLookSpeedLowest && s.look_speed <= kDisruptorLookSpeedHighest)
+            f << "look_speed = " << s.look_speed << "\n";
+        if (s.has_look_deadzone && s.look_deadzone >= 0 && s.look_deadzone <= kDisruptorLookDeadzoneHighest)
+            f << "look_deadzone = " << s.look_deadzone << "\n";
+        if (s.has_invert_look)
+            f << "invert_look = " << (s.invert_look ? "true" : "false") << "\n";
         if (s.has_high_precision_camera)
             f << "high_precision_camera = " << (s.high_precision_camera ? "true" : "false") << "\n";
         if (s.has_geometry_correction)

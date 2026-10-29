@@ -115,6 +115,37 @@ void draw_controls_tab() {
     ImGui::SeparatorText("Gamepad");
     if (const char* pad = psx_input_pad_name(0)) ImGui::TextColored(ImVec4(0.35f, 0.90f, 0.45f, 1.0f), "Gamepad in use: %s", pad);
     else ImGui::TextDisabled("No gamepad in use");
+    disruptor::sticks::Tuning sticks = disruptor::sticks::tuning();
+    int layout = static_cast<int>(sticks.layout);
+    ImGui::SetNextItemWidth(260.0f);
+    if (option_list("disruptor.stick_layout", &layout)) {
+        sticks.layout = static_cast<disruptor::sticks::Layout>(layout);
+        disruptor::sticks::tune(sticks);
+        mark("disruptor.stick_layout", layout);
+    }
+    draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
+    ImGui::Indent();
+    const bool turning = applies("disruptor.look_speed") && applies("disruptor.look_deadzone");
+    if (!turning) ImGui::BeginDisabled();
+    ImGui::SetNextItemWidth(260.0f);
+    if (option_slider("disruptor.look_speed", &sticks.look_speed)) {
+        disruptor::sticks::tune(sticks);
+        mark("disruptor.look_speed", sticks.look_speed);
+    }
+    ImGui::SetNextItemWidth(260.0f);
+    if (option_slider("disruptor.look_deadzone", &sticks.look_deadzone)) {
+        disruptor::sticks::tune(sticks);
+        mark("disruptor.look_deadzone", sticks.look_deadzone);
+    }
+    if (!turning) ImGui::EndDisabled();
+    const bool tilting = applies("disruptor.invert_look");
+    if (!tilting) ImGui::BeginDisabled();
+    if (option_toggle("disruptor.invert_look", &sticks.invert_look)) {
+        disruptor::sticks::tune(sticks);
+        mark("disruptor.invert_look", sticks.invert_look ? 1 : 0);
+    }
+    if (!tilting) ImGui::EndDisabled();
+    ImGui::Unindent();
     int deadzone = static_cast<int>(std::lround(psx_input_deadzone() * 100.0 / 32767.0));
     ImGui::SetNextItemWidth(260.0f);
     if (option_slider("controller.deadzone", &deadzone)) set_deadzone_live(deadzone);
@@ -123,10 +154,12 @@ void draw_controls_tab() {
         if (ImGui::BeginTable("pad buttons", 3, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_RowBg)) {
             for (const char* title : {"Xbox", "PlayStation", "In the game"}) ImGui::TableSetupColumn(title);
             ImGui::TableHeadersRow();
-            ImGui::TableNextRow();
-            for (const char* text : {"Left stick or D-pad", "Left stick or D-pad", "Move and turn"}) {
-                ImGui::TableNextColumn();
-                ImGui::TextUnformatted(text);
+            for (const disruptor::settings::StickUse& stick : disruptor::settings::stick_uses(layout)) {
+                ImGui::TableNextRow();
+                for (const char* text : {stick.where, stick.where, stick.use}) {
+                    ImGui::TableNextColumn();
+                    ImGui::TextUnformatted(text);
+                }
             }
             for (const disruptor::settings::PadAction& action : disruptor::settings::pad_actions) {
                 const char* source = psx_input_pad_source(action.field);

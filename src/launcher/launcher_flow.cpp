@@ -71,7 +71,10 @@ Step after(const Outcome& outcome, bool cancelled) {
             step.status = L"Cancelled\nThe language is as it was";
         } else {
             step.save_language = true;
-            step.status = describe(*outcome.language) + L"\nThe image is used where it is, so keep it there";
+            // The banner shows the first line alone: the list of what the disc gives is too long for it.
+            const std::string& language = outcome.language->language;
+            step.status = std::wstring(language.begin(), language.end()) + L" disc chosen\n" + describe(*outcome.language) +
+                          L"\nThe image is used where it is, so keep it there";
         }
     } else if (failed) {
         // A cancel can leave an installation already committed: browsing again or reopening checks it afresh.
@@ -183,7 +186,7 @@ std::wstring quote(const std::wstring& argument) {
 }
 
 std::vector<std::string> game_arguments(const std::filesystem::path& program, const VerifiedDisc& disc) {
-    return {"--no-launcher", "--game", utf8(program / disc.profile->game_config), "--disc", utf8(disc.cue)};
+    return {"--no-launcher", "--game", utf8(program / disc.profile->game_config), "--disc", utf8(disc.mount)};
 }
 
 std::wstring value_text(const Option& option, int value) {

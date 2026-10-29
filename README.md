@@ -96,6 +96,7 @@
 | | Psionic keys use the power | Off | A power's key uses the power too, once it is in hand, which comes twice as fast |
 | | Weapon and psionic wheels | Off | **EXPERIMENTAL** Choose a weapon or a psionic on a wheel instead of the game's list |
 | | Vertical mouse look | Off | **EXPERIMENTAL** Looks up and down with the mouse |
+| | Stick layout | Dual analog | On a gamepad the left stick moves and strafes, the right stick turns |
 | **And more** | | | HUD size, VSync, mouse sensitivity, gamepad buttons, the bass of the sound, a skip of the intro and others, all in the [player's guide](docs/PLAYING.md#settings) |
 
 ---

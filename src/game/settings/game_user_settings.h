@@ -16,12 +16,18 @@ struct GameUserSettings {
     // Two keys a weapon and a psionic power as written, pick_keys.h reads them. Empty without the file's lists.
     bool has_pick_keys = false;
     std::vector<std::string> weapon_keys, weapon_keys_second, psionic_keys, psionic_keys_second;
+    // Every keybinds.ini field's second key as written, second_keys.h reads it. Without it the scheme's own.
+    bool has_key_second = false; std::vector<std::string> key_second;
     bool has_horizontal_sensitivity = false; double horizontal_sensitivity = 0.1;
     bool has_invert_horizontal = false; bool invert_horizontal = false;
     bool has_vertical_look = false; bool vertical_look = false;
     bool has_vertical_sensitivity = false; double vertical_sensitivity = 0.08;
     bool has_invert_vertical = false; bool invert_vertical = false;
     bool has_separate_vertical_speed = false; bool separate_vertical_speed = false;
+    bool has_stick_layout = false; int stick_layout = 1;     // an index into kDisruptorStickLayouts
+    bool has_look_speed = false; int look_speed = 100;       // percent of the D-pad's turn at a full push
+    bool has_look_deadzone = false; int look_deadzone = 20;  // percent of the stick's length
+    bool has_invert_look = false; bool invert_look = false;
     bool has_high_precision_camera = false; bool high_precision_camera = false;
     bool has_frame_unlock = false; bool frame_unlock = false;
     bool has_skip_intro = false; bool skip_intro = false;
@@ -84,6 +90,10 @@ inline constexpr const char* kDisruptorPopupCorners[] = {"top_right", "top_left"
 inline constexpr int kDisruptorPopupCornerCount = 4;
 inline constexpr const char* kDisruptorMovieFilters[] = {"original", "smooth"};
 inline constexpr int kDisruptorMovieFilterCount = 2;
+inline constexpr const char* kDisruptorStickLayouts[] = {"classic", "dual_analog", "southpaw"};
+inline constexpr int kDisruptorStickLayoutCount = 3;
+inline constexpr int kDisruptorLookSpeedLowest = 25, kDisruptorLookSpeedHighest = 300;
+inline constexpr int kDisruptorLookDeadzoneHighest = 50;
 
 }  // namespace PSXRecompV4
 

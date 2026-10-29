@@ -137,6 +137,11 @@ constexpr const char* needs_smooth_fade[] = {smooth_fade_key};
 constexpr const char* needs_number_keys[] = {number_keys_key};
 constexpr const char* popups_key = "disruptor.achievements_popups";
 constexpr const char* needs_popups[] = {popups_key};
+// Classic is the list's first, the one a needing row reads as off.
+constexpr const char* stick_layouts[] = {"Classic", "Dual analog", "Southpaw"};
+constexpr const char* layout_key = "disruptor.stick_layout";
+constexpr const char* needs_layout[] = {layout_key};
+constexpr const char* needs_layout_and_vertical[] = {layout_key, vertical_key};
 constexpr int default_sensitivity = 80;
 
 // A file from before the switch keeps the vertical speed it set where that differs from the horizontal one.
@@ -300,8 +305,29 @@ constexpr Option option_list[] = {
         "disruptor.invert_vertical", "Invert vertical mouse", 0,
         "Looks down when the mouse moves forward", needs_vertical),
     slider("controller.deadzone", "Stick dead zone", 37,
-           "How far the stick moves before it counts\nRaise it if you walk or turn without touching the stick", 0, 90,
+           "How far the moving stick goes before it counts\nRaise it if you walk or turn without touching the stick", 0, 90,
            Unit::percent, saved<&Settings::has_deadzone>, deadzone_percent, set_deadzone_percent),
+    choice("disruptor.stick_layout", "Stick layout", 1,
+           "Dual analog: The left stick moves and strafes\n"
+           "  The right stick turns\n"
+           "Classic: The left stick moves and turns, as the D-pad does\n"
+           "Southpaw: Dual analog with the sticks swapped\n"
+           "In menus the left stick works as the D-pad",
+           stick_layouts, saved<&Settings::has_stick_layout>, read<&Settings::stick_layout>,
+           write<&Settings::has_stick_layout, &Settings::stick_layout>),
+    slider("disruptor.look_speed", "Turning speed", 100,
+           "100%: A full push turns as fast as the D-pad", PSXRecompV4::kDisruptorLookSpeedLowest,
+           PSXRecompV4::kDisruptorLookSpeedHighest,
+           Unit::percent, saved<&Settings::has_look_speed>, read<&Settings::look_speed>,
+           write<&Settings::has_look_speed, &Settings::look_speed>, needs_layout),
+    slider("disruptor.look_deadzone", "Turning dead zone", 20,
+           "How far the turning stick moves before it counts", 0, PSXRecompV4::kDisruptorLookDeadzoneHighest,
+           Unit::percent, saved<&Settings::has_look_deadzone>, read<&Settings::look_deadzone>,
+           write<&Settings::has_look_deadzone, &Settings::look_deadzone>, needs_layout),
+    toggle<&Settings::has_invert_look, &Settings::invert_look>(
+        "disruptor.invert_look", "Invert vertical stick", 0,
+        "Looks down when the turning stick is pushed forward\nNeeds Vertical mouse look, under Mouse",
+        needs_layout_and_vertical),
 
     slider("audio.master_volume", "Master volume", 100,
            "", 0, 100, Unit::percent,

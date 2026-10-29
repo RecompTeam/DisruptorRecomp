@@ -26,7 +26,8 @@ using Progress = std::function<void(const std::wstring&, unsigned)>;
 struct VerifiedDisc {
     const DiscProfile* profile = nullptr;
     std::filesystem::path data;
-    std::filesystem::path cue;
+    // What the game is started with: the CUE, or the CHD itself.
+    std::filesystem::path mount;
     // Held while the game runs: no writes or deletion between verification and start.
     std::shared_ptr<void> read_lock;
 };

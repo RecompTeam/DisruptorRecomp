@@ -163,9 +163,9 @@ require(
 require(
     """    const double shown = g_mouse.shown_yaw_fraction;
     g_mouse.shown_yaw_fraction = g_mouse.fractional_yaw;
+    const bool stick_turns = pad && g_mouse.sticks.layout != disruptor::sticks::Layout::classic;
     gpu_geometry_camera_yaw_residual_set(
-        g_mouse.high_precision_camera && g_mouse.captured &&
-                g_mouse.mouse_aim_enabled
+        g_mouse.high_precision_camera && ((g_mouse.captured && g_mouse.mouse_aim_enabled) || stick_turns)
             ? shown
             : 0.0);
 """
@@ -173,7 +173,8 @@ require(
     and mouse.count("    g_mouse.fractional_yaw = 0.0;\n    g_mouse.shown_yaw_fraction = 0.0;\n") == 2
     and mouse.count("g_mouse.shown_yaw_fraction = 0.0;") == 2
     and "    double shown_yaw_fraction = 0.0;  // what fractional_yaw was a frame ago\n" in mouse,
-    "the renderer is handed the remainder of a frame ago, only while the mouse is captured and aims, and a reset clears both",
+    "the renderer is handed the remainder of a frame ago, only while the mouse is captured and aims or a stick turns, "
+    "and a reset clears both",
 )
 
 controls = between(menu, "void draw_controls_tab() {", "void apply_geometry_enabled(")

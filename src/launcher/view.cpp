@@ -1,6 +1,7 @@
 #include "view.h"
 
 #include "art.h"
+#include "build_version.h"
 #include "game_process.h"
 #include "platform.h"
 #include "icons.h"
@@ -32,10 +33,6 @@
 #include <string_view>
 #include <utility>
 #include <vector>
-
-#ifndef DISRUPTOR_BUILD_VERSION
-#define DISRUPTOR_BUILD_VERSION "unknown"
-#endif
 
 namespace fs = std::filesystem;
 
@@ -78,9 +75,10 @@ constexpr const char* page_notes[] = {
 };
 constexpr const char* page_icons[] = {icon::monitor, icon::sparkles, icon::gamepad_2, icon::volume_2, icon::flask_conical,
                                       icon::wrench, icon::trophy};
-constexpr std::array<SDL_DialogFileFilter, 3> image_filters = {{
-    {"Disc images (*.cue;*.bin;*.iso;*.img)", "cue;bin;iso;img"},
+constexpr std::array<SDL_DialogFileFilter, 4> image_filters = {{
+    {"Disc images (*.cue;*.bin;*.chd;*.iso;*.img)", "cue;bin;chd;iso;img"},
     {"CUE sheets (*.cue)", "cue"},
+    {"CHD images (*.chd)", "chd"},
     {"Raw images (*.bin;*.iso;*.img)", "bin;iso;img"},
 }};
 constexpr std::array<SDL_DialogFileFilter, 1> sound_filters = {{{"WAV sounds (*.wav)", "wav"}}};
@@ -1487,6 +1485,10 @@ void View::settings() {
             listening_.clear();
             stop_pad_capture();
         }
+        // Down from a tab with no control right under it went to the side bar's frame, nearer by ImGui's measure.
+        if (segment_focused_ && (ImGui::IsKeyPressed(ImGuiKey_DownArrow) || ImGui::IsKeyPressed(ImGuiKey_GamepadDpadDown) ||
+                                 ImGui::IsKeyPressed(ImGuiKey_GamepadLStickDown)))
+            enter_rows_ = true;
         ImGui::Spacing();
     }
     ImGui::PushStyleColor(ImGuiCol_ChildBg, rgb(kSurface));
@@ -1508,6 +1510,7 @@ void View::settings() {
                       ImGuiWindowFlags_AlwaysVerticalScrollbar);
     ImGuiWindow* const rows_window = ImGui::GetCurrentWindow();
     if (hidden_bar) ImGui::PopStyleColor(3);
+    if (std::exchange(enter_rows_, false)) ImGui::SetKeyboardFocusHere();
     if (page_ == static_cast<int>(Page::achievements)) achievements_account();
     if (page_rows_shown(static_cast<Page>(page_))) rows();
     else coming_soon();
@@ -1817,6 +1820,14 @@ void View::group_heading(const char* name, bool first) {
 namespace {
 
 constexpr std::string_view kPickField = "pick.";
+constexpr std::string_view kSecondField = "second.";
+
+// What the page listens on for a field's first or second key, and back.
+std::string slot_name(const KeySlot& slot) { return (slot.which ? std::string(kSecondField) : std::string()) + slot.field; }
+KeySlot slot_of(std::string_view name) {
+    if (name.starts_with(kSecondField)) return {std::string(name.substr(kSecondField.size())), 1};
+    return {std::string(name), 0};
+}
 
 std::string pick_field(std::size_t row, std::size_t which) {
     return std::string(kPickField) + std::to_string(row) + "." + std::to_string(which);
@@ -1852,6 +1863,11 @@ std::string field_label(std::size_t field) {
     return std::string(name);
 }
 
+std::string field_label(std::string_view field) {
+    const auto index = settings::key_field(field);
+    return index ? field_label(*index) : std::string(field);
+}
+
 bool shown_on_page(std::size_t field) {
     const std::vector<std::size_t> fields = shown_fields();
     return std::find(fields.begin(), fields.end(), field) != fields.end();
@@ -1865,9 +1881,14 @@ settings::PickKeys View::pick_keys() const {
     });
 }
 
-void View::pick_table(const char* heading, std::size_t first, std::size_t count, const KeyLayout& pad) {
+KeyBindings View::played_keys() const {
+    KeyBindings played = session_.keys();
+    played.use(settings::layout_for_scheme(played.layout(), session_.settings().shown(*find_option("disruptor.modern_controls")) == 1));
+    return played;
+}
+
+void View::pick_table(const char* heading, std::size_t first, std::size_t count, const KeyBindings& held) {
     const settings::PickKeys keys = pick_keys();
-    const std::vector<std::size_t> shown = shown_fields();
     ImGui::Dummy(ImVec2(0.0f, 4.0f * scale_));
     ImGui::PushFont(bold_, kFontSize);
     ImGui::TextUnformatted(heading);
@@ -1915,7 +1936,7 @@ void View::pick_table(const char* heading, std::size_t first, std::size_t count,
                 const std::string field = pick_field(row, which);
                 const std::string& name = keys[row][which];
                 const bool waiting = listening_ == field;
-                const auto owner = waiting ? std::nullopt : settings::field_with(pad, name, shown);
+                const auto owner = waiting ? std::nullopt : held.holder(name);
                 const std::string label = waiting ? std::string("Press a key") : settings::no_key(name) ? std::string("-") : name;
                 ImGui::PushID(field.c_str());
                 if (waiting) ImGui::PushStyleColor(ImGuiCol_Border, rgb(kRed));
@@ -1930,7 +1951,7 @@ void View::pick_table(const char* heading, std::size_t first, std::size_t count,
                 if (owner) ImGui::PopStyleColor();
                 if (waiting) ImGui::PopStyleColor();
                 hand_when_hovered();
-                if (owner) tooltip((name + " is on " + field_label(*owner) + "\nOnly that action takes it").c_str());
+                if (owner) tooltip((name + " is on " + field_label(owner->field) + "\nOnly that action takes it").c_str());
                 ImGui::PopID();
             }
         }
@@ -1941,12 +1962,11 @@ void View::pick_table(const char* heading, std::size_t first, std::size_t count,
 }
 
 void View::pick_section() {
-    const bool modern = session_.settings().shown(*find_option("disruptor.modern_controls")) == 1;
-    const KeyLayout pad = settings::layout_for_scheme(session_.keys().layout(), modern);
+    const KeyBindings held = played_keys();
     ImGui::BeginDisabled(!session_.editable());
     ImGui::Indent(14.0f * scale_);
-    pick_table("Weapons", 0, settings::weapon_count, pad);
-    pick_table("Psionics", settings::weapon_count, settings::psionic_count, pad);
+    pick_table("Weapons", 0, settings::weapon_count, held);
+    pick_table("Psionics", settings::weapon_count, settings::psionic_count, held);
     ImGui::PushFont(nullptr, kSmallSize);
     if (!pick_note_.empty()) {
         ImGui::PushStyleColor(ImGuiCol_Text, rgb(kAmber));
@@ -1972,12 +1992,10 @@ void View::pick_section() {
 bool View::offer_holds() const {
     const SettingsFile& file = session_.settings();
     if (!offer_ || file.shown(*find_option("disruptor.number_keys")) != 1) return false;
-    const bool modern = file.shown(*find_option("disruptor.modern_controls")) == 1;
-    const auto field = settings::field_with(settings::layout_for_scheme(session_.keys().layout(), modern), offer_->key,
-                                            shown_fields());
-    if (!offer_->owner.starts_with(kPickField)) return field && settings::key_fields[*field] == offer_->owner;
+    const auto holder = played_keys().holder(offer_->key);
+    if (!offer_->owner.starts_with(kPickField)) return holder && slot_name(*holder) == offer_->owner;
     const auto pick = settings::pick_with(pick_keys(), offer_->key);
-    return !field && pick && pick_field(pick->row, pick->which) == offer_->owner;
+    return !holder && pick && pick_field(pick->row, pick->which) == offer_->owner;
 }
 
 void View::take_offer() {
@@ -1987,14 +2005,18 @@ void View::take_offer() {
     pick_note_.clear();
     if (!holds) return;
     KeyBindings& keys = session_.keys();
-    const bool modern = session_.settings().shown(*find_option("disruptor.modern_controls")) == 1;
-    const KeyLayout before = settings::layout_for_scheme(keys.layout(), modern);
+    const KeyLayout before = played_keys().layout(), before_second = keys.second();
     keys.use(before);
     settings::PickKeys picks = pick_keys();
     std::size_t row = 0, which = 0;
-    if (parse_pick_field(offer.target, row, which)) give_to_pick(keys, picks, row, which, offer.owner);
-    else give_to_action(keys, picks, offer.target, offer.key);
-    session_.store_keys(before, picks);
+    if (parse_pick_field(offer.target, row, which)) {
+        const KeySlot owner = slot_of(offer.owner);
+        give_to_pick(keys, picks, row, which, owner.field, owner.which);
+    } else {
+        const KeySlot target = slot_of(offer.target);
+        give_to_action(keys, picks, target.field, offer.key, target.which);
+    }
+    session_.store_keys(before, picks, before_second);
 }
 
 void View::profiles() {
@@ -2012,8 +2034,8 @@ void View::profiles() {
             else store_profile(slot);
         }
         hand_when_hovered();
-        tooltip(there ? "Keeps every key of this page in place of the profile's\nThe scheme and the mouse stay out"
-                      : "Keeps every key of this page, the weapons' and the powers' too\nThe scheme and the mouse stay out");
+        tooltip(there ? "Keeps every key of this page in place of the profile's\nThe scheme and the Mouse tab stay out"
+                      : "Keeps every key of this page, the weapons' and the powers' too\nThe scheme and the Mouse tab stay out");
         ImGui::SameLine(0.0f, 6.0f * scale_);
         ImGui::BeginDisabled(!there);
         if (ImGui::Button(("Load " + number).c_str())) {
@@ -2022,9 +2044,10 @@ void View::profiles() {
             });
             bool used = false;
             if (profile) {
-                const KeyLayout undo = session_.keys().layout();
+                const KeyLayout undo = session_.keys().layout(), undo_second = session_.keys().second();
                 session_.keys().use(profile->layout);
-                used = session_.store_keys(undo, profile->picks);
+                if (profile->second) session_.keys().use_second(*profile->second);
+                used = session_.store_keys(undo, profile->picks, undo_second);
             }
             key_note_good_ = used;
             key_note_ = "Profile " + number + (used ? " is in use" : profile ? " could not be used" : " could not be read");
@@ -2038,8 +2061,7 @@ void View::profiles() {
 
 void View::store_profile(int slot) {
     const std::string number = std::to_string(slot);
-    const bool modern = session_.settings().shown(*find_option("disruptor.modern_controls")) == 1;
-    const KeyProfile profile{settings::layout_for_scheme(session_.keys().layout(), modern), pick_keys()};
+    const KeyProfile profile{played_keys().layout(), pick_keys(), session_.keys().second()};
     const bool saved = save_profile(session_.data() / ("keys-" + number + ".ini"), profile);
     key_note_ = saved ? "The keys are in profile " + number : "Profile " + number + " could not be written";
     key_note_good_ = saved;
@@ -2083,6 +2105,7 @@ void View::replace_popup() {
         switch (what) {
         case Replacing::keys:
             session_.keys().use(settings::layout_of(modern ? settings::modern_keys : settings::classic_keys));
+            session_.keys().use_second(settings::default_second_keys(modern));
             session_.save_keys();
             key_note_.clear();
             break;
@@ -2115,16 +2138,16 @@ void View::take_pick_key(const std::string& field, const std::string& name) {
     using Kind = settings::PickKeyChange::Kind;
     std::size_t row = 0, which = 0;
     if (!parse_pick_field(field, row, which)) return;
-    const bool modern = session_.settings().shown(*find_option("disruptor.modern_controls")) == 1;
-    const KeyLayout pad = settings::layout_for_scheme(session_.keys().layout(), modern);
+    const KeyBindings held = played_keys();
     settings::PickKeys keys = pick_keys();
-    const settings::PickKeyChange change = settings::change_pick_key(keys, row, which, name, pad, shown_fields());
+    const settings::PickKeyChange change =
+        settings::change_pick_key(keys, row, which, name, held.layout(), shown_fields(), held.second());
     switch (change.kind) {
     case Kind::fixed: pick_note_ = name + " is one of the fixed keys under Keys"; return;
     case Kind::modifier: pick_note_ = "Shift, Ctrl, Alt and the system key pick nothing"; return;
     case Kind::taken:
         pick_note_ = name + " is on " + field_label(change.field);
-        offer_ = Offer{name, field, settings::key_fields[change.field]};
+        offer_ = Offer{name, field, slot_name({settings::key_fields[change.field], change.column})};
         return;
     case Kind::unchanged: return;
     case Kind::cleared:
@@ -2152,34 +2175,61 @@ void View::key_table() {
         keys_read_ = false;
     }
     if (!keys_read_) {
-        session_.keys().load();
+        session_.load_keys();
         keys_read_ = true;
     }
-    // What the game will play with: a scheme's own layout follows the scheme saved beside it.
-    const KeyLayout shown = settings::layout_for_scheme(session_.keys().layout(), modern);
+    const KeyBindings played = played_keys();
     group_heading("Keys", false);
     ImGui::BeginDisabled(!editable);
     const auto actions = key_actions();
     float label_width = 0.0f;
     for (const KeyAction& action : actions) label_width = std::max(label_width, ImGui::CalcTextSize(action.label).x);
-    const float small = kSmallSize;
-    const float mouse_width = modern ? body_->CalcTextSizeA(small, FLT_MAX, 0.0f, "Right click").x + 8.0f * scale_ : 0.0f;
-    const int columns = modern ? 3 : 2;
-    const float padding = 2.0f * ImGui::GetStyle().FramePadding.x + 10.0f * scale_;
-    float key_width = std::max(110.0f * scale_, ImGui::CalcTextSize("Press a key").x + padding);
-    for (const std::string& name : shown) key_width = std::max(key_width, ImGui::CalcTextSize(name.c_str()).x + padding);
+    constexpr int columns = 3;
+    // As wide as the Weapons tab's keys, so both halves stand side by side in a 1060 px window.
+    const float padding = 2.0f * ImGui::GetStyle().FramePadding.x + 4.0f * scale_;
+    float key_width = ImGui::CalcTextSize("Press a key").x + padding;
+    for (const KeyLayout* column : {&played.layout(), &played.second()})
+        for (const std::string& name : *column) key_width = std::max(key_width, ImGui::CalcTextSize(name.c_str()).x + padding);
+    for (const auto& [name, number] : settings::mouse_buttons) key_width = std::max(key_width, ImGui::CalcTextSize(name).x + padding);
     constexpr ImGuiTableFlags flags = ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_PadOuterX;
     // The two halves stand side by side where they fit, one under the other in a narrow window.
-    const float half_width = label_width + 12.0f * scale_ + key_width + mouse_width +
-                             2.0f * ImGui::GetStyle().CellPadding.x * static_cast<float>(columns);
-    const bool side_by_side = 2.0f * half_width + 28.0f * scale_ + 2.0f * ImGui::GetStyle().CellPadding.x <= ImGui::GetContentRegionAvail().x;
+    const ImVec2 cells(4.0f * scale_, 3.0f * scale_);
+    const float half_width = label_width + 12.0f * scale_ + 2.0f * key_width + 2.0f * cells.x * static_cast<float>(columns);
+    const bool side_by_side = 2.0f * half_width + 28.0f * scale_ + 2.0f * cells.x <= ImGui::GetContentRegionAvail().x;
     const int pairs = side_by_side ? 2 : 1;
-    ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(ImGui::GetStyle().CellPadding.x, 3.0f * scale_));
+    // A key button: a click waits for a key, and a second key that waits takes the mouse button that clicks it.
+    const auto key_button = [&](const KeyAction& action, std::size_t which) {
+        const std::string listen = slot_name({action.field, which});
+        const bool waiting = listening_ == listen;
+        const std::string name = played.key(action.field, which);
+        const std::string label = waiting ? std::string("Press a key") : settings::no_key(name) ? std::string("-") : name;
+        ImGui::PushID(listen.c_str());
+        if (waiting) ImGui::PushStyleColor(ImGuiCol_Border, rgb(kRed));
+        if (ImGui::Button((label + "###key").c_str(), ImVec2(-FLT_MIN, 0.0f))) {
+            if (waiting && which == 1 && ImGui::IsMouseReleased(ImGuiMouseButton_Left)) {
+                take_key("Left click");
+            } else {
+                listening_ = waiting ? std::string() : listen;
+                stop_pad_capture();
+                key_note_.clear();
+                pick_note_.clear();
+                offer_.reset();
+            }
+        }
+        if (waiting && ImGui::IsItemHovered())
+            for (const auto [button, mouse] : {std::pair{static_cast<int>(ImGuiMouseButton_Right), "Right click"},
+                                               std::pair{3, "Mouse 4"}, std::pair{4, "Mouse 5"}})
+                if (ImGui::IsMouseClicked(button)) take_key(mouse);
+        if (waiting) ImGui::PopStyleColor();
+        hand_when_hovered();
+        ImGui::PopID();
+    };
+    ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, cells);
     if (ImGui::BeginTable("keys", columns * pairs + (side_by_side ? 1 : 0), flags)) {
         for (int pair = 0; pair < pairs; ++pair) {
             ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthFixed, label_width + 12.0f * scale_);
             ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthFixed, key_width);
-            if (modern) ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthFixed, mouse_width);
+            ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthFixed, key_width);
             if (pair == 0 && side_by_side) ImGui::TableSetupColumn(nullptr, ImGuiTableColumnFlags_WidthFixed, 28.0f * scale_);
         }
         const std::size_t half = side_by_side ? (actions.size() + 1) / 2 : actions.size();
@@ -2192,35 +2242,9 @@ void View::key_table() {
                 ImGui::TableSetColumnIndex(base);
                 ImGui::AlignTextToFramePadding();
                 ImGui::TextUnformatted(action.label);
-                ImGui::TableSetColumnIndex(base + 1);
-                const std::size_t field = static_cast<std::size_t>(
-                    std::find(settings::key_fields.begin(), settings::key_fields.end(), std::string_view(action.field)) -
-                    settings::key_fields.begin());
-                const bool waiting = listening_ == action.field;
-                std::string label = waiting ? std::string("Press a key") : shown[field];
-                if (label == "None") label = "-";
-                ImGui::PushID(action.field);
-                if (waiting) ImGui::PushStyleColor(ImGuiCol_Border, rgb(kRed));
-                if (ImGui::Button((label + "###key").c_str(), ImVec2(-FLT_MIN, 0.0f))) {
-                    listening_ = waiting ? std::string() : std::string(action.field);
-                    stop_pad_capture();
-                    key_note_.clear();
-                    pick_note_.clear();
-                    offer_.reset();
-                }
-                if (waiting) ImGui::PopStyleColor();
-                hand_when_hovered();
-                ImGui::PopID();
-                if (!modern) continue;
-                ImGui::TableSetColumnIndex(base + 2);
-                for (const settings::MouseButton& button : settings::modern_mouse) {
-                    if (std::string_view(button.field) != action.field) continue;
-                    ImGui::AlignTextToFramePadding();
-                    ImGui::PushFont(nullptr, small);
-                    ImGui::PushStyleColor(ImGuiCol_Text, rgb(kMuted));
-                    ImGui::TextUnformatted(button.name);
-                    ImGui::PopStyleColor();
-                    ImGui::PopFont();
+                for (const std::size_t which : {0u, 1u}) {
+                    ImGui::TableSetColumnIndex(base + 1 + static_cast<int>(which));
+                    key_button(action, which);
                 }
             }
         }
@@ -2241,12 +2265,14 @@ void View::key_table() {
     const char* arrows = weapons ? "Arrows: Up and Down also walk\n  Only while no action, weapon or power has them\n"
                                  : "Arrows: Up and Down also walk\n  Only while no action has them\n";
     hint_lines(std::string(modern ? arrows : "") +
-                   "Change a key: Click it, then press the new one\n  Escape cancels\n  Delete takes the key away\n" + fixed +
-                   "\n  [Help](#controls) says what each does",
+                   "Change a key: Click it, then press the new one\n  Escape cancels\n  Delete takes the key away\n"
+                   "A mouse button: Click a second key, then click it with that button\n" +
+                   fixed + "\n  [Help](#controls) says what each does",
                width);
     ImGui::PopFont();
     ImGui::Dummy(ImVec2(0.0f, 4.0f * scale_));
-    const bool default_keys = shown == settings::layout_of(modern ? settings::modern_keys : settings::classic_keys);
+    const bool default_keys = played.layout() == settings::layout_of(modern ? settings::modern_keys : settings::classic_keys) &&
+                              played.second() == settings::default_second_keys(modern);
     ImGui::BeginDisabled(default_keys);
     if (button(icon::rotate_ccw, "Default keys")) ask_to_replace(Replacing::keys);
     ImGui::EndDisabled();
@@ -2382,10 +2408,11 @@ void View::pad_buttons() {
     }
     ImGui::Dummy(ImVec2(0.0f, 2.0f * scale_));
     const float width = ImGui::GetContentRegionAvail().x;
-    hint_lines(count ? "Move and turn: The left stick or the D-pad, always\n"
-                       "Change a button: Click it, then press the new one on the gamepad\n  Escape cancels"
-                     : "Move and turn: The left stick or the D-pad, always\n"
-                       "Change a button: Connect a gamepad first\n  Then click the button and press the new one",
+    std::string lines;
+    for (const settings::StickUse& stick : settings::stick_uses(session_.settings().shown(*find_option("disruptor.stick_layout"))))
+        lines += std::string(stick.use) + ": " + stick.where + "\n";
+    hint_lines(lines + (count ? "Change a button: Click it, then press the new one on the gamepad\n  Escape cancels"
+                              : "Change a button: Connect a gamepad first\n  Then click the button and press the new one"),
                width);
     ImGui::PopFont();
     ImGui::Dummy(ImVec2(0.0f, 4.0f * scale_));
@@ -2533,47 +2560,45 @@ void View::tag(const char* text, unsigned hex) {
 }
 
 void View::take_key(const char* name) {
-    const std::string field = std::exchange(listening_, std::string());
-    if (field.empty() || !name || !*name || settings::folded_key(name) == "escape") return;
-    if (field.starts_with(kPickField)) {
-        take_pick_key(field, name);
+    const std::string listened = std::exchange(listening_, std::string());
+    if (listened.empty() || !name || !*name || settings::folded_key(name) == "escape") return;
+    if (listened.starts_with(kPickField)) {
+        take_pick_key(listened, name);
         return;
     }
+    const auto [field, which] = slot_of(listened);
     key_note_good_ = false;
     if (reserved_key(name)) {
         key_note_ = std::string(name) + " cannot be changed: it is one of the fixed keys below";
         return;
     }
+    if (which == 0 && settings::mouse_button(name)) {
+        key_note_ = "A mouse button goes in the second column";
+        return;
+    }
     const SettingsFile& file = session_.settings();
-    const bool modern = file.shown(*find_option("disruptor.modern_controls")) == 1;
     KeyBindings& keys = session_.keys();
+    keys.use(played_keys().layout());
     if (settings::folded_key(name) == "delete") {
-        keys.use(settings::layout_for_scheme(keys.layout(), modern));
-        keys.clear(field);
+        keys.clear(field, which);
         key_note_.clear();
         session_.save_keys();
         return;
     }
-    keys.use(settings::layout_for_scheme(keys.layout(), modern));
     // A pick's key an action also has is idle there: the actions swap as usual.
-    if (file.shown(*find_option("disruptor.number_keys")) == 1 && !settings::field_with(keys.layout(), name)) {
+    if (file.shown(*find_option("disruptor.number_keys")) == 1 && !keys.holder(name)) {
         if (const auto pick = settings::pick_with(pick_keys(), name)) {
             key_note_ = std::string(name) + " is on " + settings::pick_names[pick->row];
-            offer_ = Offer{name, field, pick_field(pick->row, pick->which)};
+            offer_ = Offer{name, listened, pick_field(pick->row, pick->which)};
             return;
         }
     }
-    const std::string previous = keys.key(field);
-    const auto swapped = keys.assign(field, name);
+    const auto swapped = keys.assign(field, which, name);
     key_note_.clear();
     if (!session_.save_keys() || !swapped) return;
-    const auto label_of = [](std::string_view of) {
-        for (const KeyAction& action : key_actions())
-            if (of == action.field) return std::string(action.label);
-        return std::string(of);
-    };
-    key_note_ = std::string(name) + " was on " + label_of(*swapped) + ", which now has " +
-                (previous == "None" ? std::string("no key") : previous);
+    const std::string given = keys.key(swapped->field, swapped->which);
+    key_note_ = std::string(name) + " was on " + field_label(swapped->field) + ", which now has " +
+                (settings::no_key(given) ? std::string("no key") : given);
 }
 
 float View::eased(unsigned id, float target, float seconds) {
@@ -2666,6 +2691,7 @@ bool View::segmented(const char* id, int* index, std::span<const char* const> ch
                       colour(chosen ? 0xffffff : kMuted, alpha), choices[choice]);
     }
     focus_ring(focused, focused_at, focused_at + ImVec2(part, height), ImGui::GetStyle().FrameRounding);
+    segment_focused_ = focused != 0;
     ImGui::SetCursorScreenPos(at);
     ImGui::Dummy(ImVec2(width, height));
     ImGui::PopID();
@@ -2932,15 +2958,7 @@ bool View::updates_popup(const UpdateView& update) {
             ImGui::TableNextColumn();
         };
         row("Version");
-        ImGui::TextUnformatted(shown_version(DISRUPTOR_BUILD_VERSION).c_str());
-        if (!update.installed.empty()) {
-            row("Installed");
-            ImGui::Text("v%s%s", update.installed.c_str(), update.portable ? ", portable" : "");
-        }
-        if (!update.latest.empty()) {
-            row("Newest release");
-            ImGui::Text("v%s", update.latest.c_str());
-        }
+        ImGui::Text("%s%s", shown_version(DISRUPTOR_BUILD_VERSION).c_str(), update.portable ? ", portable" : "");
         row("Releases from");
         const std::string source = updater_.source();
         const std::string_view site = "https://github.com/";
@@ -3216,7 +3234,7 @@ void View::rich(const Line& line, float width, bool strong, bool faint, float le
 
 void View::about() {
     page_title("Disruptor Recompiled");
-    ImGui::TextDisabled("Version %s", DISRUPTOR_BUILD_VERSION);
+    ImGui::TextDisabled("Version %s", shown_version(DISRUPTOR_BUILD_VERSION).c_str());
     ImGui::Spacing();
     wrapped("A native PC static recompilation of Disruptor (USA, SLUS-00224), built on PSXRecomp\n"
             "No game data is included: the game runs from your own disc");

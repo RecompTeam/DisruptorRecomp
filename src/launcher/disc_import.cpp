@@ -1,5 +1,7 @@
 #include "disc_import.h"
 
+#include "chd_image.h"
+
 #ifdef _WIN32
 #include <windows.h>
 #include <bcrypt.h>
@@ -15,6 +17,7 @@
 #include <cctype>
 #include <cstdint>
 #include <fstream>
+#include <optional>
 #include <random>
 #include <regex>
 #include <sstream>
@@ -374,6 +377,65 @@ void write_cue(const fs::path& directory) {
     cue.close();
     if (!cue) throw std::runtime_error("Cannot write the disc CUE\nCheck folder permissions");
 }
+
+std::string hash_sectors(DiscImage& image, const std::atomic_bool& cancelled, const Progress& progress,
+                         const wchar_t* status) {
+    Sha256 hash;
+    std::array<unsigned char, kRawSector> sector{};
+    const uint32_t total = image.sectors();
+    for (uint32_t lba = 0; lba < total; ++lba) {
+        if (lba % 1024 == 0) {
+            report(progress, status, static_cast<unsigned>(uint64_t{lba} * 100 / total));
+            check_cancel(cancelled);
+        }
+        if (!image.raw_sector(lba, sector.data()))
+            throw std::runtime_error("Cannot read the complete image\nThe CHD may be damaged");
+        hash.add(sector.data(), sector.size());
+    }
+    report(progress, status, 100);
+    return hash.finish();
+}
+
+// An installed CHD's own SHA-256 and its sectors' beside it, once the sectors matched: later checks hash the file alone.
+struct Stamp {
+    std::string file, disc;
+};
+
+fs::path stamp_path(const fs::path& chd) { return fs::path(chd) += ".verified"; }
+
+std::optional<Stamp> read_stamp(const fs::path& chd) {
+    std::ifstream input(stamp_path(chd), std::ios::binary);
+    Stamp stamp;
+    if (input >> stamp.file >> stamp.disc && stamp.file.size() == 64 && stamp.disc.size() == 64) return stamp;
+    return std::nullopt;
+}
+
+void write_stamp(const fs::path& chd, const Stamp& stamp) {
+    std::ofstream output(stamp_path(chd), std::ios::binary);
+    output << stamp.file << '\n' << stamp.disc << '\n';
+    output.close();
+    if (!output) throw std::runtime_error(cannot_create);
+}
+
+VerifiedDisc verify_chd(const fs::path& selected, const std::atomic_bool& cancelled, const Progress& progress,
+                        std::span<const DiscProfile> profiles) {
+    auto lock = std::make_shared<File>(selected);
+    ChdImage image(selected);
+    if (!image.sectors()) throw std::runtime_error(image.refusal());
+    const uint64_t size = uint64_t{image.sectors()} * kRawSector;
+    match_size(size, profiles);
+    const wchar_t* status = L"Verifying the complete disc image...";
+    const auto stamp = read_stamp(selected);
+    const bool unchanged = stamp && hash_file(*lock, nullptr, cancelled, progress, status) == stamp->file;
+    const auto& profile = match_hash(size, unchanged ? stamp->disc : hash_sectors(image, cancelled, progress, status), profiles);
+    return {&profile, selected, selected, lock};
+}
+
+// The image a folder of installed game data holds: its CUE, or its CHD when it has no CUE.
+fs::path installed_image(const fs::path& folder) {
+    const fs::path chd = folder / "disc.chd";
+    return !fs::exists(folder / "disc.cue") && fs::exists(chd) ? chd : folder / "disc.cue";
+}
 } // namespace
 
 std::span<const DiscProfile> supported_discs() { return discs; }
@@ -381,9 +443,9 @@ std::wstring error_text(const std::exception& error) { return decode(error.what(
 
 fs::path resolve_image(const fs::path& selected) {
     const auto extension = upper(selected.extension().string());
-    if (extension == ".BIN" || extension == ".ISO" || extension == ".IMG") return selected;
+    if (extension == ".BIN" || extension == ".ISO" || extension == ".IMG" || extension == ".CHD") return selected;
     if (extension != ".CUE")
-        throw std::runtime_error("Select a CUE, BIN, IMG, or raw ISO disc image");
+        throw std::runtime_error("Select a CUE, BIN, CHD, IMG, or raw ISO disc image");
     File source(selected);
     if (source.size() > 65536) throw std::runtime_error("The CUE is too large or invalid");
     std::string text(static_cast<size_t>(source.size()), '\0');
@@ -423,6 +485,7 @@ fs::path resolve_image(const fs::path& selected) {
 VerifiedDisc verify_disc(const fs::path& selected, const std::atomic_bool& cancelled,
                          const Progress& progress, std::span<const DiscProfile> profiles) {
     check_cancel(cancelled);
+    if (is_chd(selected)) return verify_chd(selected, cancelled, progress, profiles);
     // Both CUE and data stay locked so the table of contents cannot change after verification.
     std::shared_ptr<File> cue_lock;
     if (upper(selected.extension().string()) == ".CUE") cue_lock = std::make_shared<File>(selected);
@@ -449,23 +512,46 @@ VerifiedDisc import_disc(const fs::path& selected, const fs::path& package,
     const auto parent = package / "input" / "discs";
     Staging staging;
     const DiscProfile* profile = nullptr;
-    {
+    if (is_chd(source_path)) {
+        {
+            ChdImage checked(source_path);
+            if (!checked.sectors()) throw std::runtime_error(checked.refusal());
+            match_size(uint64_t{checked.sectors()} * kRawSector, profiles);
+        }
         File source(source_path);
-        match_size(source.size(), profiles);
         fs::create_directories(parent);
         staging.path = unique_directory(parent, ".import-");
-        File output(staging.path / "disc.bin", true);
-        const auto hash = hash_file(source, &output, cancelled, progress, L"Copying and verifying your disc image...");
-        profile = &match_hash(source.size(), hash, profiles);
+        Stamp stamp;
+        {
+            File output(staging.path / "disc.chd", true);
+            stamp.file = hash_file(source, &output, cancelled, progress, L"Copying your disc image...");
+        }
+        ChdImage copy(staging.path / "disc.chd");
+        if (!copy.sectors()) throw std::runtime_error(copy.refusal());
+        const uint64_t size = uint64_t{copy.sectors()} * kRawSector;
+        match_size(size, profiles);
+        stamp.disc = hash_sectors(copy, cancelled, progress, L"Verifying the complete disc image...");
+        profile = &match_hash(size, stamp.disc, profiles);
+        write_stamp(staging.path / "disc.chd", stamp);
+    } else {
+        {
+            File source(source_path);
+            match_size(source.size(), profiles);
+            fs::create_directories(parent);
+            staging.path = unique_directory(parent, ".import-");
+            File output(staging.path / "disc.bin", true);
+            const auto hash = hash_file(source, &output, cancelled, progress, L"Copying and verifying your disc image...");
+            profile = &match_hash(source.size(), hash, profiles);
+        }
+        write_cue(staging.path);
     }
-    write_cue(staging.path);
-    { const auto verified = verify_disc(staging.path / "disc.cue", cancelled, progress, profiles); }
+    { const auto verified = verify_disc(installed_image(staging.path), cancelled, progress, profiles); }
     check_cancel(cancelled);
     const auto destination = installed_cue(package, *profile).parent_path();
     fs::path backup;
     if (fs::exists(destination)) {
         try {
-            return verify_disc(destination / "disc.cue", cancelled, progress, profiles);
+            return verify_disc(installed_image(destination), cancelled, progress, profiles);
         } catch (const std::exception&) {
             check_cancel(cancelled);
         }
@@ -483,13 +569,13 @@ VerifiedDisc import_disc(const fs::path& selected, const fs::path& package,
     }
     // Past publication a cancel must not mark installed data as an incomplete import.
     const std::atomic_bool committed{false};
-    return verify_disc(destination / "disc.cue", committed, progress, profiles);
+    return verify_disc(installed_image(destination), committed, progress, profiles);
 }
 
 fs::path find_installed_disc(const fs::path& package) {
     for (const auto& profile : supported_discs()) {
-        auto cue = installed_cue(package, profile);
-        if (fs::exists(cue)) return cue;
+        auto image = installed_image(installed_cue(package, profile).parent_path());
+        if (fs::exists(image)) return image;
     }
     // The old manual layout, left in place.
     for (const auto& name : {L"Disruptor (USA).cue", L"Disruptor (USA).bin"}) {

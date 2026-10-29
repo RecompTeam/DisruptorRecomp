@@ -77,6 +77,7 @@ runtime/src/interrupts.c
 runtime/src/iso_reader_c.cpp
 runtime/src/main.cpp
 runtime/src/memory.c
+runtime/src/mod_runtime.cpp
 runtime/src/overlay_loader.c
 runtime/src/psx_cycles.c
 runtime/src/psx_icache.c

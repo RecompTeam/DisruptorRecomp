@@ -74,7 +74,8 @@ void table() {
                 "a notice stands only beside choices that are not all offered");
         if (one.kind == Kind::toggle) require(one.initial == 0 || one.initial == 1, "a toggle starts as neither");
         for (const char* need : one.needs)
-            require(option(need).kind == Kind::toggle && &option(need) != &one, "a row needs no toggle");
+            require((option(need).kind == Kind::toggle || option(need).kind == Kind::choice) && &option(need) != &one,
+                    "a row needs a toggle, or a choice whose first entry reads as off");
         require(one.hint && (!*one.hint || (std::strlen(one.hint) >= 20 && std::strlen(one.hint) <= 240)),
                 "a row's description is empty or of 20 to 240 characters");
     }
@@ -417,6 +418,27 @@ void pick_keys_saved(const fs::path& folder) {
     require(again.set(option("disruptor.number_keys"), 1) && again.pick_lists().weapons[0] == "Z" &&
                 again.pick_lists().psionics[2] == "H",
             "another setting keeps them");
+    fs::remove(file);
+}
+
+void second_keys_saved(const fs::path& folder) {
+    namespace keys = disruptor::settings;
+    const fs::path file = folder / "settings.toml";
+    SettingsFile settings(file);
+    require(settings.load() && settings.second_keys(true) == keys::default_second_keys(true) &&
+                settings.second_keys(false) == keys::default_second_keys(false),
+            "a new file has each scheme's own second keys");
+    keys::KeyLayout second = keys::default_second_keys(true);
+    second[*keys::key_field("square")] = "None";
+    second[*keys::key_field("up")] = "Up";
+    require(settings.set_second_keys(second, true), "the second keys must be written");
+    SettingsFile again(file);
+    require(again.load() && again.second_keys(true) == second && again.second_keys(false) == second,
+            "the player's list reads back and stays whatever the scheme");
+    require(again.set(option("disruptor.number_keys"), 1) && again.second_keys(true) == second, "another setting keeps it");
+    require(again.set_second_keys(keys::default_second_keys(false), false) && again.second_keys(false) == keys::default_second_keys(false) &&
+                again.second_keys(true) == keys::default_second_keys(true),
+            "the scheme's own leaves no list, so a change of scheme brings the other's own");
     fs::remove(file);
 }
 void round_trip(const fs::path& folder) {
@@ -798,6 +820,7 @@ int main() {
         saves_beside_game(folder);
         round_trip(folder);
     pick_keys_saved(folder);
+    second_keys_saved(folder);
         whole_range(folder);
         dependants(folder);
         reset_to_new(folder);

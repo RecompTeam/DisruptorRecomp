@@ -6,6 +6,7 @@
 #include "region_disc.h"
 #include "report.h"
 #include "startup_log.h"
+#include "game/settings/game_mark.h"
 
 #include <cwchar>
 #include <exception>
@@ -36,6 +37,7 @@ void Session::open(double display_rate) {
     settings_.set_display_rate(display_rate);
     settings_.load();
     activity_.add("Your saves and settings are in " + utf8(data_));
+    watch_other_game();
     if (!settings_.readable()) say(settings_error());
     check_installed_disc();
     look();
@@ -45,7 +47,7 @@ void Session::check_installed_disc() {
     try {
         auto installed = find_installed_disc(data_);
         if (!installed.empty()) {
-            bool legacy = installed != installed_cue(data_, supported_discs().front());
+            bool legacy = installed.parent_path() != installed_cue(data_, supported_discs().front()).parent_path();
             begin(legacy ? Task::import : Task::verify, installed, false);
         } else if (settings_.readable()) {
             say(L"No game data installed\nChoose your disc image to get started\n"
@@ -56,6 +58,7 @@ void Session::check_installed_disc() {
 }
 
 void Session::poll() {
+    watch_other_game();
     std::unique_ptr<Outcome> outcome;
     std::unique_ptr<StateUpgrade> upgrade;
     {
@@ -131,15 +134,17 @@ void Session::finish(Outcome& outcome) {
     }
     if (step.disc == DiscAfter::cleared) verified_ = {};
     else if (step.disc == DiscAfter::taken) verified_ = std::move(outcome.disc);
-    if (step.save_language && !settings_.choose_language_disc(utf8(outcome.image))) step.status = settings_error();
+    if (step.save_language && game_running())
+        step.status = L"The game started meanwhile, so the language is not saved\nChoose it again once the game closes";
+    else if (step.save_language && !settings_.choose_language_disc(utf8(outcome.image))) step.status = settings_error();
     if (!step.status.empty()) say(step.status);
-    if (step.launch) launch();
+    if (step.launch && !game_running()) launch();
     else if (verified_.profile && !upgraded_) begin_upgrade();
 }
 
 void Session::begin_upgrade() {
     upgraded_ = true;
-    if (game_) return;
+    if (game_running()) return;
     if (worker_.joinable()) worker_.join();
     cancelled_ = false;
     busy_ = true;
@@ -202,14 +207,14 @@ void Session::begin_earlier(std::function<Earlier()> work) {
 }
 
 void Session::look_at_earlier(const fs::path& folder) {
-    if (busy_ || game_) return;
+    if (busy_ || game_running()) return;
     earlier_.reset();
     say(L"Looking at the earlier copy...");
     begin_earlier([this, folder] { return Earlier{look_at_copy(folder, program_, data_), std::nullopt, {}}; });
 }
 
 void Session::bring_earlier() {
-    if (busy_ || game_ || !earlier_) return;
+    if (busy_ || game_running() || !earlier_) return;
     const EarlierCopy copy = std::move(*earlier_);
     earlier_.reset();
     verified_ = {}; // a disc that comes over must not be held open
@@ -285,16 +290,29 @@ void Session::game_ended(unsigned long code) {
     look();
 }
 
+void Session::watch_other_game() {
+    if (game_ || game_mark::marked(data_) == other_game_) return;
+    other_game_ = !other_game_;
+    if (other_game_) {
+        say(running_text({}));
+        return;
+    }
+    settings_.load(); // the in-game menu writes the same file
+    show({});
+    activity_.add("Game closed");
+    look();
+}
+
 void Session::look() {
     if (!busy_ && !settings_.language_discs().empty()) begin(Task::look, {}, false);
 }
 
 void Session::take_image(const fs::path& image) {
-    if (!busy_ && !game_) begin(Task::take, image, auto_play);
+    if (!busy_ && !game_running()) begin(Task::take, image, auto_play);
 }
 
 void Session::add_language_disc(const fs::path& image) {
-    if (busy_ || game_) return;
+    if (busy_ || game_running()) return;
     if (verified_.profile) begin(Task::language, image, false);
     else say(L"Install the USA disc first: it is the game, and the other disc gives it a language");
 }
@@ -321,7 +339,7 @@ void Session::remove_language(std::size_t index) {
 }
 
 void Session::play() {
-    if (playable()) begin(Task::verify, verified_.cue, true);
+    if (playable()) begin(Task::verify, verified_.mount, true);
 }
 
 void Session::cancel() {
@@ -346,7 +364,7 @@ void Session::make_problem_report() {
 void Session::open_saves() const { platform::open_folder(settings_.saves_folder()); }
 
 void Session::start_settings_over() {
-    if (busy_ || game_) return;
+    if (busy_ || game_running()) return;
     fs::path kept;
     if (settings_.start_over(kept)) {
         write_failure_.clear();
@@ -369,7 +387,7 @@ void Session::set(const Option& option, int value) {
     saved(settings_.set(option, value));
     // A change of scheme carries the keys along where they are the other scheme's own layout.
     if (std::string_view(option.key) != "disruptor.modern_controls") return;
-    keys_.load();
+    load_keys();
     const KeyLayout next = settings::layout_for_scheme(keys_.layout(), value == 1);
     if (next == keys_.layout()) return;
     keys_.use(next);
@@ -383,22 +401,36 @@ bool Session::set_pick_keys(const settings::PickKeys& keys) {
     return written;
 }
 
+void Session::load_keys() {
+    keys_.load();
+    keys_.use_second(settings_.second_keys(settings_.shown(*find_option("disruptor.modern_controls")) == 1));
+}
+
 // A file that could not be written is read again, so the page shows what the game will use.
 bool Session::save_keys() {
-    if (keys_.save()) {
-        write_failure_.clear();
-        return true;
+    KeyBindings written(data_ / "keybinds.ini");
+    written.load();
+    if (!keys_.save()) {
+        write_failure_ = L"Cannot write keybinds.ini\nCheck that the file and its folder can be written";
+        say(write_failure_);
+        load_keys();
+        return false;
     }
-    write_failure_ = L"Cannot write keybinds.ini\nCheck that the file and its folder can be written";
-    say(write_failure_);
-    keys_.load();
+    write_failure_.clear();
+    const bool modern = settings_.shown(*find_option("disruptor.modern_controls")) == 1;
+    if (keys_.second() == settings_.second_keys(modern)) return true;
+    if (editable() && settings_.set_second_keys(keys_.second(), modern)) return true;
+    written.save(); // a first key that moved to a second one goes back with it
+    saved(false);
+    load_keys();
     return false;
 }
 
-bool Session::store_keys(const KeyLayout& undo, const settings::PickKeys& picks) {
+bool Session::store_keys(const KeyLayout& undo, const settings::PickKeys& picks, const KeyLayout& undo_second) {
     if (!save_keys()) return false;
     if (set_pick_keys(picks)) return true;
     keys_.use(undo);
+    keys_.use_second(undo_second);
     save_keys();
     return false;
 }

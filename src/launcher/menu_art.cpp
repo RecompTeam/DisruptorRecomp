@@ -1,8 +1,9 @@
 #include "menu_art.h"
 
-#include "raw_image.h"
+#include "chd_image.h"
 
 #include <array>
+#include <exception>
 #include <set>
 
 namespace fs = std::filesystem;
@@ -51,8 +52,11 @@ std::vector<Picture> menu_scenes(DiscImage& disc) {
 }
 
 std::vector<Picture> menu_scenes(const fs::path& data) {
-    RawImage image(data);
-    return image.sectors() ? menu_scenes(image) : std::vector<Picture>{};
+    try {
+        return menu_scenes(*open_image(data));
+    } catch (const std::exception&) {
+        return {};
+    }
 }
 
 } // namespace disruptor::launcher

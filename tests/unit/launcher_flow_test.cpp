@@ -201,7 +201,7 @@ void test_the_window_acts_on_an_outcome() {
     Outcome language = made(Task::language);
     language.language = RegionDisc{"German", true};
     step = after(language, false);
-    require(same(step, DiscAfter::kept, false, true, false) && starts(step.status, L"German disc: ") &&
+    require(same(step, DiscAfter::kept, false, true, false) && starts(step.status, L"German disc chosen\nGerman disc: ") &&
                 ends(step.status, L"\nThe image is used where it is, so keep it there"),
             "a checked language disc is named in the settings and described");
     step = after(language, true);

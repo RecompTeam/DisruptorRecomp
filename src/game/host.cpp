@@ -13,8 +13,10 @@
 #include "game/render/precision_routes.h"
 #include "game/session/capsule.h"
 #include "game/session/diagnostics.h"
+#include "game/settings/game_mark.h"
 #include "game/settings/options.h"
 #include "game/settings/pick_keys.h"
+#include "game/settings/second_keys.h"
 #include "game/settings/user_folder.h"
 #include "gpu.h"
 #include "host_ui.h"
@@ -46,7 +48,9 @@ extern "C" int disruptor_grown_quad_sources(uint32_t command_address, const uint
 
 std::filesystem::path psx_game_user_folder(const std::filesystem::path &program, std::string &problem) {
     try {
-        return disruptor::user_folder::prepare(program);
+        std::filesystem::path folder = disruptor::user_folder::prepare(program);
+        static const disruptor::game_mark::Mark mark(folder);
+        return folder;
     } catch (const std::exception &error) {
         problem = error.what();
         return {};
@@ -70,6 +74,18 @@ void apply_pick_keys(const PSXRecompV4::UserSettings &settings) {
     disruptor_pick_keys_set(scancodes.data(), static_cast<int>(scancodes.size()));
 }
 
+// Every field's second key under each scheme: settings.toml's list where it has one, else the scheme's own.
+void apply_second_keys(const PSXRecompV4::UserSettings &settings) {
+    namespace keys = disruptor::settings;
+    const auto scancode = [](std::string_view name) { return static_cast<int>(SDL_GetScancodeFromName(std::string(name).c_str())); };
+    const auto known = [&](std::string_view name) { return scancode(name) != SDL_SCANCODE_UNKNOWN; };
+    const auto codes = [&](bool modern) {
+        return keys::second_codes(keys::second_keys_from(settings.key_second, settings.has_key_second, modern, known), scancode);
+    };
+    const keys::SecondCodes modern = codes(true), classic = codes(false);
+    disruptor_second_keys_set(modern.data(), classic.data(), static_cast<int>(modern.size()));
+}
+
 }  // namespace
 
 void psx_game_settings_defaults(PSXRecompV4::UserSettings &settings) {
@@ -83,6 +99,7 @@ bool psx_game_settings_loaded(const PSXRecompV4::UserSettings &settings) {
     disruptor_achievements_configure(!settings.has_achievements || settings.achievements);
     disruptor::achievements::configure(settings);
     apply_pick_keys(settings);
+    apply_second_keys(settings);
     if (settings.has_language_disc && !std::getenv("PSX_DISRUPTOR_LANGUAGE_DISC"))
         disruptor_language_set_disc(settings.language_disc.c_str());
     return settings.has_skip_intro && settings.skip_intro && !std::getenv("PSX_DISRUPTOR_SKIP_INTRO");
@@ -136,11 +153,11 @@ int psx_game_packet_fade(uint32_t resolved_packet, uint32_t signature) {
     return disruptor_far_rendering_packet_fraction(resolved_packet, signature);
 }
 
-// Whether player 1's keybinds.ini puts the key on a button.
+// Whether player 1's keybinds.ini or the second keys put the key on a button.
 int disruptor_key_bound(int scancode) {
     for (int index = 0; index < PSX_KB_COUNT; ++index)
         if (psx_keybinds_get_button(1, index) == static_cast<SDL_Scancode>(scancode)) return 1;
-    return 0;
+    return disruptor_second_key_bound(scancode);
 }
 
 int psx_game_key(int scancode, uint32_t keycode, int down, int plain) {

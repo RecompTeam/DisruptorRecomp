@@ -58,11 +58,13 @@ public:
     const std::wstring& write_failure() const { return write_failure_; }
     void set(const Option& option, int value);
     bool set_pick_keys(const settings::PickKeys& keys);
-    // Player 1's keys in keybinds.ini, read again with load() before they are shown.
+    // Player 1's keys, read again with load_keys() before they are shown.
     KeyBindings& keys() { return keys_; }
+    // keybinds.ini's first keys and settings.toml's second keys, as the scheme in the file makes them.
+    void load_keys();
     bool save_keys();
-    // The keys held now and `picks` together: a failed write of the picks puts `undo` back.
-    bool store_keys(const KeyLayout& undo, const settings::PickKeys& picks);
+    // The keys held now and `picks` together: a failed write of the picks puts `undo` and `undo_second` back.
+    bool store_keys(const KeyLayout& undo, const settings::PickKeys& picks, const KeyLayout& undo_second);
     PadBindings& pads() { return pads_; }
     AchievementsAccount& achievements() { return achievements_; }
     bool save_pads();
@@ -72,9 +74,10 @@ public:
 
     bool busy() const { return busy_; }
     bool cancellable() const { return busy_ && !closing_; }
-    bool game_running() const { return game_ != nullptr; }
-    bool editable() const { return !busy_ && !game_ && settings_.readable(); }
-    bool playable() const { return !busy_ && !game_ && verified_.profile; }
+    // A game this launcher started, or one started before it opened or beside it on the same player's files.
+    bool game_running() const { return game_ != nullptr || other_game_; }
+    bool editable() const { return !busy_ && !game_running() && settings_.readable(); }
+    bool playable() const { return !busy_ && !game_running() && verified_.profile; }
     const SettingsFile& settings() const { return settings_; }
     const std::wstring& status() const { return status_; }
     unsigned progress() const { return progress_; }
@@ -103,6 +106,7 @@ private:
     void launch();
     void look();
     void game_ended(unsigned long code);
+    void watch_other_game();
     void say(const std::wstring& text);
     void show(const std::wstring& text);
     void saved(bool written, const std::wstring& done = {});
@@ -119,6 +123,7 @@ private:
     std::atomic_bool cancelled_{false};
     bool busy_ = false, closing_ = false, closed_ = false, upgraded_ = false;
     std::unique_ptr<GameProcess> game_;
+    bool other_game_ = false;
     VerifiedDisc verified_;
     Regions regions_; // filled by the worker only: an image on a share that is gone must not stall the window
     std::wstring status_;

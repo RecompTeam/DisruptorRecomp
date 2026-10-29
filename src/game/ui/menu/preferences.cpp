@@ -205,6 +205,12 @@ void apply_lighting(const PSXRecompV4::UserSettings &settings) {
     gl_renderer_set_ddgi_sun(value("disruptor.sun_lighting"));
 }
 
+void apply_sticks(const PSXRecompV4::UserSettings &settings) {
+    const auto value = [&](const char *key) { return stored(settings, *find_option(key)); };
+    disruptor::sticks::tune({static_cast<disruptor::sticks::Layout>(value("disruptor.stick_layout")), value("disruptor.look_speed"),
+                             value("disruptor.look_deadzone"), value("disruptor.invert_look") != 0});
+}
+
 // Only the second mission has a sun.
 void apply_sun(const PSXRecompV4::UserSettings &settings) {
     const auto value = [&](const char *key) { return stored(settings, *find_option(key)); };
@@ -396,6 +402,7 @@ void apply_saved_preferences(const PSXRecompV4::UserSettings &settings) {
         gl_renderer_set_gap_fill(settings.gap_filling ? 1 : 0);
     if (settings.has_depth_sorted_world && !env_override_present("PSX_GL_WORLD_DEPTH"))
         gl_renderer_set_world_depth(settings.depth_sorted_world ? 1 : 0);
+    apply_sticks(settings);
     // The renderer reads the PSX_DDGI variables at its first update, after this: they still win.
     apply_sun(settings);
     apply_lighting(settings);
@@ -439,6 +446,12 @@ void apply_pending_preferences() {
         disruptor_mouse_set_vertical_follows_horizontal(
             pending.separate_vertical_speed ? 0 : 1);
     if (changed("controller.deadzone")) psx_input_set_deadzone(pending.deadzone);
+    disruptor::sticks::Tuning sticks = disruptor::sticks::tuning();
+    if (changed("disruptor.stick_layout")) sticks.layout = static_cast<disruptor::sticks::Layout>(pending.stick_layout);
+    if (changed("disruptor.look_speed")) sticks.look_speed = pending.look_speed;
+    if (changed("disruptor.look_deadzone")) sticks.look_deadzone = pending.look_deadzone;
+    if (changed("disruptor.invert_look")) sticks.invert_look = pending.invert_look;
+    disruptor::sticks::tune(sticks);
     if (changed("disruptor.geometry_correction"))
         gpu_geometry_correction_set(pending.geometry_correction ? 1 : 0);
     if (changed("disruptor.perspective_textures"))

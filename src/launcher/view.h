@@ -115,7 +115,9 @@ private:
     void setting_row(const Placement& placement, const Option& option, float control, bool hanging);
     void key_table();
     // Two keys a row for count rows from first, under the keyboard's: a key an action also has is faint, the action wins.
-    void pick_table(const char* heading, std::size_t first, std::size_t count, const KeyLayout& pad);
+    void pick_table(const char* heading, std::size_t first, std::size_t count, const KeyBindings& held);
+    // Player 1's keys as the game will play them: a scheme's own first keys follow the scheme saved beside them.
+    KeyBindings played_keys() const;
     settings::PickKeys pick_keys() const;
     // The tables under the setting that turns them on, with their own note, hints and default.
     void pick_section();
@@ -200,8 +202,8 @@ private:
     bool key_note_good_ = false;  // the note says something was done, not refused
     struct Offer {
         std::string key;
-        std::string target;  // where the key was asked for: a pick's field or an action's
-        std::string owner;   // the field the note names
+        std::string target;  // where the key was asked for: a pick's field or an action's first or second key
+        std::string owner;   // the place the note names
     };
     std::optional<Offer> offer_;
     bool keys_read_ = false;
@@ -245,6 +247,8 @@ private:
     bool slider_focused_ = false;  // this frame's keyboard or gamepad cursor is on a slider
     bool focus_sidebar_ = false;   // the side bar's entry of the page shown takes the cursor at its next frame
     bool enter_page_ = false;      // the page's first control takes the cursor: its side bar entry was pressed by key or button
+    bool enter_rows_ = false;      // the card's first control takes it: Down was pressed on a tab of Controls
+    bool segment_focused_ = false; // the cursor is on a part of the segmented control drawn last
     // Where the cursor was at the end of the last frame: Escape and a gamepad's B take it from a page back to the side bar.
     unsigned sidebar_window_ = 0;
     bool cursor_in_page_ = false, popup_last_frame_ = false, active_last_frame_ = false;

@@ -149,6 +149,16 @@ def check(launcher: Path, folder: Path) -> None:
         "Report a problem is reached and pressed while settings.toml cannot be read",
     )
 
+    # Down on a tab of Controls goes into its card, also where no control stands right under the tab.
+    for tab in range(4):
+        down = drive(
+            launcher, folder, f"down{tab}", " ".join(["Tab"] * (tab + 1)) + " Pad:Down", page=2, tab=tab, pad=True
+        )
+        require(
+            down[tab + 1].in_rows and not down[tab + 1].in_sidebar,
+            f"Down on the Controls page's tab {tab} goes into its card, not to the side bar",
+        )
+
     # From Enhancements: a release's Experimental page has no controls to go into.
     pad = drive(launcher, folder, "pad", "Pad:Down Pad:B Pad:Down Pad:A Pad:RB", page=1, pad=True)
     require(pad[0].in_rows, "the D-pad reaches the page's controls")
@@ -156,26 +166,28 @@ def check(launcher: Path, folder: Path) -> None:
     require("page 2" in pad[3].view and not pad[3].in_sidebar, "A on a side bar entry opens its page and goes into it")
     require("page 3" in pad[4].view and pad[4].in_sidebar, "the right bumper steps to the next page")
 
-    # The Gamepad tab's stops: four tabs, the dead zone, then the first button, Fire, confirm.
-    steps = "Tab Tab Tab Tab Tab Tab Pad:A Pad:A Pad:A Pad:B Pad:A Pad:Down Pad:B Pad:Down"
+    # The Gamepad tab's stops: four tabs, the layout's three parts, two turning sliders, the dead zone, then Fire, confirm.
+    steps = " ".join(["Tab"] * 11) + " Pad:A Pad:A Pad:A Pad:B Pad:A Pad:Down Pad:B Pad:Down"
     capture = drive(launcher, folder, "capture", steps, page=2, tab=3, pad=True)
-    first = capture[5].place
-    require(" button " in capture[6].view, "A on a gamepad button waits for the new button")
+    first = capture[10].place, capture[10].scroll
+    require(" button " in capture[11].view, "A on a gamepad button waits for the new button")
     require(
-        " button " not in capture[7].view and capture[7].place == first,
+        " button " not in capture[12].view and (capture[12].place, capture[12].scroll) == first,
         "A taken for the button starts no capture again and leaves the cursor where it was",
     )
-    require(" button " in capture[8].view, "a new press of A waits again")
+    require(" button " in capture[13].view, "a new press of A waits again")
     require(
-        " button " not in capture[9].view and capture[9].place == first and not capture[9].in_sidebar,
+        " button " not in capture[14].view
+        and (capture[14].place, capture[14].scroll) == first
+        and not capture[14].in_sidebar,
         "B taken for the button does not also take the cursor back to the side bar",
     )
     require(
-        " button " in capture[11].view and capture[11].place == first,
+        " button " in capture[16].view and (capture[16].place, capture[16].scroll) == first,
         "the D-pad is no button to take and moves nothing",
     )
     require(
-        " button " not in capture[12].view and capture[13].place != first,
+        " button " not in capture[17].view and (capture[18].place, capture[18].scroll) != first,
         "after B is taken and let go the D-pad moves the cursor again",
     )
 

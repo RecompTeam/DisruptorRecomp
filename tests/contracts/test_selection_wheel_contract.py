@@ -37,13 +37,17 @@ require(
     "the single wheel preference must save and apply both true and false",
 )
 require(
-    mouse.index("if (disruptor_selection_wheel_frame())") < mouse.index("if (!g_mouse.enabled || !sdl_window) return;")
+    mouse.index("if (disruptor_selection_wheel_frame())")
+    < mouse.index("if ((!g_mouse.enabled && !pad) || !sdl_window) return;")
     and "press = disruptor_selection_wheel_filter_press(press);" in mouse,
     "wheels must read the final input sample even with modern controls off, and prevent later selector injection",
 )
 require(
-    "psx_keybinds_get_button(1, PSX_KB_L1)" in wheel and "psx_keybinds_get_button(1, PSX_KB_R1)" in wheel,
-    "the wheels must follow the existing configured selection bindings",
+    "{std::pair{PSX_KB_L1, kWeapon}, std::pair{PSX_KB_R1, kPsionic}}" in wheel
+    and "if (key_down(keys.data(), psx_keybinds_get_button(1, field)) ||\n" in wheel
+    and "disruptor_second_key_held(field, keys.data(), static_cast<int>(keys.size()), held_mouse)" in wheel
+    and "SDL_BUTTON_X1MASK" not in wheel,
+    "the wheels must follow the configured first and second keys of the selection actions, mouse buttons among them",
 )
 require(
     "gl_renderer_set_host_ui_suspended(1);" in menu

@@ -45,11 +45,12 @@ On Linux x64:
 ### Add your disc
 
 1. Open **Disruptor Recompiled** from the desktop or the Start menu.
-2. Press **Choose file...** and pick your USA **MODE2/2352** CUE or BIN, or
-   drop the image on the launcher's window.
+2. Press **Choose file...** and pick your USA **MODE2/2352** CUE, BIN or CHD,
+   or drop the image on the launcher's window.
 3. The launcher copies the image into `input/discs/SLUS-00224/` in the
    [folder of your files](#where-your-files-are), writes its CUE and checks
-   the SHA-256 of every byte. Your original files stay where they are.
+   the SHA-256 of every byte. A CHD stays a CHD, and the bytes checked are the
+   sectors in it. Your original files stay where they are.
 4. Leave **Start the game after importing** on to play at once.
 
 What the launcher accepts:
@@ -57,11 +58,12 @@ What the launcher accepts:
 - A CUE with its BIN beside it, or the BIN alone. The file names do not
   matter.
 - A raw `.iso` or `.img` whose bytes match the supported dump.
+- A `.chd` that chdman made of the supported dump.
 - Not a cooked 2048-byte ISO, and not a PAL or Japanese disc as the game
   disc. Those discs can give the game its language, see
   [Other languages](#other-languages).
 
-An import needs about 610 MiB of free space.
+An import needs about 610 MiB of free space, about 425 MiB for a CHD.
 
 ### Play
 
@@ -173,8 +175,8 @@ weapons have these at first, the powers none:
 settings, is Modern or Classic.
 
 - **Modern:** WASD and the mouse. The left button fires, the right one uses
-  psionics, the side buttons choose weapon and psionic. The Up and Down arrows
-  also walk while no action has them.
+  psionics, the side buttons choose weapon and psionic: they are these actions'
+  second keys. The Up and Down arrows also walk while no action has them.
 - **Classic:** the original keys. The mouse only turns the view.
 
 The **Keys** table under it puts any action on another key: click the key,
@@ -183,8 +185,15 @@ takes the old key. Delete takes an action's key away. **Default keys** brings
 back the scheme's own keys once you say yes. It is greyed out while the keys
 are the scheme's own.
 
+Each action takes two keys. The second may be a mouse button: click the second
+key, then click it with the button. The left, the right and the two side
+buttons can be given. The middle button stays the one that frees and holds the
+mouse. A mouse button works while the game holds the mouse, in either scheme,
+and only as a second key.
+
 **Profiles** keep two sets of keys: Save to 1 or 2 keeps every key of the page,
-the weapons' and the powers' too, and Load 1 or 2 brings one back. Save asks
+the second keys and the weapons' and the powers' too, and Load 1 or 2 brings
+one back. A profile saved before second keys existed leaves them as they are. Save asks
 before it replaces a profile saved earlier. The scheme and the mouse settings
 stay out of a profile. The profiles are `keys-1.ini` and `keys-2.ini` beside
 `keybinds.ini`.
@@ -198,9 +207,9 @@ These keys do the same in both schemes and cannot be changed:
 - **F12** loads the newest replay capsule. Ctrl+F12 records one.
 - **Alt+Enter** switches between a window and fullscreen.
 
-The keys are kept in `keybinds.ini` in the folder of your files. A change of
-scheme brings the other scheme's layout only while the keys are a scheme's
-own: keys you set yourself stay.
+The keys are kept in `keybinds.ini` in the folder of your files, the second
+keys in `settings.toml`. A change of scheme brings the other scheme's layout
+only while the keys are a scheme's own: keys you set yourself stay.
 
 ### Mouse
 
@@ -216,9 +225,20 @@ own: keys you set yourself stay.
 A connected gamepad plays beside the keyboard and mouse. The launcher's
 Controls page and the game's Controls tab name the one connected.
 
+**Stick layout** sets what the sticks do in play:
+
+| Stick layout | Left stick | Right stick |
+| --- | --- | --- |
+| Dual analog, at first | Move and strafe | Turn |
+| Classic | Move and turn, as the D-pad | Nothing |
+| Southpaw | Turn | Move and strafe |
+
+The original game read only the buttons, so the sticks here are an addition.
+In menus the left stick works as the D-pad in every layout.
+
 | Xbox | PlayStation | In the game |
 | --- | --- | --- |
-| Left stick or D-pad | Left stick or D-pad | Move and turn |
+| D-pad | D-pad | Move and turn |
 | A | Cross | Fire, confirm |
 | B | Circle | Jump, cancel |
 | X | Square | Psionic attack |
@@ -230,12 +250,18 @@ Controls page and the game's Controls tab name the one connected.
 | View | Create | Map |
 | Menu | Options | Pause |
 
-- **Stick dead zone** sets how far the stick moves before it counts. Raise it
-  if you walk or turn without touching the stick.
+- A light push of the turning stick turns slowly, for fine aim. A full push
+  turns as fast as the D-pad at **Turning speed** 100%, which goes from 25% to
+  300%. **Smooth mouse turning** smooths the stick's turn too.
+- **Turning dead zone** sets how far the turning stick moves before it turns.
+- With **Vertical mouse look** on, the turning stick also looks up and down.
+  **Invert vertical stick** turns that around.
+- **Stick dead zone** sets how far the moving stick goes before it counts.
+  Raise it if you walk without touching the stick.
 - To change a button, connect the gamepad, click the button on the launcher's
   Controls page, then press the new one on the gamepad. Escape cancels.
-  **Default buttons** brings back the table above once you say yes. The left
-  stick and the D-pad always move and turn.
+  **Default buttons** brings back the table above once you say yes. The sticks
+  and the D-pad keep their places.
 - The buttons are kept in `input.ini`, in the folder of your files.
 
 ## Settings
@@ -358,8 +384,8 @@ still needed.
 ### Add a language disc
 
 - **In the launcher:** press **Add disc...** under **Language**, or drop the
-  image on the window. The launcher checks that it fits your US disc and uses
-  it where it is. It is not copied, so keep it there.
+  image on the window. A CUE, BIN or CHD works. The launcher checks that it
+  fits your US disc and uses it where it is. It is not copied, so keep it there.
 - **In the game:** open **Settings → Language**, press **Choose a disc
   image**, then press **Restart now**.
 
@@ -595,7 +621,8 @@ describe the replay tool and its limits.
 - **Import rejected:** only the complete, unmodified USA raw dump is taken.
   Cooked ISO files, other regions, missing CUE tracks, offset tracks and
   multi-track layouts are refused. A correct raw BIN alone works too: the
-  launcher writes its CUE.
+  launcher writes its CUE. A CHD has to hold the same one MODE2/2352 track,
+  as chdman makes it of the dump's CUE.
 - **Import cancelled or interrupted:** your source files are untouched.
   Choose the image again. Incomplete data is never used to start the game.
 - **Wrong disc or the game does not start:** only the supported USA revision

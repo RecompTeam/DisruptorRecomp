@@ -58,6 +58,7 @@ set(DISRUPTOR_EXTRA_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/audio/bass_cut.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings/saved.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings/user_folder.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings/game_mark.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/intro_skip.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/language.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/language_briefing.cpp"
@@ -296,6 +297,7 @@ if(BUILD_TESTING)
     disruptor_contract(world_texel)
     disruptor_contract(near_face)
     disruptor_contract(smooth_turn)
+    disruptor_contract(sticks)
     disruptor_contract(probe_lighting)
     disruptor_contract(ambient_occlusion)
     disruptor_contract(smooth_fade)
@@ -357,11 +359,14 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
 
     disruptor_unit_test(disruptor_user_folder tests/unit/user_folder_test.cpp RUNTIME_HEADERS
         SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings/user_folder.cpp")
+    disruptor_unit_test(disruptor_game_mark tests/unit/game_mark_test.cpp
+        SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings/game_mark.cpp")
 
     disruptor_unit_test(disruptor_mouse_aim tests/unit/disruptor_mouse_aim_test.cpp
         SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings/user_folder.cpp"
         INCLUDES tests/support/stubs "${PSXRECOMP_ROOT}/runtime/include"
         DEFINITIONS PSX_SDL3=1)
+    disruptor_unit_test(disruptor_sticks tests/unit/disruptor_sticks_test.cpp INCLUDES src)
     disruptor_unit_test(disruptor_selection_wheel tests/unit/disruptor_selection_wheel_test.cpp
         INCLUDES tests/support/stubs DEFINITIONS PSX_SDL3=1)
     set_tests_properties(disruptor_mouse_aim PROPERTIES
@@ -422,7 +427,9 @@ disruptor_unit_test(disruptor_bass_cut tests/unit/disruptor_bass_cut_test.cpp
     disruptor_unit_test(disruptor_language_briefing tests/unit/disruptor_language_briefing_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_language_disc tests/unit/disruptor_language_disc_test.cpp)
     disruptor_unit_test(disruptor_launcher_menu_art tests/unit/launcher_menu_art_test.cpp
-        SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/launcher/menu_art.cpp")
+        RUNTIME_HEADERS SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/launcher/menu_art.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/src/launcher/chd_image.cpp"
+            "${PSXRECOMP_ROOT}/runtime/src/iso_reader.cpp" "${PSXRECOMP_ROOT}/runtime/src/cue_sheet.cpp")
+    target_link_libraries(disruptor-launcher-menu-art-test PRIVATE chdr-static)
     disruptor_unit_test(disruptor_language_overlay tests/unit/disruptor_language_overlay_test.cpp
         INCLUDES
             "${PSXRECOMP_ROOT}/runtime/include"

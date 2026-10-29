@@ -1,5 +1,6 @@
 #include "report.h"
 
+#include "build_version.h"
 #include "launcher_settings.h"
 #include "platform.h"
 
@@ -18,10 +19,6 @@
 #include <system_error>
 #include <utility>
 #include <vector>
-
-#ifndef DISRUPTOR_BUILD_VERSION
-#define DISRUPTOR_BUILD_VERSION "unknown"
-#endif
 
 namespace fs = std::filesystem;
 namespace disruptor::launcher {

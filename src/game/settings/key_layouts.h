@@ -21,13 +21,6 @@ inline constexpr std::array<const char*, key_count> classic_keys = {
     "Up", "Down", "Left", "Right", "X", "S", "Z", "A", "Q", "W", "E", "R",
     "T", "Y", "Return", "Right Shift", "Up", "Down", "Left", "Right", "None", "None", "None", "None"};
 
-struct MouseButton {
-    const char* field;
-    const char* name;
-};
-inline constexpr std::array<MouseButton, 4> modern_mouse = {{
-    {"cross", "Left click"}, {"square", "Right click"}, {"l1", "Mouse 4"}, {"r1", "Mouse 5"}}};
-
 using KeyLayout = std::array<std::string, key_count>;
 
 inline KeyLayout layout_of(const std::array<const char*, key_count>& names) {
