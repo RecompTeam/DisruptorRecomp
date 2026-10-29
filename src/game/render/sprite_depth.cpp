@@ -57,6 +57,10 @@ constexpr int32_t kFarColumn = 4096;  /* past this a 16.16 column no longer fits
 constexpr int32_t kHorizon = 120;
 constexpr uint32_t kReciprocals = 0x80057E98u;  /* 65536 / n in 16 bits, a table the game builds at start */
 constexpr uint32_t kCameraHeight = 0x800775D0u;
+constexpr uint32_t kActorFloor = 40u;     /* a halfword of the actor ($s5) the shadow block 0x8003D2FC hangs its shadow from */
+constexpr uint32_t kShadowDrop = 244u;    /* a word of the actor's type ($s6): how far under it the shadow lies */
+constexpr uint8_t kActorGpr = 21u;
+constexpr uint8_t kActorTypeGpr = 22u;
 constexpr uint32_t kShadowPacketSite = 0x8003D488u;
 constexpr uint32_t kEffectPacketSite = 0x8003C848u;
 constexpr uint8_t kShotRecordGpr = 19u; /* $s3: the shot the draw 0x8003C000 is at, from 0x8003C03C to 0x8003CAF4 */
@@ -87,6 +91,7 @@ constexpr uint32_t kSpriteCode = 0x2Cu;
 constexpr uint32_t kSpriteCodeMask = 0xFCu;
 constexpr int kLinksWalked = 8192;
 constexpr double kUpright = 0.6;  /* a face whose normal rises less than this share of its length is a wall */
+constexpr double kLedge = 0.75;  /* a level face this share of the half height under a body's middle or less stands above its foot */
 constexpr std::size_t kMovedMost = 64;
 constexpr uint32_t kTagWords = 0xFF000000u;
 
@@ -147,6 +152,8 @@ struct Sprite {
     int32_t key = 0;
     int32_t walked = 0;
     int32_t led = 0;
+    /* An actor's ground above the camera, in the depth's units: where the game lays its shadow. */
+    std::optional<int32_t> ground;
 };
 
 struct Box {
@@ -308,6 +315,15 @@ struct Effect {
                              .height = scaled(extent->tall, sprite.depth),
                              .shadow = false};
     }
+    /* Only where the game lays a shadow (0x8003D23C) is its drop the way down to the ground. */
+    if (const int32_t drop = funnel.size == Size::Body && readable(cpu)
+                                 ? static_cast<int32_t>(cpu.read_word(cpu.gpr[kActorTypeGpr] + kShadowDrop))
+                                 : 0;
+        drop > 0) {
+        const int32_t height = static_cast<int32_t>(cpu.read_half(cpu.gpr[kActorGpr] + kActorFloor)) - drop -
+                               static_cast<int32_t>(cpu.read_word(kCameraHeight));
+        sprite.ground = height * kGteDepthPerSpriteDepth;
+    }
     return sprite;
 }
 
@@ -374,10 +390,12 @@ struct Walk {
     int64_t reached;
 };
 
-/* A body's camera depth and its reach towards the eye, half its width in the world, both in GTE units, and its middle on the screen. */
+/* A body's camera depth, its reach towards the eye and down to its foot (half its width and height in the world), all in GTE
+ * units, and its middle on the screen. */
 struct Front {
     double depth;
     double reach;
+    double down;
     double x;
     double row;
 };
@@ -388,6 +406,7 @@ struct Front {
     const double width = static_cast<double>(sprite.shape->width) / kOne * sprite.depth / kFocal * kGteDepthPerSpriteDepth;
     return Front{.depth = depth,
                  .reach = width / 2.0,
+                 .down = static_cast<double>(sprite.shape->height) / kOne * sprite.depth / kFocal * kGteDepthPerSpriteDepth / 2.0,
                  .x = static_cast<double>(sprite.place->x) / kOne,
                  .row = static_cast<double>(sprite.shape->row) / kOne};
 }
@@ -440,9 +459,17 @@ struct Front {
 
 /* How the world polygon at `at` (corners from the GTE) hides the body, nearer than it by more than its reach: an upright face
  * over its box stands in front of it, another over the box's upper half lies over it as a floor over a drone. The lower half
- * is left out, as there the floor before a body lying on it falls. An upright face nearer than the body over the upper half,
- * with the body's middle past its plane, is one the body lies behind (`past`), as a pickup under a shut door. */
+ * is left out, as there the floor before a body lying on it falls, unless that level face stands above the body's foot, as
+ * the top of a column's base before a body on the floor. An upright face nearer than the body over the upper half, with the
+ * body's middle past its plane, is one the body lies behind (`past`), as a pickup under a shut door. */
 enum class Cover { none, front, past, over };
+
+/* A level face nearer than the body by more than its reach over its box (`under`), whose plane stands `square` under its
+ * middle on the eye's side, `rise` the share of its normal that is upright: straight down that is less than kLedge of the
+ * body's half height, above its foot, so a ledge before it and not the floor or slope it stands on. */
+[[nodiscard]] constexpr bool ledge_before(double under, double square, double rise, const Front& front) {
+    return under > 0.0 && under < front.depth - front.reach && square > 0.0 && rise > 0.0 && square / rise < kLedge * front.down;
+}
 
 [[nodiscard]] Cover occludes(const CPUState& cpu, uint32_t at, uint32_t tag, const Box& box, const Front& front) {
     const uint32_t code = cpu.read_byte(at + 7u);
@@ -494,6 +521,9 @@ enum class Cover { none, front, past, over };
             if (above > 0.0 && above < front.depth) return Cover::past;
         }
         if (found == Cover::none && nearest > 0.0 && nearest < front.depth - front.reach) found = upright ? Cover::front : Cover::over;
+        if (found == Cover::none && !upright &&
+            ledge_before(over(box), -past_plane(normal, length, camera[a], middle), std::fabs(normal[1]) / length, front))
+            found = Cover::over;
     }
     return found;
 }
@@ -802,4 +832,6 @@ extern "C" void disruptor_sprite_depth_packet(
         gpu_temporal_size_sprite(packet, sprite.shape->row, sprite.shape->width, sprite.shape->height,
                                  sprite.shape->shadow, packet_site == kDeferredPacketSite);
     }
+    if (const std::optional<Front> front = front_of(sprite); front && sprite.ground)
+        gpu_temporal_ground_sprite(packet, static_cast<float>(*sprite.ground), static_cast<float>(front->reach));
 }

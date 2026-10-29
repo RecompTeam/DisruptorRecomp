@@ -190,7 +190,7 @@ require(
     and "    smooth_fade_uniforms(u->fade, u->fade_at, u->fade_power, u->fade_blocks, u->fade_block_count, s_temp_fade_nearer);\n    edge_dissolve_batch(u->dissolve,u->clear,c->semi,c->check);\n"
     in presenter
     and "    if (semi < 0) {\n        opaque_blend();\n" in renderer
-    and presenter.count("opaque_blend()") == 3
+    and presenter.count("opaque_blend()") == 4
     and "    } else if (c->semi<0) {\n        opaque_blend(); temporal_mask(c->check,c->mask);\n        p_glUniform1i(u->pass,0);"
     in presenter
     and "    gl_renderer_set_edge_sky(disruptor_backdrop_tiles_sky_behind(psx_mod_read_word(kVBlanks)));\n"

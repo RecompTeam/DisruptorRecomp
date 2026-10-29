@@ -58,6 +58,8 @@ struct GameUserSettings {
     bool has_edge_smoothing = false; bool edge_smoothing = false;
     bool has_gap_filling = false; bool gap_filling = true;
     bool has_depth_sorted_world = false; bool depth_sorted_world = false;
+    bool has_facing_sprites = false; bool facing_sprites = false;
+    bool has_sprite_depth_read = false; bool sprite_depth_read = true;  // no menu entry: a way out on a driver that misreads
     bool has_movie_filter = false; int movie_filter = 1;  // an index into kDisruptorMovieFilters
     bool has_detailed_logging = false; bool detailed_logging = false;
     bool has_draw_distance = false; int draw_distance = 100;  // percent of the game's own, one of kDisruptorDrawDistances

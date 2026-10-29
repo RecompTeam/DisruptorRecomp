@@ -142,6 +142,15 @@ static void rtb_set_temporal_sprite(float depth, const float sides[4]) {
     }
     glb_set_temporal_sprite(depth, sides);
 }
+static void rtb_set_temporal_sprite_ground(float ground, float reach) {
+    const float v[2] = {ground, reach};
+    if (rth_record_mode() && rth_put(RTH_SPRITE_GROUND, 0, v, sizeof v)) return;
+    glb_set_temporal_sprite_ground(ground, reach);
+}
+static void rtb_set_sprite_card(const float card[8]) {
+    if (rth_record_mode() && card && rth_put(RTH_SPRITE_CARD, 0, card, 8 * sizeof(float))) return;
+    glb_set_sprite_card(card);
+}
 #endif
 static void rtb_set_screen_tile(const PsxWsPlacedTile *tile) {
     if (rth_record_mode()) {
@@ -333,6 +342,8 @@ static const GpuRenderBackend GL_RT_BACKEND = {
     .set_surface_depth_triangle = rtb_set_surface_depth_triangle,
     .set_temporal_identity_triangle = rtb_set_temporal_identity_triangle,
     .set_temporal_sprite = rtb_set_temporal_sprite,
+    .set_temporal_sprite_ground = rtb_set_temporal_sprite_ground,
+    .set_sprite_card = rtb_set_sprite_card,
 #else
     .set_temporal_depth_triangle = NULL,
     .set_temporal_identity_triangle = NULL,
@@ -395,6 +406,8 @@ static void gl_rth_exec(void *user, const RtCmd *c, const void *payload) {
         break;
     }
     case RTH_SPRITE: glb_set_temporal_sprite(fv[0], fv[5] != 0.0f ? &fv[1] : NULL); break;
+    case RTH_SPRITE_CARD: glb_set_sprite_card(fv); break;
+    case RTH_SPRITE_GROUND: glb_set_temporal_sprite_ground(fv[0], fv[1]); break;
 #endif
     case RTH_TILE: {
         int32_t has;

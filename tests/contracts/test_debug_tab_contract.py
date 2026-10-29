@@ -184,7 +184,7 @@ require(
     )
     and flush.count("geometry_visual_uniforms(") == 3
     and "apply_psx_blend" not in body(renderer, "static void tex_batch_draw_passes(int nverts, int semi) {")
-    and temporal.count("apply_texel_blend(c->semi, 1); temporal_mask(c->check,1);") == 2
+    and temporal.count("apply_texel_blend(c->semi, 1); temporal_mask(c->check,1);") == 3
     and "apply_texel_blend" not in temporal.replace("apply_texel_blend(c->semi, 1); temporal_mask(c->check,1);", ""),
     "the UV view starts off and shows, on the mirror alone, where a textured pixel lies in its texture: u and v as waves of 16 "
     "texels down and 16 up with no step, and the 16-texel cell, with the world's blended fragments left out and a flat "

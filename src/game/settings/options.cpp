@@ -240,6 +240,11 @@ constexpr Option option_list[] = {
     toggle<&Settings::has_depth_sorted_world, &Settings::depth_sorted_world>(
         "disruptor.depth_sorted_world", "Depth-sorted world", 1,
         "Keeps nearer world surfaces in front of farther ones", needs_geometry),
+    toggle<&Settings::has_facing_sprites, &Settings::facing_sprites>(
+        "disruptor.facing_sprites", "Sprites face the camera", 0,
+        "Enemies, pickups and shots turn to face you instead of the screen\n"
+        "Close by they turn less, at your feet not at all\n"
+        "Toward the screen's sides they get wider, as walls do", needs_geometry),
     toggle<&Settings::has_smooth_fade, &Settings::smooth_fade>(
         "disruptor.smooth_fade", "Smooth distance fade", 1,
         "Fades walls and floors evenly into the distance\n"

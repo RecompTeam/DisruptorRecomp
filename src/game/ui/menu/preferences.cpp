@@ -166,6 +166,8 @@ void mark_gap_filling(bool value) { mark("disruptor.gap_filling", value); }
 
 void mark_world_depth(bool value) { mark("disruptor.depth_sorted_world", value); }
 
+void mark_facing_sprites(bool value) { mark("disruptor.facing_sprites", value); }
+
 // What the renderer took, so a value it clamped or a variable set is saved as seen.
 void mark_lighting() {
     const auto percent = [](float amount) { return static_cast<int>(std::lround(amount * 100.0f)); };
@@ -412,6 +414,8 @@ void apply_saved_preferences(const PSXRecompV4::UserSettings &settings) {
         gl_renderer_set_gap_fill(settings.gap_filling ? 1 : 0);
     if (settings.has_depth_sorted_world && !env_override_present("PSX_GL_WORLD_DEPTH"))
         gl_renderer_set_world_depth(settings.depth_sorted_world ? 1 : 0);
+    if (settings.has_facing_sprites) gpu_facing_sprites_set(settings.facing_sprites ? 1 : 0);
+    if (settings.has_sprite_depth_read) gl_renderer_set_sprite_depth_read(settings.sprite_depth_read ? 1 : 0);
     apply_sticks(settings);
     // The renderer reads the PSX_DDGI variables at its first update, after this: they still win.
     apply_sun(settings);
@@ -531,6 +535,8 @@ void apply_pending_preferences() {
         gl_renderer_set_gap_fill(pending.gap_filling ? 1 : 0);
     if (changed("disruptor.depth_sorted_world"))
         gl_renderer_set_world_depth(pending.depth_sorted_world ? 1 : 0);
+    if (changed("disruptor.facing_sprites"))
+        gpu_facing_sprites_set(pending.facing_sprites ? 1 : 0);
     if (changed("disruptor.probe_lighting") || changed("disruptor.probe_strength") || changed("disruptor.probe_bounce") ||
         changed("disruptor.probe_glow") || changed("disruptor.dynamic_shadows") || changed("disruptor.shadow_strength") ||
         changed("disruptor.shadow_underneath") || changed("disruptor.shot_lights") ||

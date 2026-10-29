@@ -54,7 +54,7 @@ require(
 )
 require(
     "if (t && t->stamp == (uint32_t)s_frame_count && gain > 0.0f) t->light = gain;" in gpu
-    and "    t->light = 0.0f;\n" in gpu
+    and "    t->light = t->ground = t->reach = 0.0f;\n" in gpu
     and "card->light = tag->light > 0.0f ? tag->light : 1.0f;" in ddgi
     and "* area * card->light;" in scene,
     "the gain goes with the sprite's tag to its card and into its lamp's power, which sets the reach too",

@@ -134,7 +134,7 @@ require(
 )
 require(
     "char *geo_vs=temporal_ordered_shader(GEO_VS,4), *tex_vs=temporal_ordered_shader(TEX_VS,12);" in temporal
-    and "const int offsets[13]={0,2,4,8,10,12,13,14,18,19,20,22,23};" in temporal
+    and "const int offsets[14]={0,2,4,8,10,12,13,14,18,19,20,22,23,24};" in temporal
     and "const int gs[5]={2,4,1,2,1}, go[5]={0,2,6,7,9};" in temporal,
     "the presenter must build its own shaders and feed them the depth slot of each vertex",
 )
@@ -408,7 +408,7 @@ require(
     in take
     and "py[i] = (float)ys[i] + (sprite ? s_sprite_sides[ys[i] == s_sprite_y ? 1 : 3] : 0.0f);" in take
     and "return (world || sprite || unpinned ? 1 : 0) | (exact ? 2 : 0) | (filler ? 4 : 0);" in take
-    and "    memcpy(s_sprite_sides, s_next_sprite_sides, sizeof(s_sprite_sides));\n    memset(s_next_sprite_sides, 0, sizeof(s_next_sprite_sides));\n    memcpy(s_flat_sides, s_next_flat_sides, sizeof(s_flat_sides));\n    memset(s_next_flat_sides, 0, sizeof(s_next_flat_sides));\n    s_sprite_x = x; s_sprite_y = y;\n"
+    and "    memcpy(s_sprite_sides, s_next_sprite_sides, sizeof(s_sprite_sides));\n    memset(s_next_sprite_sides, 0, sizeof(s_next_sprite_sides));\n    memcpy(s_sprite_ground, s_next_sprite_ground, sizeof(s_sprite_ground));\n    memset(s_next_sprite_ground, 0, sizeof(s_next_sprite_ground));\n    memcpy(s_flat_sides, s_next_flat_sides, sizeof(s_flat_sides));\n    memset(s_next_flat_sides, 0, sizeof(s_next_flat_sides));\n    s_sprite_x = x; s_sprite_y = y;\n"
     in rect,
     "a sprite's unrounded place must reach the presentation of its own rectangle only, and only with geometry correction",
 )

@@ -3,6 +3,7 @@
 #include <array>
 #include <cmath>
 #include <iostream>
+#include <utility>
 
 namespace {
 
@@ -193,6 +194,181 @@ void test_a_shadow_lies_flat_when_asked() {
     expect(is(sides(&stray, under(1)), 0, 0, 0, 0), "and its left and right keep the limit of three pixels");
 }
 
+bool near(double got, double wanted, double room) { return std::isfinite(got) && std::fabs(got - wanted) <= room; }
+
+/* sized() moved along the row so that its point is `column`, its rectangle following to within a pixel. */
+std::pair<GpuTemporalSprite, Drawn> at_column(float column, float scale = 1.0f) {
+    GpuTemporalSprite sprite = sized();
+    sprite.centre_x = column;
+    Drawn drawn;
+    drawn.scale = scale;
+    drawn.w = static_cast<int>(std::lround(9.1f * scale));
+    drawn.left = std::floor(column - 0.25f * scale - static_cast<float>(drawn.w) * 0.5f);
+    return {sprite, drawn};
+}
+
+int card(const GpuTemporalSprite &sprite, const Drawn &drawn, GpuSpriteCard &out, float horizon = 120.0f) {
+    return gpu_sprite_card(&sprite, drawn.left, drawn.top, drawn.w, drawn.h, drawn.raw_w, drawn.raw_h, drawn.scale, horizon, &out);
+}
+
+/* The camera-space point of a card's side, its depth a share of the middle's, from where it is drawn. */
+std::array<double, 2> side_point(const GpuSpriteCard &turned, const Drawn &drawn, int side) {
+    const double x = (side ? drawn.left + drawn.w : drawn.left) + turned.x[side], depth = 1.0 / turned.q[side];
+    return {(x - 160.0) / (160.0 * drawn.scale) * depth, depth};
+}
+
+void test_a_card_in_the_middle_is_the_flat_sprite() {
+    const auto [sprite, drawn] = at_column(160.15f);
+    GpuSpriteCard turned{};
+    std::array<float, 4> flat = sides(&sprite, drawn);
+    expect(card(sprite, drawn, turned) == 1, "a sized sprite becomes a card");
+    expect(near(turned.x[0], flat[0], 0.002) && near(turned.x[1], flat[2], 0.002), "in the view's middle its sides are the flat sprite's");
+    expect(near(turned.y[0], flat[1], 0.002) && near(turned.y[1], flat[1], 0.002) && near(turned.y[2], flat[3], 0.002) &&
+           near(turned.y[3], flat[3], 0.002), "and so are its corners' rows");
+    expect(near(turned.q[0], 1.0, 0.0001) && near(turned.q[1], 1.0, 0.0001), "both sides stand at the middle's depth");
+}
+
+void test_a_card_aside_faces_the_camera() {
+    for (const float scale : {1.0f, 0.75f}) {
+        for (const float column : {40.0f, 104.65f, 230.0f, 300.0f}) {
+            const auto [sprite, drawn] = at_column(column, scale);
+            GpuSpriteCard turned{};
+            expect(card(sprite, drawn, turned) == 1, "a card aside is made");
+            const auto left = side_point(turned, drawn, 0), right = side_point(turned, drawn, 1);
+            const double aside = (column - 0.25 * scale - 160.0) / (160.0 * scale);
+            const double edge[2] = {right[0] - left[0], right[1] - left[1]};
+            expect(near(edge[0] * aside + edge[1], 0.0, 1e-5), "its edge stands across the line from the camera to its middle");
+            expect(near(std::hypot(edge[0], edge[1]), 9.1 / 160.0, 1e-5), "and is as wide in the world as the flat sprite at its middle");
+            expect(near((left[0] + right[0]) * 0.5, aside, 1e-5) && near((left[1] + right[1]) * 0.5, 1.0, 1e-5),
+                   "its middle stays where the game put the sprite");
+            const double drawn_width = (drawn.w + turned.x[1]) - turned.x[0];
+            expect(drawn_width > 9.1 * scale * std::sqrt(1.0 + aside * aside) - 0.01 && drawn_width > 9.1 * scale,
+                   "on screen it is wider than the flat sprite, as the world is toward the sides");
+            const int nearer = column > 160.0f ? 1 : 0;
+            expect(turned.q[nearer] > 1.0f && turned.q[1 - nearer] < 1.0f, "its outer side is the nearer one");
+            for (int side = 0; side < 2; ++side) {
+                const double top = (drawn.top + turned.y[side] - 120.0) / turned.q[side];
+                const double bottom = (drawn.top + drawn.h + turned.y[2 + side] - 120.0) / turned.q[side];
+                expect(near(top, 59.75 - 9.35 - 120.0, 1e-4) && near(bottom, 59.75 + 9.35 - 120.0, 1e-4),
+                       "each side's top and bottom are the flat sprite's at that side's depth");
+            }
+        }
+    }
+}
+
+void test_cards_mirror_about_the_middle() {
+    const auto [left_sprite, left_drawn] = at_column(100.25f);
+    const auto [right_sprite, right_drawn] = at_column(220.25f);
+    GpuSpriteCard a{}, b{};
+    expect(card(left_sprite, left_drawn, a) == 1 && card(right_sprite, right_drawn, b) == 1, "both cards are made");
+    const double a_left = left_drawn.left + a.x[0] - 160.0, a_right = left_drawn.left + left_drawn.w + a.x[1] - 160.0;
+    const double b_left = right_drawn.left + b.x[0] - 160.0, b_right = right_drawn.left + right_drawn.w + b.x[1] - 160.0;
+    expect(near(a_left, -b_right, 1e-3) && near(a_right, -b_left, 1e-3), "a card as far left as another is right mirrors it");
+    expect(near(a.q[0], b.q[1], 1e-5) && near(a.q[1], b.q[0], 1e-5), "and so do the depths of its sides");
+}
+
+void test_the_horizon_turns_the_rows() {
+    const auto [sprite, drawn] = at_column(250.0f);
+    GpuSpriteCard low{}, high{};
+    expect(card(sprite, drawn, low, 120.0f) == 1 && card(sprite, drawn, high, 20.0f) == 1, "cards under two horizons are made");
+    expect(near(low.y[0] - high.y[0], (120.0 - 20.0) * (1.0 - low.q[0]), 1e-3),
+           "a row moves toward the horizon by its distance from it, as its side's depth grows");
+    const double tall_near = (drawn.h + low.y[3]) - low.y[1], tall_far = (drawn.h + low.y[2]) - low.y[0];
+    expect(tall_near > tall_far, "the nearer side is the taller");
+}
+
+void test_what_stays_flat() {
+    const auto [sprite, drawn] = at_column(230.0f);
+    GpuSpriteCard turned{};
+    GpuTemporalSprite other = sprite;
+    other.shadow = 1;
+    expect(card(other, drawn, turned) == 0, "a shadow lies on the floor and is not turned");
+    other = sprite;
+    other.sized = 0;
+    expect(card(other, drawn, turned) == 0, "a sprite of no own size stays flat");
+    other = sprite;
+    other.placed = 0;
+    expect(card(other, drawn, turned) == 0, "nor one without a place");
+    other = sprite;
+    other.width = 13.6f;
+    expect(card(other, drawn, turned) == 0, "nor one whose size is not its packet's");
+    Drawn moved = drawn;
+    moved.left += 4.0f;
+    expect(card(sprite, moved, turned) == 0, "nor one whose point is more than three pixels from its rectangle's middle");
+    expect(gpu_sprite_card(nullptr, 0, 0, 9, 19, 10, 20, 1.0f, 120.0f, &turned) == 0, "nor one nothing is known about");
+    GpuTemporalSprite thin = sprite;
+    thin.width = 1.5f;
+    Drawn narrow = drawn;
+    narrow.w = 1;
+    narrow.raw_w = 2;
+    narrow.left = std::floor(thin.centre_x - 0.25f);
+    expect(card(thin, narrow, turned) == 0, "nor one whose own width is nothing");
+    thin.width = 2.2f;
+    expect(card(thin, narrow, turned) == 0, "or under a pixel");
+    thin = sprite;
+    thin.height = 2.3f;
+    Drawn low = drawn;
+    low.h = 1;
+    low.raw_h = 2;
+    low.top = 59.0f;
+    expect(card(thin, low, turned) == 0, "nor one under a pixel tall");
+    thin.height = 3.0f;
+    expect(card(thin, low, turned) == 1, "a pixel and a half tall is a card");
+}
+
+/* A sprite `wide` across and twice as tall around row 59.75, its point at `column`: half `wide` / 320 of its depth. */
+std::pair<GpuTemporalSprite, Drawn> big_at(float column, float wide) {
+    GpuTemporalSprite sprite = sized();
+    sprite.centre_x = column;
+    sprite.width = wide + 1.5f;
+    sprite.height = 2.0f * wide + 1.5f;
+    Drawn drawn;
+    drawn.w = static_cast<int>(std::lround(wide));
+    drawn.raw_w = drawn.w + 1;
+    drawn.h = 2 * drawn.w;
+    drawn.raw_h = drawn.h + 1;
+    drawn.left = std::floor(column - 0.25f - static_cast<float>(drawn.w) * 0.5f);
+    drawn.top = std::floor(59.75f - static_cast<float>(drawn.h) * 0.5f);
+    return {sprite, drawn};
+}
+
+void test_a_near_sprite_turns_less() {
+    expect(near(gpu_sprite_card_share(0.1f), 1.0, 1e-6) && near(gpu_sprite_card_share(0.15f), 1.0, 1e-6),
+           "a card whose half width is up to 0.15 of its depth turns all the way");
+    expect(near(gpu_sprite_card_share(0.25f), 0.5, 1e-6), "one at 0.25 half way");
+    expect(near(gpu_sprite_card_share(0.35f), 0.0, 1e-6) && near(gpu_sprite_card_share(0.6f), 0.0, 1e-6),
+           "and one at 0.35 or nearer not at all");
+    for (const float column : {60.0f, 250.0f}) {
+        const auto [sprite, drawn] = big_at(column, 80.0f);
+        GpuSpriteCard turned{};
+        expect(card(sprite, drawn, turned) == 1, "a sprite a quarter of its depth wide each way becomes a card");
+        const auto left = side_point(turned, drawn, 0), right = side_point(turned, drawn, 1);
+        const double aside = (column - 0.25 - 160.0) / 160.0;
+        expect(near(std::atan2(left[1] - right[1], right[0] - left[0]), 0.5 * std::atan(aside), 1e-4), "and turns half way");
+        expect(near(std::hypot(right[0] - left[0], right[1] - left[1]), 80.0 / 160.0, 1e-4), "keeping its width in the world");
+        expect(near((left[0] + right[0]) * 0.5, aside, 1e-5) && near((left[1] + right[1]) * 0.5, 1.0, 1e-5),
+               "and its middle where the game put it");
+    }
+    const auto [body, drawn] = big_at(300.0f, 140.0f);
+    GpuSpriteCard turned{};
+    expect(card(body, drawn, turned) == 0, "a body at the player's feet stays flat");
+}
+
+void test_a_cards_width_in_camera_space() {
+    double across[2];
+    gpu_sprite_card_across(0.0, 200.0, 8.0, across);
+    expect(near(across[0], 8.0, 1e-9) && near(across[1], 0.0, 1e-9), "straight ahead a card's width runs along the camera's x");
+    gpu_sprite_card_across(100.0, 100.0, 8.0, across);
+    expect(near(across[0], 8.0 / std::sqrt(2.0), 1e-9) && near(across[1], -8.0 / std::sqrt(2.0), 1e-9),
+           "at 45 degrees to the right it turns its right end toward the camera");
+    gpu_sprite_card_across(100.0, 100.0, 25.0, across);
+    expect(near(std::atan2(-across[1], across[0]), std::atan(1.0) * 0.5, 1e-6), "a card a quarter of its depth wide turns half way");
+    gpu_sprite_card_across(100.0, 100.0, 50.0, across);
+    expect(near(across[0], 50.0, 1e-9) && near(across[1], 0.0, 1e-9), "and one nearer keeps the camera's x");
+    gpu_sprite_card_across(0.0, 0.0, 8.0, across);
+    expect(near(across[0], 8.0, 1e-9) && near(across[1], 0.0, 1e-9), "at the camera itself it keeps the camera's x");
+}
+
 }  // namespace
 
 int main() {
@@ -201,7 +377,14 @@ int main() {
     test_a_placed_sprite_moves_whole();
     test_a_sized_sprite_takes_its_own_sides();
     test_a_shadow_lies_flat_when_asked();
+    test_a_card_in_the_middle_is_the_flat_sprite();
+    test_a_card_aside_faces_the_camera();
+    test_cards_mirror_about_the_middle();
+    test_the_horizon_turns_the_rows();
+    test_what_stays_flat();
+    test_a_near_sprite_turns_less();
+    test_a_cards_width_in_camera_space();
     if (g_failures) return 1;
-    std::cout << "GPU sprite side tests passed\n";
+    std::cout << "GPU sprite side and card tests passed\n";
     return 0;
 }

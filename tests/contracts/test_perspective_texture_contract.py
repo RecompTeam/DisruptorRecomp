@@ -261,7 +261,7 @@ def main() -> int:
     )
 
     # The appended temporal depth is CPU metadata: expanding the record must not shift attributes.
-    require("#define TEXV 24" in gl, "textured GL vertices must retain independent q and temporal depth")
+    require("#define TEXV 27" in gl, "textured GL vertices must retain independent q and temporal depth")
     tex_vs = source_span(gl, "static const char *TEX_VS", "static const char *TEX_FS")
     tex_fs = source_span(gl, "static const char *TEX_FS", "static const char *BLIT_VS")
     require("layout(location=11) in float a_q" in tex_vs, "TEX_VS must consume q at attribute location 11")

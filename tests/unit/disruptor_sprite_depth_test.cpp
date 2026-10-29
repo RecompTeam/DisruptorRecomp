@@ -116,6 +116,16 @@ extern "C" void gpu_temporal_size_sprite(std::uint32_t packet, std::int32_t row,
     g_sizes.push_back({packet, row, width, height, shadow, whole});
 }
 
+struct Ground {
+    std::uint32_t packet;
+    float ground, reach;
+};
+std::vector<Ground> g_grounds;
+
+extern "C" void gpu_temporal_ground_sprite(std::uint32_t packet, float ground, float reach) {
+    g_grounds.push_back({packet, ground, reach});
+}
+
 /* Classic wide as the runtime does it: three quarters about column 160, rounded and unrounded. 4:3 without g_squash. */
 extern "C" int psx_ws_project_x(int x) {
     if (!g_squash) return x;
@@ -661,6 +671,34 @@ void test_a_projection_keeps_what_the_divisions_dropped() {
     g_notes.clear();
 }
 
+/* An actor the game lays a shadow under hands that ground over, camera-relative in the depth's units; one without, none. */
+void test_an_actor_hands_its_ground_over() {
+    const TestFunnel &fourth = kTestFunnels[3];
+    for (const std::uint32_t drop : {80u, 0u}) {
+        g_record.fill(Sprite{});
+        g_grounds.clear();
+        CPUState cpu = ready(fourth);
+        fourth_actor(cpu, 0u, 5u, 3u);
+        put(kActor + 40u, 2682u, 2);
+        put(kBody + 244u, drop, 4);
+        put(0x800775D0u, 2724u, 4);
+        disruptor_sprite_depth_instruction_hook(&cpu, fourth.projection, kStoreWord, 1);
+        cpu.gpr[3] = 20u * 6u;
+        disruptor_sprite_depth_instruction_hook(&cpu, kTestRecordSite, kTestRecordWord, 1);
+        cpu.gpr[22] = 6u;
+        disruptor_sprite_depth_packet(&cpu, kTestDeferredSite, kPacket);
+        if (drop != 0u) {
+            expect(g_grounds.size() == 1u && g_grounds[0].packet == kPacket && g_grounds[0].ground == -976.0f && g_grounds[0].reach > 0.0f,
+                   "an actor with a shadow hands over the ground the shadow lies on, eight depth units a game unit");
+        } else {
+            expect(g_grounds.empty(), "an actor without a shadow hands over no ground");
+        }
+        g_notes.clear();
+        g_places.clear();
+        g_sizes.clear();
+    }
+}
+
 void test_deferred_actor_waits_under_its_record() {
     CPUState cpu{};
     const TestFunnel &deferring = kTestFunnels[3];
@@ -1185,8 +1223,31 @@ std::array<Corner, 4> wall(std::uint16_t z, double left = 100.0, double right = 
     return {{{left, 60.0, z}, {right, 60.0, z}, {left, 160.0, z}, {right, 160.0, z}}};
 }
 
-/* Floor 100 under the eye, from depth 2000 to 6000, 1000 wide: it passes under the body's box. */
-constexpr std::array<Corner, 4> kFloor{{{120.0, 128.0, 2000u}, {200.0, 128.0, 2000u}, {146.67, 122.67, 6000u}, {173.33, 122.67, 6000u}}};
+/* Floor 600 under the eye at the body's foot (its middle 296 over the eye, half its height 896), from depth 2000 to 6000,
+ * 1000 wide: it passes under the body's box. */
+constexpr std::array<Corner, 4> kFloor{{{120.0, 168.0, 2000u}, {200.0, 168.0, 2000u}, {146.67, 136.0, 6000u}, {173.33, 136.0, 6000u}}};
+
+/* A body of a capsule's at the column it lay behind: depth 1120, reach 392, foot 668 under its middle. */
+void test_a_ledge_before_a_body() {
+    const Front body{.depth = 1120.0, .reach = 392.0, .down = 668.0, .x = 160.0, .row = 120.0};
+    expect(ledge_before(454.0, 168.0, 1.0, body), "a level face nearer than the body, 168 under its middle, is a ledge before it");
+    expect(!ledge_before(454.0, 680.0, 1.0, body), "the floor 680 under it, at its foot, is not");
+    expect(ledge_before(454.0, 0.75 * 668.0 - 1.0, 1.0, body) && !ledge_before(454.0, 0.75 * 668.0 + 1.0, 1.0, body),
+           "the line between them is three quarters of the way to the foot");
+    const double slope = std::sqrt(0.5);
+    expect(!ledge_before(454.0, 668.0 * slope, slope, body),
+           "nor is a slope at 45 degrees the body stands on, its plane square to it nearer than its foot is straight down");
+    expect(ledge_before(454.0, 168.0 * slope, slope, body), "a slope well above its foot is a ledge too");
+    expect(!ledge_before(454.0, -168.0, 1.0, body), "nor is a level face the body's middle is past");
+    expect(ledge_before(727.0, 168.0, 1.0, body) && !ledge_before(729.0, 168.0, 1.0, body), "nor one within the body's reach");
+    expect(!ledge_before(0.0, 168.0, 1.0, body), "nor one not over the body's box");
+    CPUState cpu = body_before_its_record(5u, 600u);
+    g_projected.clear();
+    record(cpu);
+    const std::optional<Front> front = front_of(g_record[5]);
+    expect(front && front->down == 896.0 && front->reach == 1792.0, "a body 448 by 224 in the world reaches 1792 to the eye and 896 to its foot");
+    forget();
+}
 
 void test_a_wall_in_front_stops_a_body() {
     /* The body at depth 640 is 5120 GTE units deep and reaches 1792 towards the eye: a face nearer than 3328 hides it. */
@@ -1232,6 +1293,12 @@ void test_a_wall_in_front_stops_a_body() {
         add_face(70u, kPackets + 192u, kFloor);
         record(cpu);
         expect(read_half(key_at(5u)) == 536u, "nor the floor in front of it");
+        cpu = body_before_its_record(5u, 600u);
+        g_projected.clear();
+        add_face(70u, kPackets + 192u, {{{100.0, 137.78, 2700u}, {260.0, 137.78, 2700u}, {100.0, 134.55, 3300u}, {260.0, 134.55, 3300u}}});
+        record(cpu);
+        expect(read_half(key_at(5u)) == 600u,
+               "a level face 300 under the eye over the lower half of the box, above the body's foot, keeps the game's key, as the top of a column's base");
         cpu = body_before_its_record(5u, 600u);
         g_projected.clear();
         add_face(70u, kPackets + 192u, {{{100.0, 66.67, 1200u}, {260.0, 66.67, 1200u}, {100.0, 93.33, 2400u}, {260.0, 93.33, 2400u}}});
@@ -1479,6 +1546,7 @@ int main() {
     test_a_depth_stays_in_its_funnel();
     test_only_the_reviewed_instructions_count();
     test_deferred_actor_waits_under_its_record();
+    test_an_actor_hands_its_ground_over();
     test_sizes_run_after_places();
     test_a_body_sorts_in_front_of_its_floor();
     test_a_body_that_cannot_move_stays();
@@ -1486,6 +1554,7 @@ int main() {
     test_the_body_keeps_its_fade();
     test_near_bodies_keep_their_order();
     test_the_shadow_keeps_the_order_of_what_it_takes_along();
+    test_a_ledge_before_a_body();
     test_a_wall_in_front_stops_a_body();
     test_walls_hold_bodies_in_order();
     test_a_face_sorted_behind_a_body_it_hides();

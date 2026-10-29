@@ -170,9 +170,11 @@ static void ddgi_note_polygon(const int *indices, int count) {
 
 #ifndef PSX_DISABLE_FRAME_INTERPOLATION
 /* A world sprite's rectangle as drawn (x, y before the draw offset, sides its sub-pixel edges) at camera depth z, turned:
- * the game turned it (an impact, a blast), an effect and never a shadow caster. 1: the game's blob shadow, left out. */
+ * the game turned it (an impact, a blast), an effect and never a shadow caster; facing: the renderer drew it as a card
+ * facing the camera, and its caster turns the same. 1: the game's blob shadow, left out. */
 static int ddgi_note_card(int x, int y, int w, int h, const float sides[4], float z, int left_u, int top_v, int right_u,
-                          int bottom_v, uint16_t clut, uint16_t texpage, uint32_t colour, int semi, int raw, int turned) {
+                          int bottom_v, uint16_t clut, uint16_t texpage, uint32_t colour, int semi, int raw, int turned,
+                          int facing) {
     if (z <= 0.0f || w <= 0 || h <= 0) return 0;
     const WsTag *tag = temporal_sprite_tag();
     if (ddgi_blob_hidden(tag)) return 1;
@@ -195,6 +197,8 @@ static int ddgi_note_card(int x, int y, int w, int h, const float sides[4], floa
     const double c[3] = {((left + right) * 0.5 - camera.centre_x16 / 65536.0) * z / fx,
                          ((top + bottom) * 0.5 - camera.centre_y16 / 65536.0) * z / fy, z};
     const double across = (right - left) * 0.5 * z / fx, down = (bottom - top) * 0.5 * z / fy;
+    double width[2] = {across, 0.0};
+    if (facing && !turned) gpu_sprite_card_across(c[0], c[2], across, width);
     GpuDdgiCard *card = &list->cards[list->card_count++];
     float back[3][3];
     psx_ddgi_pose_back(camera.rotation, back);
@@ -202,7 +206,7 @@ static int ddgi_note_card(int x, int y, int w, int h, const float sides[4], floa
         double v = 0.0;
         for (int row = 0; row < 3; ++row) v += back[row][axis] * (c[row] - camera.translation[row]);
         card->centre[axis] = (float)(v + camera.offset[axis]);
-        card->across[axis] = (float)(back[0][axis] * across);
+        card->across[axis] = (float)(back[0][axis] * width[0] + back[2][axis] * width[1]);
         card->down[axis] = (float)(back[1][axis] * down);
     }
     card->depth = z;
@@ -222,8 +226,8 @@ static int ddgi_note_card(int x, int y, int w, int h, const float sides[4], floa
 }
 
 static int ddgi_note_sprite(int x, int y, int w, int h, const float sides[4], float z, int left_u, int top_v, int right_u,
-                            int bottom_v, uint16_t clut, uint16_t texpage, uint32_t colour, int semi, int raw) {
-    return ddgi_note_card(x, y, w, h, sides, z, left_u, top_v, right_u, bottom_v, clut, texpage, colour, semi, raw, 0);
+                            int bottom_v, uint16_t clut, uint16_t texpage, uint32_t colour, int semi, int raw, int facing) {
+    return ddgi_note_card(x, y, w, h, sides, z, left_u, top_v, right_u, bottom_v, clut, texpage, colour, semi, raw, 0, facing);
 }
 #endif
 
@@ -301,7 +305,7 @@ static void ddgi_note_turned(const int32_t vx[4], const int32_t vy[4], const int
         static const float flat[4] = {0.0f, 0.0f, 0.0f, 0.0f};
         DdgiList *list = &s_ddgi_lists[s_ddgi_now];
         const int before = list->card_count;
-        (void)ddgi_note_card(x0, y0, x1 - x0, y1 - y0, flat, (float)tag->anchor_x, u0, v0, u1, v1, clut, texpage, colour, 1, raw, 1);
+        (void)ddgi_note_card(x0, y0, x1 - x0, y1 - y0, flat, (float)tag->anchor_x, u0, v0, u1, v1, clut, texpage, colour, 1, raw, 1, 0);
         if (list->card_count > before) {
             GpuDdgiCard *card = &list->cards[before];
             const float side = sqrtf(share);

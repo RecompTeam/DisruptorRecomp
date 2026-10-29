@@ -160,7 +160,7 @@ require(
 require(
     '"  v_bill = u_visual > 0.5 ? (a_visual_flags < -0.5 && a_visual_flags > -1.5 ? 0.75 : (abs(a_camz) > 16.0 && a_visual_flags < 1.5) ? 2.0 : 1.0) : 0.0;\\n";\n'
     in renderer
-    and '            "  v_bill = a_visual_flags < -0.5 && a_visual_flags > -1.5 ? 0.75 : (a_visual_flags < 1.5 && a_order > -0.9999 && a_order < 0.9999) ? 2.0 : 1.0; }\\n") : NULL;\n'
+    and '            "  v_bill = a_visual_flags < -0.5 && a_visual_flags > -1.5 ? 0.75 : (a_visual_flags < 1.5 && a_order > -0.9999 && a_order < 0.9999) ? 2.0 : 1.0;\\n"\n'
     in presenter
     and '        "  if (v_bill > 0.5 && v_bill < 0.9) frag.a = (!blended && frag.a > 0.5) ? 0.95 : 0.75;\\n"\n'
     '        "  else if (v_bill > 0.5 && blended) frag.a = 0.25; else if (v_bill > 1.5) frag.a = 0.5;\\n"\n'
@@ -214,7 +214,8 @@ require(
     and "    if (s_temp_shading!=s_ssaa) sample_shading(s_temp_shading=s_ssaa);\n"
     "    p_glBindFramebuffer(PSXGL_FRAMEBUFFER,s_temp_ms_fbo ? s_temp_ms_fbo : s_temp_fbo);\n"
     in presenter
-    and "    s_temp_ms_fbo=s_temp_ms_rb[0]=s_temp_ms_rb[1]=0; s_temp_samples=s_temp_shading=0;\n" in presenter,
+    and "    s_temp_ms_fbo=s_temp_ms_rb=s_temp_ms_depth=s_temp_ms_ds=0; s_temp_samples=s_temp_shading=0;\n"
+    in presenter,
     "supersampling starts off and is multisampling with every sample shaded: it is on only while samples are in use and the "
     "context is GL 4.0 or has the extension, whose call alone is taken, and each of the two GL contexts is told when it "
     "changes, the presenter's before it draws a frame",
@@ -227,7 +228,16 @@ require(
     in renderer
     and "    wide_blit(s_wide_fbo[i], s_wide_ms_fbo[i], 0, VRAM_H);\n    return 1;\n" in renderer
     and "    p_glRenderbufferStorageMultisample(PSXGL_RENDERBUFFER, s_msaa, GL_RGBA8, w, h);\n" in renderer
-    and "    p_glRenderbufferStorageMultisample(PSXGL_RENDERBUFFER, s_msaa, PSXGL_DEPTH24_STENCIL8, w, h);\n"
+    and "        p_glTexImage2DMultisample(PSXGL_TEXTURE_2D_MULTISAMPLE, samples, PSXGL_DEPTH24_STENCIL8, w, h, GL_TRUE);\n"
+    in renderer
+    and "    ms_depth_attach(&s_wide_ms_depth[i], &s_wide_ms_ds[i], s_msaa, w, h);\n"
+    "    if (p_glCheckFramebufferStatus(PSXGL_FRAMEBUFFER) != PSXGL_FRAMEBUFFER_COMPLETE) {\n"
+    in renderer
+    and "        if (made <= 8 && p_glCheckFramebufferStatus(PSXGL_FRAMEBUFFER) == PSXGL_FRAMEBUFFER_COMPLETE) return;"
+    in renderer
+    and "    p_glRenderbufferStorageMultisample(PSXGL_RENDERBUFFER, samples, PSXGL_DEPTH24_STENCIL8, w, h);\n"
+    "    p_glBindRenderbuffer(PSXGL_RENDERBUFFER, 0);\n"
+    "    p_glFramebufferRenderbuffer(PSXGL_FRAMEBUFFER, PSXGL_DEPTH_STENCIL_ATTACHMENT, PSXGL_RENDERBUFFER, *renderbuffer);\n"
     in renderer
     and "        wide_twin_free(i);\n        for (int other = 0; other < WIDE_MAX_SURF; other++) wide_twin_drop(other);\n        s_msaa_asked = s_msaa = 0;\n        return 0;\n"
     in renderer
@@ -286,7 +296,11 @@ require(
     in presenter
     and "                            GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT,GL_NEAREST);\n        p_glBindFramebuffer(PSXGL_FRAMEBUFFER,s_temp_fbo);\n"
     in presenter
-    and "            s_temp_ms_fbo=s_temp_ms_rb[0]=s_temp_ms_rb[1]=0;\n        }\n" in presenter,
+    and "        ms_depth_attach(&s_temp_ms_depth,&s_temp_ms_ds,samples,width*scale,VRAM_H*scale);\n" in presenter
+    and "            if (s_temp_ms_ds) p_glDeleteRenderbuffers(1,&s_temp_ms_ds);\n"
+    "            s_temp_ms_fbo=s_temp_ms_rb=s_temp_ms_depth=s_temp_ms_ds=0;\n        }\n"
+    in presenter
+    and "    if (s_wide_ms_ds[i]) p_glDeleteRenderbuffers(1, &s_wide_ms_ds[i]);\n" in renderer,
     "an in-between frame is drawn through a twin of the same samples and resolved, colour and depth, before it is shaded, "
     "shown or read: a twin that cannot be made leaves the plain surface in use",
 )

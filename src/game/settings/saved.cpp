@@ -281,6 +281,14 @@ void read_game_user_settings(const toml::value& doc, UserSettings& s) {
             s.depth_sorted_world = toml::find<bool>(d, "depth_sorted_world");
             s.has_depth_sorted_world = true;
         });
+        if (d.contains("facing_sprites")) try_get([&]{
+            s.facing_sprites = toml::find<bool>(d, "facing_sprites");
+            s.has_facing_sprites = true;
+        });
+        if (d.contains("sprite_depth_read")) try_get([&]{
+            s.sprite_depth_read = toml::find<bool>(d, "sprite_depth_read");
+            s.has_sprite_depth_read = true;
+        });
         if (d.contains("probe_lighting")) try_get([&]{
             s.probe_lighting = toml::find<bool>(d, "probe_lighting");
             s.has_probe_lighting = true;
@@ -441,7 +449,7 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
         s.has_perspective_textures || s.has_frame_unlock ||
         s.has_ambient_occlusion || s.has_occlusion_reach || s.has_occlusion_strength || s.has_smooth_fade ||
         s.has_multisampling || s.has_sample_shading || s.has_downscale_averaging || s.has_edge_smoothing ||
-        s.has_gap_filling || s.has_depth_sorted_world || s.has_movie_filter || s.has_draw_distance || s.has_fog_shape || s.has_diagnostic_view || s.has_detailed_logging ||
+        s.has_gap_filling || s.has_depth_sorted_world || s.has_facing_sprites || s.has_sprite_depth_read || s.has_movie_filter || s.has_draw_distance || s.has_fog_shape || s.has_diagnostic_view || s.has_detailed_logging ||
         s.has_language_discs || s.has_mute_in_background || s.has_achievements || s.has_bass_cut ||
         s.has_achievements_encore || s.has_achievements_unofficial || s.has_achievements_popups || s.has_achievements_progress || s.has_achievements_sound || s.has_achievements_popup_time || s.has_achievements_corner ||
         s.has_language_disc || s.has_skip_intro || s.has_fast_disc_reads ||
@@ -574,6 +582,10 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
             f << "gap_filling = " << (s.gap_filling ? "true" : "false") << "\n";
         if (s.has_depth_sorted_world)
             f << "depth_sorted_world = " << (s.depth_sorted_world ? "true" : "false") << "\n";
+        if (s.has_facing_sprites)
+            f << "facing_sprites = " << (s.facing_sprites ? "true" : "false") << "\n";
+        if (s.has_sprite_depth_read)
+            f << "sprite_depth_read = " << (s.sprite_depth_read ? "true" : "false") << "\n";
         if (s.has_probe_lighting)
             f << "probe_lighting = " << (s.probe_lighting ? "true" : "false") << "\n";
         if (s.has_probe_strength && s.probe_strength >= 0 && s.probe_strength <= 200)

@@ -27,6 +27,8 @@ NOT_OFFERED = {
     "disruptor.downscale_averaging",
     "disruptor.edge_smoothing",
     "disruptor.fast_disc_reads",
+    # A way out for a driver that misreads the depth under a held sprite, written by hand.
+    "disruptor.sprite_depth_read",
     # game.toml routes Player 1 to the keyboard and the first gamepad together, and locks the pad mode.
     "controller.p1_device",
     "controller.p2_device",
@@ -82,7 +84,7 @@ ROW = r'\b(toggle|choice|slider)(?:<[^>]*>)?\(\s*"([\w.]+)", "([^"]+)", (-?\d+)'
 rows = re.findall(ROW, options)
 keys = [key for _, key, _, _ in rows]
 initial = {key: int(value) for _, key, _, value in rows}
-require(len(rows) == 68 and len(set(keys)) == 68, "the shared table must hold its 68 options, each key once")
+require(len(rows) == 69 and len(set(keys)) == 69, "the shared table must hold its 69 options, each key once")
 placed = re.findall(r'^    \{"([\w.]+)", Page::\w+(?:, (?:"[\w -]+"|nullptr)(?:, true)?)?\},$', table, re.MULTILINE)
 require(
     sorted(placed) == sorted(keys)

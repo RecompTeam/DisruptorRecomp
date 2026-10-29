@@ -1,8 +1,8 @@
 diff --git a/runtime/src/gpu_gl_renderer.c b/runtime/src/gpu_gl_renderer.c
-index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80a4e4735d 100644
+index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..95427b1461ab7db16f00c809484537f52cbe3633 100644
 --- a/runtime/src/gpu_gl_renderer.c
 +++ b/runtime/src/gpu_gl_renderer.c
-@@ -1,747 +1,1373 @@
+@@ -1,747 +1,1417 @@
 -/* gpu_gl_renderer.c — hardware OpenGL renderer backend.
 - *
 - * ARCHITECTURE (v2 — GPU-authoritative VRAM)
@@ -429,7 +429,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +    RTH_WIDE_CONFIGURE, RTH_WIDE_TARGET, RTH_WIDE_DISABLE, RTH_WIDE_CLEAR, RTH_WIDE_CLEAR_MARGINS, RTH_WIDE_COPY_FRAME,
 +    RTH_WIDE_COPY_ROWS, RTH_PRESENT_WIDE, RTH_PRESENT_VRAM, RTH_PRESENT_BLANK, RTH_EDGE_SKY, RTH_EDGE_DEPTH, RTH_FADE,
 +    RTH_FADE_POWER, RTH_FADE_BLOCKS, RTH_SSAO_FADE, RTH_HIDDEN_ROWS, RTH_INTERP_SUSPENDED, RTH_UI_SUSPENDED,
-+    RTH_DDGI_MISSION, RTH_INVALIDATE_PRESENT
++    RTH_DDGI_MISSION, RTH_INVALIDATE_PRESENT, RTH_SPRITE_CARD, RTH_SPRITE_GROUND
 +};
 +#define GL_RT_SYNC(reason) do { if (s_rth_on && !rt_on_render_thread()) gl_rth_acquire(reason); } while (0)
 +
@@ -450,6 +450,9 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +#define PSXGL_TEXTURE0              0x84C0
 +#define PSXGL_ARRAY_BUFFER          0x8892
 +#define PSXGL_DEPTH_CLAMP           0x864F
++#define PSXGL_TEXTURE_2D_MULTISAMPLE 0x9100
++#define PSXGL_MAX_DEPTH_TEXTURE_SAMPLES 0x910F
++#define PSXGL_TEXTURE_SAMPLES 0x9106
 +#define PSXGL_STREAM_DRAW           0x88E0
 +#define PSXGL_FRAMEBUFFER           0x8D40
 +#define PSXGL_READ_FRAMEBUFFER      0x8CA8
@@ -525,6 +528,9 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +typedef void   (APIENTRY *PFN_glBindRenderbuffer)(GLenum, GLuint);
 +typedef void   (APIENTRY *PFN_glRenderbufferStorage)(GLenum, GLenum, GLsizei, GLsizei);
 +typedef void   (APIENTRY *PFN_glRenderbufferStorageMultisample)(GLenum, GLsizei, GLenum, GLsizei, GLsizei);
++typedef void   (APIENTRY *PFN_glTexImage2DMultisample)(GLenum, GLsizei, GLenum, GLsizei, GLsizei, GLboolean);
++typedef void   (APIENTRY *PFN_glTextureBarrier)(void);
++typedef void   (APIENTRY *PFN_glGetMultisamplefv)(GLenum, GLuint, float *);
 +typedef void   (APIENTRY *PFN_glMinSampleShading)(GLfloat);
 +typedef void   (APIENTRY *PFN_glCopyImageSubData)(GLuint, GLenum, GLint, GLint, GLint, GLint, GLuint, GLenum, GLint, GLint,
 +                                                  GLint, GLint, GLsizei, GLsizei, GLsizei);
@@ -780,6 +786,10 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +static PFN_glBindRenderbuffer  p_glBindRenderbuffer;
 +static PFN_glRenderbufferStorage p_glRenderbufferStorage;
 +static PFN_glRenderbufferStorageMultisample p_glRenderbufferStorageMultisample;  /* may be absent: no multisampling then */
++static PFN_glTexImage2DMultisample p_glTexImage2DMultisample;
++static PFN_glTextureBarrier p_glTextureBarrier;     /* absent: a held sprite keeps the depth test */
++static PFN_glGetMultisamplefv p_glGetMultisamplefv;
++static int s_sample_mask_ok = 0;                   /* gl_SampleMask, for a held sprite read per sample */
 +static PFN_glMinSampleShading p_glMinSampleShading;  /* may be absent: no supersampling then */
 +static PFN_glCopyImageSubData p_glCopyImageSubData;  /* may be absent: a framebuffer copy then */
 +static PFN_glFramebufferRenderbuffer p_glFramebufferRenderbuffer;
@@ -821,6 +831,21 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +    LOAD(p_glBindRenderbuffer, "glBindRenderbuffer");
 +    LOAD(p_glRenderbufferStorage, "glRenderbufferStorage");
 +    p_glRenderbufferStorageMultisample = (void *)SDL_GL_GetProcAddress("glRenderbufferStorageMultisample");
++    p_glTexImage2DMultisample = (void *)SDL_GL_GetProcAddress("glTexImage2DMultisample");
++    p_glTextureBarrier = SDL_GL_ExtensionSupported("GL_ARB_texture_barrier") ? (void *)SDL_GL_GetProcAddress("glTextureBarrier") : NULL;
++    if (!p_glTextureBarrier && SDL_GL_ExtensionSupported("GL_NV_texture_barrier"))
++        p_glTextureBarrier = (void *)SDL_GL_GetProcAddress("glTextureBarrierNV");
++    p_glGetMultisamplefv = (void *)SDL_GL_GetProcAddress("glGetMultisamplefv");
++    s_sample_mask_ok = p_glGetMultisamplefv && SDL_GL_ExtensionSupported("GL_ARB_sample_shading");
++    {
++        const char *vendor = (const char *)glGetString(GL_VENDOR), *renderer = (const char *)glGetString(GL_RENDERER);
++        const char *version = (const char *)glGetString(GL_VERSION);
++        fprintf(stdout, "psxrecomp: GL %s, %s, %s\n", vendor ? vendor : "?", renderer ? renderer : "?", version ? version : "?");
++        fprintf(stdout, "psxrecomp: a held sprite reads the depth under it: %s\n",
++                !p_glTextureBarrier ? "no, the driver has no texture barrier"
++                : s_sample_mask_ok  ? "yes"
++                                    : "without multisampling only, the driver has no sample mask");
++    }
 +    {   /* a driver may hand out the address at any version: only GL 4.0 or the extension makes the call mean something */
 +        GLint major = 0, minor = 0;
 +        glGetIntegerv(0x821B /* GL_MAJOR_VERSION */, &major);
@@ -1381,6 +1406,9 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +#define TEMPORAL_CUT_IDENTITY UINT64_C(0x1000000000000000) /* a triangle the turn clip cut: its pieces follow, itself it shows nothing */
 +static float         s_next_sprite_depth = 0.0f, s_sprite_depth = 0.0f;
 +static float         s_next_sprite_sides[4], s_sprite_sides[4]; /* left, top, right, bottom */
++static float         s_next_sprite_ground[2], s_sprite_ground[2]; /* the ground's height above the camera and half the width; width 0, unknown */
++static float         s_next_sprite_card[8], s_sprite_card[8];   /* see gr_set_sprite_card */
++static int           s_next_sprite_card_set = 0, s_sprite_card_set = 0;
 +static float         s_next_flat_sides[2], s_flat_sides[2];     /* left, right of a flat picture's rectangle */
 +static int           s_sprite_x, s_sprite_y;
 +static PsxWsPlacedTile s_next_tile, s_tile;  /* the backdrop tile the next rectangle is, and the one being drawn */
@@ -1410,7 +1438,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +/* Vertex formats retain both canonical GP0 and presentation-only positions.
 + * Per-primitive texture state stays in flat attributes so prims can batch. */
 +#define GEOV 10
-+#define TEXV 24
++#define TEXV 27
 +static GLuint s_blit_prog = 0, s_blit_vao = 0, s_blit_vbo = 0;
 +static GLuint s_pack_prog = 0, s_stencil_prog = 0, s_rescale_prog = 0, s_empty_vao = 0;
 +
@@ -1539,12 +1567,12 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +static GLuint s_wide_tex[WIDE_MAX_SURF];     /* color tex per surface (0 = free) */
 +static GLuint s_wide_fbo[WIDE_MAX_SURF];     /* FBO per surface */
 +static uint32_t s_wide_depth_shown[WIDE_MAX_SURF] = {~0u, ~0u, ~0u, ~0u};  /* rows shown since their depth was last cleared */
-+static GLuint s_wide_rb[WIDE_MAX_SURF];      /* depth-stencil RB per surface (mask
++static GLuint s_wide_depth[WIDE_MAX_SURF];   /* depth-stencil texture per surface (mask
 +                                              * mirror, same as hr). PERF-CRITICAL:
 +                                              * a stencil-less wide FBO made every
 +                                              * stencil-enabled mirror draw cost
 +                                              * ~0.6ms of driver work (Tomba2 16:9
-+                                              * collapsed to 12fps); with the RB
++                                              * collapsed to 12fps); with it
 +                                              * attached the pass costs ~2us. */
 +static int    s_wide_base[WIDE_MAX_SURF];    /* base_x per surface (-1 = free) */
 +static float  s_wide_fill[WIDE_MAX_SURF][4]; /* the colour the frame's fill left: what a void shows */
@@ -1587,7 +1615,18 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +static int   s_draw_world = 0;   /* the batch being recorded for the in-between presenter is such a batch */
 +static GLint s_tex_uPull = -1;
 +
-+static int mirror_depth(void) { return s_geometry_correction && (s_ssao || s_grown_under || s_crack_fill > 0.0f || s_world_depth); }
++/* a sprite's floor stood 4.8 percent before its middle at most over four capsules, what hid one 42.8 percent or more */
++static float s_sprite_hold_share = 0.2f;
++static int s_sprite_hold = 1;  /* a world sprite is a batch of its own, hidden where the mirror's depth stands the share nearer */
++static int s_hold_reads = 1;   /* settings.toml sprite_depth_read: off keeps the share test on every driver */
++static int s_tb_held = 0;
++static int s_draw_held = 0;
++static GLint s_tex_uHold = -1;
++static GLint s_tex_uGroundSamples = -1, s_tex_uGroundShare = -1, s_tex_uGroundView = -1, s_tex_uSampleAt = -1;
++
++static int mirror_depth(void) {
++    return s_geometry_correction && (s_ssao || s_grown_under || s_crack_fill > 0.0f || s_world_depth || s_sprite_hold);
++}
 +
 +static int s_visual_on;
 +static void geometry_visual_uniforms(GLint visual, GLint camera, GLint options,
@@ -1657,8 +1696,13 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +        } else {
 +            px[i] = (float)xs[i] + (sprite ? s_sprite_sides[xs[i] == s_sprite_x ? 0 : 2] : s_flat_sides[xs[i] == s_sprite_x ? 0 : 1]);
 +            py[i] = (float)ys[i] + (sprite ? s_sprite_sides[ys[i] == s_sprite_y ? 1 : 3] : 0.0f);
++            if (sprite && s_sprite_card_set) {
++                const int right = xs[i] != s_sprite_x, bottom = ys[i] != s_sprite_y;
++                px[i] = (float)xs[i] + s_sprite_card[right];
++                py[i] = (float)ys[i] + s_sprite_card[2 + 2 * bottom + right];
++            }
 +        }
-+        if (pq) pq[i] = perspective ? s_next_q[i] : 0.0f;
++        if (pq) pq[i] = perspective ? s_next_q[i] : sprite && s_sprite_card_set ? s_sprite_card[6 + (xs[i] != s_sprite_x)] : 0.0f;
 +        if (pz) pz[i] = (exact && s_next_temporal_depth) || partial ? s_next_z[i] : s_sprite_depth;
 +        /* A corner the presenter has no depth for, the mirror has: negative, so that only the mirror's shaders take it. */
 +        if (pz && (exact || partial) && !(pz[i] > 0.0f) && s_next_surface_z[i] > 0.0f) pz[i] = -s_next_surface_z[i];
@@ -2108,7 +2152,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
  static const char *INTERP_FS =
      "#version 330\n"
      "in vec2 v_uv; uniform sampler2D u_prev; uniform sampler2D u_curr;\n"
-@@ -757,2715 +1383,5125 @@
+@@ -757,2715 +1427,5291 @@
      "  }\n"
      "  frag=mix(prev,curr,alpha);\n"
      "}\n";
@@ -3955,8 +3999,9 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +    "      if (close) hw *= den;\n"
 +    "    }\n"
 +    "  }\n"
-+    "  /* Under a fractional yaw a_q comes divided by the turn's denominator, or 0 for the whole triangle. */\n"
-+    "  float q = (u_visual > 0.5 && a_visual_flags > 1.5 && a_q > 0.0) ? a_q : 0.0;\n"
++    "  /* Under a fractional yaw a_q comes divided by the turn's denominator, or 0 for the whole triangle. A sprite turned\n"
++    "   * to the camera (flags 1) brings its sides' weights. */\n"
++    "  float q = (u_visual > 0.5 && a_visual_flags > 0.5 && a_q > 0.0) ? a_q : 0.0;\n"
 +    "  v_uvq = vec3(a_uv*q, q); v_perspective = q > 0.0 ? 1 : 0;\n"
 +    "  v_uvq.xy -= took.xy*q;\n"
 +    "  if (close) { v_uvq = vec3(0.0); v_perspective = 2; }\n"
@@ -4246,18 +4291,26 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +                               "    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);\n"
 +                               "  v_deep = abs(a_camz) > 16.0 ? 1.0 : -1000.0;\n"
 +                               "  v_bill = u_visual > 0.5 ? (a_visual_flags < -0.5 && a_visual_flags > -1.5 ? 0.75 : (abs(a_camz) > 16.0 && a_visual_flags < 1.5) ? 2.0 : 1.0) : 0.0;\n";
-+    const size_t length = strlen(source), tail = sizeof(flat) - 1, room = length + sizeof(deep) + sizeof(fading) + sizeof(closing) + 160;
++    static const char holding[] = "  if (u_hold > 0.0) gl_Position.z = abs(a_camz) > 16.0\n"
++                                  "    ? max(1.0 - 32.0/(abs(a_camz)*(1.0 - u_hold)), -1.0)*gl_Position.w : -gl_Position.w;\n";
++    static const char grounded[] = "layout(location=13) in vec3 a_ground; flat out vec3 v_ground; noperspective out float v_texel;\n";
++    static const char grounding[] = "  v_ground = a_ground; v_texel = abs(a_camz) > 16.0 ? 1.0/abs(a_camz) : 0.0;\n";
++    const size_t length = strlen(source), tail = sizeof(flat) - 1,
++                 room = length + sizeof(deep) + sizeof(fading) + sizeof(closing) + sizeof(holding) + sizeof(grounded) + sizeof(grounding) + 176;
 +    const char *body = strchr(source, '\n');
 +    char *out;
 +    int written;
 +    if (!body || length < tail || strcmp(source + length - tail, flat)) return NULL;
 +    out = (char *)malloc(room);
 +    if (!out) return NULL;
-+    written = snprintf(out, room, "%.*slayout(location=%d) in float a_camz; flat out float v_bill; noperspective out float v_deep; uniform float u_pull;\n", (int)(body + 1 - source), source, location);
++    written = snprintf(out, room, "%.*slayout(location=%d) in float a_camz; flat out float v_bill; noperspective out float v_deep; uniform float u_pull; uniform float u_hold;\n%s",
++                       (int)(body + 1 - source), source, location, fade ? grounded : "");
 +    memcpy(out + written, body + 1, (size_t)(source + length - tail - (body + 1)));
 +    strcpy(out + written + (source + length - tail - (body + 1)), deep);
 +    if (fade) strcat(out, fading);
 +    if (fade) strcat(out, closing);
++    strcat(out, holding);
++    if (fade) strcat(out, grounding);
 +    strcat(out, " }\n");
 +    return out;
 +}
@@ -4268,7 +4321,32 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 + * or 0.95 where it is opaque with the mask bit: the stencil rebuilt from the alpha then gets that picture's mask bits as before. */
 +static char *sprite_marking_shader(const char *source) {
 +    static const char end[] = "}\n";
++    /* A held sprite's colour reads the surface at each sample: what stands in front past its half width and above its
++     * ground hides it, the ground before it does not. Without its ground, the share nearer as the depth test held it. */
++    static const char reading[] =
++        "#extension GL_ARB_sample_shading : enable\n"
++        "flat in float v_bill; noperspective in float v_deep; flat in vec3 v_ground; noperspective in float v_texel;\n"
++        "uniform int u_ground_samples; uniform float u_ground_share; uniform vec4 u_ground_view; uniform vec4 u_sample_at[4];\n"
++        "uniform sampler2D u_scene_depth; uniform sampler2DMS u_scene_depth_ms;\n"
++        "bool ground_hides(float depth, float y){\n"
++        "  if (depth > 0.99998 || v_ground.z <= 0.0) return false;\n"
++        "  float z = 16.0 / max(1.0 - depth, 1.0e-6), own = v_texel > 0.0 ? 1.0 / v_texel : v_ground.z;\n"
++        "  if (v_ground.y <= 0.0) return z < own * (1.0 - u_ground_share);\n"
++        "  if (z >= own - min(v_ground.y, u_ground_share * own)) return false;\n"
++        "  return (u_ground_view.x - y / u_ground_view.y) * z / u_ground_view.z > v_ground.x + 16.0;\n"
++        "}\n";
 +    static const char marked[] =
++        "  if (u_ground_samples == 1 && ground_hides(texelFetch(u_scene_depth, ivec2(gl_FragCoord.xy), 0).r, gl_FragCoord.y)) discard;\n"
++        "#ifdef GL_ARB_sample_shading\n"
++        "  int kept = -1;  /* a shader that writes the mask anywhere has to write it everywhere */\n"
++        "  if (u_ground_samples > 1) {\n"
++        "    kept = 0;\n"
++        "    for (int i = 0; i < 8; ++i)\n"
++        "      if (i < u_ground_samples && !ground_hides(texelFetch(u_scene_depth_ms, ivec2(gl_FragCoord.xy), i).r, floor(gl_FragCoord.y) + ((i & 1) == 0 ? u_sample_at[i >> 1].y : u_sample_at[i >> 1].w))) kept |= 1 << i;\n"
++        "    if (kept == 0) discard;\n"
++        "  }\n"
++        "  gl_SampleMask[0] = kept;\n"
++        "#endif\n"
 +        "  bool blended = stp != 0 && (u_semimode == 4 ? v_semi != 0 : (u_semipass == 2 || u_semipass == 4));\n"
 +        "  if (u_semipass == 4 && blended) discard;\n"
 +        "  if (v_bill > 0.5 && v_bill < 0.9) frag.a = (!blended && frag.a > 0.5) ? 0.95 : 0.75;\n"
@@ -4281,14 +4359,14 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +        "    frag.rgb = vec3(abs(fract(sample_uv / 32.0) * 2.0 - 1.0), (cell.x + 16.0 * cell.y) / 255.0);\n"
 +        "  }\n"
 +        "}\n";
-+    const size_t length = strlen(source), tail = sizeof(end) - 1, room = length + sizeof(marked) + 64;
++    const size_t length = strlen(source), tail = sizeof(end) - 1, room = length + sizeof(reading) + sizeof(marked) + 64;
 +    const char *body = strchr(source, '\n');
 +    char *out;
 +    int written;
 +    if (!body || length < tail || strcmp(source + length - tail, end)) return NULL;
 +    out = (char *)malloc(room);
 +    if (!out) return NULL;
-+    written = snprintf(out, room, "%.*sflat in float v_bill; noperspective in float v_deep;\n", (int)(body + 1 - source), source);
++    written = snprintf(out, room, "%.*s%s", (int)(body + 1 - source), source, reading);
 +    memcpy(out + written, body + 1, (size_t)(source + length - tail - (body + 1)));
 +    strcpy(out + written + (source + length - tail - (body + 1)), marked);
 +    return out;
@@ -4497,7 +4575,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +static int s_msaa_asked = 0, s_msaa = 0;
 +static int s_ssaa_asked = 0, s_ssaa = 0;
 +static GLint s_msaa_most = 0;
-+static GLuint s_wide_ms_fbo[WIDE_MAX_SURF], s_wide_ms_rb[WIDE_MAX_SURF][2];
++static GLuint s_wide_ms_fbo[WIDE_MAX_SURF], s_wide_ms_rb[WIDE_MAX_SURF], s_wide_ms_depth[WIDE_MAX_SURF], s_wide_ms_ds[WIDE_MAX_SURF];
 +static int s_wide_ms_fresh[WIDE_MAX_SURF][2];  /* the rows resolved since the twin was last drawn into: the first and how many */
 +void gl_renderer_set_multisampling(int samples) { GL_RT_SYNC(__func__); s_msaa_asked = samples >= 2 ? samples : 0; }
 +int gl_renderer_multisampling(void) { return s_msaa_asked; }
@@ -4529,8 +4607,10 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +
 +static void wide_twin_free(int i) {
 +    if (s_wide_ms_fbo[i]) p_glDeleteFramebuffers(1, &s_wide_ms_fbo[i]);
-+    if (s_wide_ms_rb[i][0]) p_glDeleteRenderbuffers(2, s_wide_ms_rb[i]);
-+    s_wide_ms_fbo[i] = s_wide_ms_rb[i][0] = s_wide_ms_rb[i][1] = 0;
++    if (s_wide_ms_rb[i]) p_glDeleteRenderbuffers(1, &s_wide_ms_rb[i]);
++    if (s_wide_ms_depth[i]) glDeleteTextures(1, &s_wide_ms_depth[i]);
++    if (s_wide_ms_ds[i]) p_glDeleteRenderbuffers(1, &s_wide_ms_ds[i]);
++    s_wide_ms_fbo[i] = s_wide_ms_rb[i] = s_wide_ms_depth[i] = s_wide_ms_ds[i] = 0;
 +    s_wide_ms_fresh[i][1] = 0;
 +}
 +
@@ -4542,19 +4622,45 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +    wide_twin_free(i);
 +}
 +
++/* The bound frame buffer's multisample depth and stencil: a texture a held sprite reads, else a renderbuffer it does not. */
++static void ms_depth_attach(GLuint *texture, GLuint *renderbuffer, int samples, int w, int h) {
++    GLint most = 0;
++    if (p_glTexImage2DMultisample) glGetIntegerv(PSXGL_MAX_DEPTH_TEXTURE_SAMPLES, &most);
++    if (most >= samples) {
++        glGenTextures(1, texture);
++        glBindTexture(PSXGL_TEXTURE_2D_MULTISAMPLE, *texture);
++        p_glTexImage2DMultisample(PSXGL_TEXTURE_2D_MULTISAMPLE, samples, PSXGL_DEPTH24_STENCIL8, w, h, GL_TRUE);
++        GLint made = 0;
++        glGetTexLevelParameteriv(PSXGL_TEXTURE_2D_MULTISAMPLE, 0, PSXGL_TEXTURE_SAMPLES, &made);
++        glBindTexture(PSXGL_TEXTURE_2D_MULTISAMPLE, 0);
++        p_glFramebufferTexture2D(PSXGL_FRAMEBUFFER, PSXGL_DEPTH_STENCIL_ATTACHMENT, PSXGL_TEXTURE_2D_MULTISAMPLE, *texture, 0);
++        if (made <= 8 && p_glCheckFramebufferStatus(PSXGL_FRAMEBUFFER) == PSXGL_FRAMEBUFFER_COMPLETE) return;  /* the read covers 8 samples */
++        p_glFramebufferTexture2D(PSXGL_FRAMEBUFFER, PSXGL_DEPTH_STENCIL_ATTACHMENT, PSXGL_TEXTURE_2D_MULTISAMPLE, 0, 0);
++        glDeleteTextures(1, texture);
++        *texture = 0;
++    }
++    static int told = 0;
++    if (p_glTextureBarrier && told != samples)
++        fprintf(stdout, "psxrecomp: GL has no multisample depth texture at %d samples, a held sprite keeps the depth test there\n", samples);
++    told = samples;
++    p_glGenRenderbuffers(1, renderbuffer);
++    p_glBindRenderbuffer(PSXGL_RENDERBUFFER, *renderbuffer);
++    p_glRenderbufferStorageMultisample(PSXGL_RENDERBUFFER, samples, PSXGL_DEPTH24_STENCIL8, w, h);
++    p_glBindRenderbuffer(PSXGL_RENDERBUFFER, 0);
++    p_glFramebufferRenderbuffer(PSXGL_FRAMEBUFFER, PSXGL_DEPTH_STENCIL_ATTACHMENT, PSXGL_RENDERBUFFER, *renderbuffer);
++}
++
 +/* A twin begins as the surface stands: the other frame buffer's picture and the mask bits are in it. */
 +static int wide_twin_make(int i) {
 +    const int w = g_wide_w * s_scale, h = VRAM_H * s_scale;
-+    p_glGenRenderbuffers(2, s_wide_ms_rb[i]);
-+    p_glBindRenderbuffer(PSXGL_RENDERBUFFER, s_wide_ms_rb[i][0]);
++    p_glGenRenderbuffers(1, &s_wide_ms_rb[i]);
++    p_glBindRenderbuffer(PSXGL_RENDERBUFFER, s_wide_ms_rb[i]);
 +    p_glRenderbufferStorageMultisample(PSXGL_RENDERBUFFER, s_msaa, GL_RGBA8, w, h);
-+    p_glBindRenderbuffer(PSXGL_RENDERBUFFER, s_wide_ms_rb[i][1]);
-+    p_glRenderbufferStorageMultisample(PSXGL_RENDERBUFFER, s_msaa, PSXGL_DEPTH24_STENCIL8, w, h);
 +    p_glBindRenderbuffer(PSXGL_RENDERBUFFER, 0);
 +    p_glGenFramebuffers(1, &s_wide_ms_fbo[i]);
 +    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, s_wide_ms_fbo[i]);
-+    p_glFramebufferRenderbuffer(PSXGL_FRAMEBUFFER, PSXGL_COLOR_ATTACHMENT0, PSXGL_RENDERBUFFER, s_wide_ms_rb[i][0]);
-+    p_glFramebufferRenderbuffer(PSXGL_FRAMEBUFFER, PSXGL_DEPTH_STENCIL_ATTACHMENT, PSXGL_RENDERBUFFER, s_wide_ms_rb[i][1]);
++    p_glFramebufferRenderbuffer(PSXGL_FRAMEBUFFER, PSXGL_COLOR_ATTACHMENT0, PSXGL_RENDERBUFFER, s_wide_ms_rb[i]);
++    ms_depth_attach(&s_wide_ms_depth[i], &s_wide_ms_ds[i], s_msaa, w, h);
 +    if (p_glCheckFramebufferStatus(PSXGL_FRAMEBUFFER) != PSXGL_FRAMEBUFFER_COMPLETE) {
 +        fprintf(stdout, "psxrecomp: GL multisampling has no surface at %d samples, switched off\n", s_msaa);
 +        p_glBindFramebuffer(PSXGL_FRAMEBUFFER, 0);
@@ -5114,6 +5220,11 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +
 +static float s_fade_start = 0.0f, s_fade_step = 1.0f, s_fade_side = 0.0f;
 +void gl_renderer_set_smooth_fade(int enabled) { GL_RT_SYNC(__func__); s_smooth_fade = enabled != 0; }
++void gl_renderer_set_sprite_depth_read(int enabled) {
++    GL_RT_SYNC(__func__);
++    s_hold_reads = enabled != 0;
++    if (!s_hold_reads) fprintf(stdout, "psxrecomp: a held sprite keeps the depth test: sprite_depth_read is off\n");
++}
 +int gl_renderer_smooth_fade(void) { return s_smooth_fade; }
 +static int s_fade_power = 1;
 +void gl_renderer_set_palette_fade(int rows, float start, float step, float side) {
@@ -5163,12 +5274,56 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +    p_glUniform4f(at, (float)g_wide_cur_base + s_yaw_center_x, s_yaw_center_x > 0.0f ? s_yaw_center_x : 160.0f, nearer, s_uv_view ? 1.0f : 0.0f);
 +}
 +
++#define HOLD_DEPTH_UNIT 6
++#define HOLD_DEPTH_MS_UNIT 7
++
++/* Whether a held batch may read the depth under it: nothing in its colour draw writes the depth-stencil image it reads. */
++static int hold_reads_depth(int semi) {
++    const int i = wide_surface_of(g_wide_cur);
++    if (!s_hold_reads || !p_glTextureBarrier || i < 0 || !s_wide_depth[i] || s_mask_check || s_tb_mask || s_fill_pass > 0.0f) return 0;
++    if (semi >= 0 && semi != 4) return 0;
++    return !(s_wide_ms_fbo[i] && s_msaa >= 2) || (s_sample_mask_ok && s_wide_ms_depth[i]);
++}
++
++static void hold_depth_begin(void) {
++    static int positions_of = 0;
++    static float positions[16];
++    const int i = wide_surface_of(g_wide_cur), ms = s_wide_ms_fbo[i] && s_msaa >= 2;
++    if (ms && positions_of != s_msaa) {
++        for (int k = 0; k < 8; ++k) {
++            positions[2 * k] = positions[2 * k + 1] = 0.5f;
++            if (k < s_msaa) p_glGetMultisamplefv(0x8E50 /* GL_SAMPLE_POSITION */, (GLuint)k, &positions[2 * k]);
++        }
++        positions_of = s_msaa;
++    }
++    p_glTextureBarrier();
++    p_glActiveTexture(PSXGL_TEXTURE0 + (ms ? HOLD_DEPTH_MS_UNIT : HOLD_DEPTH_UNIT));
++    glBindTexture(ms ? PSXGL_TEXTURE_2D_MULTISAMPLE : GL_TEXTURE_2D, ms ? s_wide_ms_depth[i] : s_wide_depth[i]);
++    p_glActiveTexture(PSXGL_TEXTURE0);
++    p_glUniform1i(s_tex_uGroundSamples, ms ? s_msaa : 1);
++    p_glUniform1f(s_tex_uGroundShare, s_sprite_hold_share);
++    p_glUniform4f(s_tex_uGroundView, (float)s_off_y + s_yaw_center_y_relative, (float)s_scale, 160.0f, 0.0f);
++    if (ms) p_glUniform4fv(s_tex_uSampleAt, 4, positions);
++    glDepthFunc(GL_ALWAYS);
++    glDepthMask(GL_FALSE);
++}
++
++static void hold_depth_end(void) {
++    p_glUniform1i(s_tex_uGroundSamples, 0);
++    p_glActiveTexture(PSXGL_TEXTURE0 + HOLD_DEPTH_UNIT);
++    glBindTexture(GL_TEXTURE_2D, 0);
++    p_glActiveTexture(PSXGL_TEXTURE0 + HOLD_DEPTH_MS_UNIT);
++    glBindTexture(PSXGL_TEXTURE_2D_MULTISAMPLE, 0);
++    p_glActiveTexture(PSXGL_TEXTURE0);
++}
++
 +static void flush_tex_batch(void) {
 +    if (s_tb_n == 0) return;
 +    int nverts = s_tb_n, semi = s_tb_semi;
 +    glEnable(PSXGL_DEPTH_CLAMP);  /* a near face is clipped by its w alone, its depth stops at the nearest */
 +    const int fillers = s_tb_fillers;
 +    const int world = s_tb_world;
++    const int held = s_tb_held;
 +    s_tb_n = 0;                             /* clear first: re-entrancy safe */
 +    if (nverts == 0) return;
 +    double cw_t0 = cw_ms();
@@ -5207,9 +5362,10 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +        wide_set_bd_scale(s_tex_uXscale, s_tex_uXcenter);
 +        s_draw_filler = mirror_depth() && fillers;
 +        s_draw_world = mirror_depth() && world;
++        s_draw_held = held;
 +        temporal_draw(s_tb, s_tb_identity, nverts, 1, GL_TRIANGLES, semi, s_tb_mask,
 +                      s_tb_filter, s_tb_twin, s_tb_gate, 0);
-+        s_draw_filler = s_draw_world = 0;
++        s_draw_filler = s_draw_world = s_draw_held = 0;
 +        if (s_ws_ablate != 2) {
 +            gz_begin(GZ_MIRROR_OUTLINE);
 +            if (mirror_depth() && s_crack_fill > 0.0f) tex_batch_outline(nverts, semi);
@@ -5222,8 +5378,13 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +            }
 +            gz_end(GZ_MIRROR_FILLERS);
 +            gz_begin(GZ_MIRROR_DRAW);
++            const int read = held && !world && hold_reads_depth(semi);
++            if (read) hold_depth_begin();
++            else if (held) { glDepthFunc(GL_LEQUAL); glDepthMask(GL_FALSE); p_glUniform1f(s_tex_uHold, s_sprite_hold_share); }
 +            if (world && mirror_depth()) tex_batch_by_depth(nverts, semi);
 +            else tex_batch_draw_passes(nverts, semi);
++            if (read) hold_depth_end();
++            if (held) { p_glUniform1f(s_tex_uHold, 0.0f); glDepthFunc(GL_ALWAYS); }
 +            gz_end(GZ_MIRROR_DRAW);
 +        }
 +        gz_begin(GZ_MIRROR_DEPTH);
@@ -5232,8 +5393,10 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +            glDisable(GL_BLEND);
 +            glDisable(GL_STENCIL_TEST);
 +            glDepthMask(GL_TRUE);
++            if (held) glDepthFunc(GL_LEQUAL);  /* a farther sprite leaves the nearer surface's depth */
 +            p_glUniform1i(s_uSemipass, semi < 0 ? 3 : 4);
 +            glDrawArrays(GL_TRIANGLES, 0, nverts);
++            glDepthFunc(GL_ALWAYS);
 +            glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 +        }
 +        gz_end(GZ_MIRROR_DEPTH);
@@ -5455,6 +5618,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +    const int cut_corners = near_face ? -1 : turn_clip(px, py, visual_flags, cut);
 +    const float whole_q[3] = {pq[0], pq[1], pq[2]};
 +    turned_perspective(px, pq, visual_flags);
++    const int sprite = s_geometry_correction && s_sprite_depth > 0.0f && (visual_flags & 3) == 1;
 +    const int packet_fade = ctx_packet_fade();
 +    const int packet_raw = packet_fade >= 0 ? 2 | (packet_fade << 2) : ctx_hud_glyph() << 2;
 +    int lim_buf[4];
@@ -5503,6 +5667,8 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +            world = psx_world_depth_class(s_world_depth, visual_flags, piece_z, s_world_margin);
 +        }
 +        if (s_tb_n > 0 && world != s_tb_world) flush_tex_batch();
++        const int held = sprite && s_sprite_hold && !near_face;
++        if (s_tb_n > 0 && held != s_tb_held) flush_tex_batch();
 +        /* With mask checking off, opaque and mode-0 semi primitives use the
 +         * same dual-source blend state. The per-vertex a_semi flag selects
 +         * replace vs half-blend without breaking painter order. */
@@ -5542,6 +5708,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +        if (s_tb_n == 0) {            /* opening a batch: capture its keyed state */
 +            s_tb_semi = batch_semi; s_tb_mask = s_mask_set; s_tb_filter = s_tex_filter; s_tb_gate = gate;
 +            s_tb_fillers = 0;
++            s_tb_held = held;
 +            s_tb_world = world;
 +            s_tb_twin[0] = twx; s_tb_twin[1] = twy; s_tb_twin[2] = tox; s_tb_twin[3] = toy;
 +        }
@@ -5569,6 +5736,9 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +                tile_corner(xs[i], (float)us[i], (float)(high - low), &vp[20], &vp[19], &vp[22], &vp[21]);  /* y's slot: the mirror takes a_pos.y */
 +            }
 +            vp[23] = turned_z[i]; /* temporal identity only; no shader attribute */
++            vp[24] = sprite ? s_sprite_ground[0] : 0.0f;
++            vp[25] = sprite ? s_sprite_ground[1] : 0.0f;
++            vp[26] = sprite ? s_sprite_depth : 0.0f;
 +            if (near_face) { vp[19] = 4.0f; vp[20] = s_near[i][0]; vp[21] = s_near[i][1]; vp[22] = s_near[i][2]; }
 +            s_tb_identity[s_tb_n + i] = cut_corners >= 0 ? TEMPORAL_CUT_IDENTITY : pid[i];
 +        }
@@ -5711,9 +5881,14 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +    s_next_sprite_depth = 0.0f;
 +    memcpy(s_sprite_sides, s_next_sprite_sides, sizeof(s_sprite_sides));
 +    memset(s_next_sprite_sides, 0, sizeof(s_next_sprite_sides));
++    memcpy(s_sprite_ground, s_next_sprite_ground, sizeof(s_sprite_ground));
++    memset(s_next_sprite_ground, 0, sizeof(s_next_sprite_ground));
 +    memcpy(s_flat_sides, s_next_flat_sides, sizeof(s_flat_sides));
 +    memset(s_next_flat_sides, 0, sizeof(s_next_flat_sides));
 +    s_sprite_x = x; s_sprite_y = y;
++    s_sprite_card_set = s_next_sprite_card_set;  /* used only while the sprite's depth is, for this rectangle alone */
++    s_next_sprite_card_set = 0;
++    memcpy(s_sprite_card, s_next_sprite_card, sizeof(s_sprite_card));
 +    if (w <= 0 || h <= 0) { s_sprite_depth = 0.0f; memset(s_flat_sides, 0, sizeof(s_flat_sides)); return; }
 +    float mr=s_mod_r/255.0f, mg=s_mod_g/255.0f, mb=s_mod_b/255.0f;
 +    float col[9]={mr,mg,mb, mr,mg,mb, mr,mg,mb};
@@ -5964,6 +6139,12 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +static void glb_set_temporal_identity_triangle(uint64_t id0, uint64_t id1, uint64_t id2) {
 +    s_next_identity[0] = id0; s_next_identity[1] = id1; s_next_identity[2] = id2;
 +}
++static void glb_set_temporal_sprite_ground(float ground, float reach) {
++    const int known = isfinite(ground) && isfinite(reach) && reach > 0.0f;
++    s_next_sprite_ground[0] = known ? ground : 0.0f;
++    s_next_sprite_ground[1] = known ? reach : 0.0f;
++}
++
 +static void glb_set_temporal_sprite(float depth, const float sides[4]) {
 +    s_next_sprite_depth = s_raster_ok && isfinite(depth) && depth > 0.0f ? depth : 0.0f;
 +    int placed = s_next_sprite_depth > 0.0f && sides != NULL;
@@ -5975,6 +6156,13 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +    if (whole) placed = 0;
 +#endif
 +    for (int side = 0; side < 4; ++side) s_next_sprite_sides[side] = placed ? sides[side] : 0.0f;
++}
++static void glb_set_sprite_card(const float card[8]) {
++    int usable = s_raster_ok && card != NULL;
++    for (int k = 0; usable && k < 6; ++k) usable = isfinite(card[k]) && fabsf(card[k]) < 1024.0f;
++    for (int k = 6; usable && k < 8; ++k) usable = isfinite(card[k]) && card[k] > 0.0f && card[k] <= 4.0f;
++    s_next_sprite_card_set = usable;
++    if (usable) memcpy(s_next_sprite_card, card, sizeof(s_next_sprite_card));
 +}
 +#endif
 +
@@ -6227,6 +6415,18 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +    return t;
 +}
 +
++static GLuint depth_stencil_texture(int w, int h) {
++    GLuint made = 0;
++    glGenTextures(1, &made);
++    glBindTexture(GL_TEXTURE_2D, made);
++    glTexImage2D(GL_TEXTURE_2D, 0, PSXGL_DEPTH24_STENCIL8, w, h, 0, 0x84F9 /* GL_DEPTH_STENCIL */, 0x84FA /* GL_UNSIGNED_INT_24_8 */, NULL);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
++    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
++    return made;
++}
++
 +static int make_fbo(GLuint *out_fbo, GLuint color_tex, GLuint stencil_rb) {
 +    p_glGenFramebuffers(1, out_fbo);
 +    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, *out_fbo);
@@ -6241,6 +6441,20 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +        return 0;
 +    }
 +    return 1;
++}
++
++/* Colour over a depth-stencil texture, which a held sprite reads under a texture barrier. */
++static int make_fbo_depth_texture(GLuint *out_fbo, GLuint color_tex, GLuint depth_tex) {
++    if (!make_fbo(out_fbo, color_tex, 0)) return 0;
++    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, *out_fbo);
++    p_glFramebufferTexture2D(PSXGL_FRAMEBUFFER, PSXGL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, depth_tex, 0);
++    const GLenum st = p_glCheckFramebufferStatus(PSXGL_FRAMEBUFFER);
++    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, 0);
++    if (st == PSXGL_FRAMEBUFFER_COMPLETE) return 1;
++    fprintf(stdout, "psxrecomp: GL FBO incomplete (0x%X)\n", st);
++    p_glDeleteFramebuffers(1, out_fbo);
++    *out_fbo = 0;
++    return 0;
 +}
 +
 +static void delete_scale_target(GLuint *fbo, GLuint *tex, GLuint *rb) {
@@ -6293,7 +6507,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +    GLuint new_scratch_tex = 0, new_scratch_fbo = 0;
 +    GLuint new_wide_tex[WIDE_MAX_SURF] = {0};
 +    GLuint new_wide_fbo[WIDE_MAX_SURF] = {0};
-+    GLuint new_wide_rb[WIDE_MAX_SURF] = {0};
++    GLuint new_wide_depth[WIDE_MAX_SURF] = {0};
 +    int current_wide_index = -1;
 +
 +    new_hr_tex = make_tex(GL_RGBA8, new_hw, new_hh,
@@ -6318,14 +6532,10 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +        const int wide_w = g_wide_w * scale;
 +        new_wide_tex[i] = make_tex(GL_RGBA8, wide_w, new_hh,
 +                                   GL_RGBA, GL_UNSIGNED_BYTE);
-+        p_glGenRenderbuffers(1, &new_wide_rb[i]);
-+        p_glBindRenderbuffer(PSXGL_RENDERBUFFER, new_wide_rb[i]);
-+        p_glRenderbufferStorage(PSXGL_RENDERBUFFER,
-+                                PSXGL_DEPTH24_STENCIL8, wide_w, new_hh);
-+        p_glBindRenderbuffer(PSXGL_RENDERBUFFER, 0);
-+        if (!new_wide_tex[i] || !new_wide_rb[i] ||
-+            !make_fbo(&new_wide_fbo[i], new_wide_tex[i],
-+                      new_wide_rb[i])) {
++        new_wide_depth[i] = depth_stencil_texture(wide_w, new_hh);
++        if (!new_wide_tex[i] || !new_wide_depth[i] ||
++            !make_fbo_depth_texture(&new_wide_fbo[i], new_wide_tex[i],
++                                    new_wide_depth[i])) {
 +            goto fail;
 +        }
 +    }
@@ -6345,14 +6555,14 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +               old_scratch_fbo = s_scratch_fbo;
 +        GLuint old_wide_tex[WIDE_MAX_SURF];
 +        GLuint old_wide_fbo[WIDE_MAX_SURF];
-+        GLuint old_wide_rb[WIDE_MAX_SURF];
++        GLuint old_wide_depth[WIDE_MAX_SURF];
 +        for (int i = 0; i < WIDE_MAX_SURF; ++i) {
 +            old_wide_tex[i] = s_wide_tex[i];
 +            old_wide_fbo[i] = s_wide_fbo[i];
-+            old_wide_rb[i] = s_wide_rb[i];
++            old_wide_depth[i] = s_wide_depth[i];
 +            s_wide_tex[i] = new_wide_tex[i]; new_wide_tex[i] = 0;
 +            s_wide_fbo[i] = new_wide_fbo[i]; new_wide_fbo[i] = 0;
-+            s_wide_rb[i] = new_wide_rb[i]; new_wide_rb[i] = 0;
++            s_wide_depth[i] = new_wide_depth[i]; new_wide_depth[i] = 0;
 +        }
 +        s_hr_tex = new_hr_tex; new_hr_tex = 0;
 +        s_hr_fbo = new_hr_fbo; new_hr_fbo = 0;
@@ -6383,9 +6593,10 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +
 +        delete_scale_target(&old_hr_fbo, &old_hr_tex, &old_hr_rb);
 +        delete_scale_target(&old_scratch_fbo, &old_scratch_tex, NULL);
-+        for (int i = 0; i < WIDE_MAX_SURF; ++i)
-+            delete_scale_target(&old_wide_fbo[i], &old_wide_tex[i],
-+                                &old_wide_rb[i]);
++        for (int i = 0; i < WIDE_MAX_SURF; ++i) {
++            delete_scale_target(&old_wide_fbo[i], &old_wide_tex[i], NULL);
++            glDeleteTextures(1, &old_wide_depth[i]);
++        }
 +    }
 +
 +    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, 0);
@@ -6396,9 +6607,10 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +fail:
 +    delete_scale_target(&new_hr_fbo, &new_hr_tex, &new_hr_rb);
 +    delete_scale_target(&new_scratch_fbo, &new_scratch_tex, NULL);
-+    for (int i = 0; i < WIDE_MAX_SURF; ++i)
-+        delete_scale_target(&new_wide_fbo[i], &new_wide_tex[i],
-+                            &new_wide_rb[i]);
++    for (int i = 0; i < WIDE_MAX_SURF; ++i) {
++        delete_scale_target(&new_wide_fbo[i], &new_wide_tex[i], NULL);
++        glDeleteTextures(1, &new_wide_depth[i]);
++    }
 +    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, 0);
 +    fprintf(stderr,
 +            "psxrecomp: live internal-scale allocation failed; keeping %dx\n",
@@ -6510,6 +6722,14 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +    s_tex_uDissolve = p_glGetUniformLocation(s_tex_prog, "u_dissolve");
 +    s_tex_uClear = p_glGetUniformLocation(s_tex_prog, "u_clear");
 +    s_tex_uPull = p_glGetUniformLocation(s_tex_prog, "u_pull");
++    s_tex_uHold = p_glGetUniformLocation(s_tex_prog, "u_hold");
++    s_tex_uGroundSamples = p_glGetUniformLocation(s_tex_prog, "u_ground_samples");
++    s_tex_uGroundShare = p_glGetUniformLocation(s_tex_prog, "u_ground_share");
++    s_tex_uGroundView = p_glGetUniformLocation(s_tex_prog, "u_ground_view");
++    s_tex_uSampleAt = p_glGetUniformLocation(s_tex_prog, "u_sample_at");
++    p_glUseProgram(s_tex_prog);
++    p_glUniform1i(p_glGetUniformLocation(s_tex_prog, "u_scene_depth"), HOLD_DEPTH_UNIT);
++    p_glUniform1i(p_glGetUniformLocation(s_tex_prog, "u_scene_depth_ms"), HOLD_DEPTH_MS_UNIT);
 +    /* Default the new uniforms to the no-op (1.0 scale, 0 centre) -- GLSL would
 +     * otherwise zero them, collapsing all x to 0. */
 +    p_glUseProgram(s_geo_prog);
@@ -6579,6 +6799,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +        p_glVertexAttribPointer(10, 2, GL_FLOAT, GL_FALSE, st, (void*)(20*sizeof(float))); p_glEnableVertexAttribArray(10); /* visual pos */
 +        p_glVertexAttribPointer(11, 1, GL_FLOAT, GL_FALSE, st, (void*)(22*sizeof(float))); p_glEnableVertexAttribArray(11); /* reciprocal depth */
 +        p_glVertexAttribPointer(12, 1, GL_FLOAT, GL_FALSE, st, (void*)(23*sizeof(float))); p_glEnableVertexAttribArray(12); /* camera depth */
++        p_glVertexAttribPointer(13, 3, GL_FLOAT, GL_FALSE, st, (void*)(24*sizeof(float))); p_glEnableVertexAttribArray(13); /* ground, reach, depth */
 +    }
 +
 +    p_glGenVertexArrays(1, &s_blit_vao);
@@ -6747,6 +6968,8 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +            if (fill) s_crack_fill = s_crack_width = (float)atof(fill);
 +            if (under) s_grown_under = atoi(under) != 0;
 +            if (getenv("PSX_GL_WORLD_DEPTH")) s_world_depth = atoi(getenv("PSX_GL_WORLD_DEPTH")) != 0;
++            if (getenv("PSX_GL_SPRITE_HOLD")) s_sprite_hold = atoi(getenv("PSX_GL_SPRITE_HOLD")) != 0;
++            if (getenv("PSX_GL_SPRITE_HOLD_SHARE")) s_sprite_hold_share = (float)atof(getenv("PSX_GL_SPRITE_HOLD_SHARE"));
 +            if (getenv("PSX_GL_SHOWN_DUMP"))
 +                gl_renderer_record_shown(getenv("PSX_GL_SHOWN_DUMP"),
 +                                         getenv("PSX_GL_SHOWN_DUMP_SKIP") ? atoi(getenv("PSX_GL_SHOWN_DUMP_SKIP")) : 0,
@@ -7946,7 +8169,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +        wide_twin_free(i);
 +        if (s_wide_fbo[i]) { p_glDeleteFramebuffers(1, &s_wide_fbo[i]); s_wide_fbo[i] = 0; }
 +        if (s_wide_tex[i]) { glDeleteTextures(1, &s_wide_tex[i]); s_wide_tex[i] = 0; }
-+        if (s_wide_rb[i])  { p_glDeleteRenderbuffers(1, &s_wide_rb[i]); s_wide_rb[i] = 0; }
++        if (s_wide_depth[i]) { glDeleteTextures(1, &s_wide_depth[i]); s_wide_depth[i] = 0; }
 +        s_wide_base[i] = -1;
 +    }
 +    g_wide_cur = 0;
@@ -7967,12 +8190,10 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +             * PSX mask-bit mirror for the wide surface, and (the hard lesson)
 +             * a stencil-less FBO turns every stencil-enabled mirror draw into
 +             * ~0.6ms of driver-side work — the 16:9 GL perf collapse. */
-+            p_glGenRenderbuffers(1, &s_wide_rb[i]);
-+            p_glBindRenderbuffer(PSXGL_RENDERBUFFER, s_wide_rb[i]);
-+            p_glRenderbufferStorage(PSXGL_RENDERBUFFER, PSXGL_DEPTH24_STENCIL8, w, h);
-+            if (!make_fbo(&s_wide_fbo[i], s_wide_tex[i], s_wide_rb[i])) {
++            s_wide_depth[i] = depth_stencil_texture(w, h);
++            if (!make_fbo_depth_texture(&s_wide_fbo[i], s_wide_tex[i], s_wide_depth[i])) {
 +                glDeleteTextures(1, &s_wide_tex[i]); s_wide_tex[i] = 0;
-+                p_glDeleteRenderbuffers(1, &s_wide_rb[i]); s_wide_rb[i] = 0;
++                glDeleteTextures(1, &s_wide_depth[i]); s_wide_depth[i] = 0;
 +                return 0;
 +            }
 +            /* Clear to black so unwritten margins are clean (not stale). */
@@ -8615,24 +8836,13 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +} SsaoTargets;
 +static SsaoTargets s_ssao_main, s_ssao_thread;
 +
-+static GLuint ssao_depth_texture(int w, int h) {
-+    GLuint made = 0;
-+    glGenTextures(1, &made);
-+    glBindTexture(GL_TEXTURE_2D, made);
-+    glTexImage2D(GL_TEXTURE_2D, 0, PSXGL_DEPTH24_STENCIL8, w, h, 0, 0x84F9 /* GL_DEPTH_STENCIL */, 0x84FA /* GL_UNSIGNED_INT_24_8 */, NULL);
-+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
-+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
-+    return made;
-+}
 +
 +static int ssao_targets(SsaoTargets *t, int w, int h, int lw, int lh, int copies) {
 +    if (copies && (!t->depth_fbo || t->w != w || t->h != h)) {
 +        if (t->depth_fbo) p_glDeleteFramebuffers(1, &t->depth_fbo);
 +        if (t->depth) glDeleteTextures(1, &t->depth);
 +        t->depth_fbo = 0;
-+        t->depth = ssao_depth_texture(w, h);
++        t->depth = depth_stencil_texture(w, h);
 +        p_glGenFramebuffers(1, &t->depth_fbo);
 +        p_glBindFramebuffer(PSXGL_FRAMEBUFFER, t->depth_fbo);
 +        p_glFramebufferTexture2D(PSXGL_FRAMEBUFFER, PSXGL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, t->depth, 0);
@@ -8769,7 +8979,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +        if (t->depth) glDeleteTextures(1, &t->depth);
 +        t->fbo = 0;
 +        t->w = t->h = 0;
-+        t->depth = ssao_depth_texture(w, h);
++        t->depth = depth_stencil_texture(w, h);
 +        p_glGenFramebuffers(1, &t->fbo);
 +        p_glBindFramebuffer(PSXGL_FRAMEBUFFER, t->fbo);
 +        p_glFramebufferTexture2D(PSXGL_FRAMEBUFFER, PSXGL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, t->depth, 0);
@@ -8819,7 +9029,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +    if (!s_interp_depth[0] || s_interp_depth_w != pw || s_interp_depth_h != ph) {
 +        for (int i = 0; i < 3; i++) {
 +            if (s_interp_depth[i]) glDeleteTextures(1, &s_interp_depth[i]);
-+            s_interp_depth[i] = ssao_depth_texture(pw, ph);
++            s_interp_depth[i] = depth_stencil_texture(pw, ph);
 +        }
 +        s_interp_depth_w = pw;
 +        s_interp_depth_h = ph;
@@ -9915,7 +10125,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
      uint64_t freq = SDL_GetPerformanceFrequency();
      uint64_t deadline = SDL_GetPerformanceCounter();
      uint64_t diag_start = deadline, diag_swaps = 0, diag_captures = 0;
-@@ -3473,11 +6509,12 @@
+@@ -3473,11 +6719,12 @@
      while (SDL_AtomicGet(&s_interp_thread_run)) {
          SDL_LockMutex(s_interp_mutex);
          double hz = s_interp_target_hz;
@@ -9929,7 +10139,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
              uint64_t period = (uint64_t)((double)freq / hz);
              if (!period) period = 1;
              deadline += period;
-@@ -3492,235 +6529,485 @@
+@@ -3492,235 +6739,487 @@
              }
              while (SDL_GetPerformanceCounter() < deadline) {}
              now = SDL_GetPerformanceCounter();
@@ -10591,6 +10801,8 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80
 +    .set_surface_depth_triangle = glb_set_surface_depth_triangle,
 +    .set_temporal_identity_triangle = glb_set_temporal_identity_triangle,
 +    .set_temporal_sprite = glb_set_temporal_sprite,
++    .set_temporal_sprite_ground = glb_set_temporal_sprite_ground,
++    .set_sprite_card = glb_set_sprite_card,
 +#else
 +    .set_temporal_depth_triangle = NULL,
 +    .set_temporal_identity_triangle = NULL,

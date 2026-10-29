@@ -146,6 +146,16 @@ void draw_enhancements_tab() {
     if (!sampling_applies) ImGui::EndDisabled();
     draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
 
+    bool facing = gpu_facing_sprites_enabled() != 0;
+    const bool facing_applies = applies("disruptor.facing_sprites");
+    if (!facing_applies) ImGui::BeginDisabled();
+    if (option_toggle("disruptor.facing_sprites", &facing)) {
+        gpu_facing_sprites_set(facing ? 1 : 0);
+        mark_facing_sprites(facing);
+    }
+    if (!facing_applies) ImGui::EndDisabled();
+    draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
+
     ImGui::SeparatorText("Shading");
     bool occlusion = gl_renderer_ssao() != 0;
     const bool occlusion_applies = applies("disruptor.ambient_occlusion");

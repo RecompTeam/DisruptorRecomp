@@ -88,7 +88,7 @@ def main() -> int:
 
     # The canonical pass consumes a dedicated GP0 attribute, never presentation precision floored.
     require(
-        "#define GEOV 10" in gl and "#define TEXV 24" in gl,
+        "#define GEOV 10" in gl and "#define TEXV 27" in gl,
         "GL vertex records must retain canonical/visual positions and temporal depth",
     )
     require("layout(location=3) in vec2 a_visual_pos" in gl, "flat geometry needs a separate visual-position attribute")

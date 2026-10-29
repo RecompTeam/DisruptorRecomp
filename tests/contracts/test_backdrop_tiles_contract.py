@@ -253,7 +253,7 @@ require(
     in renderer
     and renderer.count("a_visual_flags < -1.5") == 1
     and '"  v_bill = u_visual > 0.5 ? (a_visual_flags < -0.5 && a_visual_flags > -1.5 ? 0.75 : ' in renderer
-    and '    "  float q = (u_visual > 0.5 && a_visual_flags > 1.5 && a_q > 0.0) ? a_q : 0.0;\\n"\n' in renderer,
+    and '    "  float q = (u_visual > 0.5 && a_visual_flags > 0.5 && a_q > 0.0) ? a_q : 0.0;\\n"\n' in renderer,
     "only the mirror places a tile: it is put where it stands and never turned, its texture slides and may read its column "
     "past its own ends, it is no flat picture over the world, and its slide is no perspective weight",
 )

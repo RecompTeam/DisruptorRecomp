@@ -72,6 +72,7 @@
 extern "C" void gte_ws_set_far_threshold(int threshold);
 extern "C" void gte_ws_set_backdrop_repair_enabled(int enabled);
 extern "C" void gl_renderer_set_world_depth(int enabled);
+extern "C" void gl_renderer_set_sprite_depth_read(int enabled);
 extern "C" void gl_renderer_set_host_ui_suspended(int suspended);
 extern "C" int gl_renderer_world_depth(void);
 extern "C" void gl_renderer_set_full_yaw(int enabled);
@@ -210,6 +211,7 @@ void mark_detailed_logging(bool value);
 void mark_occlusion_shape(int reach, int strength);
 void mark_gap_filling(bool value);
 void mark_world_depth(bool value);
+void mark_facing_sprites(bool value);
 void mark_lighting();
 void mark_sun(const int amounts[4]);
 void apply_diagnostic_view(int view);
