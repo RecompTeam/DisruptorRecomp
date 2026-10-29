@@ -90,7 +90,7 @@ require(
     "developer menu must remain independently build-selectable, and with it in-between frames start in the geometry mode",
 )
 require(
-    "v1.92.6.tar.gz" in cmake and "5b17c01f69545bde732b14936d89ce0f508adb83e8b56fa82448371845172bc3" in cmake.lower(),
+    "v1.93.0.tar.gz" in cmake and "f7bf6bc76e5d79d40d751096663e6c5d18daf08129dd52e7f7b09e4251c8eeee" in cmake.lower(),
     "Dear ImGui source must remain versioned and integrity-pinned",
 )
 menu_files = menu_sources(ROOT)
@@ -249,13 +249,16 @@ require(
 )
 after_helper = layer_update[layer_update.index(f"{host_ui_helper}(ww, wh);") :]
 require(
-    after_helper.index("p_glBindFramebuffer(PSXGL_FRAMEBUFFER, 0);") < after_helper.index("glViewport(0, 0, ww, wh);")
+    after_helper.index("p_glBindFramebuffer(PSXGL_FRAMEBUFFER, 0);")
+    < after_helper.index("glViewport(0, 0, ww, wh);")
     < after_helper.index("s_layer_fence[i] = p_glFenceSync("),
     "the layer's drawing leaves the window bound even when the helper drew nothing",
 )
 require(
-    re.findall(r"s_layer_next\b[^;]*;", gl) == ["s_layer_next = 0, s_layer_failed = 0;", "s_layer_next;", "s_layer_next = 1 - i;"]
-    and layer_update.index("const int i = s_layer_next;") < layer_update.index("s_layer_shown = i;")
+    re.findall(r"s_layer_next\b[^;]*;", gl)
+    == ["s_layer_next = 0, s_layer_failed = 0;", "s_layer_next;", "s_layer_next = 1 - i;"]
+    and layer_update.index("const int i = s_layer_next;")
+    < layer_update.index("s_layer_shown = i;")
     < layer_update.index("s_layer_next = 1 - i;")
     and set(re.findall(r"s_layer_shown = ([^,;]+)[,;]", gl)) == {"-1", "i"}
     and re.findall(r"s_layer_shown = ([^,;]+)[,;]", gl).count("i") == 1
@@ -439,11 +442,13 @@ require(
         f'#if DISRUPTOR_DEV_TOOLS\n            if (ImGui::BeginTabItem("{tab}")) {{\n' in menu
         for tab in ("Experimental", "Cheats")
     )
-    and "#if DISRUPTOR_DEV_TOOLS\nconstexpr bool kDeveloperBuild = true;\n#else\nconstexpr bool kDeveloperBuild = false;\n" in menu
+    and "#if DISRUPTOR_DEV_TOOLS\nconstexpr bool kDeveloperBuild = true;\n#else\nconstexpr bool kDeveloperBuild = false;\n"
+    in menu
     and "return kDeveloperBuild ? stored(settings, *find_option(key)) : 0; };\n"
-    "    gl_renderer_set_ddgi_environment(kDeveloperBuild);\n" in menu
+    "    gl_renderer_set_ddgi_environment(kDeveloperBuild);\n"
+    in menu
     and "        apply_diagnostic_view(kDeveloperBuild && settings.has_diagnostic_view &&\n" in menu
-    and "#if DISRUPTOR_DEV_TOOLS\n    ImGui::Separator();\n    if (ImGui::Button(\"Record the screen\")" in menu
+    and '#if DISRUPTOR_DEV_TOOLS\n    ImGui::Separator();\n    if (ImGui::Button("Record the screen")' in menu
     and "    ImGui::Separator();\n    draw_mission_select();\n#endif\n" in menu
     and "    if (!asked && s_ddgi_environment) {\n" in read("psxrecomp/runtime/src/gpu_gl_ddgi.c.inc")
     and "bool page_rows_shown(Page page, bool dev_tools) { return dev_tools || page != Page::experimental; }"

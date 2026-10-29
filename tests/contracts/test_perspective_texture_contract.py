@@ -12,7 +12,6 @@ import re
 import sys
 from math import isclose
 
-
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 OVERLAY = ROOT / "psxrecomp" / "runtime"
 MAIN = OVERLAY / "src" / "main.cpp"
@@ -30,7 +29,7 @@ def require(condition: bool, message: str) -> None:
 
 
 def function_match(source: str, name: str) -> re.Match[str]:
-    match = re.search(rf"\b{name}\s*\([^;]*?\)\s*\{{", source, re.S)
+    match = re.search(rf"\b{name}\s*\([^;]*?\)\s*\{{", source, re.DOTALL)
     if not match:
         raise AssertionError(f"missing function: {name}")
     return match
@@ -344,7 +343,7 @@ def main() -> int:
     # Perspective correction is attribute-only: no change to clipping, coverage or geometry through W.
     require("gl_Position.w" not in tex_vs, "texture correction must not mutate gl_Position.w")
     require(
-        re.search(r"gl_Position\s*=\s*vec4\([^;]*0\.0\s*,\s*1\.0\s*\)", tex_vs, re.S) is not None,
+        re.search(r"gl_Position\s*=\s*vec4\([^;]*0\.0\s*,\s*1\.0\s*\)", tex_vs, re.DOTALL) is not None,
         "TEX_VS must keep homogeneous W fixed at 1",
     )
     flush = function_body(gl, "flush_tex_batch")

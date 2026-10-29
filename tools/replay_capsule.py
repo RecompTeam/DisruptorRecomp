@@ -99,6 +99,7 @@ def main() -> int:
         stderr=subprocess.PIPE,
         text=True,
         errors="replace",
+        check=False,
     )
     said = [line for line in finished.stderr.splitlines() if "capsule:" in line]
     print("\n".join(said) if said else f"The game said nothing of the capsule. Its exit code is {finished.returncode}.")

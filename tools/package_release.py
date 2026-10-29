@@ -68,7 +68,7 @@ PLATFORMS = {
         "- Your files are kept in `~/.local/share/DisruptorRecompData`\n",
     ),
 }
-SIGSTORE = "sigstore@4.5.0"
+SIGSTORE = "sigstore@4.5.1"
 SIGNER = "recomp.team@gmail.com"
 SIGNER_ISSUER = "https://accounts.google.com"
 SLSA_PROVENANCE = "https://slsa.dev/provenance/v1"
@@ -323,7 +323,7 @@ def payload_of(build: Path, version: str, zstd_license: Path, platform: Platform
         "licenses/SDL-hidapi-BSD-LICENSE.txt": build / "_deps/sdl3-src/src/hidapi/LICENSE-bsd.txt",
         "licenses/SDL-yuv2rgb-LICENSE.txt": build / "_deps/sdl3-src/src/video/yuv2rgb/LICENSE",
         "licenses/libchdr-LICENSE.txt": build / "_deps/psx_libchdr-src/LICENSE.txt",
-        "licenses/LZMA-LICENSE.txt": build / "_deps/psx_libchdr-src/deps/lzma-25.01/LICENSE",
+        "licenses/LZMA-LICENSE.txt": build / "_deps/psx_libchdr-src/deps/lzma-26.02/LICENSE",
         "licenses/Zstd-LICENSE.txt": zstd_license,
     }
     payload = {name: path.read_bytes() for name, path in files.items()}

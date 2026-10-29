@@ -7,7 +7,6 @@ import pathlib
 import re
 import sys
 
-
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 GPU = ROOT / "psxrecomp" / "runtime" / "src" / "gpu.c"
 GTE = ROOT / "psxrecomp" / "runtime" / "src" / "gte.cpp"
@@ -19,7 +18,7 @@ OVERLAY_LIST = ROOT / "framework/FILES.txt"
 
 
 def function_body(source: str, name: str) -> str:
-    match = re.search(rf"\b{name}\s*\([^;]*?\)\s*\{{", source, re.S)
+    match = re.search(rf"\b{name}\s*\([^;]*?\)\s*\{{", source, re.DOTALL)
     if not match:
         raise AssertionError(f"missing function: {name}")
     start = source.index("{", match.start())

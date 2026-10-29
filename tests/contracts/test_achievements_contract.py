@@ -4,6 +4,7 @@
 The launcher's problem report carries a fixed list of files, settings.toml among them, so the token lives in its own
 file that the list never names, and no settings writer ever writes it.
 """
+
 import re
 from pathlib import Path
 
@@ -44,7 +45,7 @@ for writer in ("src/game/settings/saved.cpp", "src/launcher/launcher_settings.cp
     require("token" not in read(writer), f"{writer} writes no token into settings.toml")
 writes = read("src/game/achievements/account.cpp")
 require(
-    'const fs::path target = folder / kAccountFile;' in writes and writes.count("std::ofstream") == 1,
+    "const fs::path target = folder / kAccountFile;" in writes and writes.count("std::ofstream") == 1,
     "the token is written to the account file alone",
 )
 print("Disruptor achievements source contract: PASS")

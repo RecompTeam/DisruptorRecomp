@@ -15,7 +15,6 @@ import hashlib
 import struct
 from pathlib import Path
 
-
 SOURCE_SHA256 = "48e8c3143b7f5de10340c9d4a9bac8cb7e97c15eda7a0897d3cf337ad96cb2c4"
 CODE_START = 0x80011200
 CODE_END = 0x80056938

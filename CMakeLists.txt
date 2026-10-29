@@ -100,10 +100,10 @@ include("${PSXRECOMP_ROOT}/runtime/runtime.cmake")
 include(FetchContent)
 FetchContent_Declare(disruptor_imgui
     URL
-        "https://github.com/ocornut/imgui/archive/refs/tags/v1.92.6.tar.gz"
+        "https://github.com/ocornut/imgui/archive/refs/tags/v1.93.0.tar.gz"
     URL_HASH
-        "SHA256=5b17c01f69545bde732b14936d89ce0f508adb83e8b56fa82448371845172bc3"
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+        "SHA256=f7bf6bc76e5d79d40d751096663e6c5d18daf08129dd52e7f7b09e4251c8eeee"
+    DOWNLOAD_EXTRACT_TIMESTAMP FALSE)
 FetchContent_MakeAvailable(disruptor_imgui)
 include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/achievements.cmake")
 

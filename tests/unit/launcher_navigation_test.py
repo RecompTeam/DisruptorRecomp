@@ -76,7 +76,7 @@ def drive(
     if pad:
         arguments.append("--virtual-pad")
     environment = dict(os.environ, PSX_USER_DIR=str(folder / data))
-    done = subprocess.run(arguments, env=environment, capture_output=True, timeout=120)
+    done = subprocess.run(arguments, env=environment, capture_output=True, timeout=120, check=False)
     if done.returncode == NO_DISPLAY:
         raise Skipped(done.stderr.decode(errors="replace"))
     if done.returncode != 0:

@@ -151,13 +151,17 @@ require(
     and "int gpu_current_hud_glyph(void) { return ws_hud_glyph; }\n" in gpu
     and "    ws_hud_glyph = shrunk && clut_x == ws_hud_text_clut_x && clut_y == ws_hud_text_clut_y && (int)texpage_x == ws_hud_text_page_x &&\n"
     "                           (int)texpage_y == ws_hud_text_page_y\n"
-    "                       ? psx_ws_hud_glyph_code(ws_hud_scale_percent, raw_texture ? 0x808080u : color24) : 0;\n" in gpu
-    and "        gr_draw_textured_rect(x0, y0, w, h, u0, v0, clut_x, clut_y, current_texpage());\n    ws_hud_glyph = 0;\n" in gpu
+    "                       ? psx_ws_hud_glyph_code(ws_hud_scale_percent, raw_texture ? 0x808080u : color24) : 0;\n"
+    in gpu
+    and "        gr_draw_textured_rect(x0, y0, w, h, u0, v0, clut_x, clut_y, current_texpage());\n    ws_hud_glyph = 0;\n"
+    in gpu
     and gpu.count("shrunk = 1;") == 2
-    and "    const int packet_raw = packet_fade >= 0 ? 2 | (packet_fade << 2) : gpu_current_hud_glyph() << 2;\n" in renderer
+    and "    const int packet_raw = packet_fade >= 0 ? 2 | (packet_fade << 2) : gpu_current_hud_glyph() << 2;\n"
+    in renderer
     and '"bool glyph_edge(vec2 at, int glyph, out vec3 rgb, out int stp){\\n"' in renderer
     and '"  return t.x >= v_limits.x && t.x <= v_limits.z && t.y >= v_limits.y && t.y <= v_limits.w;\\n"' in renderer
-    and '"  if (!sample_texture(sample_uv, rgb, stp) && (glyph == 0 || !glyph_edge(sample_uv, glyph, rgb, stp))) discard;\\n"' in renderer
+    and '"  if (!sample_texture(sample_uv, rgb, stp) && (glyph == 0 || !glyph_edge(sample_uv, glyph, rgb, stp))) discard;\\n"'
+    in renderer
     and "constexpr int kTextSource[4] = {512, 177, 8, 0};" in widgets
     and "    if (!strokes || strokes[0] != '0') gpu_ws_set_hud_text_source(kTextSource[0], kTextSource[1], kTextSource[2], kTextSource[3]);\n"
     in widgets,

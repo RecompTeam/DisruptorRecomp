@@ -75,7 +75,8 @@ host = read("src/game/host.cpp")
 
 require(
     '    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/list_message.cpp"\n' in cmake
-    and "    disruptor_unit_test(disruptor_list_message tests/unit/disruptor_list_message_test.cpp RUNTIME_HEADERS)\n" in cmake
+    and "    disruptor_unit_test(disruptor_list_message tests/unit/disruptor_list_message_test.cpp RUNTIME_HEADERS)\n"
+    in cmake
     and "    disruptor_contract(list_message RETAIL)\n" in cmake,
     "the countdown line's source, its unit test and this contract with its input must stay registered",
 )
@@ -102,7 +103,8 @@ require(
     and '"disruptor.list_message.tick", kTick, tick_begins' in hooks
     and "bool wanted() { return !g_off && g_ls_mode == 0 && g_ls_replay_active == 0; }" in hooks
     and "    if (address == kModeSite && instruction == kModeWord) disruptor_list_message_builder_begins();\n"
-    "    if (address == kHudEndSite && instruction == kHudEndWord) disruptor_list_message_builder_ends(g_forced);\n" in lists
+    "    if (address == kHudEndSite && instruction == kHudEndWord) disruptor_list_message_builder_ends(g_forced);\n"
+    in lists
     and "    disruptor_list_message_state_loaded();\n" in host
     and "disruptor_stock_frames_save_deferred() || disruptor_list_message_save_deferred();" in host,
     "the line is kept from the builder's mode read to its end, coloured as the draw sends it, outside the comparator's runs,"

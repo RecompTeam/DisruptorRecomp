@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Source/codegen contract for Disruptor world-billboard aspect repair."""
 
-from pathlib import Path
 import re
 import sys
-
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 

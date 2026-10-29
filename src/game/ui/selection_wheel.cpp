@@ -43,8 +43,8 @@ void draw(int width, int height) {
         const ImU32 fill = !entry.owned ? IM_COL32(23, 27, 31, 230) : highlighted
             ? (wheel.kind == Kind::weapons ? IM_COL32(26, 86, 51, 246) : IM_COL32(27, 66, 108, 246))
             : IM_COL32(29, 36, 43, 242);
-        const ImDrawListFlags saved_flags = draw->Flags;
-        draw->Flags &= ~ImDrawListFlags_AntiAliasedFill;
+        const ImDrawFlags saved_flags = draw->Flags;
+        draw->Flags &= ~ImDrawFlags_AAFill;
         for (int part = 0; part < 16; ++part) {
             const float a = first + (last - first) * part / 16.0f;
             const float b = first + (last - first) * (part + 1) / 16.0f;
@@ -53,7 +53,7 @@ void draw(int width, int height) {
         }
         draw->Flags = saved_flags;
         draw->PathArcTo(center, radius, first, last, 16);
-        draw->PathStroke(highlighted ? accent : IM_COL32(72, 86, 95, 220), 0, highlighted ? 3.0f : 1.0f);
+        draw->PathStroke(highlighted ? accent : IM_COL32(72, 86, 95, 220), highlighted ? 3.0f : 1.0f);
         const ImVec2 label = point(center, radius * 0.72f, angle);
         std::string name = entry.name;
         if (const auto space = name.find(' '); space != std::string::npos) name[space] = '\n';

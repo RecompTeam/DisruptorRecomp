@@ -11,7 +11,7 @@ own notices remain in that checkout and resulting local build. No third-party
 binaries are stored in this repository.
 
 The optional in-game settings menu builds against Dear ImGui
-1.92.6, copyright Omar Cornut and Dear ImGui contributors, under the MIT
+1.93.0, copyright Omar Cornut and Dear ImGui contributors, under the MIT
 License. The source archive is integrity-pinned in `CMakeLists.txt`; its license
 is reproduced in [`Dear-ImGui-LICENSE.txt`](Dear-ImGui-LICENSE.txt).
 
@@ -20,7 +20,7 @@ copyright Caelan Sayler and Velopack Ltd., under the MIT License. The archive is
 integrity-pinned in `src/launcher/CMakeLists.txt`; its license is reproduced in
 [`Velopack-LICENSE.txt`](Velopack-LICENSE.txt).
 
-The Windows launcher draws its text with FreeType 2.14.3, under the FreeType
+The Windows launcher draws its text with FreeType 2.15.0, under the FreeType
 License. Portions of this software are copyright © 2026 The FreeType Project
 (https://freetype.org). All rights reserved. The archive is integrity-pinned in
 `src/launcher/CMakeLists.txt`. Its license is reproduced in

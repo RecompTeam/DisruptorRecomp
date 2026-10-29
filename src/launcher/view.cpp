@@ -354,11 +354,17 @@ void focus_ring(ImGuiID id, ImVec2 min, ImVec2 max, float rounding) {
     const ImVec2 out(distance, distance), edge(distance + thickness, distance + thickness);
     ImDrawList* draw = ImGui::GetWindowDrawList();
     draw->PushClipRect(min - edge, max + edge, false);
-    draw->AddRect(min - out, max + out, ImGui::GetColorU32(ImGuiCol_NavCursor), rounding + distance, 0, thickness);
+    draw->AddRect(min - out, max + out, ImGui::GetColorU32(ImGuiCol_NavCursor), rounding + distance, thickness,
+                  ImDrawFlags_StrokeCenter);
     draw->PopClipRect();
 }
 
 void nav_cursor(float rounding) { focus_ring(ImGui::GetItemID(), ImGui::GetItemRectMin(), ImGui::GetItemRectMax(), rounding); }
+
+// ImGui 1.93's SDL renderer samples every texture linearly unless a callback asks for the texture's own scale mode.
+void sampled_as_made(ImDrawList* draw) {
+    if (const ImDrawCallback keep = ImGui::GetPlatformIO().DrawCallback_SetSamplerFromTex) draw->AddCallback(keep, nullptr);
+}
 
 void dashed_rect(ImDrawList* draw, ImVec2 min, ImVec2 max, ImU32 tint, float dash, float thickness) {
     const auto line = [&](ImVec2 from, ImVec2 to) {
@@ -366,8 +372,9 @@ void dashed_rect(ImDrawList* draw, ImVec2 min, ImVec2 max, ImU32 tint, float das
         const ImVec2 step((to.x - from.x) / length, (to.y - from.y) / length);
         for (float at = 0.0f; at < length; at += dash * 2.0f) {
             const float end = std::min(at + dash, length);
-            draw->AddLine(ImVec2(from.x + step.x * at, from.y + step.y * at), ImVec2(from.x + step.x * end, from.y + step.y * end),
-                          tint, thickness);
+            const ImVec2 a(from.x + step.x * at, from.y + step.y * at), b(from.x + step.x * end, from.y + step.y * end);
+            if (a.y == b.y) draw->AddLineH(std::min(a.x, b.x), std::max(a.x, b.x), a.y, tint, thickness);
+            else draw->AddLineV(a.x, std::min(a.y, b.y), std::max(a.y, b.y), tint, thickness);
         }
     };
     line(min, ImVec2(max.x, min.y));
@@ -470,6 +477,7 @@ void View::style(float scale) {
     colors[ImGuiCol_ModalWindowDimBg] = rgb(0x000000, 0.6f);
     colors[ImGuiCol_Border] = rgb(kBorder);
     colors[ImGuiCol_FrameBg] = rgb(kRaised);
+    colors[ImGuiCol_CheckboxSelectedBg] = rgb(kRaised);
     colors[ImGuiCol_FrameBgHovered] = rgb(0x222d23);
     colors[ImGuiCol_FrameBgActive] = rgb(0x29362a);
     colors[ImGuiCol_Button] = rgb(kRaised);
@@ -627,11 +635,12 @@ void View::caption() {
     const float width = ImGui::GetContentRegionAvail().x;
     const float height = kCaptionHeight * scale_, side = kSidebarWidth * scale_, button = kCaptionButton * scale_;
     draw->AddRectFilled(top, top + ImVec2(side, height), colour(kSurface));
-    draw->AddLine(top + ImVec2(side - 1.0f, 0.0f), top + ImVec2(side - 1.0f, height), colour(kBorder));
+    draw->AddLineV(top.x + side - 1.0f, top.y, top.y + height, colour(kBorder));
     float x = top.x + 16.0f * scale_;
     if (app_icon_) {
         const float icon_size = 20.0f * scale_;
         const ImVec2 at(x, top.y + (height - icon_size) * 0.5f);
+        sampled_as_made(draw);
         draw->AddImageRounded(texture_id(app_icon_), at, at + ImVec2(icon_size, icon_size), ImVec2(0, 0), ImVec2(1, 1),
                               IM_COL32_WHITE, 5.0f * scale_);
         x += icon_size + 10.0f * scale_;
@@ -667,19 +676,20 @@ void View::caption() {
         const ImU32 ink = colour(closing && hovered ? 0xffffff : hovered ? kText : kMuted);
         const ImVec2 centre(std::floor(at.x + button * 0.5f) + 0.5f, std::floor(at.y + height * 0.5f) + 0.5f);
         if (index == 0) {
-            draw->AddLine(centre + ImVec2(-half, 0.0f), centre + ImVec2(half, 0.0f), ink, line);
+            draw->AddLineH(centre.x - half, centre.x + half, centre.y, ink, line);
         } else if (index == 1 && !maximized) {
-            draw->AddRect(centre + ImVec2(-half, -half), centre + ImVec2(half, half), ink, 0.0f, 0, line);
+            draw->AddRect(centre + ImVec2(-half, -half), centre + ImVec2(half, half), ink, 0.0f, line);
         } else if (index == 1) {
             const float step = std::floor(2.0f * scale_);
-            draw->AddRect(centre + ImVec2(-half, -half + step), centre + ImVec2(half - step, half), ink, 0.0f, 0, line);
-            draw->AddLine(centre + ImVec2(-half + step, -half + step), centre + ImVec2(-half + step, -half), ink, line);
-            draw->AddLine(centre + ImVec2(-half + step, -half), centre + ImVec2(half, -half), ink, line);
-            draw->AddLine(centre + ImVec2(half, -half), centre + ImVec2(half, half - step), ink, line);
-            draw->AddLine(centre + ImVec2(half, half - step), centre + ImVec2(half - step, half - step), ink, line);
+            draw->AddRect(centre + ImVec2(-half, -half + step), centre + ImVec2(half - step, half), ink, 0.0f, line);
+            draw->AddLineV(centre.x - half + step, centre.y - half, centre.y - half + step, ink, line);
+            draw->AddLineH(centre.x - half + step, centre.x + half, centre.y - half, ink, line);
+            draw->AddLineV(centre.x + half, centre.y - half, centre.y + half - step, ink, line);
+            draw->AddLineH(centre.x + half - step, centre.x + half, centre.y + half - step, ink, line);
         } else {
-            draw->AddLine(centre + ImVec2(-half, -half), centre + ImVec2(half, half), ink, line);
-            draw->AddLine(centre + ImVec2(-half, half), centre + ImVec2(half, -half), ink, line);
+            const ImVec2 pixel(0.5f, 0.5f);
+            draw->AddLine(centre + ImVec2(-half, -half) + pixel, centre + ImVec2(half, half) + pixel, ink, line);
+            draw->AddLine(centre + ImVec2(-half, half) + pixel, centre + ImVec2(half, -half) + pixel, ink, line);
         }
         if (hovered && caption_hovered_ != index) {
             caption_hovered_ = index;
@@ -707,8 +717,7 @@ void View::sidebar(const UpdateView& update) {
     sidebar_window_ = ImGui::GetCurrentWindow()->ID;
     ImDrawList* draw = ImGui::GetWindowDrawList();
     const ImVec2 corner = ImGui::GetWindowPos();
-    draw->AddLine(ImVec2(corner.x + width - 1.0f, corner.y), ImVec2(corner.x + width - 1.0f, corner.y + ImGui::GetWindowHeight()),
-                  colour(kBorder));
+    draw->AddLineV(corner.x + width - 1.0f, corner.y, corner.y + ImGui::GetWindowHeight(), colour(kBorder));
 
     const auto item = [&](const char* glyph, const char* label, bool selected, const char* badge = nullptr, bool page = false) {
         ImGui::PushID(label);
@@ -749,7 +758,7 @@ void View::sidebar(const UpdateView& update) {
     const auto rule = [&] {
         ImGui::Dummy(ImVec2(0.0f, divider * 0.5f - ImGui::GetStyle().ItemSpacing.y * 0.5f));
         const ImVec2 line = ImGui::GetCursorScreenPos() + ImVec2(14.0f * scale_, 0.0f);
-        draw->AddLine(line, line + ImVec2(ImGui::GetContentRegionAvail().x - 28.0f * scale_, 0.0f), colour(kBorder), scale_);
+        draw->AddLineH(line.x, line.x + ImGui::GetContentRegionAvail().x - 28.0f * scale_, line.y, colour(kBorder), scale_);
         ImGui::Dummy(ImVec2(0.0f, divider * 0.5f - ImGui::GetStyle().ItemSpacing.y * 0.5f));
     };
     if (item(icon::play, "Play", screen_ == Screen::home)) screen_ = Screen::home;
@@ -945,6 +954,7 @@ void View::banner(float height, bool dialog_open) {
         const float shown_x = width / pixel / 320.0f, shown_y = height / pixel / 240.0f;
         const float left = (1.0f - shown_x) * 0.5f;
         const float upper = game_art ? 0.0f : (1.0f - shown_y) * 0.5f;
+        sampled_as_made(draw);
         draw->AddImageRounded(texture_id(art), top, bottom, ImVec2(left, upper), ImVec2(left + shown_x, upper + shown_y),
                               IM_COL32_WHITE, rounding);
     } else {
@@ -1663,8 +1673,8 @@ void View::unlock_sound_row() {
     const ImVec2 at = ImGui::GetCursorScreenPos();
     const float middle = ImGui::GetTextLineHeight() * 0.5f, left = ImGui::GetCursorPosX(), top = ImGui::GetCursorPosY();
     ImDrawList* draw = ImGui::GetWindowDrawList();
-    draw->AddLine(at + ImVec2(9.0f * scale_, -8.0f * scale_), at + ImVec2(9.0f * scale_, middle), colour(kBorder), scale_);
-    draw->AddLine(at + ImVec2(9.0f * scale_, middle), at + ImVec2(19.0f * scale_, middle), colour(kBorder), scale_);
+    draw->AddLineV(at.x + 9.0f * scale_, at.y - 8.0f * scale_, at.y + middle, colour(kBorder), scale_);
+    draw->AddLineH(at.x + 9.0f * scale_, at.x + 19.0f * scale_, at.y + middle, colour(kBorder), scale_);
     ImGui::SetCursorPosX(left + indent);
     ImGui::BeginDisabled(!on);
     ImGui::BeginGroup();
@@ -2699,7 +2709,7 @@ void View::rows() {
             if (std::string_view(placement.group) == "Gamepad") pad_status();
         } else if (!first && !placement.child) {
             const ImVec2 at = ImGui::GetCursorScreenPos();
-            ImGui::GetWindowDrawList()->AddLine(at, at + ImVec2(ImGui::GetContentRegionAvail().x, 0.0f), colour(kBorder));
+            ImGui::GetWindowDrawList()->AddLineH(at.x, at.x + ImGui::GetContentRegionAvail().x, at.y, colour(kBorder));
             ImGui::Dummy(ImVec2(0.0f, 4.0f * scale_));
         } else if (placement.child) {
             ImGui::Dummy(ImVec2(0.0f, 2.0f * scale_));
@@ -2727,8 +2737,8 @@ void View::setting_row(const Placement& placement, const Option& option, float c
         const ImVec2 at = ImGui::GetCursorScreenPos();
         const float middle = ImGui::GetTextLineHeight() * 0.5f;
         ImDrawList* draw = ImGui::GetWindowDrawList();
-        draw->AddLine(at + ImVec2(9.0f * scale_, -8.0f * scale_), at + ImVec2(9.0f * scale_, middle), colour(kBorder), scale_);
-        draw->AddLine(at + ImVec2(9.0f * scale_, middle), at + ImVec2(19.0f * scale_, middle), colour(kBorder), scale_);
+        draw->AddLineV(at.x + 9.0f * scale_, at.y - 8.0f * scale_, at.y + middle, colour(kBorder), scale_);
+        draw->AddLineH(at.x + 9.0f * scale_, at.x + 19.0f * scale_, at.y + middle, colour(kBorder), scale_);
         ImGui::SetCursorPosX(ImGui::GetCursorPosX() + indent);
     }
     ImGui::BeginDisabled(!on);
@@ -3198,8 +3208,7 @@ void View::rich(const Line& line, float width, bool strong, bool faint, float le
         // A link is underlined as ImGui's own are, so a bold green name beside it does not pass for one.
         const bool linked = !span.target.empty() && (span.style == Style::link || span.style == Style::code);
         if (on || linked)
-            draw->AddLine(at + ImVec2(0.0f, size + 1.0f), at + ImVec2(piece.width, size + 1.0f), colour(on ? 0xc4f0c9 : kLink),
-                          std::max(1.0f, scale_));
+            draw->AddLineH(at.x, at.x + piece.width, at.y + size + 1.0f, colour(on ? 0xc4f0c9 : kLink), std::max(1.0f, scale_));
     }
     ImGui::SetCursorScreenPos(origin);
     ImGui::Dummy(ImVec2(width, row * static_cast<float>(rows)));

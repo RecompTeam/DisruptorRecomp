@@ -9,7 +9,6 @@ import struct
 import sys
 from pathlib import Path
 
-
 EXPECTED = {
     "sha256": "48e8c3143b7f5de10340c9d4a9bac8cb7e97c15eda7a0897d3cf337ad96cb2c4",
     "size": 0x62000,

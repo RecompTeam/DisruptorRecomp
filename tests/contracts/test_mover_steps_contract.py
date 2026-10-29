@@ -193,7 +193,7 @@ require(
 )
 require(
     'extern "C" void disruptor_mover_motion_state_loaded(void) {\n    forget(g_shifts);\n    forget(g_lifts);\n'
-    '    disruptor::objects::forget(g_objects);\n}\n'
+    "    disruptor::objects::forget(g_objects);\n}\n"
     in motion
     and "    disruptor_mover_motion_state_loaded();\n" in host,
     "a loaded state has no half step and no lag of this run to take back",
@@ -275,7 +275,7 @@ require(
     and "void psx_game_state_saving(void);\n" in read("psxrecomp/runtime/include/game_host.h")
     and "void psx_game_state_saving(void) {\n    disruptor_mover_motion_state_saving();\n" in host
     and 'extern "C" void disruptor_mover_motion_state_saving(void) {\n    Guest guest;\n    take_back(guest, g_shifts);\n'
-    '    catch_up(guest, g_lifts);\n    disruptor::objects::catch_up(guest, g_objects);\n}\n'
+    "    catch_up(guest, g_lifts);\n    disruptor::objects::catch_up(guest, g_objects);\n}\n"
     in motion,
     "a half step and a lag are taken out of memory before a state is written, so that no saved state holds one",
 )

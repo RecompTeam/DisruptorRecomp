@@ -73,6 +73,7 @@ void apply_disruptor_style() {
     const ImVec4 green_hover(0.28f, 0.90f, 0.43f, 1.00f);
     const ImVec4 green_active(0.14f, 0.62f, 0.27f, 1.00f);
     style.Colors[ImGuiCol_CheckMark] = green_hover;
+    style.Colors[ImGuiCol_CheckboxSelectedBg] = style.Colors[ImGuiCol_FrameBg];
     style.Colors[ImGuiCol_SliderGrab] = green;
     style.Colors[ImGuiCol_SliderGrabActive] = green_hover;
     style.Colors[ImGuiCol_Header] = ImVec4(0.10f, 0.38f, 0.18f, 1.00f);

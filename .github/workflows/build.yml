@@ -35,7 +35,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install --yes --no-install-recommends \
-            build-essential ccache cmake ninja-build pkg-config python3 \
+            build-essential ccache cmake ninja-build pkg-config python3 python3-venv \
             libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
             libxfixes-dev libxss-dev libxtst-dev libxinerama-dev \
             libxkbcommon-dev libwayland-dev wayland-protocols libdecor-0-dev \
@@ -54,6 +54,14 @@ jobs:
           ccache --zero-stats
           ./build.sh
           ccache --show-stats
+      - name: Check the Python tools and tests with ruff
+        if: ${{ !cancelled() }}
+        run: |
+          python3 -m venv "$RUNNER_TEMP/ruff"
+          echo "ruff==0.17.2 --hash=sha256:c60f93fec7142dba5b8f487f94bf2f6231dae24dc11e4c48648347c8b0720004" > "$RUNNER_TEMP/ruff.txt"
+          "$RUNNER_TEMP/ruff/bin/pip" install --quiet --no-deps --require-hashes -r "$RUNNER_TEMP/ruff.txt"
+          "$RUNNER_TEMP/ruff/bin/ruff" check .
+          "$RUNNER_TEMP/ruff/bin/ruff" format --check .
 
   mingw:
     name: Windows, MinGW-w64

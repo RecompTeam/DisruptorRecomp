@@ -7,7 +7,6 @@ import re
 import struct
 from pathlib import Path
 
-
 ROOT = Path(__file__).resolve().parents[2]
 LOAD_ADDRESS = 0x80011200
 ROM_TEXT_OFFSET = 0x800

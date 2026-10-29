@@ -46,18 +46,24 @@ require(
         f"disruptor_unit_test(disruptor_gpu_ddgi_{name} tests/unit/gpu_ddgi_{name}_test.cpp RUNTIME_HEADERS)" in cmake
         for name in ("turn", "bvh", "mask")
     )
-    and "disruptor_unit_test(disruptor_ddgi_level tests/unit/disruptor_ddgi_level_test.cpp RUNTIME_HEADERS INCLUDES src)" in cmake,
+    and "disruptor_unit_test(disruptor_ddgi_level tests/unit/disruptor_ddgi_level_test.cpp RUNTIME_HEADERS INCLUDES src)"
+    in cmake,
     "the three headers are the framework's own files and each has its unit test, the level reader too",
 )
 
-build = function_body(lighting, "static void ddgi_build(const GpuDdgiTriangle *tris, int count, int bvh, const float eye[3])")
+build = function_body(
+    lighting, "static void ddgi_build(const GpuDdgiTriangle *tris, int count, int bvh, const float eye[3])"
+)
 level = function_body(lighting, "static void ddgi_level_make(int count) {")
 require(
     '#include "gpu_ddgi_bvh.h"\n#include "gpu_ddgi_turn.h"\n' in lighting
     and "    psx_ddgi_corner_normals(&corners, tris, count, eye);\n" in build
     and "    psx_ddgi_median_split(&build, 0, 0, count);\n" in build
     and "    psx_ddgi_sah_split(&build, 0, 0, kept, 0);\n" in level
-    and not re.search(r"static (void|int|float|uint16_t|uint64_t|int64_t) ddgi_(split|level_split|select|face_of|oct16|corner_key|corner_normals|round|back_turn)\(", lighting),
+    and not re.search(
+        r"static (void|int|float|uint16_t|uint64_t|int64_t) ddgi_(split|level_split|select|face_of|oct16|corner_key|corner_normals|round|back_turn)\(",
+        lighting,
+    ),
     "the frame's and the level's BVH, the corner normals and their packing are the tested headers' and have no copy here",
 )
 
@@ -83,8 +89,12 @@ require(
     "orthonormal and its transpose put them off",
 )
 
-casters = function_body(scene, "static void ddgi_scene_casters(const DdgiList *list, const float eye[3], GpuDdgiScene *scene)")
-picture = function_body(lighting, '    "float picture_hides(vec3 p, vec3 l, float spread, float reach, int i, bool own){\\n"')
+casters = function_body(
+    scene, "static void ddgi_scene_casters(const DdgiList *list, const float eye[3], GpuDdgiScene *scene)"
+)
+picture = function_body(
+    lighting, '    "float picture_hides(vec3 p, vec3 l, float spread, float reach, int i, bool own){\\n"'
+)
 require(
     '#include "gpu_ddgi_mask.h"\n' in capture
     and "    psx_ddgi_card_look(vram, card, semi, !(card->flags & 20));\n" in note
@@ -101,9 +111,15 @@ require(
     "game has streamed the next animation frames into the texels they came from",
 )
 
-lamp = function_body(lighting, "static void ddgi_lamp_pass(int thread, GLuint color, GLuint depth, float focal_x, float focal_y,")
-mix = function_body(lighting, "static int ddgi_mix_begin(int thread, GLuint color, GLuint depth, float focal_x, float focal_y,")
-between = function_body(lighting, "static void ddgi_present_between(const DdgiFrame *before, const DdgiFrame *after, float alpha)")
+lamp = function_body(
+    lighting, "static void ddgi_lamp_pass(int thread, GLuint color, GLuint depth, float focal_x, float focal_y,"
+)
+mix = function_body(
+    lighting, "static int ddgi_mix_begin(int thread, GLuint color, GLuint depth, float focal_x, float focal_y,"
+)
+between = function_body(
+    lighting, "static void ddgi_present_between(const DdgiFrame *before, const DdgiFrame *after, float alpha)"
+)
 mission = function_body(lighting, "void gl_renderer_set_ddgi_mission(int mission)")
 sun_set = function_body(lighting, "void gl_renderer_ddgi_sun_set_mission(int mission, const float sun[4])")
 require(
@@ -129,7 +145,10 @@ require(
 )
 probe_writes = [m.start() for m in re.finditer(r"ddgi_draw\(s_ddgi_(state|irr|dist)_fbo", update)]
 unlocks = [m.start() for m in re.finditer(r"SDL_UnlockMutex\(s_interp_mutex\)", update)]
-held = [(m.start(), min((u for u in unlocks if u > m.start()), default=-1)) for m in re.finditer(r"SDL_LockMutex\(s_interp_mutex\)", update)]
+held = [
+    (m.start(), min((u for u in unlocks if u > m.start()), default=-1))
+    for m in re.finditer(r"SDL_LockMutex\(s_interp_mutex\)", update)
+]
 probe_fence = update.find("        s_ddgi_probe_fence = p_glFenceSync(PSXGL_SYNC_GPU_COMMANDS_COMPLETE, 0);\n")
 require(
     len(probe_writes) == 3
@@ -143,7 +162,7 @@ require(
     "the probes' state, irradiance and distances are written under the presenter's lock after its last draw, with a fence "
     "made and flushed before the lock is let go, and the presenter waits for that fence before it samples them",
 )
-units =[int(n) for n in re.findall(r"PSXGL_TEXTURE0 \+ (\d+)", update)]
+units = [int(n) for n in re.findall(r"PSXGL_TEXTURE0 \+ (\d+)", update)]
 require(
     "    gpu_ddgi_forget_level();\n" in mission
     and "ssao_mode();" in sun_set
@@ -162,9 +181,10 @@ require(
 )
 
 
-
 def fields(struct: str) -> list[str]:
-    body = lighting[lighting.rindex("typedef struct {", 0, lighting.index(f"}} {struct};")) : lighting.index(f"}} {struct};")]
+    body = lighting[
+        lighting.rindex("typedef struct {", 0, lighting.index(f"}} {struct};")) : lighting.index(f"}} {struct};")
+    ]
     return re.findall(r"\w+", body.split("GLint", 1)[1].replace(";", ""))
 
 
@@ -190,7 +210,11 @@ def glsl_of(code: str) -> str:
     parts = []
     for match in re.finditer(r'"(?:[^"\\]|\\.)*"|\bDDGI_GLSL_\w+\b', code):
         token = match.group(0)
-        parts.append(macro(token) if token.startswith("DDGI_GLSL_") else codecs.decode(LITERAL.fullmatch(token).group(1), "unicode_escape"))
+        parts.append(
+            macro(token)
+            if token.startswith("DDGI_GLSL_")
+            else codecs.decode(LITERAL.fullmatch(token).group(1), "unicode_escape")
+        )
     return "".join(parts)
 
 
@@ -202,7 +226,9 @@ def program_source(name: str) -> str:
 def declared(source: str) -> set[str]:
     names = set()
     for declaration in re.findall(r"\buniform\s+\w+\s+([^;]+);", source):
-        names |= {re.sub(r"\[.*", "", part).strip()[2:] for part in declaration.split(",") if part.strip().startswith("u_")}
+        names |= {
+            re.sub(r"\[.*", "", part).strip()[2:] for part in declaration.split(",") if part.strip().startswith("u_")
+        }
     return names
 
 

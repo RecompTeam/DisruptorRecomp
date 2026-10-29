@@ -1,10 +1,9 @@
 #!/usr/bin/env python3
 """Source/codegen contract for Disruptor's experimental far rendering."""
 
-from pathlib import Path
 import re
 import sys
-
+from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -333,7 +332,8 @@ require(
     in gpu
     and "static uint32_t gp0_cmd_buf[16];" in gpu
     and "    return disruptor_far_rendering_packet_fraction(resolved_packet, signature);\n" in host
-    and "    const int packet_raw = packet_fade >= 0 ? 2 | (packet_fade << 2) : gpu_current_hud_glyph() << 2;\n" in renderer
+    and "    const int packet_raw = packet_fade >= 0 ? 2 | (packet_fade << 2) : gpu_current_hud_glyph() << 2;\n"
+    in renderer
     and "vp[13] = (float)((rawtex ? 1 : 0) | packet_raw);" in renderer
     and '"  } else if ((v_raw & 2) != 0) level = float(v_raw >> 2)/256.0;' in renderer
     and '"  if ((v_raw & 1) == 0) rgb = clamp(rgb * v_col.rgb * 2.0, 0.0, 1.0);\\n"' in renderer

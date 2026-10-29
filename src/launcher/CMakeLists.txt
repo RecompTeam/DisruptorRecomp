@@ -124,7 +124,7 @@ if(DISRUPTOR_VELOPACK_LIBRARY)
     FetchContent_Declare(velopack_libc
         URL "https://github.com/velopack/velopack/releases/download/1.2.161/velopack_libc_1.2.161.zip"
         URL_HASH "SHA256=31de8f2cf05a47bd5328a9f98b0c41aec1582156f6075f1058b26941f7f17c20"
-        DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+        DOWNLOAD_EXTRACT_TIMESTAMP FALSE)
     FetchContent_MakeAvailable(velopack_libc)
     add_library(disruptor-velopack STATIC IMPORTED)
     set_target_properties(disruptor-velopack PROPERTIES
@@ -140,9 +140,9 @@ endforeach()
 set(SKIP_INSTALL_ALL ON CACHE BOOL "" FORCE)
 set(BUILD_SHARED_LIBS OFF) # this folder only: the launcher ships no DLL of its own
 FetchContent_Declare(disruptor_freetype
-    URL "https://github.com/freetype/freetype/archive/refs/tags/VER-2-14-3.tar.gz"
-    URL_HASH "SHA256=dc49de6b01a266eef4876a4dd34d9842c475d3e28ff2eff63bd2fb760ab56261"
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE
+    URL "https://github.com/freetype/freetype/archive/refs/tags/VER-2-15-0.tar.gz"
+    URL_HASH "SHA256=87c7f1f8699b91e89f773f7dcfa505b044e1dae67f62a55d4e29c3afdcac4fb8"
+    DOWNLOAD_EXTRACT_TIMESTAMP FALSE
     EXCLUDE_FROM_ALL)
 FetchContent_MakeAvailable(disruptor_freetype)
 

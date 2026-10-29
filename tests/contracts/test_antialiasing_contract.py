@@ -382,7 +382,7 @@ require(
 def members(text: str, opening: str) -> set[str]:
     """Every data member of the record that `opening` begins: the word before each `=` or `;` of its body, comments dropped."""
     body = text[text.index(opening) + len(opening) :]
-    body = re.sub(r"//[^\n]*", "", body[: re.search(r"^\s*};", body, re.M).start()])
+    body = re.sub(r"//[^\n]*", "", body[: re.search(r"^\s*};", body, re.MULTILINE).start()])
     return set(re.findall(r"(\w+)\s*(?:=[^;]*)?;", body))
 
 

@@ -7,7 +7,6 @@ import pathlib
 import re
 import sys
 
-
 ROOT = pathlib.Path(__file__).resolve().parents[2]
 GPU = ROOT / "psxrecomp" / "runtime" / "src" / "gpu.c"
 GTE = ROOT / "psxrecomp" / "runtime" / "src" / "gte.cpp"
@@ -54,7 +53,7 @@ EXPECTED_SCRATCH_STORE = (0x80047A0C, 0xACAA0004, 14, 0x1F800084, 8, 9)
 
 
 def function_body(source: str, name: str) -> str:
-    match = re.search(rf"\b{name}\s*\([^;]*?\)\s*\{{", source, re.S)
+    match = re.search(rf"\b{name}\s*\([^;]*?\)\s*\{{", source, re.DOTALL)
     if not match:
         raise AssertionError(f"missing function: {name}")
     start = source.index("{", match.start())
@@ -312,7 +311,7 @@ def main() -> int:
 
     codegen_copy_arrays = {}
     for array_name in ("kDisruptorPrecisionCopyLoads", "kDisruptorPrecisionCopyStores"):
-        array = re.search(rf"{array_name}\[\]\s*=\s*\{{(.*?)\}};", codegen_source, re.S)
+        array = re.search(rf"{array_name}\[\]\s*=\s*\{{(.*?)\}};", codegen_source, re.DOTALL)
         require(array is not None, f"resident codegen must declare exact {array_name} sites")
         codegen_copy_arrays[array_name] = tuple(
             (int(pc, 16), int(word, 16), int(gpr))
@@ -407,15 +406,15 @@ def main() -> int:
         'std::string_view(game_id, length) != "SLUS-00224"' in route_config,
         "reviewed resident routes must be gated to Disruptor's serial",
     )
-    mfc2_array = re.search(r"mfc2_pcs\[\]\s*=\s*\{(.*?)\};", route_config, re.S)
-    store_array = re.search(r"store_pcs\[\]\s*=\s*\{(.*?)\};", route_config, re.S)
-    copy_array = re.search(r"copy_routes\[\]\s*=\s*\{(.*?)\};", route_config, re.S)
+    mfc2_array = re.search(r"mfc2_pcs\[\]\s*=\s*\{(.*?)\};", route_config, re.DOTALL)
+    store_array = re.search(r"store_pcs\[\]\s*=\s*\{(.*?)\};", route_config, re.DOTALL)
+    copy_array = re.search(r"copy_routes\[\]\s*=\s*\{(.*?)\};", route_config, re.DOTALL)
     scratch_route = re.search(
         r"gte_precision_scratch_store_pc_route_add\(\s*"
         r"0x([0-9A-Fa-f]{8})u,\s*0x([0-9A-Fa-f]{8})u,\s*(\d+)u,\s*"
         r"0x([0-9A-Fa-f]{8})u,\s*(\d+)u,\s*(\d+)u\)",
         route_config,
-        re.S,
+        re.DOTALL,
     )
     require(
         mfc2_array is not None and store_array is not None and copy_array is not None and scratch_route is not None,
@@ -517,7 +516,7 @@ def main() -> int:
     require("ws_geometry_correction" in texture_set, "texture toggle must preserve geometry provenance tracking")
 
     sync_target = function_body(source, "ws_nw_sync_target")
-    sync_target_code = re.sub(r"/\*.*?\*/|//[^\n]*", "", sync_target, flags=re.S)
+    sync_target_code = re.sub(r"/\*.*?\*/|//[^\n]*", "", sync_target, flags=re.DOTALL)
     require(
         re.search(r"\bvisual_only\s*=\s*ws_geometry_correction\s*;", sync_target_code) is not None,
         "exact geometry must provision its visual-only mirror at 4:3",
@@ -534,7 +533,7 @@ def main() -> int:
     )
 
     fill_rect = function_body(source, "gp0_exec_fill_rect")
-    fill_rect_code = re.sub(r"/\*.*?\*/|//[^\n]*", "", fill_rect, flags=re.S)
+    fill_rect_code = re.sub(r"/\*.*?\*/|//[^\n]*", "", fill_rect, flags=re.DOTALL)
     require(
         "gr_wide_clear" in fill_rect_code
         and re.search(

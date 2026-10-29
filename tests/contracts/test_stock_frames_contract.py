@@ -99,7 +99,8 @@ require(
     and "constexpr uint32_t kSounds = 0x80013544u;" in hooks
     and "constexpr uint32_t kSoundsSite = 0x80043AD8u;" in hooks
     and "    if (!cpu || cpu->gpr[31] != kSoundsSite || !wanted()) return;\n    Guest guest;\n"
-    "    sounds_begin(guest, g_frames, cpu->gpr[31]);\n" in hooks
+    "    sounds_begin(guest, g_frames, cpu->gpr[31]);\n"
+    in hooks
     and '"disruptor.stock_frames.tick", kTick, tick_begins' in hooks
     and '"disruptor.stock_frames.vsync", kVSync, frame_waits' in hooks
     and "constexpr uint32_t kTick = 0x80039450u;" in hooks

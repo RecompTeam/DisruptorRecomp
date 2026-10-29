@@ -5,7 +5,7 @@ FetchContent_Declare(disruptor_rcheevos
         "https://github.com/RetroAchievements/rcheevos/archive/refs/tags/v12.5.0.tar.gz"
     URL_HASH
         "SHA256=e6df83de4e18f0a19206e711e1e589624dcfcf6bf529c14f6dd2bb2d1ced983f"
-    DOWNLOAD_EXTRACT_TIMESTAMP TRUE)
+    DOWNLOAD_EXTRACT_TIMESTAMP FALSE)
 FetchContent_MakeAvailable(disruptor_rcheevos)
 
 set(DISRUPTOR_RCHEEVOS_SOURCES)

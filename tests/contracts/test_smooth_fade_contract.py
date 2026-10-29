@@ -35,12 +35,14 @@ require(
     '    "    g_row = first + int(level);\\n"\n'
     in renderer
     and '    "  int first = rows > 1 && v_fade.x > 0.0 && v_depth != 2 ? fade_first_row(rows) : -1;\\n"\n'
-    '    "  if (first >= 0) {\\n"\n' in renderer
+    '    "  if (first >= 0) {\\n"\n'
+    in renderer
     and '    "  int rows = int(u_fade.z + 0.5); float level = -1.0, dissolve = 0.0;\\n"\n' in renderer
     and '    "    if (u_fade_blocks[i].x == v_clut.x && v_clut.y >= u_fade_blocks[i].y && v_clut.y < u_fade_blocks[i].y + rows) return u_fade_blocks[i].y;\\n"\n'
     in renderer
     and "    publish_fade_blocks();\n" in arena
-    and "    const uint32_t table = psx_mod_read_word(kDescriptors), count = psx_mod_read_word(kDescriptorCount);\n" in arena,
+    and "    const uint32_t table = psx_mod_read_word(kDescriptors), count = psx_mod_read_word(kDescriptorCount);\n"
+    in arena,
     "a pixel's fade level is its range past the fade's start in rows: the range is the depth, more by a share of the step aside, "
     "and the palette's block of rows begins at the row a level's texture descriptor names, a palette no descriptor names keeps the game's row",
 )
@@ -81,7 +83,10 @@ require(
 require(
     '            "  v_fade = (a_visual_flags > 1.5 && a_order > -0.9999 && a_order < 0.9999) ? vec2((1.0 - a_order)/32.0, a_visual_pos.x) : vec2(-1.0, 0.0);\\n"\n'
     in presenter
-    and presenter.count("smooth_fade_uniforms(u->fade, u->fade_at, u->fade_power, u->fade_blocks, u->fade_block_count, s_temp_fade_nearer);") == 2
+    and presenter.count(
+        "smooth_fade_uniforms(u->fade, u->fade_at, u->fade_power, u->fade_blocks, u->fade_block_count, s_temp_fade_nearer);"
+    )
+    == 2
     and '    TEMP_U(fade,"u_fade"); TEMP_U(fade_at,"u_fade_at"); TEMP_U(fade_power,"u_fade_power"); TEMP_U(fade_blocks,"u_fade_blocks"); TEMP_U(fade_block_count,"u_fade_block_count"); TEMP_U(dissolve,"u_dissolve"); TEMP_U(clear,"u_clear");\n'
     in presenter
     and "    if (!s->mesh_stats.departed_faces || p->width!=s->width || p->scale!=s->scale) return;\n"
