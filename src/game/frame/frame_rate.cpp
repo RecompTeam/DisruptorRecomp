@@ -8,7 +8,8 @@
  * cadence stays the default and the unlock is a live host switch.
  *
  * A retail frame costs 0.9 to 1.7 VBlank periods of guest CPU time, so the
- * unlock also divides instruction cost inside the frame loop. The PsyQ VSync
+ * unlock also divides instruction cost inside the frame loop, as does a state
+ * that steps a fixed count a frame at any setting. The PsyQ VSync
  * wait counts loop iterations for its timeout and always runs at stock cost.
  */
 
@@ -137,10 +138,11 @@ void vsync_entry(CPUState *cpu, uint32_t address) {
                                  return_address < kFrameLoopEnd;
     if (!frame_gate && !frame_loop_poll) return;
 
-    const bool unlocked = g_unlocked.load(std::memory_order_relaxed) &&
-                          simulation_follows_elapsed_vblanks();
+    const bool follows = simulation_follows_elapsed_vblanks();
+    const bool unlocked = g_unlocked.load(std::memory_order_relaxed) && follows;
     if (frame_loop_poll) {
-        if (unlocked) set_cpu_shift(g_cpu_shift.load(std::memory_order_relaxed));
+        /* A fixed step a frame slows the game when a frame runs past the floor: the demo did at 1.25x, 16:9. */
+        if (unlocked || !follows) set_cpu_shift(g_cpu_shift.load(std::memory_order_relaxed));
         return;
     }
     record_frame(cpu);

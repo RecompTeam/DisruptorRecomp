@@ -96,9 +96,12 @@ void retail_state() {
     g_ram[physical(kPlayerStateByte)] = 0u;
 }
 
+/* The floor of two VBlanks, with the frame loop at the divided cost so a frame fits under it. */
 bool held_at_retail_cadence() {
     const bool gate = vsync(0u, kGateReturn) == 2u;
-    return gate && poll(kLoopBegin) == 0u;
+    const bool fast = poll(kLoopBegin) != 0u;
+    (void)vsync(0u, kElsewhere);
+    return gate && fast;
 }
 
 /* `frames` gameplay frames, each `period` VBlanks long and half a VBlank of
@@ -182,6 +185,13 @@ int main() {
     retail_state();
     g_ram[physical(kPlayerStateByte)] = 5u;
     expect(held_at_retail_cadence(), "player state 5 keeps the retail cadence");
+    disruptor_frame_rate_set_unlocked(0);
+    retail_state();
+    g_ram[physical(kLoopModeByte)] = 3u;
+    expect(held_at_retail_cadence(), "locked too, the attract mode runs its frames at the divided cost");
+    retail_state();
+    expect(poll(kLoopBegin) == 0u, "while locked gameplay keeps the stock cost");
+    disruptor_frame_rate_set_unlocked(1);
     retail_state();
     g_ram[physical(kLoopModeByte)] = 2u;
     g_ram[physical(kPlayerStateByte)] = 4u;

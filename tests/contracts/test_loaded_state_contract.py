@@ -134,7 +134,7 @@ require(
     and "BS_SEC_CPU_COST" not in state.split("const uint32_t required =")[1].split(";")[0]
     and "        const uint32_t total = g_psx_cyc_overclock_carry + cycles;\n" in cycles
     and "        cycles = total >> g_psx_cyc_overclock_shift;\n" in cycles
-    and "        if (unlocked) set_cpu_shift(g_cpu_shift.load(std::memory_order_relaxed));\n" in rate
+    and "        if (unlocked || !follows) set_cpu_shift(g_cpu_shift.load(std::memory_order_relaxed));\n" in rate
     and "    if (waits) set_cpu_shift(0u);\n" in rate
     and rate.count("g_psx_cyc_overclock_carry") == 1
     and "    if (shift == g_psx_cyc_overclock_shift) return;\n    g_psx_cyc_overclock_shift = shift;\n    g_psx_cyc_overclock_carry = 0u;\n}\n"
