@@ -145,22 +145,28 @@ require(
     "a picture is measured against buffers the size of the display, and only an upload reports one",
 )
 require(
-    "\n    ws_frame_pictured(vram_write_x, vram_write_y, vram_write_w, vram_write_h);\n    /* Record for debug */\n"
+    "\n    ws_frame_pictured(vram_write_x, vram_write_y, vram_write_w, vram_write_h);\n    /* A full history retains old uploads; later transfers must not append\n"
     in upload
     and upload.index("vram_write_h = (h == 0) ? 0x200 : (uint16_t)h;") < upload.index("ws_frame_pictured("),
     "every upload must report where it lands, whatever the front end makes of it",
 )
 require(
     "            gr_copy_rect(src_x, src_y, dst_x, dst_y, w, h);\n"
-    "            if (psx_ws_frame_kinds_copied(&ws_frame_kinds, (uint32_t)src_x, (uint32_t)src_y, (uint32_t)dst_x, (uint32_t)dst_y,\n"
-    "                                          (uint32_t)w, (uint32_t)h, (uint32_t)ws_disp_w(), (uint32_t)ws_disp_h()) &&\n"
-    "                src_x + w <= 0x400 && dst_x + w <= 0x400 && src_y + h <= 0x200 && dst_y + h <= 0x200)\n"
-    "                gr_wide_copy_frame(src_x, src_y, dst_x, dst_y, h);\n            break;\n"
+    "            const int copied = psx_ws_frame_kinds_copied(&ws_frame_kinds, (uint32_t)src_x, (uint32_t)src_y, (uint32_t)dst_x, (uint32_t)dst_y,\n"
+    "                                                         (uint32_t)w, (uint32_t)h, (uint32_t)ws_disp_w(), (uint32_t)ws_disp_h());\n"
+    "            if (copied == 1 && src_x + w <= 0x400 && dst_x + w <= 0x400 && src_y + h <= 0x200 && dst_y + h <= 0x200)\n"
+    "                gr_wide_copy_frame(src_x, src_y, dst_x, dst_y, h);\n"
+    "            if (copied == 2)\n"
+    "                gr_wide_copy_rows((int)psx_ws_frame_kinds_holder(&ws_frame_kinds, (uint32_t)dst_x, (uint32_t)dst_y, (uint32_t)w, (uint32_t)h,\n"
+    "                                                                  (uint32_t)ws_disp_w(), (uint32_t)ws_disp_h())->x,\n"
+    "                                  src_x, src_y, dst_x, dst_y, w, h);\n            break;\n"
     in gpu
     and gpu.count("psx_ws_frame_kinds_copied(") == 1
-    and gpu.count("gr_wide_copy_frame(") == 1,
+    and gpu.count("gr_wide_copy_frame(") == 1
+    and gpu.count("gr_wide_copy_rows(") == 1,
     "every copy inside video memory must report where it comes from and where it lands: one buffer copied whole onto the "
-    "other keeps its kind, and the wide picture of its rows goes with it",
+    "other keeps its kind, and the wide picture of its rows goes with it; rows moved inside a world's frame keep it, and "
+    "the wide surface of that buffer moves them too",
 )
 render = read("psxrecomp/runtime/src/gpu_render.c")
 gl = read("psxrecomp/runtime/src/gpu_gl_renderer.c")
@@ -186,6 +192,33 @@ require(
     "a frame copied whole takes the wide surface's rows with it: read where the source's twin was resolved, written through "
     "the destination's twin, colour, depth and mask bits, never over its own rows, never under a mask test, and the "
     "in-between presenter drops what it built from the rows drawn before",
+)
+wide_rows = body(gl, "static void glb_wide_copy_rows(")
+require(
+    "    if (g_b->wide_copy_rows) g_b->wide_copy_rows(base_x, src_x, src_y, dst_x, dst_y, w, h);\n" in render
+    and "    .wide_copy_rows = glb_wide_copy_rows,\n" in gl
+    and "!s_raster_ok || g_wide_w <= 0 || s_mask_check || s_mask_set || w <= 0 || h <= 0" in wide_rows
+    and "    const int from = src_x - base_x + g_wide_off, to = dst_x - base_x + g_wide_off;\n"
+    "    if (!fbo || from + w > g_wide_w || to + w > g_wide_w) return;\n"
+    in wide_rows
+    and wide_rows.index("    temporal_invalidate_surface(fbo);\n")
+    < wide_rows.index("    wide_drawn(fbo);")
+    < wide_rows.index("    wide_resolved(fbo, src_y, h);\n")
+    < wide_rows.index("    p_glBindFramebuffer(PSXGL_DRAW_FRAMEBUFFER, s_scratch_fbo);\n")
+    < wide_rows.index("    const GLuint target = wide_drawn(fbo);")
+    < wide_rows.index("    p_glBindFramebuffer(PSXGL_DRAW_FRAMEBUFFER, target);\n")
+    and wide_rows.count("wide_drawn(") == 2
+    and wide_rows.count("GL_COLOR_BUFFER_BIT, GL_NEAREST);") == 2
+    and "    p_glBlitFramebuffer(from * S, src_y * S, (from + w) * S, (src_y + h) * S, from * S, src_y * S, (from + w) * S, "
+    "(src_y + h) * S,\n"
+    in wide_rows
+    and "    p_glBlitFramebuffer(from * S, src_y * S, (from + w) * S, (src_y + h) * S, to * S, dst_y * S, (to + w) * S, "
+    "(dst_y + h) * S,\n"
+    in wide_rows
+    and "DEPTH" not in wide_rows,
+    "rows moved inside a frame move the wide surface's colour by the same columns and rows: read where its twin was "
+    "resolved, through the scratch surface, written through the twin, never under a mask test, and the in-between "
+    "presenter drops what it built from the rows drawn before",
 )
 require(
     "    if (opcode >= 0x20 && opcode <= 0x7F) {\n"

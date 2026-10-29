@@ -70,8 +70,19 @@ static inline void psx_ws_frame_kinds_pictured(PsxWsFrameKinds *kinds, uint32_t 
     }
 }
 
+/* The known buffer that holds the rectangle whole, or none. */
+static inline const PsxWsFrameBuffer *psx_ws_frame_kinds_holder(const PsxWsFrameKinds *kinds, uint32_t x, uint32_t y, uint32_t w, uint32_t h,
+                                                                uint32_t wide, uint32_t tall) {
+    for (int i = 0; i < 2; ++i) {
+        const PsxWsFrameBuffer *buffer = &kinds->buffers[i];
+        if (buffer->known && x >= buffer->x && y >= buffer->y && x + w <= buffer->x + wide && y + h <= buffer->y + tall) return buffer;
+    }
+    return 0;
+}
+
 /* The game copied a whole frame buffer onto the other: the copy is that frame, of that kind, and 1 is returned so that the
- * renderer's own surfaces follow it. Any other copy is a picture: 0. */
+ * renderer's own surfaces follow it. Rows moved inside a world's frame leave it that frame: 2, for the same reason (the
+ * teleport at the end of a level waves the picture so). Any other copy is a picture: 0. */
 static inline int psx_ws_frame_kinds_copied(PsxWsFrameKinds *kinds, uint32_t from_x, uint32_t from_y, uint32_t x, uint32_t y, uint32_t w,
                                              uint32_t h, uint32_t wide, uint32_t tall) {
     for (int i = 0; i < 2; ++i) {
@@ -83,6 +94,8 @@ static inline int psx_ws_frame_kinds_copied(PsxWsFrameKinds *kinds, uint32_t fro
         to->veiled = from->veiled;
         return 1;
     }
+    const PsxWsFrameBuffer *held = psx_ws_frame_kinds_holder(kinds, x, y, w, h, wide, tall);
+    if (held && held == psx_ws_frame_kinds_holder(kinds, from_x, from_y, w, h, wide, tall) && !held->flat && !held->menu) return 2;
     psx_ws_frame_kinds_pictured(kinds, x, y, w, h, wide, tall);
     return 0;
 }

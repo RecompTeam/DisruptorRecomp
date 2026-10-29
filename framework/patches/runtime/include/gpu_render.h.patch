@@ -1,5 +1,5 @@
 diff --git a/runtime/include/gpu_render.h b/runtime/include/gpu_render.h
-index 4953270aaccd4c606f5320f949befcdc544261e6..acd8b09760e6e838913b8a60de3a5ad6a2cdd8dc 100644
+index 4953270aaccd4c606f5320f949befcdc544261e6..87961cc086cd1ca28c89e8648f45f2835041f10e 100644
 --- a/runtime/include/gpu_render.h
 +++ b/runtime/include/gpu_render.h
 @@ -38,6 +38,39 @@
@@ -42,16 +42,18 @@ index 4953270aaccd4c606f5320f949befcdc544261e6..acd8b09760e6e838913b8a60de3a5ad6
  
  /* Primitives */
  void gr_fill_rect(int x, int y, int w, int h, uint16_t color);
-@@ -100,6 +133,8 @@
+@@ -100,6 +133,10 @@
  void gr_wide_clear(int base_x, int y, int h, uint16_t color);
  /* sides: bit 0 = left synthetic margin, bit 1 = right. */
  void gr_wide_clear_margins(int base_x, int y, int h, uint16_t color, int sides);
 +/* The game copied a whole frame buffer onto another: the wide picture of its rows follows, margins included. */
 +void gr_wide_copy_frame(int src_base_x, int src_y, int dst_base_x, int dst_y, int h);
++/* The game moved rows inside the world's frame at base_x: the wide picture's rows move with them. */
++void gr_wide_copy_rows(int base_x, int src_x, int src_y, int dst_x, int dst_y, int w, int h);
  int  gr_wide_dump_full(uint32_t *out, int cap_pixels, int *ow, int *oh, int base_x);
  int  gr_render_wide_display(uint32_t *out, int pitch, int base_x,
                              int disp_y, int disp_h);
-@@ -119,6 +154,25 @@
+@@ -119,6 +156,25 @@
      void (*set_mask_bits)(int set_bit, int check_bit);
      void (*set_texture_window)(uint32_t raw);
      void (*set_color_modulation)(int r, int g, int b, int raw_texture);
@@ -77,15 +79,16 @@ index 4953270aaccd4c606f5320f949befcdc544261e6..acd8b09760e6e838913b8a60de3a5ad6
      void (*fill_rect)(int x, int y, int w, int h, uint16_t color);
      void (*copy_rect)(int src_x, int src_y, int dst_x, int dst_y, int w, int h);
      void (*draw_flat_triangle)(int x0, int y0, int x1, int y1, int x2, int y2,
-@@ -169,6 +223,7 @@
+@@ -169,6 +225,8 @@
      void (*wide_disable_target)(void);
      void (*wide_clear)(int base_x, int y, int h, uint16_t color);
      void (*wide_clear_margins)(int base_x, int y, int h, uint16_t color, int sides);
 +    void (*wide_copy_frame)(int src_base_x, int src_y, int dst_base_x, int dst_y, int h);
++    void (*wide_copy_rows)(int base_x, int src_x, int src_y, int dst_x, int dst_y, int w, int h);
      int  (*render_wide_display)(uint32_t *out, int pitch, int base_x,
                                  int disp_y, int disp_h);
      /* Dump the ENTIRE wide compositor surface for base_x (all double-buffer
-@@ -176,6 +231,7 @@
+@@ -176,6 +234,7 @@
       * pixel count, writes width/height to ow/oh. NULL if unsupported. */
      int  (*wide_dump_full)(uint32_t *out, int cap_pixels, int *ow, int *oh,
                             int base_x);

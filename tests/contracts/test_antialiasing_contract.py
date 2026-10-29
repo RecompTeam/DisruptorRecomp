@@ -235,7 +235,9 @@ require(
     in renderer
     and "    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, wide_drawn(fbo));\n    glViewport(0, 0, W, H);\n" in renderer
     and "    const GLuint target = wide_drawn(to);" in renderer
-    and renderer.count("wide_drawn(") == 7
+    and "    wide_drawn(fbo);  /* first: making a twin binds framebuffers of its own */\n" in renderer
+    and "    const GLuint target = wide_drawn(fbo);" in renderer
+    and renderer.count("wide_drawn(") == 9
     and "p_glBindFramebuffer(PSXGL_FRAMEBUFFER, g_wide_cur)" not in renderer,
     "what is drawn into a mirror surface goes to its multisample twin, colour, depth and stencil, and a twin begins as the "
     "surface stands: one that cannot be made switches multisampling off with the others handed back",
@@ -255,7 +257,9 @@ require(
     and renderer.count("    wide_resolved(fbo, 0, VRAM_H);\n    p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, fbo);\n")
     == 2
     and "    wide_resolved(from, src_y, h);\n    const int w = g_wide_w * s_scale;\n" in renderer
-    and renderer.count("wide_resolved(") == 6
+    and "    wide_resolved(fbo, src_y, h);\n    const int S = s_scale;\n    p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, fbo);\n"
+    in renderer
+    and renderer.count("wide_resolved(") == 7
     and "    wide_blit(s_wide_ms_fbo[i], s_wide_fbo[i], 0, VRAM_H);\n    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, 0);\n    wide_twin_free(i);\n"
     in renderer
     and "    for (int i = 0; i < WIDE_MAX_SURF; ++i) wide_twin_drop(i);\n    for (int i = 0; i < WIDE_MAX_SURF; ++i) {\n        if (!s_wide_fbo[i]) continue;\n"

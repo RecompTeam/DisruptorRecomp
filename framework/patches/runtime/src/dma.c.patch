@@ -1,8 +1,16 @@
 diff --git a/runtime/src/dma.c b/runtime/src/dma.c
-index 15e09455c97ffd19429f997c0cba334133267324..d9736531fbb3661b6c93a2f23e292f93439c4de0 100644
+index 15e09455c97ffd19429f997c0cba334133267324..4e327245bf2dbda8e2c49c31ee9c79f4b22012eb 100644
 --- a/runtime/src/dma.c
 +++ b/runtime/src/dma.c
-@@ -653,6 +653,12 @@
+@@ -20,6 +20,7 @@
+ #include "mdec.h"
+ #include "mod_memory.h"
+ #include "overlay_capture.h"
++#include "psx_cyc_overclock.h"
+ #include "spu.h"
+ #include "audio_trace.h"
+ #include "event_ring.h"
+@@ -653,6 +654,12 @@
      complete_transfer(1);
  }
  
@@ -15,7 +23,7 @@ index 15e09455c97ffd19429f997c0cba334133267324..d9736531fbb3661b6c93a2f23e292f93
  static uint32_t execute_ch2_gpu(void) {
      uint32_t chcr = channels[2].chcr;
      uint32_t direction = chcr & 1;           /* 0=to RAM, 1=from RAM (to device) */
-@@ -667,12 +673,12 @@
+@@ -667,12 +674,12 @@
              uint32_t block_size = channels[2].bcr & 0xFFFF;
              uint32_t block_count = (channels[2].bcr >> 16) & 0xFFFF;
              uint32_t total_words = block_size * block_count;
@@ -30,7 +38,7 @@ index 15e09455c97ffd19429f997c0cba334133267324..d9736531fbb3661b6c93a2f23e292f93
              }
              channels[2].madr = addr;
              actual_words = total_words;
-@@ -686,14 +692,14 @@
+@@ -686,14 +693,14 @@
          uint32_t block_size = channels[2].bcr & 0xFFFF;
          uint32_t block_count = (channels[2].bcr >> 16) & 0xFFFF;
          uint32_t total_words = block_size * block_count;
@@ -47,7 +55,7 @@ index 15e09455c97ffd19429f997c0cba334133267324..d9736531fbb3661b6c93a2f23e292f93
          }
          channels[2].madr = addr;
          actual_words = total_words;
-@@ -748,14 +754,14 @@
+@@ -748,14 +755,14 @@
          /* Burst mode (sync_mode == 0) */
          uint32_t word_count = channels[2].bcr & 0xFFFF;
          if (word_count == 0) word_count = 0x10000; /* 0 means 0x10000 */
@@ -64,10 +72,29 @@ index 15e09455c97ffd19429f997c0cba334133267324..d9736531fbb3661b6c93a2f23e292f93
          }
          channels[2].madr = addr;
          actual_words = word_count;
-@@ -899,6 +905,23 @@
+@@ -861,10 +868,13 @@
+         case 1:
+             start_async_mdec_transfer(1);
+             break;
+-        case 2:
+-            schedule_delayed_complete(2, execute_ch2_gpu(),
+-                                      DMA_GPU_CYCLES_PER_WORD);
++        case 2: {
++            /* Overclocked, GPU transfers end as much sooner, or the CPU outruns the GPU into an area both upload to. */
++            schedule_delayed_complete(2, execute_ch2_gpu(), DMA_GPU_CYCLES_PER_WORD);
++            DMADelayedComplete *gpu = &delayed_complete[2];
++            if (gpu->active) gpu->cycles_remaining = psx_cyc_overclocked_latency(gpu->cycles_remaining);
+             break;
++        }
+         case 3:
+             execute_ch3_cdrom();
+             break;
+@@ -897,6 +907,23 @@
+            ((channels[3].chcr >> 24) & 1u) &&
+            channel_enabled(3) &&
             ((channels[3].chcr & 1u) == 0);
- }
- 
++}
++
 +int psx_mod_dma_write_ram(uint32_t address, const void* data, uint32_t bytes,
 +                          int lba) {
 +    const uint8_t* source = (const uint8_t*)data;
@@ -83,8 +110,6 @@ index 15e09455c97ffd19429f997c0cba334133267324..d9736531fbb3661b6c93a2f23e292f93
 +                                  ((uint32_t)source[at + 3u] << 24));
 +    dirty_ram_mark_executable_range(addr, bytes);
 +    return 1;
-+}
-+
+ }
+ 
  /* Cycle-budgeted precise event slicing: guest CPU cycles until DMA raises a
-  * DELIVERABLE IRQ (bit3 unmasked in i_mask). UINT32_MAX if none. Conservative
-  * under-estimate: for async channels uses a 1-cycle/word floor minus cycles

@@ -1,5 +1,5 @@
 diff --git a/runtime/src/gpu.c b/runtime/src/gpu.c
-index 6d81477285f786cdd3658d14c424d4bfbab5d809..dbd26bc76230aff55ad8f49fca661890415477bc 100644
+index 6d81477285f786cdd3658d14c424d4bfbab5d809..55aa12051186d0705790a76dccb3a0f70ec02ae4 100644
 --- a/runtime/src/gpu.c
 +++ b/runtime/src/gpu.c
 @@ -11,6 +11,7 @@
@@ -2092,19 +2092,23 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..dbd26bc76230aff55ad8f49fca661890
      ws_nw_sync_target();  /* back buffer (draw_area_left) → wide mirror surface */
  }
  
-@@ -3799,7 +5078,10 @@
+@@ -3799,8 +5078,13 @@
      /* 0 means max dimension */
      vram_write_w = (w == 0) ? 0x400 : (uint16_t)w;
      vram_write_h = (h == 0) ? 0x200 : (uint16_t)h;
 -
+-    /* Record for debug */
 +    if (!psx_ws_menu_is_picture(vram_write_x, vram_write_y, vram_write_w, vram_write_h)) /* the whole picture is dealt with once it has arrived */
 +        ws_menu_yield(vram_write_x, vram_write_y, vram_write_w, vram_write_h, 1); /* before its words land */
 +
 +    ws_frame_pictured(vram_write_x, vram_write_y, vram_write_w, vram_write_h);
-     /* Record for debug */
++    /* A full history retains old uploads; later transfers must not append
++     * to the last slot and overflow its diagnostic word counter. */
++    a0_capture_slot = -1;
      if (a0_history_count < A0_HISTORY_CAP) {
          int slot = a0_history_count++;
-@@ -3879,6 +5161,7 @@
+         a0_history[slot].x = vram_write_x;
+@@ -3879,6 +5163,7 @@
      uint32_t h = (gp0_cmd_buf[2] >> 16) & 0x1FFu;
      vram_read_w = (w == 0) ? 0x400 : (uint16_t)w;
      vram_read_h = (h == 0) ? 0x200 : (uint16_t)h;
@@ -2112,7 +2116,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..dbd26bc76230aff55ad8f49fca661890
  
      /* Record for debug */
      if (c0_history_count < C0_HISTORY_CAP) {
-@@ -4047,7 +5330,7 @@
+@@ -4047,7 +5332,7 @@
      item->group.x = min_x;
      item->group.width = width;
      item->group.anchor = 0;
@@ -2121,7 +2125,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..dbd26bc76230aff55ad8f49fca661890
      item->ot_rank = rank;
  }
  
-@@ -4397,8 +5680,13 @@
+@@ -4397,8 +5682,13 @@
      extern void ws_bg_phase_note(uint32_t op);
      ws_bg_phase_note(opcode);   /* native-wide 2D-backdrop stretch: background-phase latch */
  
@@ -2135,7 +2139,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..dbd26bc76230aff55ad8f49fca661890
          int32_t cvx, cvy;
          parse_vertex(gp0_cmd_buf[1], &cvx, &cvy);
          ws_census_record(opcode, cvx, cvy);
-@@ -4499,7 +5787,8 @@
+@@ -4499,7 +5789,8 @@
              int raw_texture = (gp0_cmd_buf[0] >> 24) & 1;
              int32_t x0, y0;
              parse_vertex(gp0_cmd_buf[1], &x0, &y0);
@@ -2145,7 +2149,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..dbd26bc76230aff55ad8f49fca661890
              x0 += draw_offset_x; y0 += draw_offset_y;
              int u0 = gp0_cmd_buf[2] & 0xFF;
              int v0 = (gp0_cmd_buf[2] >> 8) & 0xFF;
-@@ -4522,9 +5811,10 @@
+@@ -4522,9 +5813,10 @@
              uint16_t color = rgb888_to_rgb555(gp0_cmd_buf[0] & 0xFFFFFFu);
              int32_t x0, y0;
              parse_vertex(gp0_cmd_buf[1], &x0, &y0);
@@ -2157,21 +2161,25 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..dbd26bc76230aff55ad8f49fca661890
              break;
          }
          case 0x7C: case 0x7D: case 0x7E: case 0x7F:
-@@ -4549,7 +5839,13 @@
+@@ -4549,7 +5841,17 @@
              int h = (gp0_cmd_buf[3] >> 16) & 0x1FF;
              if (w == 0) w = 0x400;
              if (h == 0) h = 0x200;
 +            ws_menu_yield(src_x, src_y, w, h, 0);
 +            ws_menu_yield(dst_x, dst_y, w, h, 1);
              gr_copy_rect(src_x, src_y, dst_x, dst_y, w, h);
-+            if (psx_ws_frame_kinds_copied(&ws_frame_kinds, (uint32_t)src_x, (uint32_t)src_y, (uint32_t)dst_x, (uint32_t)dst_y,
-+                                          (uint32_t)w, (uint32_t)h, (uint32_t)ws_disp_w(), (uint32_t)ws_disp_h()) &&
-+                src_x + w <= 0x400 && dst_x + w <= 0x400 && src_y + h <= 0x200 && dst_y + h <= 0x200)
++            const int copied = psx_ws_frame_kinds_copied(&ws_frame_kinds, (uint32_t)src_x, (uint32_t)src_y, (uint32_t)dst_x, (uint32_t)dst_y,
++                                                         (uint32_t)w, (uint32_t)h, (uint32_t)ws_disp_w(), (uint32_t)ws_disp_h());
++            if (copied == 1 && src_x + w <= 0x400 && dst_x + w <= 0x400 && src_y + h <= 0x200 && dst_y + h <= 0x200)
 +                gr_wide_copy_frame(src_x, src_y, dst_x, dst_y, h);
++            if (copied == 2)
++                gr_wide_copy_rows((int)psx_ws_frame_kinds_holder(&ws_frame_kinds, (uint32_t)dst_x, (uint32_t)dst_y, (uint32_t)w, (uint32_t)h,
++                                                                  (uint32_t)ws_disp_w(), (uint32_t)ws_disp_h())->x,
++                                  src_x, src_y, dst_x, dst_y, w, h);
              break;
          }
  
-@@ -4777,6 +6073,7 @@
+@@ -4777,6 +6079,7 @@
          polyline_has_prev = 0;
          gr_set_semi_transparency(polyline_semi_trans, (int)semi_transparency);
          gp0_state = shaded ? GP0_POLYLINE_SHADED : GP0_POLYLINE_MONO;
@@ -2179,7 +2187,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..dbd26bc76230aff55ad8f49fca661890
          gp0_draw_count++;
          /* Record polyline header (variable-length body not captured;
           * just enough so per-frame stream shows the polyline existed). */
-@@ -4901,7 +6198,10 @@
+@@ -4901,7 +6204,10 @@
      hres1 = val & 3;
      vres = (val >> 2) & 1;
      video_mode = (val >> 3) & 1;
@@ -2191,7 +2199,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..dbd26bc76230aff55ad8f49fca661890
      vertical_interlace = (val >> 5) & 1;
      /* GPUSTAT.13 holds the legacy constant 0 in progressive (see the vblank
       * field flip); clear it on the switch so a title that toggles interlace
-@@ -5087,11 +6387,16 @@
+@@ -5087,11 +6393,16 @@
  }
  void gpu_snapshot_write(uint8_t *p) {
      PstW w; uint32_t n = gpu_snapshot_bytes();
@@ -2209,7 +2217,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..dbd26bc76230aff55ad8f49fca661890
  void gpu_cosim_dump(char *out, int cap) {
      if (!out || cap <= 0) return;
      char *p = out;
-@@ -5136,10 +6441,13 @@
+@@ -5136,10 +6447,13 @@
      if (len != gpu_snapshot_bytes()) return 0;
      pst_r_init(&r, p, len);
      if (!gpu_snap_parse(&r)) return 0;

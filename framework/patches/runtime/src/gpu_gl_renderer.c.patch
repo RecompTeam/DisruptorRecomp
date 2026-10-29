@@ -1,8 +1,8 @@
 diff --git a/runtime/src/gpu_gl_renderer.c b/runtime/src/gpu_gl_renderer.c
-index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..418d935ab0f8164a9ed3ba8a5891fd8a190d6d41 100644
+index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b04b6410105804ac8b5a42187152a318c796bcdd 100644
 --- a/runtime/src/gpu_gl_renderer.c
 +++ b/runtime/src/gpu_gl_renderer.c
-@@ -1,747 +1,1175 @@
+@@ -1,747 +1,1176 @@
 -/* gpu_gl_renderer.c — hardware OpenGL renderer backend.
 - *
 - * ARCHITECTURE (v2 — GPU-authoritative VRAM)
@@ -147,6 +147,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..418d935ab0f8164a9ed3ba8a5891fd8a
 +#include "gpu_turn_clip.h"
 +#include "gpu_world_depth.h"
 +#include "gpu_world_texel.h"
++#include "gpu_ws_frame_kind.h"
 +#include "gpu_ws_screen_tile.h"
 +#include "gpu_near_face.h"
 +#include "host_ui.h"
@@ -1910,7 +1911,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..418d935ab0f8164a9ed3ba8a5891fd8a
  static const char *INTERP_FS =
      "#version 330\n"
      "in vec2 v_uv; uniform sampler2D u_prev; uniform sampler2D u_curr;\n"
-@@ -757,2715 +1185,4950 @@
+@@ -757,2715 +1186,4981 @@
      "  }\n"
      "  frag=mix(prev,curr,alpha);\n"
      "}\n";
@@ -7789,6 +7790,37 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..418d935ab0f8164a9ed3ba8a5891fd8a
 +    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, 0);
 +}
 +
++/* The game moved rows inside the world's frame at base_x (the teleport's wave): the wide surface's rows move the same way,
++ * colour only, through the scratch surface since the two overlap. With native-wide margins only the frame's columns move.
++ * Under a mask test or a forced mask bit video memory's rows are not the source's: left alone. */
++static void glb_wide_copy_rows(int base_x, int src_x, int src_y, int dst_x, int dst_y, int w, int h) {
++    if (!s_raster_ok || g_wide_w <= 0 || s_mask_check || s_mask_set || w <= 0 || h <= 0 || src_x < base_x || dst_x < base_x ||
++        src_y < 0 || dst_y < 0 || src_y + h > VRAM_H || dst_y + h > VRAM_H)
++        return;
++    GLuint fbo = 0;
++    for (int i = 0; i < WIDE_MAX_SURF; i++)
++        if (s_wide_fbo[i] && s_wide_base[i] == base_x) fbo = s_wide_fbo[i];
++    const int from = src_x - base_x + g_wide_off, to = dst_x - base_x + g_wide_off;
++    if (!fbo || from + w > g_wide_w || to + w > g_wide_w) return;
++    flush_flat_batch();
++    flush_tex_batch();
++    temporal_invalidate_surface(fbo);
++    wide_drawn(fbo);  /* first: making a twin binds framebuffers of its own */
++    wide_resolved(fbo, src_y, h);
++    const int S = s_scale;
++    p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, fbo);
++    p_glBindFramebuffer(PSXGL_DRAW_FRAMEBUFFER, s_scratch_fbo);
++    glDisable(GL_SCISSOR_TEST);
++    p_glBlitFramebuffer(from * S, src_y * S, (from + w) * S, (src_y + h) * S, from * S, src_y * S, (from + w) * S, (src_y + h) * S,
++                        GL_COLOR_BUFFER_BIT, GL_NEAREST);
++    const GLuint target = wide_drawn(fbo);  /* again: the rows resolved above are no longer the twin's */
++    p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, s_scratch_fbo);
++    p_glBindFramebuffer(PSXGL_DRAW_FRAMEBUFFER, target);
++    p_glBlitFramebuffer(from * S, src_y * S, (from + w) * S, (src_y + h) * S, to * S, dst_y * S, (to + w) * S, (dst_y + h) * S,
++                        GL_COLOR_BUFFER_BIT, GL_NEAREST);
++    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, 0);
++}
++
 +/* Clear only the two synthetic reveal strips, preserving the centred canonical
 + * framebuffer. This is an opt-in transition cleanup driven by gpu.c. */
 +static void glb_wide_clear_margins(int base_x, int y, int h, uint16_t color, int sides) {
@@ -9542,7 +9574,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..418d935ab0f8164a9ed3ba8a5891fd8a
      uint64_t freq = SDL_GetPerformanceFrequency();
      uint64_t deadline = SDL_GetPerformanceCounter();
      uint64_t diag_start = deadline, diag_swaps = 0, diag_captures = 0;
-@@ -3473,11 +6136,12 @@
+@@ -3473,11 +6168,12 @@
      while (SDL_AtomicGet(&s_interp_thread_run)) {
          SDL_LockMutex(s_interp_mutex);
          double hz = s_interp_target_hz;
@@ -9556,7 +9588,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..418d935ab0f8164a9ed3ba8a5891fd8a
              uint64_t period = (uint64_t)((double)freq / hz);
              if (!period) period = 1;
              deadline += period;
-@@ -3492,235 +6156,433 @@
+@@ -3492,235 +6188,434 @@
              }
              while (SDL_GetPerformanceCounter() < deadline) {}
              now = SDL_GetPerformanceCounter();
@@ -10204,6 +10236,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..418d935ab0f8164a9ed3ba8a5891fd8a
 +    .wide_clear = glb_wide_clear,
 +    .wide_clear_margins = glb_wide_clear_margins,
 +    .wide_copy_frame = glb_wide_copy_frame,
++    .wide_copy_rows = glb_wide_copy_rows,
 +    .render_wide_display = glb_render_wide_display,
 +    .wide_dump_full = glb_wide_dump_full,
 +};

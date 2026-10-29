@@ -389,6 +389,38 @@ void test_a_buffer_copied_whole_keeps_its_kind() {
     expect(psx_ws_frame_kinds_displayed_menu(&kinds, 0, 0) && worlds(kinds, 1, 1), "and a front-end frame copied whole is the front end's there too");
 }
 
+/* The teleport at the end of a level waves the world's frame: rows of it moved a little aside and up, inside its buffer. */
+void test_rows_moved_inside_a_world_stay_a_world() {
+    PsxWsFrameKinds kinds{};
+    frame(kinds, 1500, 0);
+    frame(kinds, 1500, 240);
+    expect(psx_ws_frame_kinds_copied(&kinds, 4, 478, 5, 476, 312, 2, 320, 240) == 2 && psx_ws_frame_kinds_copied(&kinds, 4, 236, 8, 234, 312, 2, 320, 240) == 2,
+           "rows moved inside a world's frame are told, so that the wide picture moves them too");
+    expect(worlds(kinds, 0, 0), "and leave each buffer the world it was");
+    const PsxWsFrameBuffer *held = psx_ws_frame_kinds_holder(&kinds, 5, 476, 312, 2, 320, 240);
+    expect(held && held->x == 0 && held->y == 240, "the buffer they lie in is the one holding the rows");
+    for (const auto &[from_x, from_y, x, y, w, h, first, second] :
+         {std::array<int, 8>{4, 238, 5, 240, 312, 2, 0, 1}, {4, 240, 5, 238, 312, 2, 1, 0}, {320, 0, 4, 100, 64, 12, 1, 0}, {4, 100, 320, 100, 8, 2, 0, 0},
+          {9, 100, 4, 100, 312, 2, 1, 0}, {0, 0, 0, 0, 321, 1, 1, 0}}) {
+        frame(kinds, 1500, 0);
+        frame(kinds, 1500, 240);
+        expect(psx_ws_frame_kinds_copied(&kinds, static_cast<std::uint32_t>(from_x), static_cast<std::uint32_t>(from_y), static_cast<std::uint32_t>(x),
+                                         static_cast<std::uint32_t>(y), static_cast<std::uint32_t>(w), static_cast<std::uint32_t>(h), 320, 240) == 0 &&
+                   worlds(kinds, first, second),
+               "rows from the other buffer, from beside both, out of the buffer or wider than it are a picture where they land");
+    }
+    frame(kinds, 1500, 0);
+    frame(kinds, 0, 240);
+    expect(psx_ws_frame_kinds_copied(&kinds, 4, 300, 5, 298, 312, 2, 320, 240) == 0 && worlds(kinds, 0, 1), "rows moved inside a flat frame are a picture");
+    frame(kinds, 0, 240);
+    psx_ws_frame_kinds_menu_begin(&kinds);
+    expect(psx_ws_frame_kinds_copied(&kinds, 4, 300, 5, 298, 312, 2, 320, 240) == 0 && !psx_ws_frame_kinds_displayed_menu(&kinds, 0, 240),
+           "and inside a front-end frame they end it");
+    PsxWsFrameKinds unknown{};
+    expect(psx_ws_frame_kinds_copied(&unknown, 4, 300, 5, 298, 312, 2, 320, 240) == 0 && !psx_ws_frame_kinds_holder(&unknown, 4, 300, 5, 2, 320, 240),
+           "and no buffer holds anything before one is known");
+}
+
 void test_a_blend_is_a_flat_colour_laid_over() {
     for (std::uint32_t opcode = 0x20; opcode < 0x80; ++opcode) {
         const bool lines = opcode >= 0x40 && opcode < 0x60, textured = !lines && (opcode & 4) != 0, blended = (opcode & 2) != 0;
@@ -414,6 +446,7 @@ int main() {
     test_a_world_under_a_veil_stays_a_world();
     test_a_fill_or_a_picture_ends_a_veil();
     test_a_buffer_copied_whole_keeps_its_kind();
+    test_rows_moved_inside_a_world_stay_a_world();
     test_a_blend_is_a_flat_colour_laid_over();
     if (g_failures) return 1;
     std::cout << "GPU widescreen frame kind tests passed\n";

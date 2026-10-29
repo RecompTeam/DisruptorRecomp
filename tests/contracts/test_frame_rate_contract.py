@@ -243,6 +243,26 @@ require(
     "the overclock divides the GTE and multiplier latencies without the elapsed carry, instruction cache refills and main "
     "RAM loads off the inline path with it, leaves device waits whole, and another divisor starts from no carry",
 )
+dma = read("psxrecomp/runtime/src/dma.c")
+GPU_TRANSFER = (
+    "        case 2: {\n"
+    "            /* Overclocked, GPU transfers end as much sooner, or the CPU outruns the GPU into an area both upload to."
+    " */\n"
+    "            schedule_delayed_complete(2, execute_ch2_gpu(), DMA_GPU_CYCLES_PER_WORD);\n"
+    "            DMADelayedComplete *gpu = &delayed_complete[2];\n"
+    "            if (gpu->active) gpu->cycles_remaining = psx_cyc_overclocked_latency(gpu->cycles_remaining);\n"
+    "            break;\n"
+    "        }\n"
+    "        case 3:\n"
+)
+require(
+    '#include "psx_cyc_overclock.h"\n' in dma
+    and dma.count(GPU_TRANSFER) == 1
+    and dma.count("psx_cyc_overclocked_") == 1
+    and dma.count("delayed_complete[2]") == 1,
+    "a GPU transfer ends as much sooner as the overclock runs the CPU, the other channels keep their time: "
+    "at 8x the pause menu's pictures went into the sprite chain's area before the chain was done",
+)
 
 present_rate = read("src/game/frame/present_rate.h")
 present_control = read("src/game/frame/present_rate.cpp")
