@@ -78,6 +78,7 @@ In the game's menu, pick **New Game** with the arrow keys and **Enter**, or
 - **Details** there shows the end of `startup.log` and everything the launcher
   did.
 - **Help** in the side bar shows this guide. F1 opens it too.
+- **EXIT**, under **CREDITS** in the game's main menu, closes the game.
 
 ### Older releases
 
@@ -317,6 +318,16 @@ defaults**: the file is kept beside it as `settings.unreadable.toml`.
   edge, so a small line stays readable. At 100% it is drawn as the game draws it.
 - Shadows keep the game's own shape at 4:3 and lie flat on the floor in
   widescreen.
+- **Resolution** sets the display mode in exclusive fullscreen, the nearest
+  one the display has, and the window's size in a window. Borderless
+  fullscreen keeps the desktop's size. Desktop, the default, takes the
+  desktop's display mode.
+- **Dynamic resolution** lowers the internal resolution while the graphics
+  card cannot keep up and raises it back when it can. It is meant for weaker
+  graphics cards, integrated ones above all. It starts off.
+- **Render thread** can make the game smoother on slower processors and
+  integrated graphics. It has no effect with in-between frames on. It starts
+  off.
 
 ### Enhancements
 
@@ -329,6 +340,7 @@ The page is in five groups, in the launcher and in the game alike.
 | Picture | **Exact-provenance geometry**, **Perspective-correct world textures**, **Gap filling**, **Smooth distance fade**, **Depth-sorted world** | On |
 | Picture | **Fog shape** and **Draw distance** | Original |
 | Picture | **Anti-aliasing (MSAA / SSAA)** | Off |
+| Picture | **Sprites face the camera** | Off |
 | Shading | **Ambient occlusion**, its reach and strength | Off |
 | Movies | **Movie filter** | Smooth |
 | Startup | **Skip the logos and the title movie** | Off |
@@ -344,6 +356,10 @@ The page is in five groups, in the launcher and in the game alike.
   Original and 1.25x, a quarter further.
 - **Depth-sorted world** draws world polygons by their depth where the game's
   own order puts a far one over a near one.
+- **Sprites face the camera** stands enemies, pickups and shots in the world
+  like cut-outs that face you. Without it they turn with the view when you
+  turn on the spot. Toward the screen's sides they get wider, as walls there
+  do.
 - **Anti-aliasing (MSAA / SSAA)** smooths edges.
   - MSAA at 2x, 4x or 8x smooths the edges of polygons and of the HUD's
     rectangles. A saved 16x reads as 8x: at 8x internal resolution with in-between frames 16x took about 40% more of the graphics card's work, with no difference we could see.

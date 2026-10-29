@@ -91,6 +91,7 @@
 | | Smooth distance fade | On | Walls fade evenly instead of in twelve steps, distant ones fade in instead of appearing in blocks |
 | | Draw distance | Original | 1.25x draws the world a quarter further |
 | | Ambient occlusion | Off | Shaded corners and floors under things |
+| | Sprites face the camera | Off | Enemies, pickups and shots stand in the world like cut-outs and face you |
 | **Controls** | Control scheme | Modern | WASD and the mouse, or the original keys |
 | | Weapon and psionic keys | Off | Two keys a weapon or power, 1 to 9 and 0 at first |
 | | Psionic keys use the power | Off | A power's key uses the power too, once it is in hand, which comes twice as fast |

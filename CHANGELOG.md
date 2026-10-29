@@ -2,6 +2,49 @@
 
 What changed in each release. The launcher shows the section of its own version on its home page.
 
+## v0.9.0
+
+### Changes
+
+- Gamepad: Dual analog is the default, the left stick moves and strafes and the right stick turns, Classic keeps the old layout
+- Anti-aliasing: 16x MSAA and 16x SSAA are gone, a saved 16x reads as 8x
+- Resolution: in exclusive fullscreen with Desktop it takes the desktop's display mode, it took the window's size
+- Window frames: in a window or borderless fullscreen on Windows a frame is shown at once, as with Immediate
+- Save states: those of 0.8.0 are carried over on the first start
+
+### Enhancements
+
+- Gamepad sticks: Dual analog, Classic and Southpaw layouts, turning speed and dead zone, the right stick looks up and down with Vertical mouse look
+- Second keys: every action takes one, a mouse button may be among them
+- Disc images: the launcher takes a CHD of the game disc or a language disc
+- Start: about 2 seconds sooner when no mod is on
+- Display resolution: sets an exclusive fullscreen's display mode or a window's size
+- Render thread: off at first, the drawing goes to the graphics card from its own thread
+- Dynamic resolution: off at first, the internal resolution steps down while the graphics card cannot keep up
+- Sprites face the camera: off at first, enemies, pickups and shots turn to the player as cut-outs
+- Main menu: EXIT under CREDITS closes the game
+- Level loading: the data the game streams arrives at once, the pause near the prison's H Block is gone
+- Updates window: names this copy's version once
+
+### Bug fixes
+
+- Prison H Block: the game no longer stops for seconds while it loads two parts of a level in turn
+- Crash: no access violation after an hour or more of play
+- Teleport wave: stays in widescreen at the end of a level
+- Pause menu: whole pictures under 60 FPS gameplay with many sprites in view
+- Menu demo: plays at the console's speed with a longer draw distance or a wide screen
+- Ceilings: no grey patches at the screen's edge
+- Sky: no flat purple rectangle in a doorway, no strip of sky at the edge with smooth mouse aim
+- Depth-sorted world: a pillar's line between two faces stays still, bodies and enemies behind walls and columns stay hidden
+- Near textures: keep their shape while turning
+- Floor at the screen's corner: no sky beside you under a wall button
+- Staircase: no empty strip under the landing's edge
+- Fog: a far shape in the fog loses its faint blue edge line
+- Memory cards: written to a new file, a failed or unreadable card is no longer lost or replaced
+- Save states: one that cannot be read whole or cannot run is refused
+- Launcher: held back while the game runs, Down on a Controls tab goes into the page
+- Language discs: one is not loaded while the game runs and uses the file
+
 ## v0.8.0
 
 ### Changes
