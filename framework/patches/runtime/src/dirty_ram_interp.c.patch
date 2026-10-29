@@ -1,5 +1,5 @@
 diff --git a/runtime/src/dirty_ram_interp.c b/runtime/src/dirty_ram_interp.c
-index 0a324bcd9913b32b2bb2bcd7a673fd4aba39e4c4..8467bce1f99d13aa842fb5d2e0e2eb9a6a7d56fe 100644
+index 0a324bcd9913b32b2bb2bcd7a673fd4aba39e4c4..e432278dd9a6b774f4b885bbb44b1ce64ac3560d 100644
 --- a/runtime/src/dirty_ram_interp.c
 +++ b/runtime/src/dirty_ram_interp.c
 @@ -24,6 +24,7 @@
@@ -92,7 +92,39 @@ index 0a324bcd9913b32b2bb2bcd7a673fd4aba39e4c4..8467bce1f99d13aa842fb5d2e0e2eb9a
  
      if (is_ld) {
          const uint32_t loaded = cpu->gpr[ld_rt];
-@@ -2114,7 +2169,9 @@
+@@ -1671,7 +1726,16 @@
+         case 0x09: { /* JALR rd, rs */
+             uint32_t target = cpu->gpr[rs];
+             uint32_t return_pc = pc + 8;
+-            cpu->gpr[rd ? rd : 31] = return_pc;
++            /* JALR writes the encoded rd exactly.  The one-operand assembler
++             * form encodes rd=$ra; rd=0 is a real discard, not an implicit
++             * $ra.  More importantly, only rd=$ra gives the call-unit code a
++             * return contract it can validate.  Games also use other link
++             * registers for data-bearing transfer stubs (for example
++             * `jalr $a1,$t0`, where the target consumes $a1 and later returns
++             * through the pre-existing $ra).  Treating pc+8 as that transfer's
++             * mandatory return address fabricates a nested continuation and
++             * leaks psx_dispatch_call frames. */
++            if (rd != 0) cpu->gpr[rd] = return_pc;
+             cpu->gpr[0] = 0;
+             exec_delay_slot(cpu, pc + 4);
+             cosim_exec_one_transfer_hook(pc + 4);
+@@ -1683,6 +1747,13 @@
+             uint32_t _cr = callret_begin(cpu, pc, target);   /* call-resolution ring */
+ #define CRET(code, rv) do { callret_end(_cr, cpu, (code)); return (rv); } while (0)
+             if (g_precise_mode || g_ls_replay_active) { cpu->pc = target; CRET(CRES_PLAIN, 1); }  /* slice / lockstep-replay: plain transfer, never execute the callee */
++            if (rd != 31) {
++                /* No architectural $ra contract: preserve the transfer as a
++                 * pc-chain and let the callee's eventual JR choose the real
++                 * continuation.  This is both faithful and host-stack-flat. */
++                cpu->pc = target;
++                CRET(CRES_PCCHAIN, 1);
++            }
+ #ifdef PSX_HAS_GAME_DISPATCH
+             cpu->pc = 0;
+             if (interp_enter_compiled(cpu, target)) {
+@@ -2114,7 +2185,9 @@
  #ifdef PSX_ENABLE_BLOCK_CYCLES
              psx_gte_read(cpu, rt);
  #endif
@@ -103,7 +135,7 @@ index 0a324bcd9913b32b2bb2bcd7a673fd4aba39e4c4..8467bce1f99d13aa842fb5d2e0e2eb9a
              cpu->gpr[0] = 0;
              return 0;
          }
-@@ -2181,6 +2238,8 @@
+@@ -2181,6 +2254,8 @@
              cpu->gpr[rt] = psx_ws_xclip_bound(psx_cyc_load_word(cpu, addr, rt, 1u << rs));
          else
              cpu->gpr[rt] = psx_cyc_load_word(cpu, addr, rt, 1u << rs);
@@ -112,7 +144,7 @@ index 0a324bcd9913b32b2bb2bcd7a673fd4aba39e4c4..8467bce1f99d13aa842fb5d2e0e2eb9a
          cpu->gpr[0] = 0;
          return 0;
      }
-@@ -2236,6 +2295,11 @@
+@@ -2236,6 +2311,11 @@
          g_debug_last_store_pc = pc;
          parappa_rhythm_log_store(cpu, pc, addr, cpu->gpr[rt], 4u);
          cpu->write_word(addr, cpu->gpr[rt]);
@@ -124,7 +156,7 @@ index 0a324bcd9913b32b2bb2bcd7a673fd4aba39e4c4..8467bce1f99d13aa842fb5d2e0e2eb9a
          return 0;
      }
      case 0x2E: { /* SWR */
-@@ -2509,6 +2573,7 @@
+@@ -2509,6 +2589,7 @@
          cosim_exec_one_begin();
          int transferred = exec_one(cpu, pc, &next_pc);  /* charges its own interlock */
          g_dirty_ram_insns_run++;
@@ -132,7 +164,7 @@ index 0a324bcd9913b32b2bb2bcd7a673fd4aba39e4c4..8467bce1f99d13aa842fb5d2e0e2eb9a
  #ifdef PSX_COSIM
          if (!cosim_exec_one_did_hook()) { extern void cosim_instr(uint32_t); cosim_instr(pc); }
  #endif
-@@ -2981,6 +3046,7 @@
+@@ -2981,6 +3062,7 @@
              OV_FPLOG_RET1();
          }
          g_dirty_ram_insns_run++;
@@ -140,7 +172,7 @@ index 0a324bcd9913b32b2bb2bcd7a673fd4aba39e4c4..8467bce1f99d13aa842fb5d2e0e2eb9a
          insns_executed++;
          /* COP0 software-interrupt latency: an MTC0 to CAUSE or SR that makes a
           * software interrupt deliverable (CAUSE.IP0/IP1 & SR.IM0/IM1 & IEc)
-@@ -3433,6 +3499,7 @@
+@@ -3433,6 +3515,7 @@
      uint32_t    sav_unsup_pc     = g_unsupported_pc;
      uint32_t    sav_unsup_insn   = g_unsupported_insn;
      const char *sav_unsup_reason = g_unsupported_reason;
@@ -148,7 +180,7 @@ index 0a324bcd9913b32b2bb2bcd7a673fd4aba39e4c4..8467bce1f99d13aa842fb5d2e0e2eb9a
      g_ls_replay_active = 1;
      g_ls_mode = 2;
      uint32_t pc = rep.pc;
-@@ -3456,6 +3523,7 @@
+@@ -3456,6 +3539,7 @@
      }
      g_ls_mode = 0;
      g_ls_replay_active = 0;
@@ -156,7 +188,7 @@ index 0a324bcd9913b32b2bb2bcd7a673fd4aba39e4c4..8467bce1f99d13aa842fb5d2e0e2eb9a
      g_unsupported_seen   = sav_unsup_seen;     /* undo any replay-side decode-state leak */
      g_unsupported_pc     = sav_unsup_pc;
      g_unsupported_insn   = sav_unsup_insn;
-@@ -3550,6 +3618,7 @@
+@@ -3550,6 +3634,7 @@
      const char *sav_unsup_reason = g_unsupported_reason;
      uint32_t    sav_store_pc     = g_debug_last_store_pc;
      uint32_t    sav_func_addr    = g_debug_current_func_addr;
@@ -164,7 +196,7 @@ index 0a324bcd9913b32b2bb2bcd7a673fd4aba39e4c4..8467bce1f99d13aa842fb5d2e0e2eb9a
  
      g_ls_replay_active = 1;
      g_ls_mode = 2;
-@@ -3585,6 +3654,7 @@
+@@ -3585,6 +3670,7 @@
  
      g_ls_mode = 0;
      g_ls_replay_active = 0;

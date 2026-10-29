@@ -26,7 +26,7 @@
 #include "savestate.h"
 
 extern "C" uint8_t *memory_get_ram_ptr(void);
-extern "C" void psx_write_byte(uint32_t address, uint8_t value);
+extern "C" void psx_host_write_byte(uint32_t address, uint8_t value);
 extern "C" uint16_t sio_get_pad_buttons_slot(int slot);
 extern "C" void sio_set_pad_state_slot(int slot, uint16_t buttons);
 extern "C" double disruptor_mouse_vertical_pitch(void);
@@ -531,12 +531,12 @@ void replay_frame() {
     sio_set_pad_state_slot(0, frame.pad[0]);
     sio_set_pad_state_slot(1, frame.pad[1]);
     if (frame.byte_at != 0u) {
-        psx_write_byte(frame.byte_at, frame.byte);
+        psx_host_write_byte(frame.byte_at, frame.byte);
         disruptor_capsule_note_byte(frame.byte_at, frame.byte);  /* a recording made inside a replay holds the byte too */
         if (frame.byte_at == kWeaponInHand) disruptor_weapon_chosen(frame.byte);
     }
     if (frame.byte2_at != 0u) {
-        psx_write_byte(frame.byte2_at, frame.byte2);
+        psx_host_write_byte(frame.byte2_at, frame.byte2);
         disruptor_capsule_note_byte(frame.byte2_at, frame.byte2);
         if (frame.byte2_at == kWeaponInHand) disruptor_weapon_chosen(frame.byte2);
     }

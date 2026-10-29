@@ -1,0 +1,13 @@
+diff --git a/runtime/include/memcard.h b/runtime/include/memcard.h
+index 1275ebcf823b3a70e9627c8da1b8b62f05136392..4b3b0f2995ece5d6f45175a133fab56d4ef862bc 100644
+--- a/runtime/include/memcard.h
++++ b/runtime/include/memcard.h
+@@ -54,6 +54,8 @@
+ /* Flush pending writes to disk */
+ void memcard_flush(int card);
+ void memcard_flush_all(void);
++/* 0 when the card's last flush reached its file, -1 when the old file was kept. */
++int memcard_last_flush_result(int card);
+ 
+ /* Check if card is present */
+ int memcard_is_present(int card);

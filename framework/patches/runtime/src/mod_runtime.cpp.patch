@@ -1,8 +1,22 @@
 diff --git a/runtime/src/mod_runtime.cpp b/runtime/src/mod_runtime.cpp
-index acfaf51d7a30fba962f2bd682971fbe399fafa49..426da47a68092f73227169e6e43b2e904075eec1 100644
+index acfaf51d7a30fba962f2bd682971fbe399fafa49..beb17634460a0c057601f173eb31362ba61d1d7a 100644
 --- a/runtime/src/mod_runtime.cpp
 +++ b/runtime/src/mod_runtime.cpp
-@@ -509,6 +509,21 @@
+@@ -35,10 +35,13 @@
+ 
+ extern "C" uint8_t psx_read_byte(uint32_t addr);
+ extern "C" void psx_write_byte(uint32_t addr, uint8_t value);
++extern "C" void psx_host_write_byte(uint32_t addr, uint8_t value);
+ extern "C" uint16_t psx_read_half(uint32_t addr);
+ extern "C" void psx_write_half(uint32_t addr, uint16_t value);
++extern "C" void psx_host_write_half(uint32_t addr, uint16_t value);
+ extern "C" uint32_t psx_read_word(uint32_t addr);
+ extern "C" void psx_write_word(uint32_t addr, uint32_t value);
++extern "C" void psx_host_write_word(uint32_t addr, uint32_t value);
+ extern "C" uint32_t psx_mod_memory_alloc(uint32_t size, uint32_t alignment);
+ extern "C" uint32_t psx_mod_gpu_dma_memory_alloc(uint32_t size,
+                                                   uint32_t alignment);
+@@ -509,6 +512,21 @@
      std::fprintf(stdout, "psxrecomp: cached derived disc %s\n", cached.string().c_str());
      out = cached;
      return true;
@@ -24,7 +38,7 @@ index acfaf51d7a30fba962f2bd682971fbe399fafa49..426da47a68092f73227169e6e43b2e90
  }
  
  #if defined(RECOMP_LAUNCHER)
-@@ -806,7 +821,7 @@
+@@ -806,7 +824,7 @@
      }
      if (!state().disc_path.empty())
          state().validation = state().manager.resolve(
@@ -33,7 +47,7 @@ index acfaf51d7a30fba962f2bd682971fbe399fafa49..426da47a68092f73227169e6e43b2e90
      else
          state().validation = {};
      state().error.clear();
-@@ -939,14 +954,11 @@
+@@ -939,14 +957,11 @@
      RuntimeMods& s = state();
      if (!s.initialized) return true;
      if (disc_path != s.disc_path) {
@@ -50,3 +64,48 @@ index acfaf51d7a30fba962f2bd682971fbe399fafa49..426da47a68092f73227169e6e43b2e90
      s.validation = plan;
      if (!plan.ok) {
          s.error.clear();
+@@ -1029,7 +1044,7 @@
+         if (write.target != ModPatchTarget::MainExe) continue;
+         if (write.fields.empty()) {
+             for (size_t i = 0; i < write.replacement.size(); ++i)
+-                psx_write_byte((uint32_t)write.location + (uint32_t)i,
++                psx_host_write_byte((uint32_t)write.location + (uint32_t)i,
+                                write.replacement[i]);
+             dirty_ram_mark_executable_range(
+                 (uint32_t)write.location & 0x1FFFFFFFu,
+@@ -1037,7 +1052,7 @@
+         } else {
+             for (const ModResolution::Write::Field& field : write.fields) {
+                 for (size_t i = 0; i < field.replacement.size(); ++i)
+-                    psx_write_byte(
++                    psx_host_write_byte(
+                         (uint32_t)write.location +
+                             (uint32_t)field.offset + (uint32_t)i,
+                         field.replacement[i]);
+@@ -1105,7 +1120,7 @@
+ }
+ 
+ extern "C" void psx_mod_write_byte(uint32_t address, uint8_t value) {
+-    psx_write_byte(address, value);
++    psx_host_write_byte(address, value);
+ }
+ 
+ extern "C" uint16_t psx_mod_read_half(uint32_t address) {
+@@ -1113,7 +1128,7 @@
+ }
+ 
+ extern "C" void psx_mod_write_half(uint32_t address, uint16_t value) {
+-    psx_write_half(address, value);
++    psx_host_write_half(address, value);
+ }
+ 
+ extern "C" uint32_t psx_mod_read_word(uint32_t address) {
+@@ -1121,7 +1136,7 @@
+ }
+ 
+ extern "C" void psx_mod_write_word(uint32_t address, uint32_t value) {
+-    psx_write_word(address, value);
++    psx_host_write_word(address, value);
+ }
+ 
+ extern "C" uint32_t psx_mod_alloc_guest_memory(uint32_t size,

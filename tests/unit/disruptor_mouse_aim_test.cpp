@@ -106,6 +106,8 @@ void psx_write_byte(std::uint32_t address, std::uint8_t value) {
     g_ram[address & 0x001fffffu] = value;
 }
 
+void psx_host_write_byte(std::uint32_t address, std::uint8_t value) { psx_write_byte(address, value); }
+
 std::uint16_t sio_get_pad_buttons_slot(int slot) {
     return slot == 0 ? g_pad_buttons : 0xFFFFu;
 }

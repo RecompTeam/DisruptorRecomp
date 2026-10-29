@@ -497,6 +497,8 @@ disruptor_unit_test(disruptor_bass_cut tests/unit/disruptor_bass_cut_test.cpp
     disruptor_unit_test(disruptor_resolution tests/unit/resolution_test.cpp INCLUDES "${CMAKE_CURRENT_SOURCE_DIR}/src")
     disruptor_unit_test(psxrecomp_render_thread_core tests/unit/render_thread_core_test.cpp RUNTIME_HEADERS
         SOURCES "${PSXRECOMP_ROOT}/runtime/src/render_thread.c")
+    disruptor_unit_test(psxrecomp_memcard_publish tests/unit/memcard_publish_test.cpp RUNTIME_HEADERS
+        SOURCES "${PSXRECOMP_ROOT}/runtime/src/memcard.c")
     disruptor_unit_test(disruptor_adaptive_resolution_hooks tests/unit/adaptive_resolution_hooks_test.cpp
         INCLUDES tests/support/stubs src "${PSXRECOMP_ROOT}/runtime/include" SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/adaptive_resolution.cpp"
         "${PSXRECOMP_ROOT}/runtime/src/dynamic_resolution.c" DEFINITIONS PSX_SDL3=1)

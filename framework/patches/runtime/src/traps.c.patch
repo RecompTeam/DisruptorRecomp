@@ -1,8 +1,16 @@
 diff --git a/runtime/src/traps.c b/runtime/src/traps.c
-index 77402276fcb35e9283d89457415d3970ea10d6a7..9ef672e1ffab51e9da330efeff5330eeb79ef2b4 100644
+index 77402276fcb35e9283d89457415d3970ea10d6a7..9405214df608ab770cf95bdb07acb61a2c6d7324 100644
 --- a/runtime/src/traps.c
 +++ b/runtime/src/traps.c
-@@ -205,7 +205,8 @@
+@@ -7,6 +7,7 @@
+ #include "cpu_state.h"
+ #include "psx_runtime.h"   /* fix B: psx_exc_escape_reason_t + g_exc_escape_reason */
+ #include "debug_server.h"
++#include "interrupts.h"
+ #include "crash_trace.h"
+ #include <stdio.h>
+ #include <stdlib.h>
+@@ -205,7 +206,8 @@
  }
  
  static void trap_crash(const char* msg) {
@@ -12,3 +20,32 @@ index 77402276fcb35e9283d89457415d3970ea10d6a7..9ef672e1ffab51e9da330efeff5330ee
      if (cf) { fprintf(cf, "%s\n", msg); fclose(cf); }
      /* Full ring dump, then halt-and-serve (debug builds) / exit(1)
       * (release). Never returns — call sites' trailing exit(1) are
+@@ -695,6 +697,8 @@
+  * on the old stack (safe: the restored state is complete in CPUState/RAM/devices
+  * and every block leader is re-enterable). MUST be called on the scheduler fiber
+  * (HLE mode, default) at a block-leader boundary with in_exception == 0. */
++static int g_sched_restore_edge_check = 0;
++
+ void psx_scheduler_resume_at(uint32_t resume_pc)
+ {
+     if (!psx_is_dispatchable(resume_pc)) {
+@@ -707,6 +711,8 @@
+     g_sched_escape.target_tcb = 0;
+     g_sched_escape.resume_pc  = resume_pc;
+     g_sched_escape.reason     = PSX_RUN_RESUME_CURRENT;
++    /* The state was taken by a poll in the interrupt check at this edge, the live run took delivery here (#636). */
++    g_sched_restore_edge_check = 1;
+     longjmp(g_scheduler_jmpbuf, 1); /* unwind to psx_scheduler_run; never returns */
+ }
+ 
+@@ -837,6 +843,10 @@
+ 
+         cpu->pc = run_pc;
+         g_sched_escape.reason = PSX_RUN_CONTINUE;
++        if (g_sched_restore_edge_check) {
++            g_sched_restore_edge_check = 0;
++            psx_check_interrupts_dispatch_entry(cpu, run_pc);
++        }
+         psx_dispatch(cpu, run_pc);
+ 
+         /* psx_dispatch returned with NO structured escape => the outermost

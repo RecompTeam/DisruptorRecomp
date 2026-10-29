@@ -40,7 +40,7 @@ require(
     in state
     and state.count("interrupts_resync_after_restore();") == 1
     and state.index("        psx_cycle_count = cyc;")
-    < state.index("    if (!ok || (seen & required) != required)\n        return 0;\n")
+    < state.index("    free(sections);\n    if (!ok) return 0;\n")
     < state.index("    interrupts_resync_after_restore();\n"),
     "a state loaded into a running game puts the clock back: the delivery deadline and the two stall deadlines of the old "
     "clock are dropped, or no interrupt arrives until the clock is there again",
@@ -122,8 +122,12 @@ require(
     "             pst_w_u32(&w, g_psx_cyc_overclock_carry) &&\n"
     "             write_section(f, BS_SEC_CPU_COST, cost, sizeof cost);\n"
     in state
-    and "        if (!pst_r_u32(&r, &shift) || !pst_r_u32(&r, &carry) || shift > 31u || (carry >> 31) != 0u ||\n"
-    "            (shift != 0u && carry >= (1u << shift))) return 0;\n"
+    and "    return pst_r_u32(&r, shift) && pst_r_u32(&r, carry) && *shift <= 31u && (*carry >> 31) == 0u &&\n"
+    "           (*shift == 0u || *carry < (1u << *shift));\n"
+    "}\n"
+    in state
+    and "    case BS_SEC_CPU_COST:       return parse_cpu_cost(p, len, &shift, &carry);\n" in state
+    and "        if (!parse_cpu_cost(p, len, &shift, &carry)) return 0;\n"
     "        g_psx_cyc_overclock_shift = shift;\n"
     "        g_psx_cyc_overclock_carry = carry;\n"
     in state

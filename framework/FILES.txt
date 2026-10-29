@@ -99,3 +99,6 @@ recompiler/src/full_function_emitter.cpp
 +runtime/src/render_thread.c
 +runtime/src/gpu_gl_render_thread.c.inc
 runtime/src/gpu_sw_renderer.c
+runtime/include/memcard.h
+runtime/src/memcard.c
+runtime/src/sio.c

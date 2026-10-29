@@ -44,7 +44,7 @@
 extern "C" void mod_register_frame_hook(void (*hook)(void));
 extern "C" uint8_t psx_read_byte(uint32_t address);
 extern "C" uint32_t psx_read_word(uint32_t address);
-extern "C" void psx_write_byte(uint32_t address, uint8_t value);
+extern "C" void psx_host_write_byte(uint32_t address, uint8_t value);
 extern "C" uint16_t sio_get_pad_buttons_slot(int slot);
 extern "C" void sio_set_pad_state_slot(int slot, uint16_t buttons);
 extern "C" int32_t psx_mod_widescreen_x_margin(void);
@@ -489,7 +489,7 @@ bool select_psionic(int power) {
         return false;
     }
     g_mouse.pending_psionic = -1;
-    psx_write_byte(kCurrentPsionicAddress, static_cast<uint8_t>(power));
+    psx_host_write_byte(kCurrentPsionicAddress, static_cast<uint8_t>(power));
     disruptor_capsule_note_byte(kCurrentPsionicAddress, static_cast<uint8_t>(power));
     return true;
 }
@@ -517,7 +517,7 @@ bool select_weapon(int weapon) {
         }
     }
     g_mouse.pending_weapon = -1;
-    psx_write_byte(kCurrentWeaponAddress, static_cast<uint8_t>(weapon));
+    psx_host_write_byte(kCurrentWeaponAddress, static_cast<uint8_t>(weapon));
     disruptor_capsule_note_byte(kCurrentWeaponAddress, static_cast<uint8_t>(weapon));
     disruptor_weapon_chosen(static_cast<uint8_t>(weapon));
     return true;
@@ -603,7 +603,7 @@ void apply_turn(double raw_x, double stick) {
     const uint8_t old_yaw = psx_read_byte(kPlayerYawAddress);
     const uint8_t new_yaw = static_cast<uint8_t>(
         static_cast<int>(old_yaw) + yaw_steps);
-    psx_write_byte(kPlayerYawAddress, new_yaw);
+    psx_host_write_byte(kPlayerYawAddress, new_yaw);
     disruptor_capsule_note_byte(kPlayerYawAddress, new_yaw);
     ++g_mouse.motion_samples;
     g_mouse.interval_mouse_x += raw_x;

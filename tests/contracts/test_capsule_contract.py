@@ -101,14 +101,14 @@ require(
     replay.index("capsule.seen.push_back(memory_now());") < replay.index("    sio_set_pad_state_slot(0, frame.pad[0]);")
     and replay.index("if (++capsule.at == capsule.replayed.size()) finish_replay();")
     < replay.index("    sio_set_pad_state_slot(0, frame.pad[0]);")
-    and "        psx_write_byte(frame.byte_at, frame.byte);\n        disruptor_capsule_note_byte(frame.byte_at, frame.byte);"
+    and "        psx_host_write_byte(frame.byte_at, frame.byte);\n        disruptor_capsule_note_byte(frame.byte_at, frame.byte);"
     in replay
     and "    disruptor_mouse_set_vertical_pitch(static_cast<double>(frame.pitch));\n" in replay,
     "a replay compares the memory before it puts a frame's input in, puts in all a frame holds, "
     "and notes the byte it writes for a capsule recorded inside it",
 )
 require(
-    "        psx_write_byte(frame.byte2_at, frame.byte2);\n        disruptor_capsule_note_byte(frame.byte2_at, frame.byte2);"
+    "        psx_host_write_byte(frame.byte2_at, frame.byte2);\n        disruptor_capsule_note_byte(frame.byte2_at, frame.byte2);"
     in replay,
     "a replay must also restore weapon selection when the same frame holds a mouse yaw write",
 )
@@ -132,7 +132,7 @@ require(
     "the save state folder is the capsule's for one save or load only, and is turned back whatever came of it",
 )
 require(
-    "    psx_write_byte(kPlayerYawAddress, new_yaw);\n    disruptor_capsule_note_byte(kPlayerYawAddress, new_yaw);\n"
+    "    psx_host_write_byte(kPlayerYawAddress, new_yaw);\n    disruptor_capsule_note_byte(kPlayerYawAddress, new_yaw);\n"
     in mouse
     and 'extern "C" void disruptor_mouse_set_vertical_pitch(double pitch) {\n    g_mouse.vertical_pitch = pitch;\n}\n'
     in mouse,

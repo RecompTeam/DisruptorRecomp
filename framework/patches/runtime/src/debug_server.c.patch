@@ -1,8 +1,25 @@
 diff --git a/runtime/src/debug_server.c b/runtime/src/debug_server.c
-index 073ebd846862865163b389c7604af390ca282f8a..634526c407a53922ee595924d35735367c6f10f0 100644
+index 073ebd846862865163b389c7604af390ca282f8a..d6df96cf9beedee171057c83b32b41cf82ade396 100644
 --- a/runtime/src/debug_server.c
 +++ b/runtime/src/debug_server.c
-@@ -7148,6 +7148,24 @@
+@@ -91,6 +91,7 @@
+ extern void     psx_write_word(uint32_t addr, uint32_t val);
+ extern uint8_t  psx_read_byte(uint32_t addr);
+ extern void     psx_write_byte(uint32_t addr, uint8_t val);
++extern void     psx_host_write_byte(uint32_t addr, uint8_t val);
+ 
+ /* ---- Server state ---- */
+ static sock_t s_listen  = SOCK_INVALID;
+@@ -4853,7 +4854,7 @@
+     }
+     uint32_t addr = hex_to_u32(addr_str);
+     uint8_t val = (uint8_t)hex_to_u32(val_str);
+-    psx_write_byte(addr, val);
++    psx_host_write_byte(addr, val);
+     send_ok(id);
+ }
+ 
+@@ -7148,6 +7149,24 @@
  #endif
  }
  
@@ -27,7 +44,7 @@ index 073ebd846862865163b389c7604af390ca282f8a..634526c407a53922ee595924d3573536
  static void handle_frame_perf(int id, const char *json)
  {
      (void)json;
-@@ -7935,6 +7953,10 @@
+@@ -7935,6 +7954,10 @@
      if (h > DISP_RING_MAX_H) h = DISP_RING_MAX_H;
      e->w = (uint16_t)w; e->h = (uint16_t)h;
      e->depth24 = (uint8_t)(di.depth24 ? 1 : 0);
@@ -38,7 +55,7 @@ index 073ebd846862865163b389c7604af390ca282f8a..634526c407a53922ee595924d3573536
      /* GPU-side truth when the GL raster pipeline is live (scissored pack of
       * just the display rect + one small readback); CPU VRAM otherwise (the
       * software backend's authoritative surface). Runs on the present thread,
-@@ -12519,6 +12541,7 @@
+@@ -12519,6 +12542,7 @@
      { "gl_present_ring",   handle_gl_present_ring },
      { "present_ring",      handle_present_ring },
      { "frame_perf",        handle_frame_perf },
@@ -46,3 +63,25 @@ index 073ebd846862865163b389c7604af390ca282f8a..634526c407a53922ee595924d3573536
      { "gl_ws_ablate",      handle_gl_ws_ablate },
      { "gl_interp",         handle_gl_interp },
      { "gl_wide_fast",      handle_gl_wide_fast },
+@@ -12877,6 +12901,21 @@
+      * 16 leaves room for a few probes to queue while we investigate. This
+      * is observability infrastructure, not a freeze fix. */
+     listen(s_listen, 16);
++    /* Bounded accept(): close() of a socket blocked in accept() does NOT
++     * reliably wake the sleeper on Linux (the fd number can even be recycled
++     * under us), so the close-to-break-accept + SDL_WaitThread dance in
++     * debug_server_shutdown() could hang window-close forever. A receive
++     * timeout makes accept() return EWOULDBLOCK/EINTR periodically; the loop
++     * re-checks s_io_running, so shutdown joins within ~200 ms. */
++#ifdef _WIN32
++    { DWORD accept_to = 200;
++      setsockopt(s_listen, SOL_SOCKET, SO_RCVTIMEO, (const char *)&accept_to,
++                 sizeof(accept_to)); }
++#else
++    { struct timeval accept_to = { 0, 200 * 1000 };
++      setsockopt(s_listen, SOL_SOCKET, SO_RCVTIMEO, &accept_to,
++                 sizeof(accept_to)); }
++#endif
+     fprintf(stdout, "psxrecomp: debug server LISTENING on 127.0.0.1:%d\n",
+             s_port);
+ 

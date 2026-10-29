@@ -12,7 +12,7 @@
 
 extern "C" uint8_t psx_read_byte(uint32_t address);
 extern "C" uint32_t psx_read_word(uint32_t address);
-extern "C" void psx_write_byte(uint32_t address, uint8_t value);
+extern "C" void psx_host_write_byte(uint32_t address, uint8_t value);
 extern "C" uint16_t sio_get_pad_buttons_slot(int slot);
 extern "C" void sio_set_pad_state_slot(int slot, uint16_t buttons);
 extern "C" void sio_get_pad_sticks(int slot, uint8_t out[4]);
@@ -127,7 +127,7 @@ void equip() {
     const uint8_t current = psx_read_byte(address);
     const bool baton = view.kind == Kind::weapons && picked == 0;
     if ((current >= view.count && current != 0xFFu) || (current == picked && !baton)) return;
-    psx_write_byte(address, static_cast<uint8_t>(picked));
+    psx_host_write_byte(address, static_cast<uint8_t>(picked));
     disruptor_capsule_note_byte(address, static_cast<uint8_t>(picked));
     if (view.kind == Kind::weapons) disruptor_weapon_chosen(static_cast<uint8_t>(picked));
 }

@@ -1,8 +1,8 @@
 diff --git a/runtime/src/boot_state.c b/runtime/src/boot_state.c
-index b4acb4175df98cced308fbcc84e64d56a9b98c0c..6bdb7c85a69661a9b740e54879485d9bb29b088d 100644
+index b4acb4175df98cced308fbcc84e64d56a9b98c0c..ebddfdbfff37cc40c50875ab6f2418e755a7a429 100644
 --- a/runtime/src/boot_state.c
 +++ b/runtime/src/boot_state.c
-@@ -1,6 +1,13 @@
+@@ -1,8 +1,16 @@
  #include "boot_state.h"
 +#include "mod_memory.h"
 +
@@ -15,8 +15,11 @@ index b4acb4175df98cced308fbcc84e64d56a9b98c0c..6bdb7c85a69661a9b740e54879485d9b
 +#include "interrupts.h"
  #include "psx_cycles.h"
  #include "pst_wire.h"
++#include "psx_scheduler.h"
  #include <stdio.h>
-@@ -22,6 +29,8 @@
+ #include <stdlib.h>
+ #include <string.h>
+@@ -22,6 +30,8 @@
  extern uint32_t  i_stat;
  extern uint32_t  i_mask;
  extern uint64_t  psx_cycle_count;
@@ -25,7 +28,7 @@ index b4acb4175df98cced308fbcc84e64d56a9b98c0c..6bdb7c85a69661a9b740e54879485d9b
  extern void timers_get_snapshot(uint16_t counter[3], uint32_t mode[3],
                                  uint16_t target[3], int32_t irq_line[3],
                                  uint32_t frac[3]);
-@@ -178,7 +187,7 @@
+@@ -178,7 +188,7 @@
      h.codegen_hash  = (uint32_t)PSX_OVERLAY_CODEGEN_HASH;
      h.abi_tag       = (int32_t)PSX_OVERLAY_ABI_TAG;
      h.codegen_ver   = (uint32_t)PSX_OVERLAY_CODEGEN_VER;
@@ -34,7 +37,7 @@ index b4acb4175df98cced308fbcc84e64d56a9b98c0c..6bdb7c85a69661a9b740e54879485d9b
  
      int ok = write_header_le(f, &h);
  
-@@ -242,6 +251,18 @@
+@@ -242,6 +252,18 @@
          }
      }
  
@@ -53,20 +56,66 @@ index b4acb4175df98cced308fbcc84e64d56a9b98c0c..6bdb7c85a69661a9b740e54879485d9b
      fclose(f);
      if (!ok)
          remove(path);
-@@ -271,6 +292,20 @@
+@@ -250,8 +272,49 @@
+ 
+ /* ============================ LOAD ============================ */
+ 
++/* A carry stays under its divider. With none any carry loads: older builds left one there. */
++static int parse_cpu_cost(const uint8_t* p, uint32_t len, uint32_t* shift, uint32_t* carry) {
++    PstR r;
++    if (len != 8) return 0;
++    pst_r_init(&r, p, len);
++    return pst_r_u32(&r, shift) && pst_r_u32(&r, carry) && *shift <= 31u && (*carry >> 31) == 0u &&
++           (*shift == 0u || *carry < (1u << *shift));
++}
++
++/* 1 iff apply_section cannot fail on it: past an exact length every reader only takes fixed-width fields. */
++static int validate_section(uint32_t tag, const uint8_t* p, uint32_t len) {
++    uint32_t shift, carry;
++    switch (tag) {
++    case BS_SEC_CPU: {
++        PstR r;
++        uint32_t pc = 0;
++        if (len != CPU_REGS_WIRE_BYTES) return 0;
++        pst_r_init(&r, p, len);
++        for (int i = 0; i <= 32; i++) (void)pst_r_u32(&r, &pc);
++        return psx_is_dispatchable(pc);
++    }
++    case BS_SEC_GPU_DMA_MEMORY: return len <= PSX_MOD_GPU_DMA_APERTURE_SIZE;
++    case BS_SEC_CPU_COST:       return parse_cpu_cost(p, len, &shift, &carry);
++    case BS_SEC_RAM:            return len == RAM_SIZE;
++    case BS_SEC_SPAD:           return len == SPAD_SIZE;
++    case BS_SEC_IRQ:            return len == 8u;
++    case BS_SEC_TIMER:          return len == TIMER_REGS_WIRE_BYTES;
++    case BS_SEC_CLOCK:          return len == 8u;
++    case BS_SEC_GPU:            return len == gpu_snapshot_bytes();
++    case BS_SEC_VRAM:           return len == VRAM_SIZE;
++    case BS_SEC_SPU:            return len == spu_snapshot_bytes();
++    case BS_SEC_SPURAM:         return len == spu_get_ram_bytes();
++    case BS_SEC_CDROM:          return len == cdrom_snapshot_bytes();
++    case BS_SEC_DMA:            return len == dma_snapshot_bytes();
++    case BS_SEC_SIO:            return len == sio_snapshot_bytes();
++    case BS_SEC_DIRTY:          return len % 4u == 0u;
++    default:                    return 0;
++    }
++}
++
++/* scratch holds the largest VRAM or dirty bitmap section, allocated before the first section is applied. */
+ static int apply_section(uint32_t tag, const uint8_t* p, uint32_t len,
+-                         CPUState* cpu, uint32_t entry_pc) {
++                         CPUState* cpu, uint32_t entry_pc, void* scratch) {
+     switch (tag) {
+     case BS_SEC_CPU: {
+         PstR r;
+@@ -271,6 +334,15 @@
              if (!pst_r_u32(&r, &cpu->gte_ctrl[i])) return 0;
          return 1;
      }
 +    case BS_SEC_GPU_DMA_MEMORY:
 +        return psx_mod_gpu_dma_memory_restore(p, len);
 +    case BS_SEC_CPU_COST: {
-+        PstR r;
 +        uint32_t shift, carry;
-+        if (len != 8) return 0;
-+        pst_r_init(&r, p, len);
-+        /* A carry stays under its divider. With none any carry loads: older builds left one there. */
-+        if (!pst_r_u32(&r, &shift) || !pst_r_u32(&r, &carry) || shift > 31u || (carry >> 31) != 0u ||
-+            (shift != 0u && carry >= (1u << shift))) return 0;
++        if (!parse_cpu_cost(p, len, &shift, &carry)) return 0;
 +        g_psx_cyc_overclock_shift = shift;
 +        g_psx_cyc_overclock_carry = carry;
 +        return 1;
@@ -74,10 +123,96 @@ index b4acb4175df98cced308fbcc84e64d56a9b98c0c..6bdb7c85a69661a9b740e54879485d9b
      case BS_SEC_RAM:
          if (len != RAM_SIZE) return 0;
          memcpy(memory_get_ram_ptr(), p, RAM_SIZE);
-@@ -424,6 +459,10 @@
+@@ -325,18 +397,12 @@
+     case BS_SEC_GPU:
+         return gpu_snapshot_read(p, len);
+     case BS_SEC_VRAM: {
+-        uint16_t* vbuf;
++        uint16_t* vbuf = (uint16_t*)scratch;
+         PstR r;
+         if (len != VRAM_SIZE) return 0;
+-        vbuf = (uint16_t*)malloc(VRAM_SIZE);
+-        if (!vbuf) return 0;
+-        pst_r_init(&r, p, len);
+-        if (!pst_r_pod(&r, vbuf, VRAM_SIZE, 2)) {
+-            free(vbuf);
+-            return 0;
+-        }
++        pst_r_init(&r, p, len);
++        if (!pst_r_pod(&r, vbuf, VRAM_SIZE, 2)) return 0;
+         gr_vram_transfer_in(0, 0, VRAM_W, VRAM_H, vbuf);
+-        free(vbuf);
+         return 1;
+     }
+     case BS_SEC_SPU:
+@@ -353,21 +419,14 @@
+         return sio_snapshot_read(p, len);
+     case BS_SEC_DIRTY: {
+         uint32_t wc;
+-        uint32_t* words;
++        uint32_t* words = (uint32_t*)scratch;
+         PstR r;
+         if (len % 4u) return 0;
+         wc = len / 4u;
+-        words = (uint32_t*)malloc(len ? len : 1);
+-        if (!words) return 0;
+-        pst_r_init(&r, p, len);
+-        for (uint32_t i = 0; i < wc; i++) {
+-            if (!pst_r_u32(&r, &words[i])) {
+-                free(words);
+-                return 0;
+-            }
+-        }
++        pst_r_init(&r, p, len);
++        for (uint32_t i = 0; i < wc; i++)
++            if (!pst_r_u32(&r, &words[i])) return 0;
+         dirty_ram_set_bitmap_words(words, wc);
+-        free(words);
+         return 1;
+     }
+     default:
+@@ -401,6 +460,12 @@
+         (1u<<BS_SEC_SIO)|(1u<<BS_SEC_DIRTY);
+     uint32_t seen = 0;
+     int ok = 1;
++    /* Every section is read and checked before the first is applied: a refused state never leaves half a machine. */
++    typedef struct { uint32_t tag, len; uint8_t* p; } BsSection;
++    BsSection* sections =
++        h.section_count && h.section_count <= 256u ? (BsSection*)calloc(h.section_count, sizeof *sections) : NULL;
++    uint32_t n_sections = 0;
++    if (!sections) { fclose(f); return 0; }
  
-     if (!ok || (seen & required) != required)
-         return 0;
+     for (uint32_t i = 0; ok && i < h.section_count; i++) {
+         uint8_t shdr[16];
+@@ -415,15 +480,29 @@
+         if (len > 64u * 1024u * 1024u) { ok = 0; break; }
+         uint8_t* buf = (uint8_t*)malloc(len ? (size_t)len : 1);
+         if (!buf) { ok = 0; break; }
+-        if (len && fread(buf, 1, (size_t)len, f) != (size_t)len) { free(buf); ok = 0; break; }
+-        if (!apply_section(tag, buf, (uint32_t)len, cpu, entry_pc)) ok = 0;
+-        else if (tag < 32) seen |= (1u << tag);
+-        free(buf);
++        sections[n_sections++] = (BsSection){tag, (uint32_t)len, buf};
++        if (len && fread(buf, 1, (size_t)len, f) != (size_t)len) { ok = 0; break; }
++        if (!validate_section(tag, buf, (uint32_t)len)) { ok = 0; break; }
++        if (tag < 32) seen |= (1u << tag);
+     }
+     fclose(f);
+ 
+-    if (!ok || (seen & required) != required)
+-        return 0;
++    if ((seen & required) != required) ok = 0;
++    uint32_t scratch_len = VRAM_SIZE;
++    for (uint32_t i = 0; i < n_sections; i++)
++        if (sections[i].tag == BS_SEC_DIRTY && sections[i].len > scratch_len) scratch_len = sections[i].len;
++    void* scratch = ok ? malloc(scratch_len) : NULL;
++    if (!scratch) ok = 0;
++    for (uint32_t i = 0; ok && i < n_sections; i++)
++        if (!apply_section(sections[i].tag, sections[i].p, sections[i].len, cpu, entry_pc, scratch)) ok = 0;
++    free(scratch);
++    for (uint32_t i = 0; i < n_sections; i++) free(sections[i].p);
++    free(sections);
++    if (!ok) return 0;
 +    if (!(seen & (1u << BS_SEC_GPU_DMA_MEMORY)))
 +        psx_mod_gpu_dma_memory_restore(NULL, 0u);
 +    interrupts_resync_after_restore();

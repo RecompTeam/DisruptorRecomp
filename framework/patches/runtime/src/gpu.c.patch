@@ -1,5 +1,5 @@
 diff --git a/runtime/src/gpu.c b/runtime/src/gpu.c
-index 6d81477285f786cdd3658d14c424d4bfbab5d809..55aa12051186d0705790a76dccb3a0f70ec02ae4 100644
+index 6d81477285f786cdd3658d14c424d4bfbab5d809..d522438316c41818e255ed73363f6d95dd21e9e5 100644
 --- a/runtime/src/gpu.c
 +++ b/runtime/src/gpu.c
 @@ -11,6 +11,7 @@
@@ -213,6 +213,33 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..55aa12051186d0705790a76dccb3a0f7
  }
  
  int psx_ws_angle_site(uint32_t pc, uint32_t instr, uint32_t *out) {
+@@ -1086,7 +1203,7 @@
+  * Off-map columns fill tile 0 (the renderer skips them) = the engine's own void; at a
+  * horizontal map-loop seam (engine early-return) we skip the column. Gated on
+  * native-wide + ~320 mode, so 4:3 and the 512 hi-res title stay byte-identical. */
+-extern void psx_write_half(uint32_t addr, uint16_t val);
++extern void psx_host_write_half(uint32_t addr, uint16_t val);
+ 
+ static void bg2d_clear_column(int layer, int ringcol, int worldY) {
+     int rows = 0x12;
+@@ -1099,7 +1216,7 @@
+         uint32_t cell = ringbase
+                       + (uint32_t)((ringcol & (int)(g_bg2d_ring_cols - 1u)) * 2)
+                       + (uint32_t)((ringrow & 0x1f) * (int)(g_bg2d_ring_cols * 2u));
+-        psx_write_half(cell, 0);
++        psx_host_write_half(cell, 0);
+         ringrow = (ringrow + 1) & 0x1f;
+     }
+ }
+@@ -1175,7 +1292,7 @@
+         uint16_t tile = psx_read_half(metaBase + (uint32_t)metaIdx * 0x200u
+                                       + (uint32_t)(trowInMeta * 0x20) + (uint32_t)(tcolInMeta * 2));
+         if (write) {
+-            psx_write_half(cell, tile);
++            psx_host_write_half(cell, tile);
+         } else if (cmp_total) {
+             (*cmp_total)++;
+             if (psx_read_half(cell) != tile && cmp_bad) (*cmp_bad)++;
 @@ -1303,6 +1420,20 @@
      return ((int32_t)sx < bound - psx_ws_x_margin()) ? 1 : 0;
  }

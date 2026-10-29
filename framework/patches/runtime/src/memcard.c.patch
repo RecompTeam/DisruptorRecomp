@@ -1,0 +1,155 @@
+diff --git a/runtime/src/memcard.c b/runtime/src/memcard.c
+index c0f95005a88ba06a13873d4251a37d6a88e17469..222d41e032e4ac48d0fe6247f499a84b1f6c239f 100644
+--- a/runtime/src/memcard.c
++++ b/runtime/src/memcard.c
+@@ -12,13 +12,23 @@
+  *   - No fake events found (clean)
+  */
+ 
++#if !defined(_WIN32) && !defined(_POSIX_C_SOURCE)
++#define _POSIX_C_SOURCE 200809L
++#endif
+ #include "memcard.h"
+ #include <stdio.h>
+ #include <string.h>
+ #include <stdlib.h>
+ #include <sys/stat.h>
++#include <errno.h>
++#include <fcntl.h>
+ #ifdef _WIN32
+ #include <direct.h>
++#include <io.h>
++#include <process.h>
++#include <windows.h>
++#else
++#include <unistd.h>
+ #endif
+ 
+ #define MAX_CARDS 2
+@@ -28,9 +38,48 @@
+     char filepath[512];
+     int present;
+     int dirty;
++    int flush_result;
+ } MemCard;
+ 
+ static MemCard cards[MAX_CARDS];
++
++/* The card goes to an exclusive temporary beside it, then replaces it: a process dying mid-write keeps the old card. */
++static int publish_card(const char* path, const uint8_t* data) {
++    static unsigned sequence;
++    char temporary[576];
++    int descriptor = -1;
++    for (unsigned attempt = 0; attempt < 32u && descriptor < 0; ++attempt) {
++#ifdef _WIN32
++        snprintf(temporary, sizeof temporary, "%s.tmp.%lu.%u", path, (unsigned long)_getpid(), ++sequence);
++        descriptor = _open(temporary, _O_WRONLY | _O_CREAT | _O_EXCL | _O_BINARY, _S_IREAD | _S_IWRITE);
++#else
++        snprintf(temporary, sizeof temporary, "%s.tmp.%lu.%u", path, (unsigned long)getpid(), ++sequence);
++        descriptor = open(temporary, O_WRONLY | O_CREAT | O_EXCL, 0600);
++#endif
++    }
++    if (descriptor < 0) return -1;
++#ifdef _WIN32
++    FILE* f = _fdopen(descriptor, "wb");
++    if (!f) _close(descriptor);
++#else
++    FILE* f = fdopen(descriptor, "wb");
++    if (!f) close(descriptor);
++#endif
++    int ok = f && fwrite(data, 1, MEMCARD_SIZE, f) == MEMCARD_SIZE && fflush(f) == 0;
++#ifdef _WIN32
++    if (ok && _commit(_fileno(f)) != 0) ok = 0;
++#else
++    if (ok && fsync(fileno(f)) != 0) ok = 0;
++#endif
++    if (f && fclose(f) != 0) ok = 0;
++#ifdef _WIN32
++    if (ok) ok = MoveFileExA(temporary, path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH) != 0;
++#else
++    if (ok) ok = rename(temporary, path) == 0;
++#endif
++    if (!ok) remove(temporary);
++    return ok ? 0 : -1;
++}
+ 
+ /* XOR checksum of bytes 0x00-0x7E, stored at 0x7F. */
+ static uint8_t frame_checksum(const uint8_t *frame) {
+@@ -113,6 +162,7 @@
+             continue;  /* no path and no dir: cannot resolve a file */
+         }
+ 
++        errno = 0;
+         FILE* f = fopen(cards[i].filepath, "rb");
+         if (f) {
+             size_t n = fread(cards[i].data, 1, MEMCARD_SIZE, f);
+@@ -120,17 +170,9 @@
+             if (n == MEMCARD_SIZE) {
+                 cards[i].present = 1;
+             }
+-        } else {
++        } else if (errno == ENOENT) {  /* only a missing card is made: one that cannot be read stays as it is */
+             memcard_format(cards[i].data);
+-            f = fopen(cards[i].filepath, "wb");
+-            if (f) {
+-                size_t n = fwrite(cards[i].data, 1, MEMCARD_SIZE, f);
+-                int flush_ok = (fflush(f) == 0);
+-                int close_ok = (fclose(f) == 0);
+-                if (n == MEMCARD_SIZE && flush_ok && close_ok) {
+-                    cards[i].present = 1;
+-                }
+-            }
++            cards[i].present = publish_card(cards[i].filepath, cards[i].data) == 0;
+         }
+     }
+ }
+@@ -145,16 +187,9 @@
+     uint8_t* data = (uint8_t*)malloc(MEMCARD_SIZE);
+     if (!data) return -1;
+     memcard_format(data);
+-    FILE* f = fopen(path, "wb");
+-    int ok = 0;
+-    if (f) {
+-        size_t n = fwrite(data, 1, MEMCARD_SIZE, f);
+-        int flush_ok = (fflush(f) == 0);
+-        int close_ok = (fclose(f) == 0);
+-        ok = (n == MEMCARD_SIZE && flush_ok && close_ok);
+-    }
++    const int result = publish_card(path, data);
+     free(data);
+-    return ok ? 0 : -1;
++    return result;
+ }
+ 
+ int memcard_summary_path(const char* path, MemcardSummary* out) {
+@@ -220,15 +255,12 @@
+     if (!cards[card].dirty) return;
+     if (cards[card].filepath[0] == '\0') return;
+ 
+-    FILE* f = fopen(cards[card].filepath, "wb");
+-    if (f) {
+-        size_t n = fwrite(cards[card].data, 1, MEMCARD_SIZE, f);
+-        int flush_ok = (fflush(f) == 0);
+-        int close_ok = (fclose(f) == 0);
+-        if (n == MEMCARD_SIZE && flush_ok && close_ok) {
+-            cards[card].dirty = 0;
+-        }
+-    }
++    cards[card].flush_result = publish_card(cards[card].filepath, cards[card].data);
++    if (cards[card].flush_result == 0) cards[card].dirty = 0;
++}
++
++int memcard_last_flush_result(int card) {
++    return card >= 0 && card < MAX_CARDS ? cards[card].flush_result : -1;
+ }
+ 
+ void memcard_flush_all(void) {
+@@ -280,7 +312,7 @@
+     cards[card].present = 1;
+     cards[card].dirty = 1;
+     memcard_flush(card);
+-    return 0;
++    return cards[card].flush_result;
+ }
+ 
+ int memcard_rebind_dir(const char *dir) {
