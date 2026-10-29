@@ -30,14 +30,16 @@ launcher = read("src/launcher/launcher_settings.cpp")
 require(
     '    "    float range = (1.0 + u_fade.w*abs(v_fade.y - u_fade_at.x)/u_fade_at.y)/(v_fade.x*u_fade_at.z);\\n"\n'
     '    "    float into = (range - u_fade.x)/(u_fade.y*float(rows));\\n"\n'
-    '    "    level = clamp(float(rows)*(into > 0.0 ? pow(min(into, 1.0), max(u_fade_power, 1.0)) : into), 0.0, float(rows - 1));\\n"\n'
+    '    "    float ramp = float(rows)*(into > 0.0 ? pow(min(into, 1.0), max(u_fade_power, 1.0)) : into);\\n"\n'
+    '    "    level = clamp(ramp, 0.0, float(rows - 1));\\n"\n'
+    '    "    past = clamp(ramp - float(rows - 1), 0.0, 1.0);\\n"\n'
     '    "    if (u_dissolve.y > 0.5) dissolve = smoothstep(u_dissolve.x, u_dissolve.w, 1.0/(v_fade.x*u_fade_at.z));\\n"\n'
     '    "    g_row = first + int(level);\\n"\n'
     in renderer
     and '    "  int first = rows > 1 && v_fade.x > 0.0 && v_depth != 2 ? fade_first_row(rows) : -1;\\n"\n'
     '    "  if (first >= 0) {\\n"\n'
     in renderer
-    and '    "  int rows = int(u_fade.z + 0.5); float level = -1.0, dissolve = 0.0;\\n"\n' in renderer
+    and '    "  int rows = int(u_fade.z + 0.5); float level = -1.0, dissolve = 0.0, past = 0.0;\\n"\n' in renderer
     and '    "    if (u_fade_blocks[i].x == v_clut.x && v_clut.y >= u_fade_blocks[i].y && v_clut.y < u_fade_blocks[i].y + rows) return u_fade_blocks[i].y;\\n"\n'
     in renderer
     and "    publish_fade_blocks();\n" in arena
@@ -205,6 +207,20 @@ require(
     "fill over the whole drawing area): what shows through is that background or farther fogged geometry. An opaque pixel is thinned by the second blend "
     "output in every pass, a batch only where its colour pass blends so; its fillers and outlines are dropped, its depth kept, "
     "for the void fill and the rim eraser read depth as geometry",
+)
+finish = (
+    '    "  if (past > 0.0 && u_semipass < 2 && dst_factor == 0.0 && u_clear.w > 0.5 && u_fade_at.w < 0.5 &&\\n"\n'
+    '    "      all(lessThanEqual(abs(rgb - u_clear.rgb), vec3(1.5/31.0))))\\n"\n'
+    '    "    rgb = mix(rgb, u_clear.rgb, past);'
+)
+require(
+    renderer.count(finish) == 1
+    and renderer.index('"  if (u_semimode == 4 && v_semi != 0 && stp != 0) {\\n"')
+    < renderer.index(finish)
+    < renderer.index('"  if (dissolve > 0.0 && dst_factor == 0.0) {'),
+    "past the last fog row the smooth fade goes on into the frame's background, for an opaque texel whose last shade is "
+    "within a step and a half of it: the level's palettes stop a five-bit step short of their fog, which left the bright "
+    "edges of far shapes as faint lines. The UV view keeps its values",
 )
 require("    disruptor_contract(smooth_fade)\n" in cmake, "this contract must remain registered")
 

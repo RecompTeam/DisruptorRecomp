@@ -1,5 +1,5 @@
 diff --git a/runtime/src/gpu_gl_renderer.c b/runtime/src/gpu_gl_renderer.c
-index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..e1774e1f8d23433b66d130f7a0d3357e76505421 100644
+index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b658ca0f5c8c0f3a004983d6bd230d80a4e4735d 100644
 --- a/runtime/src/gpu_gl_renderer.c
 +++ b/runtime/src/gpu_gl_renderer.c
 @@ -1,747 +1,1373 @@
@@ -2108,7 +2108,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..e1774e1f8d23433b66d130f7a0d3357e
  static const char *INTERP_FS =
      "#version 330\n"
      "in vec2 v_uv; uniform sampler2D u_prev; uniform sampler2D u_curr;\n"
-@@ -757,2715 +1383,5120 @@
+@@ -757,2715 +1383,5125 @@
      "  }\n"
      "  frag=mix(prev,curr,alpha);\n"
      "}\n";
@@ -4080,12 +4080,14 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..e1774e1f8d23433b66d130f7a0d3357e
 +    "  if (v_perspective == 2) sample_uv = v_uvw;\n"
 +    "  int stp; vec3 rgb;\n"
 +    "  g_row = v_clut.y;\n"
-+    "  int rows = int(u_fade.z + 0.5); float level = -1.0, dissolve = 0.0;\n"
++    "  int rows = int(u_fade.z + 0.5); float level = -1.0, dissolve = 0.0, past = 0.0;\n"
 +    "  int first = rows > 1 && v_fade.x > 0.0 && v_depth != 2 ? fade_first_row(rows) : -1;\n"
 +    "  if (first >= 0) {\n"
 +    "    float range = (1.0 + u_fade.w*abs(v_fade.y - u_fade_at.x)/u_fade_at.y)/(v_fade.x*u_fade_at.z);\n"
 +    "    float into = (range - u_fade.x)/(u_fade.y*float(rows));\n"
-+    "    level = clamp(float(rows)*(into > 0.0 ? pow(min(into, 1.0), max(u_fade_power, 1.0)) : into), 0.0, float(rows - 1));\n"
++    "    float ramp = float(rows)*(into > 0.0 ? pow(min(into, 1.0), max(u_fade_power, 1.0)) : into);\n"
++    "    level = clamp(ramp, 0.0, float(rows - 1));\n"
++    "    past = clamp(ramp - float(rows - 1), 0.0, 1.0);\n"
 +    "    if (u_dissolve.y > 0.5) dissolve = smoothstep(u_dissolve.x, u_dissolve.w, 1.0/(v_fade.x*u_fade_at.z));\n"
 +    "    g_row = first + int(level);\n"
 +    "  } else if ((v_raw & 2) != 0) level = float(v_raw >> 2)/256.0;  /* a sprite the game faded: its row, and the share of the next */\n"
@@ -4111,6 +4113,9 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..e1774e1f8d23433b66d130f7a0d3357e
 +    "    dst_factor = v_semi == 1 ? 0.5 : 1.0;\n"
 +    "    if (v_semi == 1) rgb *= 0.5; else if (v_semi == 4) rgb *= 0.25;\n"
 +    "  }\n"
++    "  if (past > 0.0 && u_semipass < 2 && dst_factor == 0.0 && u_clear.w > 0.5 && u_fade_at.w < 0.5 &&\n"
++    "      all(lessThanEqual(abs(rgb - u_clear.rgb), vec3(1.5/31.0))))\n"
++    "    rgb = mix(rgb, u_clear.rgb, past);  /* a level's last fog shade can stop a five-bit step short of the background */\n"
 +    "  if (dissolve > 0.0 && dst_factor == 0.0) {  /* where the sky or a background like the fog shows through: no filler, its colour thinned, its depth kept */\n"
 +    "    if (u_visual_options.w > 0.0) discard;\n"
 +    "    if (u_semipass == 0) { rgb *= 1.0 - dissolve; dst_factor = dissolve; }\n"
@@ -9910,7 +9915,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..e1774e1f8d23433b66d130f7a0d3357e
      uint64_t freq = SDL_GetPerformanceFrequency();
      uint64_t deadline = SDL_GetPerformanceCounter();
      uint64_t diag_start = deadline, diag_swaps = 0, diag_captures = 0;
-@@ -3473,11 +6504,12 @@
+@@ -3473,11 +6509,12 @@
      while (SDL_AtomicGet(&s_interp_thread_run)) {
          SDL_LockMutex(s_interp_mutex);
          double hz = s_interp_target_hz;
@@ -9924,7 +9929,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..e1774e1f8d23433b66d130f7a0d3357e
              uint64_t period = (uint64_t)((double)freq / hz);
              if (!period) period = 1;
              deadline += period;
-@@ -3492,235 +6524,485 @@
+@@ -3492,235 +6529,485 @@
              }
              while (SDL_GetPerformanceCounter() < deadline) {}
              now = SDL_GetPerformanceCounter();
