@@ -7,6 +7,11 @@
 </p>
 
 <p align="center">
+  <a href="docs/STATUS.md"><img src="https://img.shields.io/badge/status-alpha-orange?style=for-the-badge" alt="Status: alpha"></a>
+  <a href="docs/STATUS.md"><img src="https://img.shields.io/badge/campaign-playable%20start%20to%20finish-2ea043?style=for-the-badge" alt="Campaign: playable start to finish"></a>
+</p>
+
+<p align="center">
   <a href="https://github.com/RecompTeam/DisruptorRecomp/actions/workflows/build.yml"><img src="https://img.shields.io/github/actions/workflow/status/RecompTeam/DisruptorRecomp/build.yml?label=build" alt="Build"></a>
   <a href="https://github.com/RecompTeam/DisruptorRecomp/releases"><img src="https://img.shields.io/github/v/release/RecompTeam/DisruptorRecomp?include_prereleases&label=release" alt="Release"></a>
   <a href="https://github.com/RecompTeam/DisruptorRecomp/releases"><img src="https://img.shields.io/github/downloads/RecompTeam/DisruptorRecomp/total" alt="Downloads"></a>

@@ -2,6 +2,16 @@
 
 What changed in each release. The launcher shows the section of its own version on its home page.
 
+## v0.10.2
+
+### Bug fixes
+
+- Game package: the game's own enhancements and fixes run when the launcher starts the game, 0.10.1 still looked for their package in the player's folder
+- Main menu: EXIT is back under CREDITS and closes the game
+- Mission start: no lock-up in the teleport, where only the music played on
+- Match window: the game starts matching the screen again, 0.10.0 and 0.10.1 started at the widest view with black bars above and below
+- Game package: without it the game now says so and does not start, 0.10.0 and 0.10.1 started broken without a word
+
 ## v0.10.1
 
 ### Bug fixes
