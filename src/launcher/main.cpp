@@ -30,6 +30,7 @@
 #include <atomic>
 #include <charconv>
 #include <chrono>
+#include <cmath>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -102,6 +103,7 @@ struct Arguments {
     // A picture's steps before it is taken: keys, gamepad buttons, the pointer, pictures on the way. See drive().
     std::vector<std::string> input;
     std::optional<fs::path> nav_log;
+    std::optional<fs::path> rows_log; // each setting row of the picture: its key, its place in pixels, whole or cut
     bool virtual_pad = false;
 };
 
@@ -145,6 +147,8 @@ Arguments parse(int count, char** values) {
             for (std::string step; steps >> step;) arguments.input.push_back(step);
         } else if (words[i] == "--nav-log" && more) {
             arguments.nav_log = from_utf8(std::string(words[++i]));
+        } else if (words[i] == "--rows-log" && more) {
+            arguments.rows_log = from_utf8(std::string(words[++i]));
         } else if (words[i] == "--virtual-pad") {
             arguments.virtual_pad = true;
         } else {
@@ -475,6 +479,16 @@ int run_window(const Arguments& arguments, Updater& updater, Activity& activity,
         SDL_DestroySurface(pixels);
         return saved;
     };
+    const auto save_rows = [&](const fs::path& path) {
+        std::ofstream out(path, std::ios::binary);
+        const ImVec2 scale = io.DisplayFramebufferScale;
+        for (const View::RowPlace& row : view.row_places())
+            out << row.key << '\t' << std::lround(row.left * scale.x) << ' ' << std::lround(row.top * scale.y) << ' '
+                << std::lround(row.right * scale.x) << ' ' << std::lround(row.bottom * scale.y) << '\t'
+                << (row.whole ? "whole" : "cut") << '\n';
+        if (!out) write_error("The rows were not written: " + utf8(path));
+        return static_cast<bool>(out);
+    };
     // Where the keyboard and gamepad cursor is after a step: its window, place, whether it shows, the open popup, the view.
     const auto note = [&](std::ofstream& log, std::string_view step) {
         const ImGuiContext& g = *GImGui;
@@ -574,7 +588,8 @@ int run_window(const Arguments& arguments, Updater& updater, Activity& activity,
         result = 1;
         if (picture) {
             for (int i = 0; i < 4; ++i) frame();
-            if (drive() && save_picture(*arguments.screenshot)) result = 0;
+            if (drive() && (!arguments.rows_log || save_rows(*arguments.rows_log)) && save_picture(*arguments.screenshot))
+                result = 0;
             SDL_SetRenderTarget(renderer, nullptr);
             SDL_DestroyTexture(picture);
         } else {

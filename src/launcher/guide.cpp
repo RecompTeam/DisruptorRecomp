@@ -269,7 +269,8 @@ std::vector<Block> parse_markdown(std::string_view markdown) {
         if (!open) return;
         open->text = parse_inline(pending);
         Line& text = open->text;
-        const std::size_t name = text.empty() || text.front().style != Style::plain ? 0 : settings::choice_name(text.front().text);
+        // A list item may name a setting, the longest of which has 34 letters.
+        const std::size_t name = text.empty() || text.front().style != Style::plain ? 0 : settings::choice_name(text.front().text, 40);
         if (open->kind != BlockKind::paragraph && name) {
             text.insert(text.begin(), Span{Style::lead, text.front().text.substr(0, name), {}});
             text[1].text.erase(0, name);

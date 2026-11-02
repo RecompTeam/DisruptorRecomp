@@ -83,6 +83,13 @@ public:
     bool redraw() { return std::exchange(redraw_, false); }
     // The screen, page and tab shown and what waits for a key, for the log of a check driven by --input.
     std::string describe() const;
+    // A setting's row as the last frame drew it, cut to the card, for a picture's --rows-log.
+    struct RowPlace {
+        std::string key;
+        float left, top, right, bottom;
+        bool whole;
+    };
+    std::span<const RowPlace> row_places() const { return row_places_; }
 
     const LauncherChoices& choices() const { return choices_; }
     // Where the last frame drew the title bar and its buttons, for the window's hit test.
@@ -186,6 +193,7 @@ private:
     Screen screen_ = Screen::home;
     int page_ = 0;
     int held_page_ = -1;
+    std::vector<RowPlace> row_places_;
     float rows_scroll_ = 0.0f;
     float rows_at_ = 0.0f;
     bool version_hidden_ = false;

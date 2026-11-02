@@ -184,17 +184,29 @@ FetchContent_Declare(disruptor_freetype
     EXCLUDE_FROM_ALL)
 FetchContent_MakeAvailable(disruptor_freetype)
 
+# ImGui's FreeType loader skips a size switch by a baked font's address, which the atlas's clean-up hands to another size.
+file(READ "${disruptor_imgui_SOURCE_DIR}/misc/freetype/imgui_freetype.cpp" imgui_freetype)
+string(REPLACE "if (bd_font_data->BakedLastActivated != baked) // <-- could use id"
+    "if (bd_font_data->FtFace->size != ((ImGui_ImplFreeType_FontSrcBakedData*)loader_data_for_baked_src)->FtSize)"
+    patched_freetype "${imgui_freetype}")
+if(patched_freetype STREQUAL imgui_freetype)
+    message(FATAL_ERROR "imgui_freetype.cpp no longer has the size switch the launcher patches: check the new ImGui")
+endif()
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/imgui_freetype.cpp.new" "${patched_freetype}")
+configure_file("${CMAKE_CURRENT_BINARY_DIR}/imgui_freetype.cpp.new" "${CMAKE_CURRENT_BINARY_DIR}/imgui_freetype.cpp" COPYONLY)
+
 add_library(disruptor-launcher-imgui STATIC
     "${disruptor_imgui_SOURCE_DIR}/imgui.cpp"
     "${disruptor_imgui_SOURCE_DIR}/imgui_draw.cpp"
     "${disruptor_imgui_SOURCE_DIR}/imgui_tables.cpp"
     "${disruptor_imgui_SOURCE_DIR}/imgui_widgets.cpp"
-    "${disruptor_imgui_SOURCE_DIR}/misc/freetype/imgui_freetype.cpp"
+    "${CMAKE_CURRENT_BINARY_DIR}/imgui_freetype.cpp"
     "${disruptor_imgui_SOURCE_DIR}/backends/imgui_impl_sdl3.cpp"
     "${disruptor_imgui_SOURCE_DIR}/backends/imgui_impl_sdlrenderer3.cpp")
 target_include_directories(disruptor-launcher-imgui PUBLIC
     "${disruptor_imgui_SOURCE_DIR}"
     "${disruptor_imgui_SOURCE_DIR}/backends")
+target_include_directories(disruptor-launcher-imgui PRIVATE "${disruptor_imgui_SOURCE_DIR}/misc/freetype")
 target_compile_definitions(disruptor-launcher-imgui PUBLIC IMGUI_ENABLE_FREETYPE)
 target_link_libraries(disruptor-launcher-imgui PUBLIC ${DISRUPTOR_LAUNCHER_SDL_LIBRARY} freetype)
 target_compile_features(disruptor-launcher-imgui PUBLIC cxx_std_20)
@@ -325,6 +337,10 @@ if(BUILD_TESTING)
     target_link_libraries(disruptor-launcher-state-stamp-test PRIVATE disruptor-launcher-model)
     add_test(NAME disruptor_launcher_state_stamp COMMAND disruptor-launcher-state-stamp-test)
 
+    add_executable(disruptor-launcher-fonts-test "${PROJECT_SOURCE_DIR}/tests/unit/launcher_fonts_test.cpp")
+    target_link_libraries(disruptor-launcher-fonts-test PRIVATE disruptor-launcher-imgui)
+    add_test(NAME disruptor_launcher_fonts COMMAND disruptor-launcher-fonts-test)
+
     add_executable(disruptor-achievements-test "${PROJECT_SOURCE_DIR}/tests/unit/achievements_test.cpp")
     target_link_libraries(disruptor-achievements-test PRIVATE disruptor-launcher-model)
     target_include_directories(disruptor-achievements-test PRIVATE "${disruptor_rcheevos_SOURCE_DIR}/src")
@@ -342,7 +358,7 @@ if(BUILD_TESTING)
         disruptor-launcher-key-bindings-test disruptor-launcher-pad-bindings-test disruptor-launcher-report-test
         disruptor-launcher-platform-test
         disruptor-launcher-player-files-test disruptor-launcher-state-stamp-test disruptor-region-disc-test
-        disruptor-achievements-test PROPERTIES
+        disruptor-achievements-test disruptor-launcher-fonts-test PROPERTIES
         RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}")
     if(MSVC)
         set_property(TARGET disruptor-launcher-settings-test disruptor-launcher-flow-test disruptor-launcher-guide-test
@@ -350,7 +366,7 @@ if(BUILD_TESTING)
                             disruptor-launcher-key-bindings-test disruptor-launcher-pad-bindings-test disruptor-launcher-report-test
                             disruptor-launcher-platform-test
                             disruptor-launcher-player-files-test disruptor-launcher-state-stamp-test disruptor-region-disc-test
-                            disruptor-achievements-test
+                            disruptor-achievements-test disruptor-launcher-fonts-test
             PROPERTY MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
         target_compile_options(disruptor-launcher-settings-test PRIVATE /utf-8)
         target_compile_options(disruptor-launcher-flow-test PRIVATE /utf-8)
@@ -364,5 +380,6 @@ if(BUILD_TESTING)
         target_compile_options(disruptor-launcher-state-stamp-test PRIVATE /W4 /utf-8)
         target_compile_options(disruptor-region-disc-test PRIVATE /utf-8)
         target_compile_options(disruptor-achievements-test PRIVATE /W4 /utf-8)
+        target_compile_options(disruptor-launcher-fonts-test PRIVATE /W4 /utf-8)
     endif()
 endif()

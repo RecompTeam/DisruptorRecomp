@@ -34,6 +34,10 @@ void test_lead_in() {
     require(spans(list[1].text, {{Style::plain, "Plain item, no name: here"}}), "a comma before the colon makes no lead");
     require(spans(list[2].text, {{Style::lead, "Fog:"}, {Style::plain, " one"}}), "a numbered item has one too");
     require(spans(list[3].text, {{Style::plain, "Word: no list"}}), "a paragraph has none");
+    const auto setting = parse_markdown("- Perspective-correct world textures: on at first\n- A sentence that runs well past forty letters: here");
+    require(spans(setting[0].text, {{Style::lead, "Perspective-correct world textures:"}, {Style::plain, " on at first"}}),
+            "the longest setting name is a lead");
+    require(setting[1].text.size() == 1 && setting[1].text[0].style == Style::plain, "a colon past forty letters makes no lead");
     const auto marked = parse_markdown("- **Bold**: stays bold");
     require(spans(marked[0].text, {{Style::bold, "Bold"}, {Style::plain, ": stays bold"}}), "an item that marks its start keeps its marks");
 }

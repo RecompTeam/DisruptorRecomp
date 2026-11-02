@@ -5,7 +5,7 @@ SLUS-00224)** disc image.
 
 - Game assets are not included.
 - You do not need to build the project or extract its executable.
-- No PlayStation BIOS is needed: OpenBIOS is included.
+- No PlayStation BIOS is needed. OpenBIOS is included.
 
 Join the [community Discord](https://discord.gg/hWbFatkXpU) to talk about the
 project and share feedback.
@@ -513,8 +513,8 @@ replaces it:
 as an unzipped older release, into this one.
 
 1. Choose the folder of that copy.
-2. The launcher lists what it found: saves, settings, keys and gamepad
-   buttons, capsules, mods and the imported disc.
+2. The launcher lists the saves, settings, keys and gamepad buttons, capsules,
+   mods and the imported disc it found.
 3. It copies them once you agree. The earlier copy is left as it was.
 
 A file here that one of them replaces is kept in `backups/replaced-<time>/`

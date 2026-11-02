@@ -3,6 +3,7 @@
 Run by ctest with the launcher's path. Exit 77, a skip, where the launcher finds no display to draw on.
 """
 
+import itertools
 import os
 import re
 import subprocess
@@ -192,11 +193,44 @@ def check(launcher: Path, folder: Path) -> None:
     )
 
 
+def check_rows(launcher: Path, folder: Path) -> None:
+    """--rows-log names each setting row of the picture with its place, as the release notes' marked pictures need."""
+    log = folder / "rows.txt"
+    arguments = [str(launcher), "--screenshot", str(folder / "rows.bmp"), "--screen", "settings", "--page", "0"]
+    arguments += ["--size", "1280x720", "--rows-log", str(log)]
+    done = subprocess.run(
+        arguments,
+        env=dict(os.environ, PSX_USER_DIR=str(folder / "data")),
+        capture_output=True,
+        timeout=120,
+        check=False,
+    )
+    require(done.returncode == 0, f"rows: the launcher ended with {done.returncode}")
+    places: dict[str, tuple[int, ...]] = {}
+    whole: set[str] = set()
+    for line in log.read_text(encoding="utf-8").splitlines():
+        key, place, shown = line.split("\t")
+        places[key] = tuple(int(number) for number in place.split())
+        if shown == "whole":
+            whole.add(key)
+    require("disruptor.resolution" in whole, "Resolution's row is in the picture whole")
+    ordered = sorted(places.values(), key=lambda place: place[1])
+    require(
+        all(0 <= left < right <= 1280 and 0 <= top < bottom <= 720 for left, top, right, bottom in ordered),
+        "every row lies inside the picture",
+    )
+    require(
+        all(above[3] <= below[1] + 1 for above, below in itertools.pairwise(ordered)),
+        "rows follow one another without overlapping",
+    )
+
+
 def main() -> int:
     launcher = Path(sys.argv[1])
     with tempfile.TemporaryDirectory() as folder:
         try:
             check(launcher, Path(folder))
+            check_rows(launcher, Path(folder))
         except Skipped as reason:
             print(f"launcher navigation: skipped, no display ({reason})")
             return SKIP

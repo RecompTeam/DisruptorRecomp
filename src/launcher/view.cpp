@@ -2704,6 +2704,8 @@ void View::rows() {
     const SettingsFile& file = session_.settings();
     const float control = std::min(300.0f * scale_, std::min(ImGui::GetContentRegionAvail().x, kRowWidth * scale_) * 0.42f);
     const bool tabbed = page_ == static_cast<int>(Page::controls);
+    const ImRect card = ImGui::GetCurrentWindow()->InnerClipRect;
+    row_places_.clear();
     // Every slider of a page as long as the others: the value beside it takes the widest value of them all.
     value_width_ = 0.0f;
     for (const auto& placement : layout()) {
@@ -2741,10 +2743,18 @@ void View::rows() {
             ImGui::Dummy(ImVec2(0.0f, 2.0f * scale_));
         }
         first = false;
+        const ImVec2 start = ImGui::GetCursorScreenPos();
+        const float width = std::min(ImGui::GetContentRegionAvail().x, kRowWidth * scale_);
         setting_row(placement, option, control, placement.child);
         if (std::string_view(option.key) == "disruptor.psionic_keys_use" && file.shown(*find_option("disruptor.number_keys")) == 1)
             pick_section();
         if (std::string_view(option.key) == "disruptor.achievements_sound") unlock_sound_row();
+        ImRect row(start.x, start.y - 4.0f * scale_, start.x + width, ImGui::GetCursorScreenPos().y);
+        if (row.Overlaps(card)) {
+            const bool whole = card.Contains(row);
+            row.ClipWith(card);
+            row_places_.push_back({option.key, row.Min.x, row.Min.y, row.Max.x, row.Max.y, whole});
+        }
         ImGui::PopID();
     }
 }
