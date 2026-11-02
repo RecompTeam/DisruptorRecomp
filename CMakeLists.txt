@@ -263,6 +263,10 @@ psxrecomp_add_runtime_target(psx-runtime ${DISRUPTOR_PGXP_ARG}
     DEFAULT_GAME_CONFIG_PATH "game.toml"
     EXE_NAME "DisruptorRecompiled"
 )
+if(BUILD_TESTING)
+    # The audit runs the linked game, which needs the translated code.
+    set_tests_properties(psx_mod_plugin_audit_psx-runtime PROPERTIES LABELS retail)
+endif()
 target_compile_definitions(psx-runtime PRIVATE
     PSX_HAS_GAME_HOST=1)
 disruptor_achievements_library(disruptor-achievements)
