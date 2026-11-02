@@ -1,5 +1,5 @@
 diff --git a/runtime/src/mod_runtime.cpp b/runtime/src/mod_runtime.cpp
-index c2095254a35878c9b2b7380a29e84afa0d4742eb..7f7e0e2ad786a2736fa62cfd42a4a9e76da617ec 100644
+index c2095254a35878c9b2b7380a29e84afa0d4742eb..5dbbb31fcb82e40b7618f2421fcbb8153f9dc09b 100644
 --- a/runtime/src/mod_runtime.cpp
 +++ b/runtime/src/mod_runtime.cpp
 @@ -76,10 +76,13 @@
@@ -16,3 +16,21 @@ index c2095254a35878c9b2b7380a29e84afa0d4742eb..7f7e0e2ad786a2736fa62cfd42a4a9e7
  extern "C" uint32_t psx_mod_memory_alloc(uint32_t size, uint32_t alignment);
  extern "C" uint32_t psx_mod_gpu_dma_memory_alloc(uint32_t size,
                                                    uint32_t alignment);
+@@ -1638,6 +1641,9 @@
+  * API answers (defined with the overrides below). */
+ void reset_live_option_overrides();
+ 
++static std::filesystem::path g_bundled_root;
++void mod_runtime_set_bundled_root(const std::filesystem::path& bundled) { g_bundled_root = bundled; }
++
+ bool mod_runtime_initialize(const std::filesystem::path& root,
+                             const std::string& game_id,
+                             uint32_t game_entry_pc,
+@@ -1680,6 +1686,7 @@
+     s.disc_enabled = false;
+     s.disc_guard_failed = false;
+     s.manager.set_root(root);
++    s.manager.set_bundled_root(g_bundled_root);
+     // Optional comma-separated trusted title policy, stronger than omitting
+     // bundled manifests: stale/installed copies cannot reactivate these ids.
+ #ifdef PSX_MOD_DISABLED_PACKAGES

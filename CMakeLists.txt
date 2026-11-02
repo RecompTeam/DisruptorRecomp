@@ -441,6 +441,7 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
         SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings/user_folder.cpp")
     disruptor_unit_test(disruptor_game_mark tests/unit/game_mark_test.cpp
         SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings/game_mark.cpp")
+    disruptor_unit_test(disruptor_game_package tests/unit/disruptor_game_package_test.cpp)
 
     disruptor_unit_test(disruptor_mouse_aim tests/unit/disruptor_mouse_aim_test.cpp
         SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings/user_folder.cpp"

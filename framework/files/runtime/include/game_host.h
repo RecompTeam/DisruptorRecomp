@@ -25,6 +25,8 @@ extern "C" {
 
 /* Called when the disc's serial is known, `length` characters of it. 0 stops the start. */
 int psx_game_configure(const char *game_id, size_t length);
+/* Called after a session's packages are activated, `netplay` nonzero for a netplay session: why it cannot start, or NULL. */
+const char *psx_game_session_problem(int netplay);
 /* Nonzero asks for a boot without the BIOS animation whatever the settings say. */
 int psx_game_fast_boot_forced(void);
 /* Called when save states have their folder, before any can be asked for. */

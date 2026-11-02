@@ -1,0 +1,29 @@
+diff --git a/runtime/include/mod_packages.h b/runtime/include/mod_packages.h
+index c48789a59ccc8178548f1f47b740ccebb1ce41e5..4f21ec6a5d56e3ad9f4cc2f61bb936fd968dcd6c 100644
+--- a/runtime/include/mod_packages.h
++++ b/runtime/include/mod_packages.h
+@@ -482,6 +482,7 @@
+     explicit ModPackageManager(std::filesystem::path mods_root = {});
+ 
+     void set_root(std::filesystem::path mods_root);
++    void set_bundled_root(std::filesystem::path bundled) { bundled_root_ = std::move(bundled); }
+     const std::filesystem::path& root() const { return root_; }
+     /* Developer-channel features are stripped at scan and install time unless
+      * this is set. Defaults to kDeveloperChannelDefault; tests set it
+@@ -496,7 +497,7 @@
+     void set_disabled_packages(std::vector<std::string> ids) { disabled_packages_ = std::move(ids); }
+ 
+     /* Build-owned catalog: wiped and re-staged by every build. */
+-    std::filesystem::path bundled_root() const { return root_ / "bundled"; }
++    std::filesystem::path bundled_root() const { return bundled_root_.empty() ? root_ / "bundled" : bundled_root_; }
+     /* Launcher-owned catalog: a build never touches this tree. */
+     std::filesystem::path installed_root() const { return root_ / "installed"; }
+ 
+@@ -636,6 +637,7 @@
+     std::map<std::tuple<std::string, std::string, std::string>, std::filesystem::path>
+         generated_resource_defaults_;
+     std::filesystem::path root_;
++    std::filesystem::path bundled_root_;  /* build output beside the binary, when the player's files are elsewhere */
+     bool developer_channel_ = kDeveloperChannelDefault;
+     std::vector<std::string> scan_errors_;
+     std::map<std::string, std::map<std::string, ModPackage>> packages_;

@@ -423,7 +423,9 @@ runtime_main = read("psxrecomp/runtime/src/main.cpp")
 folder = read("src/game/settings/user_folder.cpp")
 program_sites = re.findall(r"exe_dir_from_argv\((?:argv0|argv\[0\])\)", runtime_main)
 require(
-    len(program_sites) == 24
+    len(program_sites) == 25
+    and 'PSXRecompV4::mod_runtime_set_bundled_root((image.empty() ? exe_dir_from_argv(argv[0]) : image) / "mods" / "bundled");'
+    in runtime_main
     and "        g_user_dir = psx_game_user_folder(exe_dir_from_argv(argv[0]), problem);\n" in runtime_main
     and runtime_main.index("psx_game_user_folder(") < runtime_main.index("    psx_crash_trace_install_handlers();")
     and "    if (!psx_set_note_folder(user_dir_from_argv(argv[0]).string().c_str())) {\n" in runtime_main
@@ -456,7 +458,7 @@ require(
     "in the source, each writable path of the game, from settings to the notes of a crash, is named in the user folder "
     "the game host gives before anything else runs, a configured memory card folder is moved there by the rule the "
     "user folder test checks, also from the binary's own folder (an AppImage's read-only mount), and exe_dir_from_argv "
-    "is left only at its 24 program-file sites, each a read",
+    "is left only at its 25 program-file sites, each a read, the 25th the build's mod packages",
 )
 require(
     'constexpr const char* kInstalledName = "DisruptorRecompData";' in read("src/game/settings/user_folder.h")

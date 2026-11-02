@@ -1,0 +1,13 @@
+diff --git a/runtime/include/mod_runtime.h b/runtime/include/mod_runtime.h
+index aec6fd7ccc69785b3249470dd74f52bd3bfa7472..a6d5643ef259cfe487246df87a1cb3ffde481cb0 100644
+--- a/runtime/include/mod_runtime.h
++++ b/runtime/include/mod_runtime.h
+@@ -14,6 +14,8 @@
+ 
+ namespace PSXRecompV4 {
+ 
++// Where mod_runtime_initialize finds the build's packages; empty keeps <root>/bundled.
++void mod_runtime_set_bundled_root(const std::filesystem::path& bundled);
+ bool mod_runtime_initialize(const std::filesystem::path& root,
+                             const std::string& game_id,
+                             uint32_t game_entry_pc,

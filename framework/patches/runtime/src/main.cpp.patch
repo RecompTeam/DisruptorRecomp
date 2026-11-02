@@ -1,5 +1,5 @@
 diff --git a/runtime/src/main.cpp b/runtime/src/main.cpp
-index 886c0db0e1bdc3ab1284a6ff9b920d6a3f75440d..c9038616fd7ac2bb7fe3b269038846e472140d29 100644
+index 886c0db0e1bdc3ab1284a6ff9b920d6a3f75440d..ac15dbf183987af8c3f2f036b224aa3d58d54997 100644
 --- a/runtime/src/main.cpp
 +++ b/runtime/src/main.cpp
 @@ -1,3 +1,4 @@
@@ -1558,7 +1558,7 @@ index 886c0db0e1bdc3ab1284a6ff9b920d6a3f75440d..c9038616fd7ac2bb7fe3b269038846e4
          if (us.parse_error) {
              /* The file exists but is not valid TOML: every setting in it (the
               * user's renderer choice, BIOS/disc paths, ...) is being ignored,
-@@ -18609,6 +19478,10 @@
+@@ -18609,12 +19478,17 @@
                  "pacing)\" mod instead. The stale key is dropped on the next "
                  "settings save.\n");
          if (us.has_fast_boot)      fast_boot = us.fast_boot;
@@ -1569,7 +1569,14 @@ index 886c0db0e1bdc3ab1284a6ff9b920d6a3f75440d..c9038616fd7ac2bb7fe3b269038846e4
          if (us.has_bios_hle)       bios_hle  = us.bios_hle;
          if (us.has_fullscreen)     g_fullscreen      = us.fullscreen;
          if (us.has_aspect_ratio) {
-@@ -18675,9 +19548,9 @@
+             g_video_aspect_num = us.aspect_num;
+             g_video_aspect_den = us.aspect_den;
+         }
++        if (us.has_adaptive_view) g_ws_adaptive_view = us.adaptive_view;
+         if (us.has_hotkey_pad_rewind)
+             g_hotkey_pad_rewind = normalize_hotkey_pad_binding(
+                 us.hotkey_pad_rewind,
+@@ -18675,9 +19549,9 @@
          }
          /* Relative [memcard] values anchor on the exe directory; the
           * per-game options file also lives in memcard_dir. */
@@ -1582,7 +1589,7 @@ index 886c0db0e1bdc3ab1284a6ff9b920d6a3f75440d..c9038616fd7ac2bb7fe3b269038846e4
          if (us.has_memcard1_enabled) memcard1_enabled = us.memcard1_enabled;
          if (us.has_memcard2_enabled) memcard2_enabled = us.memcard2_enabled;
          if (us.has_multitap_enabled) multitap_enabled = us.multitap_enabled;
-@@ -18711,6 +19584,12 @@
+@@ -18711,6 +19585,12 @@
              g_frame_interpolation = us.frame_interpolation ? 1 : 0;
          if (us.has_frame_interpolation_fps)
              g_frame_interpolation_fps = us.frame_interpolation_fps;
@@ -1595,7 +1602,7 @@ index 886c0db0e1bdc3ab1284a6ff9b920d6a3f75440d..c9038616fd7ac2bb7fe3b269038846e4
      }
  
      /* lock_mode: the game supports exactly ONE pad type (e.g. X4 / Tomba 2 are
-@@ -18790,6 +19669,11 @@
+@@ -18790,6 +19670,11 @@
          g_video_aspect_num = ws_offered ? 16 : 4;
          g_video_aspect_den = ws_offered ? 9 : 3;
      }
@@ -1607,7 +1614,7 @@ index 886c0db0e1bdc3ab1284a6ff9b920d6a3f75440d..c9038616fd7ac2bb7fe3b269038846e4
  
      /* Latency knobs: env overrides win over config (for A/B measurement).
       * PSX_LOW_LATENCY_INPUT=0/1 ; PSX_VSYNC=1(vsync)/0(immediate)/-1(adaptive)
-@@ -18803,7 +19687,7 @@
+@@ -18803,7 +19688,7 @@
          g_frame_interpolation = atoi(e) ? 1 : 0;
      if (const char *e = std::getenv("PSX_FRAME_INTERPOLATION_FPS")) {
          int fps = atoi(e);
@@ -1616,7 +1623,7 @@ index 886c0db0e1bdc3ab1284a6ff9b920d6a3f75440d..c9038616fd7ac2bb7fe3b269038846e4
      }
  
      /* Apply writable-state isolation before game-options and launcher setup,
-@@ -18812,7 +19696,7 @@
+@@ -18812,7 +19697,7 @@
      if (cli_memcard_dir) {
          memcard_dir = std::filesystem::path(cli_memcard_dir);
          if (memcard_dir.is_relative())
@@ -1625,16 +1632,20 @@ index 886c0db0e1bdc3ab1284a6ff9b920d6a3f75440d..c9038616fd7ac2bb7fe3b269038846e4
          memcard_dir = memcard_dir.lexically_normal();
          memcard1_path.clear();
          memcard2_path.clear();
-@@ -18878,7 +19762,7 @@
+@@ -18877,8 +19762,11 @@
+      * psx_mod_set_* callbacks — is inert until this runs. */
      {
          std::string mod_error;
++        /* The packages the build staged stay beside the binary (an AppImage's mount): only the player's mods and state follow the user folder. */
++        const std::filesystem::path image = image_dir();
++        PSXRecompV4::mod_runtime_set_bundled_root((image.empty() ? exe_dir_from_argv(argv[0]) : image) / "mods" / "bundled");
          if (!PSXRecompV4::mod_runtime_initialize(
 -                exe_dir_from_argv(argv[0]) / "mods", game_id,
 +                user_dir_from_argv(argv[0]) / "mods", game_id,
                  game_entry_pc, text_guard_exe_path, &mod_error)) {
              std::fprintf(stderr, "psxrecomp: mods unavailable: %s\n",
                           mod_error.c_str());
-@@ -18896,11 +19780,11 @@
+@@ -18896,11 +19784,11 @@
      auto run_deferred_overlay_init = [&]() {
          PSXRecompV4::HostLaunchTimingScope timing(HOST_LAUNCH_OVERLAY_WORKER);
          std::filesystem::path exe_dir = exe_dir_from_argv(argv[0]);
@@ -1649,7 +1660,7 @@ index 886c0db0e1bdc3ab1284a6ff9b920d6a3f75440d..c9038616fd7ac2bb7fe3b269038846e4
              if (!overlay_capture_set_path(captures_path.string().c_str())) {
                  throw std::runtime_error(
                      "overlay capture path exceeds runtime limit");
-@@ -19190,7 +20074,11 @@
+@@ -19190,7 +20078,11 @@
                  psx_bios_has_selectable() != 0 || psx_bios_registry_count == 0 ||
                  psx_bios_module_supported(
                      exe_dir_from_argv(argv[0]).string().c_str()) != 0;
@@ -1662,7 +1673,7 @@ index 886c0db0e1bdc3ab1284a6ff9b920d6a3f75440d..c9038616fd7ac2bb7fe3b269038846e4
              /* Netplay session BIOS is match-only; never overwrite seed/bios.cfg. */
              std::filesystem::path match_session_bios_path;
              bool match_session_bios_set = false;
-@@ -19361,7 +20249,7 @@
+@@ -19361,7 +20253,7 @@
                      ls.pad_mode[i] = player_mode[i];
                      ls.player_gamepad_guid[i][0] = '\0';
                      if (ls.player_src[i] == 2 && !d.empty() && d != "auto" &&
@@ -1671,7 +1682,7 @@ index 886c0db0e1bdc3ab1284a6ff9b920d6a3f75440d..c9038616fd7ac2bb7fe3b269038846e4
                          std::snprintf(ls.player_gamepad_guid[i],
                                        sizeof(ls.player_gamepad_guid[i]), "%s",
                                        d.c_str());
-@@ -19902,7 +20790,7 @@
+@@ -19902,7 +20794,7 @@
                  {
                      PSXRecompV4::UserSettings save = seed;
                      (void)PSXRecompV4::save_user_settings(
@@ -1680,7 +1691,7 @@ index 886c0db0e1bdc3ab1284a6ff9b920d6a3f75440d..c9038616fd7ac2bb7fe3b269038846e4
                  }
                  std::fprintf(stdout, "psxrecomp: launcher closed; exiting.\n");
                  if (overlay_init_thread.joinable())
-@@ -20066,7 +20954,7 @@
+@@ -20066,7 +20958,7 @@
                  {
                      PSXRecompV4::UserSettings save = seed;
                      (void)PSXRecompV4::save_user_settings(
@@ -1689,7 +1700,7 @@ index 886c0db0e1bdc3ab1284a6ff9b920d6a3f75440d..c9038616fd7ac2bb7fe3b269038846e4
                  }
              }
          }
-@@ -20154,11 +21042,22 @@
+@@ -20154,11 +21046,22 @@
          /* The helper restores interpolation and Skip FMVs to their
           * pre-activation values, which is only right while no launcher
           * control owns them. */
@@ -1717,7 +1728,20 @@ index 886c0db0e1bdc3ab1284a6ff9b920d6a3f75440d..c9038616fd7ac2bb7fe3b269038846e4
           * those process-lifetime resources by default. A title declaring the
           * session-owned build contract recreates all handles on activation;
           * retire registrations first, after renderer/audio/window teardown. */
-@@ -20250,7 +21149,7 @@
+@@ -20178,6 +21081,12 @@
+             std::fprintf(stderr,"psxrecomp: %s\n",error);
+             return false;
+         }
++#ifdef PSX_HAS_GAME_HOST
++        if (const char* problem = psx_game_session_problem(netplay ? 1 : 0)) {
++            launcher_warning(s_picker_game_name.c_str(), problem);
++            return false;
++        }
++#endif
+         resolved_audio_buffer_ms = psx_audio_sync_target(configured_audio_buffer_ms);
+         func_override_install();
+         if (!psx_mod_immediate_session_valid()) {
+@@ -20250,7 +21159,7 @@
      if (cli_memcard_dir) {
          memcard_dir = std::filesystem::path(cli_memcard_dir);
          if (memcard_dir.is_relative())
@@ -1726,7 +1750,7 @@ index 886c0db0e1bdc3ab1284a6ff9b920d6a3f75440d..c9038616fd7ac2bb7fe3b269038846e4
          memcard_dir = memcard_dir.lexically_normal();
          memcard1_path.clear();
          memcard2_path.clear();
-@@ -20530,8 +21429,11 @@
+@@ -20530,8 +21439,11 @@
       * stay the player's settings: the mod never leaks into a launcher seed.
       * With [video] pgxp_mod_only the mod is the one switch (pgxp_session.h). */
      PSXPgxpSessionConfig pgxp_cfg{};
@@ -1740,7 +1764,7 @@ index 886c0db0e1bdc3ab1284a6ff9b920d6a3f75440d..c9038616fd7ac2bb7fe3b269038846e4
      pgxp_cfg.video_cpu_mode = g_video_pgxp_cpu_mode;
      pgxp_cfg.tolerance = g_video_pgxp_tolerance;
      pgxp_cfg.position_fallback = g_video_pgxp_position_fallback;
-@@ -20544,6 +21446,8 @@
+@@ -20544,6 +21456,8 @@
      pgxp_cfg.netplay = net_cfg.enabled ? 1 : 0;
      PSXPgxpSessionInputs pgxp_in{};
      const PSXPgxpSessionArm pgxp_arm = psx_pgxp_session_arm(&pgxp_cfg, &pgxp_in);
@@ -1749,7 +1773,7 @@ index 886c0db0e1bdc3ab1284a6ff9b920d6a3f75440d..c9038616fd7ac2bb7fe3b269038846e4
      if (pgxp_in.env_geometry >= 0) g_video_geometry_correction = pgxp_in.env_geometry;
      if (pgxp_in.env_texture >= 0) g_video_perspective_texturing = pgxp_in.env_texture;
      if (pgxp_in.env_cpu_mode >= 0) g_video_pgxp_cpu_mode = pgxp_in.env_cpu_mode;
-@@ -20754,7 +21658,7 @@
+@@ -20754,7 +21668,7 @@
              [](void) -> int { return cdrom_disc_selected(); });
      }
      disc_menu_session = { &selected_disc_index, &disc_path_str, &resolved_disc,
@@ -1758,7 +1782,7 @@ index 886c0db0e1bdc3ab1284a6ff9b920d6a3f75440d..c9038616fd7ac2bb7fe3b269038846e4
      psx_disc_tray_set_host_hook([](void *ctx, int disc, const char *path) {
          auto &session = *static_cast<DiscMenuSession*>(ctx);
          *session.selected = disc;
-@@ -20821,6 +21725,7 @@
+@@ -20821,6 +21735,7 @@
       * the local EXE file (dev checkouts) and the disc image (every install). */
      if (game_config_path)
          arm_text_image_guard(text_guard_exe_path, text_guard_load_addr,
@@ -1766,7 +1790,7 @@ index 886c0db0e1bdc3ab1284a6ff9b920d6a3f75440d..c9038616fd7ac2bb7fe3b269038846e4
                               disc_path_str);
      /* Executable/overlay patches from enabled mods, applied once the guard is
       * armed so a patched image is never mistaken for a divergent one. */
-@@ -20930,12 +21835,13 @@
+@@ -20930,12 +21845,13 @@
              return 1;
          }
          if (!netplay_cpu_auth_gpu()) g_video_scale = gr_scale();
@@ -1781,7 +1805,7 @@ index 886c0db0e1bdc3ab1284a6ff9b920d6a3f75440d..c9038616fd7ac2bb7fe3b269038846e4
      }
    } else {
      /* ---- SDL init ---- */
-@@ -21068,6 +21974,12 @@
+@@ -21068,6 +21984,12 @@
       * the image scales to fill the larger window with no further distortion. */
      int game_w = g_video_win_w, game_h = 0;
      clamp_window_aspect(&game_w, &game_h, g_video_aspect_num, g_video_aspect_den);
@@ -1794,7 +1818,7 @@ index 886c0db0e1bdc3ab1284a6ff9b920d6a3f75440d..c9038616fd7ac2bb7fe3b269038846e4
      sdl_window = SDL_CreateWindow(
          window_title.c_str(),
          SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED,
-@@ -21082,6 +21994,8 @@
+@@ -21082,6 +22004,8 @@
      s_window_fullscreen = {};
      if (psx_window_fullscreen_set(sdl_window, &s_window_fullscreen, g_fullscreen) != 0)
          std::fprintf(stderr, "Fullscreen setup failed: %s\n", SDL_GetError());
@@ -1803,7 +1827,7 @@ index 886c0db0e1bdc3ab1284a6ff9b920d6a3f75440d..c9038616fd7ac2bb7fe3b269038846e4
  
      /* No maximise: the default size (window_size.h) leaves a third of the
       * usable height free, so the client plus title bar and borders fits on
-@@ -21210,11 +22124,12 @@
+@@ -21210,11 +22134,12 @@
           * the settings preference (equals gr_scale() under dual-raster). */
          if (!netplay_cpu_auth_gpu())
              g_video_scale = gr_scale();
@@ -1819,7 +1843,7 @@ index 886c0db0e1bdc3ab1284a6ff9b920d6a3f75440d..c9038616fd7ac2bb7fe3b269038846e4
                                        g_frame_interpolation_blend);
          gl_renderer_set_interpolation_source(g_frame_interpolation_source);
      }
-@@ -21316,6 +22231,8 @@
+@@ -21316,6 +22241,8 @@
      }
    }
      log_present_cadence();
@@ -1828,7 +1852,7 @@ index 886c0db0e1bdc3ab1284a6ff9b920d6a3f75440d..c9038616fd7ac2bb7fe3b269038846e4
    }
  
      if (net_cfg.enabled && psx_mod_netplay_requires_texture_banks() &&
-@@ -21504,6 +22421,9 @@
+@@ -21504,6 +22431,9 @@
           * broke boot-skip on OpenBIOS: call-HLE needs deliver_event_ret, the
           * boot-skip needs only shell_entry_phys, so refusing the former must
           * not silently cancel the latter. */
@@ -1838,7 +1862,7 @@ index 886c0db0e1bdc3ab1284a6ff9b920d6a3f75440d..c9038616fd7ac2bb7fe3b269038846e4
          PsxBiosHleRequest req;
          req.bios_hle               = bios_hle ? 1 : 0;
          req.keep_intro             = bios_hle_keep_intro ? 1 : 0;
-@@ -21586,6 +22506,10 @@
+@@ -21586,6 +22516,10 @@
          savestate_configure(memcard_dir.string().c_str(),
                              memory_get_bios_checksum(), game_entry_pc,
                              bios_token, openbios_ws);
@@ -1849,7 +1873,7 @@ index 886c0db0e1bdc3ab1284a6ff9b920d6a3f75440d..c9038616fd7ac2bb7fe3b269038846e4
          psx_rewind_set_enabled(g_rewind_enabled);
          psx_rewind_set_depth((uint32_t)g_rewind_depth);
          psx_rewind_set_interval((uint32_t)g_rewind_interval);
-@@ -21850,7 +22774,8 @@
+@@ -21850,7 +22784,8 @@
       * see exactly which targets led to the null PC. (CLAUDE.md ring-buffer
       * model: consume the always-on ring after the fact, not arm-and-time.) */
      {
@@ -1859,7 +1883,7 @@ index 886c0db0e1bdc3ab1284a6ff9b920d6a3f75440d..c9038616fd7ac2bb7fe3b269038846e4
          if (tf) {
              std::fprintf(tf, "{\n  \"final_pc\": \"0x%08X\",\n  \"final_ra\": \"0x%08X\",\n"
                              "  \"final_sp\": \"0x%08X\",\n  \"fntrace_seq\": %llu,\n  \"tail\": [\n",
-@@ -22085,7 +23010,7 @@
+@@ -22085,7 +23020,7 @@
                  ls.pad_mode[i] = player_mode[i];
                  ls.player_gamepad_guid[i][0] = '\0';
                  if (ls.player_src[i] == 2 && !d.empty() && d != "auto" &&
@@ -1868,7 +1892,7 @@ index 886c0db0e1bdc3ab1284a6ff9b920d6a3f75440d..c9038616fd7ac2bb7fe3b269038846e4
                      std::snprintf(ls.player_gamepad_guid[i],
                                    sizeof(ls.player_gamepad_guid[i]), "%s",
                                    d.c_str());
-@@ -22286,7 +23211,7 @@
+@@ -22286,7 +23221,7 @@
               * the rest of settings.toml — merge into the on-disk file. */
              {
                  const auto settings_path =

@@ -148,4 +148,67 @@ require(
     "switches that on only later: the game asks for the saved or launcher choice again after it, or they were off "
     "at every start",
 )
+packages = read("psxrecomp/runtime/include/mod_packages.h")
+runtime = read("psxrecomp/runtime/src/mod_runtime.cpp")
+start = host[host.index("        std::string mod_error;\n") :][:700]
+require(
+    'std::filesystem::path bundled_root() const { return bundled_root_.empty() ? root_ / "bundled" : bundled_root_; }'
+    in packages
+    and "    s.manager.set_root(root);\n    s.manager.set_bundled_root(g_bundled_root);\n" in runtime
+    and "void set_bundled_root(std::filesystem::path bundled) { bundled_root_ = std::move(bundled); }" in packages
+    and "void mod_runtime_set_bundled_root(const std::filesystem::path& bundled) { g_bundled_root = bundled; }\n"
+    in runtime
+    and runtime.count("g_bundled_root") == 3
+    and packages.count("bundled_root_") == 4
+    and start.index(
+        "PSXRecompV4::mod_runtime_set_bundled_root((image.empty() ? exe_dir_from_argv(argv[0]) : image) / "
+        '"mods" / "bundled");'
+    )
+    < start.index("PSXRecompV4::mod_runtime_initialize(")
+    and 'user_dir_from_argv(argv[0]) / "mods", game_id,' in start,
+    "the build's mod packages, the game's own among them, are read beside the binary and the player's mods and state "
+    "in the user folder: with the launcher's PSX_USER_DIR the game looked for its own package in the player's folder, "
+    "and 0.10.1 ran without a single game hook",
+)
+session = host[host.index("    auto start_mod_session = [&](bool netplay) -> bool {\n") :]
+session = session[
+    : session.index("        resolved_audio_buffer_ms = psx_audio_sync_target(configured_audio_buffer_ms);\n")
+]
+game_host = read("src/game/host.cpp")
+manifest = read("CMakeLists.txt")
+require(
+    session.endswith(
+        "        mod_runtime_activate_plugins();\n"
+        "        if (const char* error = mod_runtime_activation_error()) {\n"
+        '            std::fprintf(stderr,"psxrecomp: %s\\n",error);\n'
+        "            return false;\n"
+        "        }\n"
+        "#ifdef PSX_HAS_GAME_HOST\n"
+        "        if (const char* problem = psx_game_session_problem(netplay ? 1 : 0)) {\n"
+        "            launcher_warning(s_picker_game_name.c_str(), problem);\n"
+        "            return false;\n"
+        "        }\n"
+        "#endif\n"
+    )
+    and "const char *psx_game_session_problem(int netplay) {\n"
+    "    return disruptor::game_package_problem(netplay != 0, "
+    "mod_runtime_snapshot_package_active(disruptor::kGamePackage) != 0);\n}\n"
+    in game_host
+    and 'id = \\"disruptor.game\\"' in manifest
+    and 'inline constexpr const char *kGamePackage = "disruptor.game";' in read("src/game/settings/game_package.h"),
+    "a session whose packages leave out the game's own stops with a message after activation: 0.10.0 and 0.10.1 ran "
+    "without it and showed nothing wrong but a broken game",
+)
+require(
+    "        if (us.has_aspect_ratio) {\n"
+    "            g_video_aspect_num = us.aspect_num;\n"
+    "            g_video_aspect_den = us.aspect_den;\n"
+    "        }\n"
+    "        if (us.has_adaptive_view) g_ws_adaptive_view = us.adaptive_view;\n"
+    in host
+    and host.index("        if (us.has_adaptive_view) g_ws_adaptive_view = us.adaptive_view;\n")
+    < host.index("    if (!ws_adaptive_view_supported) g_ws_adaptive_view = false;\n"),
+    "a saved Match window starts the game matching the window: the raise to v0.3.4 dropped this line, and the game "
+    "started at the fixed aspect under it, 32:9 letterboxed on a 16:9 or 16:10 screen",
+)
 print("Host present source contract: PASS")

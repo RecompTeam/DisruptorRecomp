@@ -13,6 +13,7 @@
 #include "game/session/capsule.h"
 #include "game/session/diagnostics.h"
 #include "game/settings/game_mark.h"
+#include "game/settings/game_package.h"
 #include "game/settings/options.h"
 #include "game/settings/pick_keys.h"
 #include "game/settings/second_keys.h"
@@ -21,6 +22,7 @@
 #include "gpu.h"
 #include "host_ui.h"
 #include "mod_plugins.h"
+#include "mod_runtime.h"
 #include "psx_keybinds.h"
 #include "savestate.h"
 
@@ -109,6 +111,10 @@ extern "C" {
 
 int psx_game_configure(const char *game_id, size_t length) {
     return disruptor_precision_routes_configure(game_id, length);
+}
+
+const char *psx_game_session_problem(int netplay) {
+    return disruptor::game_package_problem(netplay != 0, mod_runtime_snapshot_package_active(disruptor::kGamePackage) != 0);
 }
 
 int psx_game_fast_boot_forced(void) {
