@@ -2,6 +2,31 @@
 
 What changed in each release. The launcher shows the section of its own version on its home page.
 
+## v0.10.0
+
+### Changes
+
+- Framework: the game runs on PSXRecomp v0.3.4-alpha
+- Render thread: on by default
+- Save states: those of 0.9.0 do not load, settings, keys and memory cards stay
+
+### Enhancements
+
+- Render thread: works with In-between frames
+- Performance: less processor time at the same settings, busy scenes take the graphics card less time
+- Sky: drawn pixel by pixel from the level's panorama
+
+### Bug fixes
+
+- Windows: no green wedge at a frame, no next room in place of the sky, no green square through a doorway, no ticks along a frame
+- Window sky: no lag behind the frame while turning with In-between frames
+- Sky: no green line along the screen's bottom edge outdoors, no fog-coloured line beside a pillar in widescreen
+- Walls: a wall at arm's length stays solid in widescreen, no light line down the edge of some wall textures
+- Fog: no lighter hole at a far corridor wall with a longer Draw distance
+- Dynamic resolution: works below 15 FPS and does not count in-between pictures
+- Save states: loading one with Render thread on keeps the picture
+- Launcher: page titles keep their letters' size
+
 ## v0.9.0
 
 ### Changes

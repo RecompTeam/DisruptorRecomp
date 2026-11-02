@@ -83,6 +83,7 @@
 | | Movie filter | Smooth | Movies drawn smoothly at your screen's size, without their square blocks |
 | **Motion** | 60 FPS gameplay | On | The game runs at up to 60 FPS instead of 30 |
 | | In-between frames | Off | Adds frames for smoother motion, up to 320 FPS |
+| | Render thread | On | Draws from a thread of its own, smoother on slower processors and graphics cards |
 | | Smooth mouse turning | On | The view turns between the game's 256 heading steps |
 | **World** | Exact-provenance geometry | On | Steadies the polygon edges that wobble on the PlayStation |
 | | Perspective-correct world textures | On | Textures keep their shape near the viewer |
