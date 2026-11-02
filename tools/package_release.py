@@ -7,6 +7,12 @@ section, with explicit anchors for its links to its own headings. The previous r
 published unless --publish is given. The players' files are signed with Sigstore first: a browser opens to sign in as
 the organisation's account, and each gets a bundle and a line of SLSA provenance. Windows comes first and makes
 the release as a draft, Linux adds its files and publishes it, so players never see a release without them.
+
+A release goes in two runs. Without --publish the script packs, from a build whose SOURCE_COMMIT names the
+checkout's commit, and records the packages' digests in packed.json. Then tools/release_smoke.py tests the player's
+file it names, and the installed launcher's --updates-from <packages folder> rehearses the update. --publish packs
+nothing: it signs and uploads that packing, and stops unless it came from a clean checkout of this commit, is
+unchanged, passed the smoke test, and the build workflow passed on the commit.
 """
 
 from __future__ import annotations
@@ -21,6 +27,8 @@ import struct
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+
+from release_smoke import MIN_SECONDS, REQUIRED_CHECKS
 
 ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY = "https://github.com/RecompTeam/DisruptorRecomp"
@@ -68,6 +76,9 @@ PLATFORMS = {
         "- Your files are kept in `~/.local/share/DisruptorRecompData`\n",
     ),
 }
+# The player's file the smoke test starts on each system.
+SMOKE_FILES = {"windows": f"{PACKAGE_ID}-win-Portable.zip", "linux": f"{PACKAGE_ID}.AppImage"}
+PACKED = "packed.json"
 SIGSTORE = "sigstore@4.5.1"
 SIGNER = "recomp.team@gmail.com"
 SIGNER_ISSUER = "https://accounts.google.com"
@@ -257,19 +268,114 @@ def source_commit() -> str:
     return subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
 
 
-def check_build_commit(build: Path, platform: Platform, signing: bool) -> None:
-    """Stops when the build may not be the checkout's commit: a signed release names that commit."""
-    if signing:
-        changed = subprocess.check_output(
-            ["git", "status", "--porcelain", "--untracked-files=no"], cwd=ROOT, text=True
-        ).strip()
-        if changed:
-            raise SystemExit("The checkout has uncommitted changes: commit them, build again, then sign")
+def checkout_changed() -> bool:
+    """Whether tracked files differ from the commit the checkout stands on."""
+    return bool(
+        subprocess.check_output(["git", "status", "--porcelain", "--untracked-files=no"], cwd=ROOT, text=True).strip()
+    )
+
+
+def build_is_clean(build: Path) -> bool:
+    """Stops unless the build's SOURCE_COMMIT names the checkout's commit, and says whether neither the build nor the
+    checkout carried uncommitted changes: only such a packing is published."""
     stamp = build / "SOURCE_COMMIT"
-    if platform.name == "linux" and not stamp.is_file():
-        raise SystemExit(f"{stamp} is missing: the Linux build must say which commit it was made from")
-    if stamp.is_file() and stamp.read_text(encoding="utf-8").strip() != source_commit():
-        raise SystemExit(f"{build} was built from {stamp.read_text(encoding='utf-8').strip()}, not {source_commit()}")
+    if not stamp.is_file():
+        raise SystemExit(f"{stamp} is missing: the build must say which commit it was made from")
+    named, head = stamp.read_text(encoding="utf-8").strip(), source_commit()
+    if named.removesuffix("-dirty") != head:
+        raise SystemExit(f"{build} was built from {named}, not {head}")
+    return named == head and not checkout_changed()
+
+
+def package_digests(packages: Path) -> dict[str, str]:
+    return {
+        item.name: hashlib.sha256(item.read_bytes()).hexdigest()
+        for item in sorted(packages.iterdir())
+        if item.is_file()
+    }
+
+
+def check_packed(work: Path, version: str, platform: Platform, commit: str) -> dict:
+    """Stops unless `work` holds a packing of this version from a clean checkout of `commit`, its files unchanged."""
+    record_path = work / PACKED
+    if not record_path.is_file():
+        raise SystemExit(f"{work} holds no packing: pack without --publish first")
+    record = json.loads(record_path.read_text(encoding="utf-8"))
+    if (record.get("version"), record.get("platform")) != (version, platform.name):
+        raise SystemExit(f"{record_path} is a packing of {record.get('version')} for {record.get('platform')}")
+    if record.get("commit") != commit or record.get("clean") is not True:
+        raise SystemExit(
+            f"{record_path} was packed from {record.get('commit')}"
+            f"{'' if record.get('clean') is True else ' with uncommitted changes'}: build {commit} and pack again"
+        )
+    now_digests = package_digests(work / "packages")
+    files = record.get("files") or {}
+    if not files or any(now_digests.get(name) != digest for name, digest in files.items()):
+        raise SystemExit(f"{work / 'packages'} changed since it was packed: pack again")
+    return record
+
+
+def smoke_stamp(output: Path, version: str, platform: Platform) -> Path:
+    """Where the smoke test's result goes, outside the work folder every packing makes again."""
+    return output / version / f"{platform.name}.smoke.json"
+
+
+def check_smoke(stamp: Path, version: str, platform: Platform, manifest: bytes, package_sha256: str) -> None:
+    """Stops unless the smoke test passed this very player's file, with every check its system asks for."""
+    player_file, needed = SMOKE_FILES[platform.name], REQUIRED_CHECKS[platform.name]
+    if not stamp.is_file():
+        raise SystemExit(
+            f"No smoke test result at {stamp}: pack without --publish, run tools/release_smoke.py on {player_file}, "
+            "then publish"
+        )
+    verdict = json.loads(stamp.read_text(encoding="utf-8"))
+    if (verdict.get("version"), verdict.get("platform")) != (version, platform.name):
+        raise SystemExit(f"{stamp} is the smoke test of {verdict.get('version')} for {verdict.get('platform')}")
+    if (
+        verdict.get("package_sha256") != package_sha256
+        or verdict.get("manifest_sha256") != hashlib.sha256(manifest).hexdigest()
+    ):
+        raise SystemExit(f"{stamp} tested other files than this packing's: run the smoke test on it again")
+    checks = {check.get("name"): check for check in verdict.get("checks", [])}
+    missing = [name for name in needed if checks.get(name, {}).get("passed") is not True]
+    start_seconds = checks.get("start", {}).get("seconds")
+    if verdict.get("passed") is not True or missing:
+        failed = [name for name, check in checks.items() if check.get("passed") is not True]
+        raise SystemExit(f"The smoke test did not pass: failed {failed}, not passed {missing}")
+    if not isinstance(start_seconds, (int, float)) or not start_seconds >= MIN_SECONDS:
+        raise SystemExit(f"The smoke test's start ran {start_seconds} s, not {MIN_SECONDS:.0f} or more")
+
+
+def ci_passed(runs: list[dict]) -> bool:
+    """Whether the newest of the build workflow's runs on a commit, reruns counted, finished green."""
+    newest = max(runs, key=lambda run: (run.get("databaseId") or 0, run.get("attempt") or 0), default=None)
+    return newest is not None and newest.get("status") == "completed" and newest.get("conclusion") == "success"
+
+
+def check_ci(repository: str, commit: str) -> None:
+    """Stops unless the build workflow passed on the commit the release names."""
+    shown = subprocess.run(
+        [
+            "gh",
+            "run",
+            "list",
+            "--repo",
+            repository,
+            "--commit",
+            commit,
+            "--workflow",
+            "build",
+            "--json",
+            "status,conclusion,databaseId,attempt",
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if shown.returncode != 0:
+        raise SystemExit(f"Cannot read the CI runs of {commit}: {shown.stderr.strip()}")
+    if not ci_passed(json.loads(shown.stdout)):
+        raise SystemExit(f"The build workflow has not passed on {commit}: push it and wait for a green run")
 
 
 def check_executable(name: str, binary: bytes, platform: Platform) -> None:
@@ -439,6 +545,53 @@ def vpk(work: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
     return subprocess.run(command, cwd=work, capture_output=True, text=True, check=False)
 
 
+def packed_names(version: str, platform: Platform) -> tuple[str, ...]:
+    channel_part = "" if platform.channel == "win" else f"-{platform.channel}"
+    return tuple(f"{PACKAGE_ID}-{version[1:]}{channel_part}-{kind}.nupkg" for kind in ("full", "delta"))
+
+
+def publish(work: Path, version: str, platform: Platform, stamp: Path, text: str) -> None:
+    """Signs and uploads the packing in `work` once it is a clean packing of the checkout's commit, unchanged since,
+    passed by the smoke test, and the build workflow passed on that commit. It packs nothing itself."""
+    if checkout_changed():
+        raise SystemExit("The checkout has uncommitted changes: a release names its commit")
+    commit = source_commit()
+    record = check_packed(work, version, platform, commit)
+    player_file = SMOKE_FILES[platform.name]
+    check_smoke(
+        stamp, version, platform, (work / "program/MANIFEST.json").read_bytes(), record["files"].get(player_file, "")
+    )
+    repository = REPOSITORY.removeprefix("https://github.com/")
+    check_ci(repository, commit)
+    packages = work / "packages"
+    players = [packages / name for name in platform.player_files]
+    signed = sign(work, players, version, commit, record["started"], platform.channel)
+    print(f"Signed {len(players)} files as {SIGNER}")
+    ours = published_names(
+        platform.channel, list(platform.player_files), packed_names(version, platform), [item.name for item in signed]
+    )
+    made_now = {item.name for item in signed}
+    uploads = [str(packages / name) for name in sorted(ours) if name in record["files"] or name in made_now]
+    if platform.name == "linux":
+        add_to_release(work, repository, version, commit, platform, uploads)
+        return
+    (work / "body.md").write_text(release_body(text), encoding="utf-8")
+    tagged = subprocess.run(
+        ["git", "ls-remote", "--tags", REPOSITORY, f"refs/tags/{version}"], capture_output=True, text=True, check=True
+    )
+    if tagged.stdout.strip():
+        raise SystemExit(f"{version} is tagged on GitHub already: the release would not be this build's commit")
+    existing = subprocess.run(
+        ["gh", "release", "view", version, "--repo", repository], capture_output=True, text=True, check=False
+    )
+    if existing.returncode == 0:
+        raise SystemExit(
+            f"{version} has a release or a draft already: delete a draft left by a failed run with "
+            f"`gh release delete {version} --repo {repository}`, then run again"
+        )
+    subprocess.run(create_command(version, repository, commit, work / "body.md", uploads), check=True)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", required=True)
@@ -454,6 +607,12 @@ def main() -> None:
     args = parser.parse_args()
     if not re.fullmatch(r"v\d+\.\d+\.\d+(?:-[A-Za-z0-9.]+)?", args.version):
         parser.error("version must be a release tag such as v0.3.1")
+    platform = PLATFORMS[args.platform]
+    work = (args.output / args.version / platform.name).resolve()
+    stamp = smoke_stamp(args.output.resolve(), args.version, platform)
+    if args.publish:
+        publish(work, args.version, platform, stamp, release_text(args.version))
+        return
 
     build = args.build.resolve()
     cache = (build / "CMakeCache.txt").read_text()
@@ -471,14 +630,14 @@ def main() -> None:
         if cache_entries.get(name) != value:
             raise SystemExit(f"Release build setting missing: {name}={value}")
     notes = release_notes(args.version)
-    text = release_text(args.version)
+    release_text(args.version)
     if shutil.which("dotnet") is None:
         raise SystemExit("Velopack packs with the .NET SDK: install it, then run again")
-    platform = PLATFORMS[args.platform]
-    check_build_commit(build, platform, args.publish or args.sign)
+    clean = build_is_clean(build)
+    if args.sign and not clean:
+        raise SystemExit("The build or the checkout has uncommitted changes: commit them, build again, then sign")
 
     started = now()
-    work = (args.output / args.version / platform.name).resolve()
     shutil.rmtree(work, ignore_errors=True)
     stage, packages = work / "program", work / "packages"
     stage.mkdir(parents=True)
@@ -555,42 +714,23 @@ def main() -> None:
         print(f"{item.stat().st_size:>12,}  {item.name}")
     for name, digest in digests.items():
         print(f"{name} SHA-256: {digest}")
-
-    channel_part = "" if platform.channel == "win" else f"-{platform.channel}"
-    packed_names = tuple(f"{PACKAGE_ID}-{args.version[1:]}{channel_part}-{kind}.nupkg" for kind in ("full", "delta"))
     commit = json.loads(payload["MANIFEST.json"])["source_commit"]
-    signed: list[Path] = []
-    if args.publish or args.sign:
-        signed = sign(work, players, args.version, commit, started, platform.channel)
+    record = {"version": args.version, "platform": platform.name, "commit": commit, "clean": clean}
+    record |= {"started": started, "files": package_digests(packages)}
+    (work / PACKED).write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
+    smoked = packages / SMOKE_FILES[platform.name]
+    capsule = " --capsule <capsule recorded on this build>" if "capsule" in REQUIRED_CHECKS[platform.name] else ""
+    where = "" if platform.name == "windows" else " (inside the Linux build's system, with its own paths)"
+    print(
+        f"Smoke test{where}: python tools/release_smoke.py --version {args.version} --platform {platform.name} "
+        f"--package {smoked} --disc <cue>{capsule} --stamp {stamp}"
+    )
+    print(f"Update rehearsal: <installed copy>/DisruptorLauncher{platform.executable_suffix} --updates-from {packages}")
+    if args.sign:
+        sign(work, players, args.version, commit, started, platform.channel)
         print(f"Signed {len(players)} files as {SIGNER}")
-
-    if args.publish:
-        ours = published_names(platform.channel, list(digests), packed_names, [item.name for item in signed])
-        uploads = [str(item) for item in sorted(packages.iterdir()) if item.name in ours]
-        repository = REPOSITORY.removeprefix("https://github.com/")
-        if platform.name == "linux":
-            add_to_release(work, repository, args.version, commit, platform, uploads)
-            return
-        (work / "body.md").write_text(release_body(text), encoding="utf-8")
-        tagged = subprocess.run(
-            ["git", "ls-remote", "--tags", REPOSITORY, f"refs/tags/{args.version}"],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        if tagged.stdout.strip():
-            raise SystemExit(
-                f"{args.version} is tagged on GitHub already: the release would not be this build's commit"
-            )
-        existing = subprocess.run(
-            ["gh", "release", "view", args.version, "--repo", repository], capture_output=True, text=True, check=False
-        )
-        if existing.returncode == 0:
-            raise SystemExit(
-                f"{args.version} has a release or a draft already: delete a draft left by a failed run with "
-                f"`gh release delete {args.version} --repo {repository}`, then run again"
-            )
-        subprocess.run(create_command(args.version, repository, commit, work / "body.md", uploads), check=True)
+    if not clean:
+        print("Packed from uncommitted changes: this packing can be tested but not published")
 
 
 if __name__ == "__main__":

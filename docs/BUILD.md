@@ -81,6 +81,39 @@ python tools/package_release.py --version v0.3.1 --build build --zstd-license <z
   script stops when a bundle names another account. It signs only a checkout
   without uncommitted changes.
 
+A release goes in two runs for each system:
+
+1. Pack without `--publish`. The build folder must hold a `SOURCE_COMMIT`
+   file naming the checkout's commit. The packager records every package's
+   digest in `packed.json` beside them and prints the next two commands with
+   this build's paths.
+2. Run the smoke test on the player's file:
+
+   ```powershell
+   python tools/release_smoke.py --version v0.3.1 --platform windows `
+       --package build/releases/v0.3.1/windows/packages/DisruptorRecomp-win-Portable.zip `
+       --disc <cue> --capsule <capsule> --stamp build/releases/v0.3.1/windows.smoke.json
+   ```
+
+   It tests a copy of the package, keeps the player's files in another folder
+   as the launcher does and checks every file against `MANIFEST.json`. The
+   package's own entry, the portable stub or the AppImage, must start the
+   launcher and report this version. It starts the game from power-on, hidden
+   and muted with detailed logging: the game must draw its first frame, show
+   new pictures from the game in every pulse of the log after the first, and
+   still run after 30 seconds. Without its own package the game
+   stops at the start with a message. On Windows it also replays the capsule,
+   which must be recorded on this build and stay in step. On Linux it runs
+   inside the build's distribution on the AppImage, without a capsule.
+3. Rehearse the update: close the game, start the installed launcher with
+   `--updates-from build/releases/v0.3.1/windows/packages`, update, then check
+   EXIT in the main menu, a mission start and a memory card load.
+4. Push the commit and wait for the build workflow to pass.
+5. Run again with `--publish`. It packs nothing: it signs and uploads that
+   packing. It stops unless the packing came from a checkout of this commit
+   without uncommitted changes, its files are unchanged, the smoke test passed
+   on its player's file, and the newest build run on the commit is green.
+
 A Linux release is an AppImage packed from a Linux Release build of the same
 commit. It is built on Ubuntu 22.04, so that it runs on glibc 2.35 and newer:
 GCC 13 from the `ubuntu-toolchain-r/test` PPA, Kitware's CMake and Python 3.11,
@@ -93,8 +126,8 @@ python tools/package_release.py --platform linux --version v0.3.1 `
     --build \\wsl.localhost\<distro>\<checkout>\build --zstd-license <zstd LICENSE>
 ```
 
-The Linux build folder must hold a `SOURCE_COMMIT` file with the commit it was
-built from, and the script stops unless that is the checkout's. It makes
+The Linux build folder holds a `SOURCE_COMMIT` file too, and the script stops
+unless it names the checkout's commit. It makes
 `DisruptorRecomp.AppImage` and the packages the launcher updates from in
 `build/releases/<version>/linux/packages`. With `--publish` they go to the draft the Windows run made, which must
 come first and from the same commit. The release text gets the Linux
