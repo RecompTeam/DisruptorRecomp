@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Test of the packager's GitHub release: its text, the written page or the changelog section, and its files."""
 
+import ast
 import importlib
 import sys
 import tempfile
@@ -164,5 +165,52 @@ require(
     and refused(lambda: package_release.with_install("Banner\n## Install\n## Notes\n", linux)),
     "so is one with a section after Install, where Linux's lines would land in the wrong section",
 )
+
+
+def payload_unpacks_bundled_mods() -> bool:
+    """Whether payload_of's file table unpacks bundled_mods(build) into itself, read from the code and not its text."""
+    tree = ast.parse((ROOT / "tools/package_release.py").read_text(encoding="utf-8"))
+    payload = next(node for node in ast.walk(tree) if isinstance(node, ast.FunctionDef) and node.name == "payload_of")
+    tables = [
+        node.value
+        for node in ast.walk(payload)
+        if isinstance(node, ast.Assign)
+        and [getattr(target, "id", None) for target in node.targets] == ["files"]
+        and isinstance(node.value, ast.Dict)
+    ]
+    return len(tables) == 1 and any(
+        key is None
+        and isinstance(value, ast.Call)
+        and getattr(value.func, "id", None) == "bundled_mods"
+        and [getattr(arg, "id", None) for arg in value.args] == ["build"]
+        for key, value in zip(tables[0].keys, tables[0].values, strict=True)
+    )
+
+
+with tempfile.TemporaryDirectory() as folder:
+    build = Path(folder)
+    rewind = build / "mods/bundled/psx.feature.rewind/1.0.0/manifest.toml"
+    rewind.parent.mkdir(parents=True)
+    rewind.write_text("id = 1\n", encoding="utf-8")
+    without_game = refused(lambda: package_release.bundled_mods(build))
+    game = build / "mods/bundled/disruptor.game/1.0.0/manifest.toml"
+    game.parent.mkdir(parents=True)
+    game.write_text("id = 2\n", encoding="utf-8")
+    (build / "mods/state.toml").write_text("format_version = 2\n", encoding="utf-8")
+    frame = build / "mods/bundled/psx.presentation.bezel/1.0.0/assets/frame.png"
+    frame.parent.mkdir(parents=True)
+    frame.write_bytes(b"\x89PNG")
+    require(
+        without_game
+        and package_release.bundled_mods(build)
+        == {
+            "mods/bundled/disruptor.game/1.0.0/manifest.toml": game,
+            "mods/bundled/psx.feature.rewind/1.0.0/manifest.toml": rewind,
+            "mods/bundled/psx.presentation.bezel/1.0.0/assets/frame.png": frame,
+        }
+        and payload_unpacks_bundled_mods(),
+        "a package carries every mod package the framework staged, the player's mod state not among them, and refuses "
+        "a build without the game's own: 0.10.0 shipped without it, and none of the game's enhancements and fixes ran",
+    )
 
 print("Disruptor release text and files: PASS")

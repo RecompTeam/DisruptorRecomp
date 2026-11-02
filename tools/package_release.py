@@ -307,6 +307,17 @@ def lzma_license(build: Path) -> Path:
     return found[0]
 
 
+def bundled_mods(build: Path) -> dict[str, Path]:
+    """The mod packages the framework stages beside the game, the game's own among them, by their installed place."""
+    root = build / "mods/bundled"
+    found = {
+        f"mods/bundled/{path.relative_to(root).as_posix()}": path for path in sorted(root.rglob("*")) if path.is_file()
+    }
+    if "mods/bundled/disruptor.game/1.0.0/manifest.toml" not in found:
+        raise SystemExit(f"{root} lacks the game's own package: without it the game's enhancements and fixes stay off")
+    return found
+
+
 def payload_of(build: Path, version: str, zstd_license: Path, platform: Platform) -> dict[str, bytes]:
     """The program's files by their place in the installed folder."""
     game, launcher = (f"{name}{platform.executable_suffix}" for name in ("DisruptorRecompiled", "DisruptorLauncher"))
@@ -333,6 +344,7 @@ def payload_of(build: Path, version: str, zstd_license: Path, platform: Platform
         "licenses/libchdr-LICENSE.txt": build / "_deps/psx_libchdr-src/LICENSE.txt",
         "licenses/LZMA-LICENSE.txt": lzma_license(build),
         "licenses/Zstd-LICENSE.txt": zstd_license,
+        **bundled_mods(build),
     }
     payload = {name: path.read_bytes() for name, path in files.items()}
     if len(payload["bios/openbios.bin"]) != 524288:
