@@ -63,7 +63,7 @@ require(
     in renderer
     and "            world = psx_world_depth_class(s_world_depth, visual_flags, piece_z, s_world_margin);\n"
     "        }\n"
-    "        if (s_tb_n > 0 && world != s_tb_world) flush_tex_batch();\n"
+    "        if (s_tb_n > 0 && !deferred && world != s_tb_world) flush_tex_batch();\n"
     in renderer
     and "            s_tb_world = world;\n" in renderer
     and "static float s_world_margin = 0.003f;\n" in renderer
@@ -75,20 +75,34 @@ by_depth = between(renderer, "static void tex_batch_by_depth(int nverts, int sem
 require(
     by_depth
     == """static void tex_batch_by_depth(int nverts, int semi) {
+    const int held_back = s_tb_held_back;  /* drawn after the batch it came in: a tie, or a hair behind, stays the batch's */
+    if (held_back) {
+        glEnable(GL_POLYGON_OFFSET_FILL);
+        glPolygonOffset(1.0f, 1.0f);
+    }
     glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
     glDisable(GL_BLEND);
-    glDisable(GL_STENCIL_TEST);
-    glDepthFunc(GL_LEQUAL);
+    depth_stencil_within();
+    if (held_back && s_supp_stencil) {
+        glStencilMask(HELD_BACK_WON_STENCIL);
+        glStencilFunc(GL_EQUAL, SUPPLEMENTAL_STENCIL | HELD_BACK_WON_STENCIL, SUPPLEMENTAL_STENCIL);
+        glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
+    }
+    glDepthFunc(held_back ? GL_LESS : GL_LEQUAL);
     glDepthMask(GL_TRUE);
     p_glUniform1i(s_uSemimode, semi < 0 ? 0 : semi);
     p_glUniform1i(s_uSemipass, semi < 0 ? 3 : 4);
     glDrawArrays(GL_TRIANGLES, 0, nverts);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     glDepthMask(GL_FALSE);
-    p_glUniform1f(s_tex_uPull, s_world_margin);
+    p_glUniform1f(s_tex_uPull, held_back ? 0.0f : s_world_margin);
+    if (held_back) glDepthFunc(GL_EQUAL);
+    s_won_stencil = held_back;
     tex_batch_draw_passes(nverts, semi);
+    s_won_stencil = 0;
     p_glUniform1f(s_tex_uPull, 0.0f);
-    glDepthFunc(GL_ALWAYS);""",
+    glDepthFunc(GL_ALWAYS);
+    if (held_back) glDisable(GL_POLYGON_OFFSET_FILL);""",
     "a batch of the class writes its true depths first, then draws its colours pulled by the margin without writing depth, "
     "and leaves the pull and the depth test as it found them",
 )
@@ -120,7 +134,7 @@ int gl_renderer_world_depth(void) { return s_world_depth; }
 )
 
 require(
-    "        p_glUniform1f(s_temp_uPull,s_world_margin);\n" in presenter
+    "        p_glUniform1f(s_temp_uPull,c->supp?0.0f:s_world_margin);\n" in presenter
     and "        p_glUniform1f(s_temp_uPull,0.0f); glDepthFunc(GL_ALWAYS); glDepthMask(GL_TRUE);\n" in presenter
     and "    for (last_world=s->nt-1;last_world>=0 && !s->triangles[last_world].world;--last_world) {}\n" in presenter
     and "            if (s_world_depth && (now->world || ti<last_world))\n" in presenter
@@ -191,12 +205,12 @@ require(
     "the launcher offers it on the Enhancements page, on by default and only with geometry correction",
 )
 
-flush = between(renderer, "static void flush_tex_batch(void) {", "\n}\n")
+flush = between(renderer, "static void flush_tex_batch_now(void) {", "\n}\n")
 require(
     "static float s_sprite_hold_share = 0.2f;\nstatic int s_sprite_hold = 1;" in renderer
     and "    const int sprite = s_geometry_correction && s_sprite_depth > 0.0f && (visual_flags & 3) == 1;\n"
     in renderer
-    and "        if (s_tb_n > 0 && world != s_tb_world) flush_tex_batch();\n"
+    and "        if (s_tb_n > 0 && !deferred && world != s_tb_world) flush_tex_batch();\n"
     "        const int held = sprite && s_sprite_hold && !near_face;\n"
     "        if (s_tb_n > 0 && held != s_tb_held) flush_tex_batch();\n"
     in renderer
@@ -263,7 +277,7 @@ require(
 
 gpu = read("psxrecomp/runtime/src/gpu.c")
 thread = read("psxrecomp/runtime/src/gpu_gl_render_thread.c.inc")
-reading = between(renderer, "static int hold_reads_depth(int semi) {", "static void flush_tex_batch(void) {")
+reading = between(renderer, "static int hold_reads_depth(int semi) {", "static void flush_tex_batch_now(void) {")
 require(
     "    if (!s_hold_reads || !p_glTextureBarrier || i < 0 || !s_wide_depth[i] || s_mask_check || s_tb_mask || s_fill_pass > 0.0f)"
     " return 0;\n"

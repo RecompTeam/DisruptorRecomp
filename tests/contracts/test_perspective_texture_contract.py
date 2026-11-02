@@ -346,7 +346,7 @@ def main() -> int:
         re.search(r"gl_Position\s*=\s*vec4\([^;]*0\.0\s*,\s*1\.0\s*\)", tex_vs, re.DOTALL) is not None,
         "TEX_VS must keep homogeneous W fixed at 1",
     )
-    flush = function_body(gl, "flush_tex_batch")
+    flush = function_body(gl, "flush_tex_batch_now")
     canonical = flush.find("geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 0)")
     visual = flush.find("geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 1)")
     require(0 <= canonical < visual, "the canonical affine pass must execute before the visual pass")

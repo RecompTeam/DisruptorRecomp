@@ -73,10 +73,10 @@ static void filler_pass_end(void) {
 """
     in renderer
     and """    if (s_fill_pass > 0.0f) {  /* a filler obeys the mask and leaves it as it is */
-        if (!s_mask_check) { glDisable(GL_STENCIL_TEST); return; }
+        if (!s_mask_check && !within) { glDisable(GL_STENCIL_TEST); return; }
         glEnable(GL_STENCIL_TEST);
         glStencilMask(0x00);
-        glStencilFunc(GL_EQUAL, 0, 0x01);
+        glStencilFunc(GL_EQUAL, within, (s_mask_check ? 0x01 : 0) | within);
         glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
         return;
     }
@@ -114,7 +114,7 @@ require(
     "filler pass, and the fill mode is put back",
 )
 
-flush = between(renderer, "static void flush_tex_batch(void) {\n    if (s_tb_n == 0) return;", "\n}\n")
+flush = between(renderer, "static void flush_tex_batch_now(void) {\n    if (s_tb_n == 0) return;", "\n}\n")
 outline = flush.index("            if (mirror_depth() && s_crack_fill > 0.0f) tex_batch_outline(nverts, semi);\n")
 copies = flush.index(
     """            if (mirror_depth() && fillers) {  /* in sequence each copy would break the batch: 135 batches a frame against 2 */
@@ -225,11 +225,12 @@ def depth_step(clip_z: str) -> int:
 
 
 copy_frame = re.findall(
-    r"u_visual_options\.w >= 1\.0 \? ([0-9.]+) : u_visual_options\.w > 0\.0 \? ([0-9.]+) : \(\(u_visual > 0\.5",
+    r"u_visual_options\.w >= 1\.0 \? ([0-9.]+) : \(u_visual_options\.w > 0\.0 \|\| u_visual_options\.w < -1\.5\) \? ([0-9.]+) : \(\(u_visual > 0\.5",
     renderer,
 )
 copy_between = re.findall(
-    r'u_visual_options\.w >= 1\.0 \? ([0-9.]+) : \(u_visual_options\.w > 0\.0 \? ([0-9.]+) "', presenter
+    r'u_visual_options\.w >= 1\.0 \? ([0-9.]+) : \(\(u_visual_options\.w > 0\.0 \|\| u_visual_options\.w < -1\.5\) \? ([0-9.]+) "',
+    presenter,
 )
 require(
     len(copy_frame) == 1

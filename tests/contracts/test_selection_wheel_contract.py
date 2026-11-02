@@ -38,7 +38,7 @@ require(
 )
 require(
     mouse.index("if (disruptor_selection_wheel_frame())")
-    < mouse.index("if ((!g_mouse.enabled && !pad) || !sdl_window) return;")
+    < mouse.index("if ((!g_mouse.enabled && !pad) || !sdl_window) {")
     and "press = disruptor_selection_wheel_filter_press(press);" in mouse,
     "wheels must read the final input sample even with modern controls off, and prevent later selector injection",
 )

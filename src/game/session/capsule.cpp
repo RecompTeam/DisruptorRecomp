@@ -16,10 +16,12 @@
 #include <iterator>
 #include <string>
 #include <system_error>
+#include <utility>
 #include <vector>
 
 #ifndef DISRUPTOR_CAPSULE_NO_HOST
 #include "gpu.h"
+#include "gpu_presentation.h"
 #include "interrupts.h"
 #include "overlay_api.h"
 #include "psx_cycles.h"
@@ -36,20 +38,28 @@ extern "C" int psx_netplay_active(void);
 extern "C" int gl_renderer_snap_shown(int width);
 extern "C" void gl_renderer_snap_cancel(void);
 extern "C" int gl_renderer_snap_taken(unsigned char *rgb, int room, int *width, int *height);
+extern "C" int gl_renderer_snap_taken_sequence(void);
+extern "C" void gl_renderer_shown_log_begin(uint64_t first, uint64_t period);
+extern "C" void gl_renderer_shown_log_end(void);
+extern "C" int gl_renderer_shown_log_take(PsxShownPicture *out, int room, unsigned *lost);
+extern "C" uint64_t gl_renderer_shown_captures(void);
+extern "C" int gl_renderer_shown_script(const PsxShownPicture *pictures, int count, uint64_t first, uint64_t period);
+extern "C" void gl_renderer_shown_script_counts(unsigned *shown, unsigned *missed, unsigned *late, unsigned *timeouts, unsigned *left);
 #endif
 
 namespace disruptor::capsule {
 namespace {
 
-constexpr char kMagic[8] = {'D', 'C', 'A', 'P', 'S', 'U', 'L', '3'};
-constexpr size_t kFrameBytes = 27, kHeadBytes = sizeof(kMagic) + 4 + 8;
+constexpr char kMagic[8] = {'D', 'C', 'A', 'P', 'S', 'U', 'L', '4'};
+constexpr size_t kFrameBytes = 35, kHeadBytes = sizeof(kMagic) + 4 + 8;
 
-/* A frame of version 1 has no second byte write, one of version 2 no weapon list. */
+/* A frame of version 1 has no second byte write, one of version 2 no weapon list, one of version 3 no turn remainder or presenter count. */
 size_t frame_bytes_of(char version) {
     switch (version) {
     case '1': return 21;
     case '2': return 26;
-    case '3': return kFrameBytes;
+    case '3': return 27;
+    case '4': return kFrameBytes;
     default: return 0;
     }
 }
@@ -82,6 +92,10 @@ std::string encode(const std::vector<Frame> &frames, uint64_t first_cycle) {
         put(out, frame.byte2_at, 4);
         put(out, frame.byte2, 1);
         put(out, frame.list, 1);
+        uint32_t residual = 0;
+        std::memcpy(&residual, &frame.residual, sizeof(residual));
+        put(out, residual, 4);
+        put(out, frame.captures, 4);
     }
     return out;
 }
@@ -111,8 +125,88 @@ bool decode(std::string_view bytes, std::vector<Frame> &frames, uint64_t &first_
             frame.byte2 = static_cast<uint8_t>(take(bytes, at + 25, 1));
         }
         if (frame_bytes > 26) frame.list = static_cast<uint8_t>(take(bytes, at + 26, 1));
+        if (frame_bytes > 27) {
+            const auto residual = static_cast<uint32_t>(take(bytes, at + 27, 4));
+            std::memcpy(&frame.residual, &residual, sizeof(residual));
+            frame.captures = static_cast<uint32_t>(take(bytes, at + 31, 4));
+        }
     }
     return true;
+}
+
+std::string shown_list(const std::vector<Shown> &pictures) {
+    std::string out = "sequence,frame,kind,alpha,width,height\n";
+    char line[96];
+    for (const Shown &picture : pictures) {
+        std::snprintf(line, sizeof(line), "%u,%u,%u,%.9g,%u,%u\n", static_cast<unsigned>(picture.sequence), static_cast<unsigned>(picture.frame),
+                      static_cast<unsigned>(picture.kind), static_cast<double>(picture.alpha), static_cast<unsigned>(picture.width),
+                      static_cast<unsigned>(picture.height));
+        out += line;
+    }
+    return out;
+}
+
+bool shown_decode(std::string_view text, std::vector<Shown> &pictures) {
+    constexpr std::string_view head = "sequence,frame,kind,alpha,width,height\n";
+    std::vector<Shown> read;
+    pictures.clear();
+    if (text.substr(0, head.size()) != head) return false;
+    for (size_t at = head.size(); at < text.size();) {
+        const size_t end = text.find('\n', at);
+        if (end == std::string_view::npos) return false;
+        const std::string line(text.substr(at, end - at));
+        unsigned sequence = 0, frame = 0, kind = 0, width = 0, height = 0;
+        double alpha = 0.0;
+        int used = 0;
+        if (std::sscanf(line.c_str(), "%u,%u,%u,%lf,%u,%u%n", &sequence, &frame, &kind, &alpha, &width, &height, &used) != 6 ||
+            static_cast<size_t>(used) != line.size() || kind > 1u || !(alpha >= 0.0 && alpha <= 1.0) || width > 65535u || height > 65535u)
+            return false;
+        if (!read.empty() && (sequence <= read.back().sequence || frame < read.back().frame)) return false;
+        read.push_back({sequence, frame, static_cast<float>(alpha), static_cast<uint16_t>(width), static_cast<uint16_t>(height),
+                            static_cast<uint8_t>(kind)});
+        at = end + 1;
+    }
+    pictures = std::move(read);
+    return true;
+}
+
+std::string marks_list(const std::vector<Mark> &marks) {
+    std::string out = "mark,frame,picture,width,height\n";
+    char line[96];
+    for (size_t number = 0; number < marks.size(); ++number) {
+        std::snprintf(line, sizeof(line), "%zu,%u,%lld,%u,%u\n", number, static_cast<unsigned>(marks[number].frame),
+                      static_cast<long long>(marks[number].picture), static_cast<unsigned>(marks[number].width), static_cast<unsigned>(marks[number].height));
+        out += line;
+    }
+    return out;
+}
+
+std::string mark_name(uint32_t number) {
+    char name[32];
+    std::snprintf(name, sizeof(name), "mark_%03u.ppm", static_cast<unsigned>(number));
+    return name;
+}
+
+Verdict judge(const std::vector<Frame> &recorded, const std::vector<uint64_t> &seen) {
+    Verdict verdict;
+    size_t apart = 0, last_compared = 0;
+    for (size_t index = 0; index < seen.size() && index < recorded.size(); ++index) {
+        if (recorded[index].memory == 0u) {
+            ++verdict.scripted;
+            continue;
+        }
+        ++verdict.compared;
+        last_compared = index;
+        if (seen[index] == recorded[index].memory) {
+            ++verdict.same;
+            verdict.last_same = index;
+            apart = 0;
+        } else {
+            verdict.longest_apart = std::max(verdict.longest_apart, ++apart);
+        }
+    }
+    verdict.in_step = verdict.same != 0 && verdict.last_same + kInStep > last_compared;
+    return verdict;
 }
 
 uint64_t digest(const uint8_t *bytes, size_t size) {
@@ -310,10 +404,15 @@ namespace {
 namespace fs = std::filesystem;
 constexpr uint32_t kWeaponInHand = 0x80077627u;
 using disruptor::capsule::Frame;
+using disruptor::capsule::Mark;
+using disruptor::capsule::Shown;
 
 constexpr size_t kRamBytes = 0x200000;
 constexpr uint32_t kVBlankCycles = 564480u;  /* VBLANK_CYCLES of the framework's interrupts.c */
-constexpr size_t kSettle = 120, kInStep = 60, kLongest = 60 * 60 * 10;  /* ten minutes at 60 VBlanks a second, then the recording ends itself */
+constexpr size_t kSettle = 120, kLongest = 60 * 60 * 10;  /* ten minutes at 60 VBlanks a second, then the recording ends itself */
+constexpr uint32_t kCameraZ = 0x800775C8u, kCameraX = 0x800775CCu, kCameraHeight = 0x800775D0u, kYaw = 0x80077624u;
+constexpr int kMarkWidth = 3840;
+constexpr size_t kMarkWait = 120;  /* a mark's picture comes a VBlank or two later: two seconds is a failure */
 
 fs::path from_utf8(const char *text) { return fs::path(std::u8string(text, text + std::strlen(text))); }
 
@@ -349,6 +448,18 @@ struct Capsule {
     float load_pitch = 0.0f; /* the look up or down its recording began with, which no state holds */
     uint32_t previews = 0;   /* pictures kept for the list so far */
     bool preview_asked = false;
+    std::vector<Shown> shown;        /* what reached the screen while recording, or what a replay is to present again */
+    uint64_t shown_base = 0;         /* the presenter's count of game frames when the recording or replay began */
+    unsigned shown_lost = 0;
+    std::vector<Mark> marks;
+    bool mark_asked = false;
+    std::vector<unsigned char> mark_pixels;
+    size_t mark_waited = 0;          /* VBlanks the mark's picture has been waited for */
+    bool settings_kept = false;      /* the settings were copied as the recording began */
+    bool presented_whole = true;     /* a replay as shown presented every picture it could reach */
+    bool as_shown = false;           /* the replay presents the recorded pictures instead of its own */
+    fs::path pose;                   /* where a replay writes the camera at each frame */
+    std::string poses;
     std::vector<unsigned char> preview = std::vector<unsigned char>(disruptor::capsule::kPreviewWidth * disruptor::capsule::kPreviewWidth * 3u);
 
     Capsule() {
@@ -364,6 +475,14 @@ struct Capsule {
             std::exit(2);
         }
         if (const char *out = std::getenv("PSX_DISRUPTOR_CAPSULE_FRAMES"); out && out[0]) pictures = from_utf8(out);
+        if (const char *out = std::getenv("PSX_DISRUPTOR_CAPSULE_POSE"); out && out[0]) pose = from_utf8(out);
+        if (const char *asked = std::getenv("PSX_DISRUPTOR_CAPSULE_AS_SHOWN"); asked && asked[0] == '1') {
+            std::ifstream list(played / disruptor::capsule::kShownFile, std::ios::binary);
+            const std::string listed((std::istreambuf_iterator<char>(list)), {});
+            as_shown = disruptor::capsule::shown_decode(listed, shown) && !shown.empty();
+            if (!as_shown) std::fprintf(stderr, "disruptor: capsule: %s holds no readable %s, the replay presents its own pictures\n", replay_of,
+                                        disruptor::capsule::kShownFile);
+        }
         replay = Replay::kAsked;
     }
 };
@@ -395,6 +514,22 @@ bool write(const fs::path &path, const std::string &bytes) {
 
 uint64_t memory_now() { return disruptor::capsule::digest(memory_get_ram_ptr(), kRamBytes); }
 
+int32_t ram_word(uint32_t address) {
+    int32_t word = 0;
+    std::memcpy(&word, memory_get_ram_ptr() + (address & (kRamBytes - 1u)), sizeof(word));
+    return word;
+}
+
+/* The pictures the presenter logged since the last call join the recording's list. */
+void take_shown() {
+    Capsule &capsule = g_capsule;
+    PsxShownPicture taken[256];
+    for (int count; (count = gl_renderer_shown_log_take(taken, 256, &capsule.shown_lost)) > 0;)
+        for (int index = 0; index < count; ++index)
+            capsule.shown.push_back({taken[index].sequence, taken[index].frame, taken[index].alpha, taken[index].width, taken[index].height,
+                                     taken[index].kind});
+}
+
 /* The open frame gets what the last VBlank left in the pads and wrote into the game. */
 void close_frame() {
     Capsule &capsule = g_capsule;
@@ -406,6 +541,9 @@ void close_frame() {
     capsule.open.byte2 = capsule.notes.byte2;
     capsule.open.list = capsule.notes.list;
     capsule.open.pitch = static_cast<float>(disruptor_mouse_vertical_pitch());
+    capsule.open.residual = capsule.notes.residual;
+    capsule.open.captures = static_cast<uint32_t>(gl_renderer_shown_captures() - capsule.shown_base);
+    take_shown();
     capsule.recorded.push_back(capsule.open);
     capsule.notes = Frame{};
 }
@@ -441,26 +579,69 @@ void keep_preview() {
         ++capsule.previews;
 }
 
+/* The picture a mark asked for is kept with the number of the picture it was read from. */
+void keep_mark() {
+    Capsule &capsule = g_capsule;
+    int width = 0, height = 0;
+    if (!capsule.mark_asked) return;
+    if (!gl_renderer_snap_taken(capsule.mark_pixels.data(), static_cast<int>(capsule.mark_pixels.size()), &width, &height)) {
+        if (++capsule.mark_waited < kMarkWait) return;
+        gl_renderer_snap_cancel();  /* never taken, or larger than the room kept for it: the mark keeps no picture */
+        capsule.mark_asked = false;
+        say("MARK NOT saved");
+        return;
+    }
+    capsule.mark_asked = false;
+    Mark &mark = capsule.marks.back();
+    if (!write(capsule.made / disruptor::capsule::mark_name(static_cast<uint32_t>(capsule.marks.size() - 1)),
+               disruptor::capsule::preview(capsule.mark_pixels.data(), static_cast<uint32_t>(width), static_cast<uint32_t>(height)))) {
+        say("MARK NOT saved");
+        return;
+    }
+    mark.picture = gl_renderer_snap_taken_sequence();
+    mark.width = static_cast<uint32_t>(width);
+    mark.height = static_cast<uint32_t>(height);
+    say("MARK");
+}
+
+/* The settings as the recording begins: a replay runs with these. */
+bool keep_settings() {
+    std::error_code failed;
+    const char *settings = psx_host_user_settings_path();
+    if (!settings || !fs::exists(from_utf8(settings), failed)) return false;
+    fs::copy_file(from_utf8(settings), g_capsule.made / "settings.toml", fs::copy_options::overwrite_existing, failed);
+    return !failed;
+}
+
 /* Writes what was recorded. Its last frame is there for its memory alone: a replay ends on it. */
 void store_recording(const char *why) {
     Capsule &capsule = g_capsule;
-    keep_preview();
+    keep_mark();
+    if (!capsule.mark_asked) keep_preview();
     gl_renderer_snap_cancel();
-    capsule.preview_asked = false;
-    char about[256];
-    std::snprintf(about, sizeof(about), "frames = %zu\ncodegen_hash = \"0x%08X\"\nentry_pc = \"0x%08X\"\nended = \"%s\"\n",
-                  capsule.recorded.size(), static_cast<unsigned>(PSX_OVERLAY_CODEGEN_HASH), static_cast<unsigned>(capsule.entry), why);
+    capsule.preview_asked = capsule.mark_asked = false;
+    gl_renderer_shown_log_end();
+    take_shown();
+    if (capsule.shown_lost != 0)
+        std::fprintf(stderr, "disruptor: capsule: %u shown pictures were lost, a full log could not keep them\n", capsule.shown_lost);
+    char about[512];
+    std::snprintf(about, sizeof(about),
+                  "frames = %zu\ncodegen_hash = \"0x%08X\"\nentry_pc = \"0x%08X\"\nended = \"%s\"\npresented = %zu\nlost = %u\nmarks = %zu\n",
+                  capsule.recorded.size(), static_cast<unsigned>(PSX_OVERLAY_CODEGEN_HASH), static_cast<unsigned>(capsule.entry), why,
+                  capsule.shown.size(), capsule.shown_lost, capsule.marks.size());
     std::error_code failed;
-    const char *settings = psx_host_user_settings_path();
-    if (settings && fs::exists(from_utf8(settings), failed))
-        fs::copy_file(from_utf8(settings), capsule.made / "settings.toml", fs::copy_options::overwrite_existing, failed);
+    const bool settings = capsule.settings_kept;
     const bool input = write(capsule.made / "input.bin", disruptor::capsule::encode(capsule.recorded, capsule.first_cycle));
-    const bool stored = write(capsule.made / "capsule.toml", about) && input && !failed;
+    const bool lists = (capsule.shown.empty() || write(capsule.made / disruptor::capsule::kShownFile, disruptor::capsule::shown_list(capsule.shown))) &&
+                       (capsule.marks.empty() || write(capsule.made / disruptor::capsule::kMarksFile, disruptor::capsule::marks_list(capsule.marks)));
+    const bool stored = write(capsule.made / "capsule.toml", about) && input && settings && lists;
     if (stored)
         std::fprintf(stderr, "disruptor: capsule: %zu frames in %s (%s)\n", capsule.recorded.size(), utf8(capsule.made).c_str(), why);
     else
         std::fprintf(stderr, "disruptor: capsule: the capsule in %s could NOT be written whole (%s)\n", utf8(capsule.made).c_str(), why);
     capsule.recorded.clear();
+    capsule.shown.clear();
+    capsule.marks.clear();
     capsule.recording = Recording::kOff;
     say(stored ? "REC saved" : "REC NOT saved");
     if (capsule.scripted == 0) return;
@@ -496,10 +677,23 @@ void write_picture(size_t number) {
 
 [[noreturn]] void finish_replay() {
     Capsule &capsule = g_capsule;
-    const bool in_step = capsule.same != 0 && capsule.last_same + kInStep >= capsule.replayed.size();
-    std::fprintf(stderr, "disruptor: capsule: replayed %zu frames and %s: the game's memory is the recording's at %zu of them, last at frame %zu, run %016llx\n",
-                 capsule.replayed.size(), in_step ? "stayed in step with the recording" : "LEFT the recording", capsule.same, capsule.last_same,
-                 static_cast<unsigned long long>(capsule.run));
+    if (capsule.as_shown) {
+        unsigned shown = 0, missed = 0, late = 0, timeouts = 0, left = 0;
+        gl_renderer_shown_script_counts(&shown, &missed, &late, &timeouts, &left);
+        capsule.presented_whole = late == 0 && timeouts == 0;
+        std::fprintf(stderr,
+                     "disruptor: capsule: presented %u of the %zu recorded pictures, %u could not be (%u after the first), %u waits given up, "
+                     "%u still to come: %s\n",
+                     shown, capsule.shown.size(), missed, late, timeouts, left, capsule.presented_whole ? "as shown" : "NOT as shown");
+    }
+    const disruptor::capsule::Verdict verdict = disruptor::capsule::judge(capsule.replayed, capsule.seen);
+    const bool in_step = verdict.in_step;
+    std::fprintf(stderr,
+                 "disruptor: capsule: replayed %zu frames and %s: the game's memory is the recording's at %zu of the %zu it holds, last at frame %zu, "
+                 "%zu apart at most in a row, %zu frames of a script; run %016llx\n",
+                 capsule.replayed.size(), in_step ? "stayed in step with the recording" : "LEFT the recording", verdict.same, verdict.compared,
+                 verdict.last_same, verdict.longest_apart, verdict.scripted, static_cast<unsigned long long>(capsule.run));
+    if (!capsule.pose.empty() && !write(capsule.pose, "frame,x,z,height,yaw,captures\n" + capsule.poses)) ++capsule.unwritten;
     if (!capsule.pictures.empty()) {
         std::string lines;
         char line[64];
@@ -513,12 +707,18 @@ void write_picture(size_t number) {
             std::fprintf(stderr, "disruptor: capsule: %zu of the files asked for in %s could NOT be written\n", capsule.unwritten, utf8(capsule.pictures).c_str());
     }
     std::fflush(nullptr);
-    std::_Exit(!in_step ? 3 : capsule.unwritten != 0 ? 2 : 0);  /* the run ends inside a VBlank on the game's thread: nothing is left to save */
+    std::_Exit(!in_step ? 3 : capsule.unwritten != 0 ? 2 : !capsule.presented_whole ? 4 : 0);  /* the run ends inside a VBlank on the game's thread: nothing is left to save */
 }
 
 void replay_frame() {
     Capsule &capsule = g_capsule;
     const Frame &frame = capsule.replayed[capsule.at];
+    if (!capsule.pose.empty()) {
+        char line[96];
+        std::snprintf(line, sizeof(line), "%zu,%d,%d,%d,%u,%lld\n", capsule.at, ram_word(kCameraX), ram_word(kCameraZ), ram_word(kCameraHeight),
+                      static_cast<unsigned>(memory_get_ram_ptr()[kYaw & (kRamBytes - 1u)]), static_cast<long long>(gl_renderer_shown_captures() - capsule.shown_base));
+        capsule.poses += line;
+    }
     capsule.seen.push_back(memory_now());
     capsule.run = (capsule.run ^ capsule.seen.back()) * 0x100000001B3ull;
     capsule.run = (capsule.run ^ psx_cycle_count) * 0x100000001B3ull;
@@ -590,6 +790,31 @@ extern "C" void disruptor_capsule_note_byte(uint32_t address, uint8_t value) {
 }
 
 extern "C" void disruptor_capsule_note_list(uint8_t list) { g_capsule.notes.list = list; }
+
+extern "C" void disruptor_capsule_note_residual(double yaw) { g_capsule.notes.residual = static_cast<float>(yaw); }
+
+extern "C" int disruptor_capsule_replay_residual(double *yaw) {
+    const Capsule &capsule = g_capsule;
+    if (capsule.replay != Replay::kOn || capsule.at == 0 || !yaw) return 0;
+    *yaw = static_cast<double>(capsule.replayed[capsule.at - 1].residual);
+    return 1;
+}
+
+extern "C" int disruptor_capsule_mark(int repeat) {
+    Capsule &capsule = g_capsule;
+    if (capsule.recording != Recording::kOn) return 0;
+    if (repeat || capsule.mark_asked) return 1;
+    if (capsule.preview_asked) {
+        gl_renderer_snap_cancel();
+        capsule.preview_asked = false;
+    }
+    capsule.mark_pixels.resize(static_cast<size_t>(kMarkWidth) * 2160u * 3u);
+    if (!gl_renderer_snap_shown(kMarkWidth)) return 1;
+    capsule.marks.push_back({static_cast<uint32_t>(capsule.recorded.size()), -1, 0u, 0u});
+    capsule.mark_asked = true;
+    capsule.mark_waited = 0;
+    return 1;
+}
 
 extern "C" void disruptor_capsule_state_loaded(void) {
     if (!g_capsule.loading.empty()) g_capsule.load_done = true;
@@ -671,10 +896,16 @@ extern "C" void disruptor_capsule_before_input(void) {
         std::fprintf(stderr, "disruptor: capsule: recording into %s\n", utf8(capsule.made).c_str());
         gl_renderer_snap_cancel();
         capsule.previews = 0;
-        capsule.preview_asked = false;
+        capsule.preview_asked = capsule.mark_asked = false;
+        capsule.shown.clear();
+        capsule.marks.clear();
+        capsule.shown_lost = 0;
+        capsule.settings_kept = keep_settings();
         capsule.recording = Recording::kOn;
         say("REC");
         capsule.first_cycle = psx_get_cycle_count();
+        gl_renderer_shown_log_begin(capsule.first_cycle, kVBlankCycles);
+        capsule.shown_base = gl_renderer_shown_captures();
         open_frame();
         if (disruptor_baton_held_by_choice()) disruptor_capsule_note_byte(kWeaponInHand, 0u);  /* the state forgets the choice */
         disruptor_weapon_list_state_loaded();  /* and the list a key showed, which its replay cannot know */
@@ -688,8 +919,10 @@ extern "C" void disruptor_capsule_before_input(void) {
             finish_recording(capsule.scripted != 0 ? "the asked length" : "the longest recording");
             break;
         }
-        keep_preview();
-        if (disruptor::capsule::preview_due(capsule.recorded.size()) && gl_renderer_snap_shown(static_cast<int>(disruptor::capsule::kPreviewWidth)))
+        keep_mark();
+        if (!capsule.mark_asked) keep_preview();
+        if (!capsule.mark_asked && disruptor::capsule::preview_due(capsule.recorded.size()) &&
+            gl_renderer_snap_shown(static_cast<int>(disruptor::capsule::kPreviewWidth)))
             capsule.preview_asked = true;
         close_frame();
         open_frame();
@@ -729,6 +962,15 @@ extern "C" void disruptor_capsule_after_input(void) {
             std::_Exit(2);
         }
         capsule.replay = Replay::kOn;
+        capsule.shown_base = gl_renderer_shown_captures();
+        if (capsule.as_shown) {
+            std::vector<PsxShownPicture> script;
+            for (const Shown &picture : capsule.shown) script.push_back({picture.sequence, picture.frame, picture.alpha, picture.width, picture.height, picture.kind});
+            if (!gl_renderer_shown_script(script.data(), static_cast<int>(script.size()), capsule.played_first_cycle, kVBlankCycles)) {
+                std::fprintf(stderr, "disruptor: capsule: the presenter takes no script, the replay presents its own pictures\n");
+                capsule.as_shown = false;
+            }
+        }
     }
     if (capsule.replay == Replay::kOn) replay_frame();
 }

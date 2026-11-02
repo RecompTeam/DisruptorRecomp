@@ -73,6 +73,16 @@ void disruptor_weapon_list_show(void) { ++g_list_shows; }
 int g_psionic_list_shows = 0;
 void disruptor_psionic_list_show(void) { ++g_psionic_list_shows; }
 
+double g_noted_residual = -9.0;
+bool g_replay_gives = false;
+double g_replayed_residual = 0.0;
+void disruptor_capsule_note_residual(double yaw) { g_noted_residual = yaw; }
+int disruptor_capsule_replay_residual(double *yaw) {
+    if (!g_replay_gives) return 0;
+    *yaw = g_replayed_residual;
+    return 1;
+}
+
 void disruptor_capsule_note_byte(std::uint32_t address, std::uint8_t value) {
     g_noted_at = address;
     g_noted = value;
@@ -1044,6 +1054,13 @@ void test_high_precision_camera_residual() {
     mouse_aim_frame();
     expect_close(g_camera_yaw_residual, -0.04,
                  "presentation residual is continuous across byte boundary");
+    expect_close(g_noted_residual, -0.04, "a capsule keeps the remainder the picture is turned by");
+    g_replay_gives = true;
+    g_replayed_residual = 0.31;
+    mouse_aim_frame();
+    expect_close(g_camera_yaw_residual, 0.31, "a capsule's replay turns the picture by its recording's remainder");
+    expect_close(g_noted_residual, 0.31, "and a recording made inside the replay keeps that one");
+    g_replay_gives = false;
 
     g_buttons = SDL_BUTTON_MMASK;
     mouse_aim_frame();

@@ -1,5 +1,5 @@
 diff --git a/runtime/include/gpu_render.h b/runtime/include/gpu_render.h
-index 4953270aaccd4c606f5320f949befcdc544261e6..30610542cfede3e5c9e653095d36106c590f828e 100644
+index 4953270aaccd4c606f5320f949befcdc544261e6..9b9acb9ca25be4448d807a147613298b05ad6b6c 100644
 --- a/runtime/include/gpu_render.h
 +++ b/runtime/include/gpu_render.h
 @@ -25,6 +25,7 @@
@@ -10,7 +10,7 @@ index 4953270aaccd4c606f5320f949befcdc544261e6..30610542cfede3e5c9e653095d36106c
  
  /* Lifecycle / global state */
  void gr_init(uint16_t *vram);
-@@ -38,6 +39,42 @@
+@@ -38,6 +39,45 @@
  void gr_set_mask_bits(int set_bit, int check_bit);
  void gr_set_texture_window(uint32_t raw);
  void gr_set_color_modulation(int r, int g, int b, int raw_texture);
@@ -18,6 +18,9 @@ index 4953270aaccd4c606f5320f949befcdc544261e6..30610542cfede3e5c9e653095d36106c
 +/* Presentation-only geometry: the authoritative framebuffer stays integer, a backend uses 16.16 and yaw only for the display mirror. */
 +void gr_set_geometry_correction(int enabled);
 +void gr_set_world_triangle(int world);
++void gr_set_column_band(int low, int high, int canonical);
++void gr_set_sky_cells(int rows, int columns, int period, int focal, const int32_t *cells);
++int gr_has_column_band(void);
 +void gr_set_precise_triangle(int enabled,
 +                             int32_t x0, int32_t y0,
 +                             int32_t x1, int32_t y1,
@@ -53,7 +56,7 @@ index 4953270aaccd4c606f5320f949befcdc544261e6..30610542cfede3e5c9e653095d36106c
  
  /* Primitives */
  void gr_fill_rect(int x, int y, int w, int h, uint16_t color);
-@@ -100,6 +137,10 @@
+@@ -100,6 +140,10 @@
  void gr_wide_clear(int base_x, int y, int h, uint16_t color);
  /* sides: bit 0 = left synthetic margin, bit 1 = right. */
  void gr_wide_clear_margins(int base_x, int y, int h, uint16_t color, int sides);
@@ -64,12 +67,14 @@ index 4953270aaccd4c606f5320f949befcdc544261e6..30610542cfede3e5c9e653095d36106c
  int  gr_wide_dump_full(uint32_t *out, int cap_pixels, int *ow, int *oh, int base_x);
  int  gr_render_wide_display(uint32_t *out, int pitch, int base_x,
                              int disp_y, int disp_h);
-@@ -119,6 +160,27 @@
+@@ -119,6 +163,29 @@
      void (*set_mask_bits)(int set_bit, int check_bit);
      void (*set_texture_window)(uint32_t raw);
      void (*set_color_modulation)(int r, int g, int b, int raw_texture);
 +    void (*set_geometry_correction)(int enabled);
 +    void (*set_world_triangle)(int world);
++    void (*set_column_band)(int low, int high, int canonical);
++    void (*set_sky_cells)(int rows, int columns, int period, int focal, const int32_t *cells);
 +    void (*set_precise_triangle)(int enabled,
 +                                 int32_t x0, int32_t y0,
 +                                 int32_t x1, int32_t y1,
@@ -92,7 +97,7 @@ index 4953270aaccd4c606f5320f949befcdc544261e6..30610542cfede3e5c9e653095d36106c
      void (*fill_rect)(int x, int y, int w, int h, uint16_t color);
      void (*copy_rect)(int src_x, int src_y, int dst_x, int dst_y, int w, int h);
      void (*draw_flat_triangle)(int x0, int y0, int x1, int y1, int x2, int y2,
-@@ -169,6 +231,8 @@
+@@ -169,6 +236,8 @@
      void (*wide_disable_target)(void);
      void (*wide_clear)(int base_x, int y, int h, uint16_t color);
      void (*wide_clear_margins)(int base_x, int y, int h, uint16_t color, int sides);
@@ -101,7 +106,7 @@ index 4953270aaccd4c606f5320f949befcdc544261e6..30610542cfede3e5c9e653095d36106c
      int  (*render_wide_display)(uint32_t *out, int pitch, int base_x,
                                  int disp_y, int disp_h);
      /* Dump the ENTIRE wide compositor surface for base_x (all double-buffer
-@@ -176,6 +240,7 @@
+@@ -176,6 +245,7 @@
       * pixel count, writes width/height to ow/oh. NULL if unsupported. */
      int  (*wide_dump_full)(uint32_t *out, int cap_pixels, int *ow, int *oh,
                             int base_x);

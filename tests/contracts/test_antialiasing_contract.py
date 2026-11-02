@@ -440,4 +440,16 @@ require(
     "with multisampling and no sample shading a pixel is shaded once: its texture place is taken inside the polygon, "
     "not at a pixel centre outside it, which read the texel past a sprite's edge and drew a line along it",
 )
+hr_end = renderer[renderer.index("static void hr_end(void) {") :]
+hr_end = hr_end[: hr_end.index("\n}\n")]
+present = renderer[renderer.index("void gl_renderer_present(const uint32_t *pixels") :]
+blank = renderer[renderer.index("void gl_renderer_present_blank(void) {") :]
+require(
+    "BindFramebuffer" not in hr_end
+    and present.index("    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, 0);\n")
+    < present.index("glClear(GL_COLOR_BUFFER_BIT)")
+    and blank.index("    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, 0);\n") < blank.index("glClear(GL_COLOR_BUFFER_BIT)"),
+    "a pass leaves its frame buffer bound, as binding the window after every batch cost 40 us a batch, and the two "
+    "presents that draw into the window without a bind of their own bind it first",
+)
 print("Disruptor anti-aliasing source contract: PASS")

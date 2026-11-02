@@ -287,19 +287,23 @@ require(
 
 writes = re.findall(r"psx_mod_write_word\(([^,]+),", source)
 require(
-    sorted(writes) == ["address"] * 4 + ["kFadeStart", "kFadeStart", "kFarDistance", "kFarDistance", "kVisibleEnd"]
+    sorted(writes)
+    == ["address"] * 5 + ["kFadeStart", "kFadeStart", "kFarDistance", "kFarDistance"] + ["kVisibleEnd"] * 2
     and body(source, "void restore_distances").count("psx_mod_read_word(") == 2
-    and body(source, "void close_spans").count("psx_mod_write_word(") == 1
+    and body(source, "void close_spans").count("psx_mod_write_word(") == 2
     and body(source, "void show_objects").count("psx_mod_write_word(") == 1
-    and body(source, "void open_spans").count("psx_mod_write_word(") == 1
+    and body(source, "void open_spans").count("psx_mod_write_word(") == 2
     and body(source, "void keep_game_rooms").count("psx_mod_write_word(") == 2,
     "far rendering writes only the two distance globals, the visible list and the object lists of rooms only the wider "
-    "walk reached, and reads each before giving it back (the behaviour is the unit test's)",
+    "walk reached or a portal beside the camera added, and reads each before giving it back (the behaviour is the unit "
+    "test's)",
 )
 require(
-    re.findall(r"psx_mod_write_(?:byte|half)\(", source) == ["psx_mod_write_byte("] * 2
+    re.findall(r"psx_mod_write_(?:byte|half)\(", source) == ["psx_mod_write_byte("] * 4
     and body(source, "void relist_room").count("psx_mod_write_byte(") == 1
-    and body(source, "void face_portal").count("psx_mod_write_byte(") == 1,
+    and body(source, "void face_portal").count("psx_mod_write_byte(") == 1
+    and body(source, "void close_spans").count("psx_mod_write_byte(") == 1
+    and body(source, "void open_spans").count("psx_mod_write_byte(") == 1,
     "the only byte far rendering writes is a room's place in the visible list, and it gives that back",
 )
 host = read("src/game/host.cpp")
@@ -358,7 +362,7 @@ require(
     and "static uint32_t gp0_cmd_buf[16];" in gpu
     and "    return disruptor_far_rendering_packet_fraction(resolved_packet, signature);\n" in host
     and "    const int packet_raw = packet_fade >= 0 ? 2 | (packet_fade << 2) : ctx_hud_glyph() << 2;\n" in renderer
-    and "vp[13] = (float)((rawtex ? 1 : 0) | packet_raw);" in renderer
+    and "vp[13] = (float)((rawtex ? 1 : 0) | packet_raw | sky_raw);" in renderer
     and '"  } else if ((v_raw & 2) != 0) level = float(v_raw >> 2)/256.0;' in renderer
     and '"  if ((v_raw & 1) == 0) rgb = clamp(rgb * v_col.rgb * 2.0, 0.0, 1.0);\\n"' in renderer
     and "v_raw == 0" not in renderer,
@@ -435,5 +439,16 @@ if image_path.exists():
     for address, instruction in retail.items():
         found = struct.unpack_from("<I", image, 0x800 + address - 0x80011200)[0]
         require(found == instruction, f"retail mesh renderer word changed at 0x{address:08X}")
+
+upload = gpu[gpu.index("static void gp0_commit_cpu_to_vram(void) {") :]
+upload = upload[: upload.index("\n}\n")]
+require(
+    "psx_texture_row_fix(vram, (int)vram_write_x, (int)vram_write_y, (int)vram_write_w, (int)vram_write_h)" in upload
+    and "        psx_texture_row_fix(vbuf, 0, 0, VRAM_W, VRAM_H);\n        gr_vram_transfer_in(0, 0, VRAM_W, VRAM_H, vbuf);"
+    in read("psxrecomp/runtime/src/boot_state.c")
+    and "disruptor_unit_test(disruptor_gpu_texture_row tests/unit/gpu_texture_row_test.cpp RUNTIME_HEADERS)"
+    in read("CMakeLists.txt"),
+    "the wall texture's light first row is replaced at every upload to video memory and every loaded save state",
+)
 
 print("far rendering source/codegen contract: PASS")

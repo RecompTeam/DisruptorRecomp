@@ -1,8 +1,8 @@
 diff --git a/runtime/src/gpu_gl_renderer.c b/runtime/src/gpu_gl_renderer.c
-index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a8477490b409c2 100644
+index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4efcc960b5b54f2058abfff271bde9829cafebcf 100644
 --- a/runtime/src/gpu_gl_renderer.c
 +++ b/runtime/src/gpu_gl_renderer.c
-@@ -1,747 +1,1419 @@
+@@ -1,747 +1,1494 @@
 -/* gpu_gl_renderer.c — hardware OpenGL renderer backend.
 - *
 - * ARCHITECTURE (v2 — GPU-authoritative VRAM)
@@ -150,6 +150,8 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +#include "gpu_ws_frame_kind.h"
 +#include "gpu_ws_screen_tile.h"
 +#include "gpu_near_face.h"
++#include "gpu_presentation.h"
++#include "psx_cycles.h"
 +#include "host_ui.h"
 +#include "latency_ring.h"
 +
@@ -410,13 +412,16 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +static int s_rth_on = 0;
 +static int s_rthx_tagged = 0, s_rthx_backdrop = 0, s_rthx_flat = 0, s_rthx_fade = -1, s_rthx_glyph = 0;
 +static int32_t s_rthx_squash[2] = {1, 1};
++static int s_rthx_sky = 0;
 +static uint64_t s_rthx_presented = 0;  /* when the game's thread recorded the present being replayed */
++static uint64_t s_rthx_cycle = 0;      /* and the emulated clock then */
 +static inline int rth_replaying(void) { return s_rth_on && rt_on_render_thread(); }
 +static int ctx_prim_tagged(void);
 +static int ctx_prim_in_backdrop(void);
 +static int ctx_drawing_flat(void);
 +static int ctx_packet_fade(void);
 +static int ctx_hud_glyph(void);
++static int ctx_sky_fogged(void);
 +static int ctx_depth24(void);
 +static void ctx_x_squash(int32_t *num, int32_t *den);
 +static void gl_rth_acquire(const char *reason);
@@ -430,7 +435,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +    RTH_WIDE_CONFIGURE, RTH_WIDE_TARGET, RTH_WIDE_DISABLE, RTH_WIDE_CLEAR, RTH_WIDE_CLEAR_MARGINS, RTH_WIDE_COPY_FRAME,
 +    RTH_WIDE_COPY_ROWS, RTH_PRESENT_WIDE, RTH_PRESENT_VRAM, RTH_PRESENT_BLANK, RTH_EDGE_SKY, RTH_EDGE_DEPTH, RTH_FADE,
 +    RTH_FADE_POWER, RTH_FADE_BLOCKS, RTH_SSAO_FADE, RTH_HIDDEN_ROWS, RTH_INTERP_SUSPENDED, RTH_UI_SUSPENDED,
-+    RTH_DDGI_MISSION, RTH_INVALIDATE_PRESENT, RTH_SPRITE_CARD, RTH_SPRITE_GROUND
++    RTH_DDGI_MISSION, RTH_INVALIDATE_PRESENT, RTH_SPRITE_CARD, RTH_SPRITE_GROUND, RTH_COLUMN_BAND, RTH_SKY_CELLS
 +};
 +#define GL_RT_SYNC(reason) do { if (s_rth_on && !rt_on_render_thread()) gl_rth_acquire(reason); } while (0)
 +
@@ -631,7 +636,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +    double sum[GZ_COUNT];
 +} GpuZones;
 +static GpuZones s_gz[2];
-+/* The outermost passes' GPU spans of both contexts, for gl_renderer_gpu_busy_ms. */
++/* The game context's outermost passes' GPU spans, for gl_renderer_gpu_busy_ms. */
 +#define GZ_SPANS 4096
 +typedef struct { uint64_t t0, t1; } GpuSpan;
 +static GpuSpan s_gz_ring[GZ_SPANS];
@@ -672,7 +677,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +            p_glGetQueryObjectui64v(z->q[rd][i * 2 + 1], GL_QUERY_RESULT, &t1);
 +            if (t1 <= t0) continue;
 +            add[z->zone[rd][i]] += (double)(t1 - t0) / 1.0e6;
-+            if (!z->busy || !z->outer[rd][i] || z->zone[rd][i] == GZ_WAIT) continue;
++            if (context != 0 || !z->busy || !z->outer[rd][i] || z->zone[rd][i] == GZ_WAIT) continue;
 +            SDL_AtomicLock(&s_gz_lock);
 +            if (s_gz_head - s_gz_tail < GZ_SPANS) s_gz_ring[s_gz_head++ % GZ_SPANS] = (GpuSpan){t0, t1};
 +            SDL_AtomicUnlock(&s_gz_lock);
@@ -728,9 +733,10 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +    return on ? frames[0] + frames[1] : 0;
 +}
 +void gl_renderer_gpu_busy_enable(int enabled) { SDL_AtomicSet(&s_gz_busy_wanted, enabled != 0); }
-+/* Milliseconds the GPU spent in either context's outermost passes since the start, overlaps counted once: the contexts take
-+ * turns on one card and a pass of one spans the other's work. Spans older than half a second, or past the room, are
-+ * folded into the total, and a later span is cut where the folded time ends, so nothing counts twice. One reader. */
++/* Milliseconds the GPU spent in the game context's outermost passes since the start, overlaps counted once. The
++ * in-between presenter's passes are left out: the resolution answers to the game's own frames. Spans older than half a
++ * second, or past the room, are folded into the total, and a later span is cut where the folded time ends, so nothing
++ * counts twice. One reader. */
 +double gl_renderer_gpu_busy_ms(void) {
 +    static GpuSpan kept[GZ_SPANS];
 +    static int count = 0;
@@ -774,7 +780,8 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +    double ms = done_ms;
 +    for (int i = 0; i < count; i++) ms += (double)(kept[i].t1 - kept[i].t0) / 1.0e6;
 +    return ms;
-+}/* Native-wide mirror ABLATION (perf attribution, debug cmd gl_ws_ablate):
++}
++/* Native-wide mirror ABLATION (perf attribution, debug cmd gl_ws_ablate):
 + * 0 = normal, 1 = skip the whole mirror pass, 2 = full mirror state churn but no
 + * draw calls, 3 = mirror draws land in the hr FBO (no per-pass FBO rebind; wide
 + * margins go stale + hr gets garbage — perf probe only). */
@@ -1414,6 +1421,24 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +static float         s_next_flat_sides[2], s_flat_sides[2];     /* left, right of a flat picture's rectangle */
 +static int           s_sprite_x, s_sprite_y;
 +static PsxWsPlacedTile s_next_tile, s_tile;  /* the backdrop tile the next rectangle is, and the one being drawn */
++#define SKY_CELLS 96
++/* The level's panorama, told by the game: its cells in VRAM, its texels a turn and the world's focal. mode 0 draws the game's
++ * tiles as they are, 1 each pixel's texel as the game lays the panorama, 2 turned with the world (PSX_SKY_MAP). */
++typedef struct {
++    int mode, rows, columns, generation;
++    float texels_a_radian, focal;
++    int32_t cells[2 * SKY_CELLS];
++} SkyPanorama;
++static SkyPanorama s_sky;
++static int sky_drawn(const SkyPanorama *sky) { return sky->rows > 0 ? sky->mode : 0; }
++static int sky_mode_now(void) {
++    static int forced = -2;
++    if (forced == -2) {
++        const char *mode = getenv("PSX_SKY_MAP");
++        forced = mode ? atoi(mode) : -1;
++    }
++    return forced >= 0 ? forced : 1;  /* 2 turns the sky with the world: stretched 2.2x at the 16:9 edge, kept for a skybox */
++}
 +static int           s_next_tile_set = 0, s_tile_set = 0;
 +static float         s_next_near[3][3], s_near[3][3];  /* a near face's corners: place and w, see gpu_near_face.h */
 +static int           s_next_near_set = 0, s_near_set = 0, s_near_shader = 0;
@@ -1469,6 +1494,8 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 + * fixed and the optional exact-coverage tint cannot affect canonical output. */
 +static GLint s_geo_uVisual = -1, s_geo_uCamera = -1, s_geo_uVisualOptions = -1;
 +static GLint s_tex_uVisual = -1, s_tex_uCamera = -1, s_tex_uVisualOptions = -1;
++static GLint s_tex_uSky = -1, s_tex_uSkyFrame = -1, s_tex_uSkyCells = -1, s_tex_uSkyShape = -1;
++static int s_tex_sky_generation = -1;
 +static GLint s_tex_uFade = -1, s_tex_uFadeAt = -1, s_tex_uFadePower = -1, s_tex_uDissolve = -1, s_tex_uClear = -1;
 +static GLint s_tex_uFadeBlocks = -1, s_tex_uFadeBlockCount = -1;
 +/* Runtime controls (ws_backdrop_stretch debug command). */
@@ -1601,6 +1628,18 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +static int   s_grown_under = 1;
 +static int   s_tb_fillers = 0;   /* grown copies in the open batch */
 +static int   s_draw_filler = 0;  /* the batch being recorded for the in-between presenter holds grown copies */
++/* A polygon only the widened walk admits draws where nothing is drawn yet, by its depth among its own kind: its batch
++ * marks the samples still at the cleared depth in this stencil bit, draws within them and takes the mark back. */
++#define SUPPLEMENTAL_STENCIL 0x04
++#define HELD_BACK_WON_STENCIL 0x08  /* a held-back face's prepass won the sample */
++#define SUPPLEMENTAL_MARK_PASS -2.0f
++#define PAST_SPAN_MARK_PASS -3.0f  /* at 0.99999: behind every world depth, before the sky's */
++#define PAST_SPAN_COPY_PASS -4.0f  /* at 0.99999925: behind the sky's depth, before a copy's */
++static int   s_took_supplemental = 0;
++static int   s_tb_supp = 0;
++static int   s_supp_stencil = 0;  /* the draws of such a batch keep within the mark */
++static int   s_won_stencil = 0;   /* and the colours of a held-back one within its won samples */
++static int   s_draw_supp = 0;     /* the batch being recorded for the in-between presenter is such a batch */
 +/* What the mirror draws of a batch: 0 its polygons, between 0 and 1 its grown copies where nothing is drawn, 2 the outlines,
 + * -1 all of it as it comes. */
 +static float s_fill_pass = 0.0f;
@@ -1656,14 +1695,39 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 + * side. A free edge moves with the panorama (mark -2). An end of the game's span stays and slides its texture: marks -3
 + * for the left end and -4 for the right. */
 +static int tile_placed(void) { return s_geometry_correction && s_tile_set; }
-+static void tile_corner(int x, float u, float across, float *place, float *mark, float *slide, float *want) {
++/* The panorama for a program: the mode, its texels a radian, their ratio to the focal and the focal; where the projection's
++ * centre stands and its focal in the vertices' own units; the cells, sent again only when the table changed. */
++static void sky_uniforms(GLint sky, GLint frame, GLint cells, GLint shape, int *sent, const SkyPanorama *pano, float centre_x,
++                         float centre_y, float focal) {
++    const int mode = sky_drawn(pano);
++    p_glUniform4f(sky, (float)mode, pano->texels_a_radian, pano->focal > 0.0f ? pano->texels_a_radian / pano->focal : 0.0f, pano->focal);
++    p_glUniform4f(frame, centre_x, centre_y, focal, 0.0f);
++    if (*sent == pano->generation) return;
++    *sent = pano->generation;
++    p_glUniform2i(shape, pano->rows, pano->columns);
++    if (pano->rows > 0) p_glUniform2iv(cells, pano->rows * pano->columns, pano->cells);
++}
++
++/* The vertex shader's own test: a tile the pass does not draw keeps its texture's bounds. */
++static int sky_finds(const SkyPanorama *pano, float page_x, float page_y, float u0, float v0, float depth) {
++    if (sky_drawn(pano) <= 0 || (int)floorf(depth + 0.5f) != 1) return 0;
++    const int x = (int)floorf(page_x + 0.5f) + ((int)floorf(u0 + 0.5f) >> 1), y = (int)floorf(page_y + 0.5f) + (int)floorf(v0 + 0.5f);
++    for (int i = 0; i < pano->rows * pano->columns; ++i)
++        if (x >= pano->cells[2 * i] && x < pano->cells[2 * i] + 32 && y >= pano->cells[2 * i + 1] && y < pano->cells[2 * i + 1] + 60)
++            return 1;
++    return 0;
++}
++
++static void tile_corner(int x, float u, float across, int sky, float *place, float *mark, float *slide, float *want) {
 +    const int end = x == s_sprite_x ? 0 : 1;
 +    const float offset = end ? s_tile.right : s_tile.left;
 +    if (s_tile.pins & (end ? 2u : 1u)) {
 +        *place = (float)x;
 +        *mark = end ? -4.0f : -3.0f;
++        const int any = sky;  /* each pixel finds its texel in the cells: no column bounds the slide */
 +        *slide = psx_ws_screen_tile_slide(offset, s_tile.moved, s_tile.scale, end,
-+                                          psx_ws_screen_tile_room(u, s_tile.column, end), across > 1.0f ? across - 1.0f : 0.0f);
++                                          any ? 1.0e6f : psx_ws_screen_tile_room(u, s_tile.column, end),
++                                          any ? 1.0e6f : across > 1.0f ? across - 1.0f : 0.0f);
 +        *want = psx_ws_screen_tile_want(offset, s_tile.moved, s_tile.scale);
 +    } else {
 +        *place = (float)x + offset + s_tile.moved;
@@ -1718,6 +1782,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +    s_next_near_set = 0;
 +    if (s_near_set) memcpy(s_near, s_next_near, sizeof(s_near));
 +    const int filler = s_grown_under && exact && s_next_world == 2;
++    s_took_supplemental = !exact ? 0 : s_next_world == 3 ? 1 : s_next_world == 4 ? 2 : 0;
 +    s_next_world = 0;
 +    s_next_precise = 0;
 +    s_next_unpinned = 0;
@@ -1736,12 +1801,22 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +                        : depth;
 +}
 +
-+/* Under a part-step turn: the corners left of a triangle between the columns the turn can place, 0 for none, -1 to draw it whole. */
-+static int turn_clip(const float px[3], const float py[3], int visual_flags, PsxTurnCorner cut[PSX_TURN_CLIP_MAX]) {
-+    float low, high;
-+    if (!visual_flags ||
-+        !psx_turn_band(s_yaw_sin, s_yaw_cos, (float)g_wide_cur_base + s_yaw_center_x, s_yaw_focal_x, &low, &high))
-+        return -1;
++/* A piece of a face is cut to its columns, see gpu_supplemental.h; only the first piece is drawn into the game's picture. */
++static int s_next_band = 0, s_next_band_canonical = 1;
++static float s_next_band_low = 0.0f, s_next_band_high = 0.0f;
++
++/* The corners left of a triangle between the columns a part-step turn can place and its piece's, 0 for none, -1 to draw it whole. */
++static int turn_clip(const float px[3], const float py[3], int visual_flags, int banded, float band_low, float band_high,
++                     PsxTurnCorner cut[PSX_TURN_CLIP_MAX]) {
++    float low = -1.0e9f, high = 1.0e9f;
++    const int turned = visual_flags &&
++        psx_turn_band(s_yaw_sin, s_yaw_cos, (float)g_wide_cur_base + s_yaw_center_x, s_yaw_focal_x, &low, &high);
++    banded = banded && visual_flags;
++    if (!turned && !banded) return -1;
++    if (banded) {
++        low = low > band_low ? low : band_low;
++        high = high < band_high ? high : band_high;
++    }
 +    if (px[0] >= low && px[0] <= high && px[1] >= low && px[1] <= high && px[2] >= low && px[2] <= high) return -1;
 +    return psx_turn_clip(px, py, low, high, cut);
 +}
@@ -2154,7 +2229,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
  static const char *INTERP_FS =
      "#version 330\n"
      "in vec2 v_uv; uniform sampler2D u_prev; uniform sampler2D u_curr;\n"
-@@ -757,2715 +1429,5317 @@
+@@ -757,2715 +1504,5685 @@
      "  }\n"
      "  frag=mix(prev,curr,alpha);\n"
      "}\n";
@@ -3963,6 +4038,10 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +    "uniform vec4 u_camera;  /* sin(yaw), cos(yaw), centre-x, centre-y */\n"
 +    "uniform vec4 u_visual_options; /* focal-x, full-yaw, tint-strength, unused */\n"
 +    "noperspective centroid out vec2 v_uv; noperspective centroid out vec3 v_uvq;\n"
++    "uniform vec4 u_sky;        /* mode, texels a radian, their ratio to the focal, the focal: see SkyPanorama */\n"
++    "uniform vec4 u_sky_frame;  /* the projection centre x, y and focal in these vertices' units */\n"
++    "uniform ivec2 u_sky_cells[96]; uniform ivec2 u_sky_shape;\n"
++    "noperspective out vec4 v_sky; flat out int v_sky_on;\n"
 +    "noperspective out vec4 v_col; flat out int v_perspective;\n"
 +    "centroid out vec2 v_uvw;  /* with a real w the rasterizer gives it perspective */\n"
 +    "noperspective out float v_tint;\n"
@@ -3986,6 +4065,20 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +    "  vec2 p = corrected ? a_visual_pos : a_pos;\n"
 +    "  if (u_visual > 0.5 && a_visual_flags < -0.5 && a_visual_flags > -1.5) p.x = a_visual_pos.x;\n"
 +    "  if (placed) { p = vec2(a_visual_pos.x, a_pos.y); v_uv.x += a_q; v_limits.x -= 64; v_limits.z += 64; }\n"
++    "  /* The panorama coordinate this corner shows as the game lays it, from the cell its first texel lies in. */\n"
++    "  v_sky = vec4(0.0); v_sky_on = 0;\n"
++    "  if (placed && u_sky.x > 0.5 && v_depth == 1) {\n"
++    "    int u0 = int(floor(a_limits.x + 0.5)), w0 = int(floor(a_limits.y + 0.5));\n"
++    "    ivec2 at = ivec2(v_tpage.x + (u0 >> 1), v_tpage.y + w0);\n"
++    "    for (int i = 0; i < u_sky_shape.x * u_sky_shape.y; ++i) {\n"
++    "      ivec2 cell = u_sky_cells[i];\n"
++    "      if (at.x < cell.x || at.x >= cell.x + 32 || at.y < cell.y || at.y >= cell.y + 60) continue;\n"
++    "      v_sky = vec4(float((i % u_sky_shape.y) * 64 + (at.x - cell.x) * 2 + (u0 & 1)) + a_uv.x + a_q - float(u0),\n"
++    "                   float((i / u_sky_shape.y) * 60 + at.y - cell.y) + a_uv.y - float(w0), p.x - u_sky_frame.x, p.y - u_sky_frame.y);\n"
++    "      v_sky_on = 1;\n"
++    "      break;\n"
++    "    }\n"
++    "  }\n"
 +    "  /* The whole-pixel rule for mirrored pictures flips a moving world face by a texel: the mirror takes back what is marked. */\n"
 +    "  vec4 took = corrected ? step(0.125, a_limits - floor(a_limits + 0.5)) : vec4(0.0);\n"
 +    "  v_uv -= took.xy; v_limits += ivec4(vec4(-took.xy, took.zw));\n"
@@ -4041,6 +4134,8 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +    "uniform vec4 u_dissolve;  /* camera depth the world starts to dissolve into what lies behind at, 1 where it may, 1 with the sky behind, the depth the game drops it at */\n"
 +    "uniform vec4 u_clear;     /* the frame's background, 1 when known: without the sky only a fog that ends in it dissolves */\n"
 +    "uniform vec4 u_visual_options;  /* w above 0: a filler or outline pass */\n"
++    "uniform vec4 u_sky; uniform vec4 u_sky_frame; uniform ivec2 u_sky_cells[96]; uniform ivec2 u_sky_shape;\n"
++    "noperspective in vec4 v_sky; flat in int v_sky_on;\n"
 +    "int g_row;\n"
 +    "int vram_at(int x, int y){\n"
 +    "  return int(texelFetch(u_vram, ivec2(x & 1023, y & 511), 0).r);\n"
@@ -4105,6 +4200,41 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +    "  }\n"
 +    "  return true;\n"
 +    "}\n"
++    "int sky_texel(int u, int v){\n"
++    "  int period = u_sky_shape.y * 64;\n"
++    "  u = int(mod(float(u), float(period))); v = clamp(v, 0, u_sky_shape.x * 60 - 1);  /* % of a negative is undefined in GLSL */\n"
++    "  ivec2 cell = u_sky_cells[(v / 60) * u_sky_shape.y + (u >> 6)];\n"
++    "  int px = vram_at(cell.x + ((u & 63) >> 1), cell.y + v % 60);\n"
++    "  return vram_at(v_clut.x + ((px >> ((u & 1) * 8)) & 0xFF), g_row);\n"
++    "}\n"
++    "/* The panorama where this pixel looks: as the game lays it, or turned with the world across, its rows as the game\n"
++    " * has them: rows by the cosine bent the sky into a drum. The same weights as sample_texture's bilinear. */\n"
++    "bool sky_sample(out vec3 rgb, out int stp){\n"
++    "  vec2 at = v_sky.xy;\n"
++    "  if (u_sky.x > 1.5 && u_sky_frame.z > 0.0) {\n"
++    "    float phi = atan(v_sky.z / u_sky_frame.z);\n"
++    "    at.x += u_sky.y * phi - v_sky.z * u_sky.w / u_sky_frame.z;\n"
++    "  }\n"
++    "  int iu = int(floor(at.x)), iv = int(floor(at.y));\n"
++    "  if (u_filter == 0) {\n"
++    "    int raw = sky_texel(iu, iv);\n"
++    "    if (raw == 0) return false;\n"
++    "    rgb = col5(raw); stp = (raw >> 15) & 1;\n"
++    "    return true;\n"
++    "  }\n"
++    "  float fx = at.x - float(iu) - 0.5, fy = at.y - float(iv) - 0.5;\n"
++    "  int sx = fx < 0.0 ? -1 : 1, sy = fy < 0.0 ? -1 : 1;\n"
++    "  fx = abs(fx); fy = abs(fy);\n"
++    "  int c00 = sky_texel(iu, iv), c10 = sky_texel(iu + sx, iv), c01 = sky_texel(iu, iv + sy), c11 = sky_texel(iu + sx, iv + sy);\n"
++    "  float w00 = (c00 == 0 ? 0.0 : 1.0) * (1.0 - fx) * (1.0 - fy), w10 = (c10 == 0 ? 0.0 : 1.0) * fx * (1.0 - fy);\n"
++    "  float w01 = (c01 == 0 ? 0.0 : 1.0) * (1.0 - fx) * fy, w11 = (c11 == 0 ? 0.0 : 1.0) * fx * fy;\n"
++    "  float opac = w00 + w10 + w01 + w11;\n"
++    "  if (opac < 0.5) return false;\n"
++    "  rgb = (col5(c00)*w00 + col5(c10)*w10 + col5(c01)*w01 + col5(c11)*w11) / opac;\n"
++    "  stp = (float((c00 >> 15) & 1) * w00 + float((c10 >> 15) & 1) * w10 + float((c01 >> 15) & 1) * w01\n"
++    "         + float((c11 >> 15) & 1) * w11) / opac >= 0.5 ? 1 : 0;\n"
++    "  return true;\n"
++    "}\n"
 +    "const vec2 kAround[8] = vec2[8](vec2(1.0, 0.0), vec2(-1.0, 0.0), vec2(0.0, 1.0), vec2(0.0, -1.0),\n"
 +    "  vec2(0.7071, 0.7071), vec2(-0.7071, 0.7071), vec2(0.7071, -0.7071), vec2(-0.7071, -0.7071));\n"
 +    "bool texel_in(vec2 at){\n"
@@ -4138,15 +4268,17 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +    "    if (u_dissolve.y > 0.5) dissolve = smoothstep(u_dissolve.x, u_dissolve.w, 1.0/(v_fade.x*u_fade_at.z));\n"
 +    "    g_row = first + int(level);\n"
 +    "  } else if ((v_raw & 2) != 0) level = float(v_raw >> 2)/256.0;  /* a sprite the game faded: its row, and the share of the next */\n"
-+    "  int glyph = (v_raw & 2) == 0 && (u_twin.x | u_twin.y) == 0 ? v_raw >> 2 : 0;  /* a texture window samples past the limits */\n"
-+    "  if (!sample_texture(sample_uv, rgb, stp) && (glyph == 0 || !glyph_edge(sample_uv, glyph, rgb, stp))) discard;\n"
++    "  int glyph = (v_raw & 2) == 0 && (u_twin.x | u_twin.y) == 0 ? (v_raw >> 2) & 0x3FFFF : 0;  /* a texture window samples past the limits */\n"
++    "  if (v_sky_on != 0 ? !sky_sample(rgb, stp)\n"
++    "                    : !sample_texture(sample_uv, rgb, stp) && (glyph == 0 || !glyph_edge(sample_uv, glyph, rgb, stp))) discard;\n"
 +    "  if (level >= 0.0 && int(level) < rows - 1 && u_semipass < 3) {  /* passes 3 and 4 write depth alone */\n"
 +    "    vec3 next; int next_stp; g_row += 1;\n"
-+    "    if (sample_texture(sample_uv, next, next_stp)) rgb = mix(rgb, next, fract(level));\n"
++    "    if (v_sky_on != 0 ? sky_sample(next, next_stp) : sample_texture(sample_uv, next, next_stp)) rgb = mix(rgb, next, fract(level));\n"
 +    "  }\n"
 +    "  if (u_semipass == 1 && stp == 1) discard;\n"
 +    "  if (u_semipass == 2 && stp == 0) discard;\n"
 +    "  if ((v_raw & 1) == 0) rgb = clamp(rgb * v_col.rgb * 2.0, 0.0, 1.0);\n"
++    "  if ((v_raw & 0x100000) != 0 && u_clear.w > 0.5 && u_fade_at.w < 0.5) rgb = u_clear.rgb;  /* RAW_SKY */\n"
 +    "  if (dissolve > 0.0 && u_dissolve.z < 0.5 && (u_semipass < 3 || u_visual_options.w > 0.0)) {\n"
 +    "    vec3 last; int last_stp; int row = g_row; g_row = first + rows - 1;\n"
 +    "    bool same = u_clear.w > 0.5 && sample_texture(sample_uv, last, last_stp);\n"
@@ -4287,7 +4419,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +    static const char closing[] = "  if (close) { v_deep = 1.0; v_fade = vec2(-1.0, 0.0);\n"
 +                                  "    if (u_visual_options.w <= 0.0) { gl_Position.z = 1.0 - 32.0*(1.0 + u_pull)/hw; gl_Position *= hw; } else gl_Position = vec4(2.0, 2.0, 2.0, 1.0); }\n";
 +    /* The game grows a copy a sixteenth past its polygon: at 0.9999995 it passes the cleared depth alone and hides nothing drawn (a lamp behind a lintel was). */
-+    static const char deep[] = "u_visual_options.w >= 1.0 ? 0.99999 : u_visual_options.w > 0.0 ? 0.9999995 : ((u_visual > 0.5 && abs(a_camz) > 16.0) ? max(1.0 - 32.0*(1.0 + u_pull)/(abs(a_camz)*(1.0 + max(u_visual_options.w, 0.0))), -1.0) : 0.999999), 1.0);\n"
++    static const char deep[] = "u_visual_options.w < -3.5 ? 0.99999925 : u_visual_options.w < -2.5 || u_visual_options.w >= 1.0 ? 0.99999 : (u_visual_options.w > 0.0 || u_visual_options.w < -1.5) ? 0.9999995 : ((u_visual > 0.5 && abs(a_camz) > 16.0) ? max(1.0 - 32.0*(1.0 + u_pull)/(abs(a_camz)*(1.0 + max(u_visual_options.w, 0.0))), -1.0) : 0.999999), 1.0);\n"
 +                               "  bool grown = a_visual_flags > 5.5;\n"
 +                               "  if (u_visual > 0.5 && (u_visual_options.w == 0.0 ? grown : u_visual_options.w >= 1.0 ? (grown || a_visual_flags < 1.5) : (u_visual_options.w > 0.0 && !grown)))\n"
 +                               "    gl_Position = vec4(2.0, 2.0, 2.0, 1.0);\n"
@@ -4393,23 +4525,33 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 + *              stored value is known to be 0 when the test passed) and a 0
 + *              via KEEP. */
 +static void mask_stencil(int write_val) {
++    const GLint within = s_supp_stencil ? SUPPLEMENTAL_STENCIL | (s_won_stencil ? HELD_BACK_WON_STENCIL : 0) : 0;
 +    if (s_fill_pass > 0.0f) {  /* a filler obeys the mask and leaves it as it is */
-+        if (!s_mask_check) { glDisable(GL_STENCIL_TEST); return; }
++        if (!s_mask_check && !within) { glDisable(GL_STENCIL_TEST); return; }
 +        glEnable(GL_STENCIL_TEST);
 +        glStencilMask(0x00);
-+        glStencilFunc(GL_EQUAL, 0, 0x01);
++        glStencilFunc(GL_EQUAL, within, (s_mask_check ? 0x01 : 0) | within);
 +        glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
 +        return;
 +    }
 +    glEnable(GL_STENCIL_TEST);
 +    glStencilMask(0x01);
 +    if (s_mask_check) {
-+        glStencilFunc(GL_EQUAL, 0, 0x01);
++        glStencilFunc(GL_EQUAL, within, 0x01 | within);
 +        glStencilOp(GL_KEEP, GL_KEEP, write_val ? GL_INVERT : GL_KEEP);
 +    } else {
-+        glStencilFunc(GL_ALWAYS, write_val ? 1 : 0, 0x01);
++        glStencilFunc(within ? GL_EQUAL : GL_ALWAYS, (write_val ? 1 : 0) | within, within ? within : 0x01);
 +        glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
 +    }
++}
++
++/* Depth-only draws of such a batch keep within the mark too. */
++static void depth_stencil_within(void) {
++    if (!s_supp_stencil) { glDisable(GL_STENCIL_TEST); return; }
++    glEnable(GL_STENCIL_TEST);
++    glStencilMask(0x00);
++    glStencilFunc(GL_EQUAL, SUPPLEMENTAL_STENCIL, SUPPLEMENTAL_STENCIL);
++    glStencilOp(GL_KEEP, GL_KEEP, GL_KEEP);
 +}
 +/* Like mask_stencil but never checks (uploads: gpu.c already applied mask). */
 +static void plain_stencil(int write_val) {
@@ -4463,13 +4605,13 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +                  sw * s_scale, sh * s_scale);
 +    }
 +}
++/* The FBO stays bound: binding the window after every pass cost 40 us a batch, so it is bound where it is drawn. */
 +static void hr_end(void) {
 +    glDisable(GL_BLEND);
 +    glDisable(GL_STENCIL_TEST);
 +    glDisable(GL_SCISSOR_TEST);
 +    p_glBindVertexArray(0);
 +    p_glUseProgram(0);
-+    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, 0);
 +}
 +
 +/* ---- coherency: CPU -> GPU upload flush --------------------------------- */
@@ -5023,6 +5165,11 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +#define TEXBATCH_MAXV 8190                 /* multiple of 3; ~2730 tris */
 +static float s_tb[TEXBATCH_MAXV * TEXV];
 +static uint64_t s_tb_identity[TEXBATCH_MAXV];
++static float s_tp[TEXBATCH_MAXV * TEXV];  /* the batch's faces of a supplemental kind, drawn by depth when it ends */
++static unsigned char s_tp_kind[TEXBATCH_MAXV / 3];
++static int   s_tb_held_back = 0;  /* the batch being drawn is one of them */
++static uint64_t s_tp_identity[TEXBATCH_MAXV];
++static int   s_tp_n = 0;
 +static int   s_tb_n = 0;                    /* verts queued */
 +static int   s_tb_semi = -2;
 +static int   s_tb_mask = 0, s_tb_filter = 0;
@@ -5049,6 +5196,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +static float s_edge_depth = 0.0f;
 +static int s_clear_known = 0;
 +static float s_clear_rgb[3];
++static unsigned s_clear_serial = 0, s_present_serial = 0;  /* the clear was this frame's while they are equal */
 +void gl_renderer_set_edge_sky(int sky) {
 +    const int32_t v[] = {sky};
 +    if (rth_rec_call(RTH_EDGE_SKY, v, 1)) return;
@@ -5062,6 +5210,27 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +}
 +static int edge_dissolving(void) {
 +    return s_smooth_fade && (s_edge_sky || s_clear_known) && s_fade_rows > 1 && s_edge_depth > EDGE_DISSOLVE_BAND && !s_uv_view;
++}
++
++#define RAW_SKY 0x100000  /* a_raw: drawn in the frame's background, see sky_ends_in_clear */
++
++/* A sky tile at its opening's last fog step whose every colour is within 1.5 five-bit steps of this frame's background:
++ * the level's sky palettes stop a step short of it, and a far wall dissolving at the draw edge showed them as a patch. */
++static int sky_ends_in_clear(uint16_t texpage, uint16_t clut_x, uint16_t clut_y, const float *col, int rawtex) {
++    const int depth = (texpage >> 7) & 3, entries = depth == 0 ? 16 : 256;
++    if (!edge_dissolving() || !s_clear_known || s_clear_serial != s_present_serial || depth > 1 || !s_vram ||
++        clut_x + entries > VRAM_W || clut_y >= VRAM_H)
++        return 0;
++    const uint16_t *palette = s_vram + (size_t)clut_y * VRAM_W + clut_x;
++    for (int i = 0; i < entries; i++) {
++        if (!palette[i]) continue;
++        for (int c = 0; c < 3; c++) {
++            float v = (float)((palette[i] >> (5 * c)) & 31) / 31.0f;
++            if (!rawtex) v = fminf(v * col[c] * 2.0f, 1.0f);
++            if (fabsf(v - s_clear_rgb[c]) > 1.5f / 31.0f) return 0;
++        }
++    }
++    return 1;
 +}
 +
 +/* An opaque pass blends by the second output while the edge dissolves: its factor is 0, the pixel unchanged, short of the edge. */
@@ -5094,7 +5263,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +    if (semi < 0) {
 +        opaque_blend();
 +        /* Stencil the line below declares stale is not written: no stencil write lets the card test depth before shading. */
-+        if (!s_mask_check && !s_tb_mask && s_fill_pass <= 0.0f) glDisable(GL_STENCIL_TEST);
++        if (!s_mask_check && !s_tb_mask && s_fill_pass <= 0.0f && !s_supp_stencil) glDisable(GL_STENCIL_TEST);
 +        else mask_stencil(s_tb_mask);
 +        p_glUniform1i(s_uSemipass, 0);                 /* all texels, one ordered colour pass */
 +        glDrawArrays(GL_TRIANGLES, 0, nverts);
@@ -5117,7 +5286,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +        glEnable(GL_BLEND);
 +        p_glBlendEquationSeparate(PSXGL_FUNC_ADD, PSXGL_FUNC_ADD);
 +        p_glBlendFuncSeparate(GL_ONE, PSXGL_SRC1_ALPHA, GL_ONE, GL_ZERO);
-+        if (s_tb_mask) mask_stencil(1); else glDisable(GL_STENCIL_TEST);
++        if (s_tb_mask || s_supp_stencil) mask_stencil(s_tb_mask); else glDisable(GL_STENCIL_TEST);
 +        p_glUniform1i(s_uSemipass, 0);
 +        glDrawArrays(GL_TRIANGLES, 0, nverts);
 +        if (!s_tb_mask && s_fill_pass <= 0.0f) s_stencil_valid = 0;
@@ -5204,19 +5373,63 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +
 +/* A batch of exact world polygons by depth, see s_world_depth. */
 +static void tex_batch_by_depth(int nverts, int semi) {
++    const int held_back = s_tb_held_back;  /* drawn after the batch it came in: a tie, or a hair behind, stays the batch's */
++    if (held_back) {
++        glEnable(GL_POLYGON_OFFSET_FILL);
++        glPolygonOffset(1.0f, 1.0f);
++    }
 +    glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
 +    glDisable(GL_BLEND);
-+    glDisable(GL_STENCIL_TEST);
-+    glDepthFunc(GL_LEQUAL);
++    depth_stencil_within();
++    if (held_back && s_supp_stencil) {
++        glStencilMask(HELD_BACK_WON_STENCIL);
++        glStencilFunc(GL_EQUAL, SUPPLEMENTAL_STENCIL | HELD_BACK_WON_STENCIL, SUPPLEMENTAL_STENCIL);
++        glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
++    }
++    glDepthFunc(held_back ? GL_LESS : GL_LEQUAL);
 +    glDepthMask(GL_TRUE);
 +    p_glUniform1i(s_uSemimode, semi < 0 ? 0 : semi);
 +    p_glUniform1i(s_uSemipass, semi < 0 ? 3 : 4);
 +    glDrawArrays(GL_TRIANGLES, 0, nverts);
 +    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 +    glDepthMask(GL_FALSE);
-+    p_glUniform1f(s_tex_uPull, s_world_margin);
++    p_glUniform1f(s_tex_uPull, held_back ? 0.0f : s_world_margin);
++    if (held_back) glDepthFunc(GL_EQUAL);
++    s_won_stencil = held_back;
 +    tex_batch_draw_passes(nverts, semi);
++    s_won_stencil = 0;
 +    p_glUniform1f(s_tex_uPull, 0.0f);
++    glDepthFunc(GL_ALWAYS);
++    if (held_back) glDisable(GL_POLYGON_OFFSET_FILL);
++}
++
++/* Marks (or takes back) the samples a batch only the widened walk admits may draw on: those still at the cleared depth,
++ * tested at the depth a grown copy passes, which nothing drawn and no copy lets through. A piece past its span, kind 2,
++ * also takes the world's and the copies' samples, not the sky's. */
++static void supplemental_mark(int nverts, int semi, int set, int kind) {
++    s_fill_pass = set && kind == 2 ? PAST_SPAN_COPY_PASS : SUPPLEMENTAL_MARK_PASS;
++    geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 1);
++    glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
++    glDisable(GL_BLEND);
++    glEnable(GL_STENCIL_TEST);
++    glStencilMask(SUPPLEMENTAL_STENCIL | (set ? 0 : HELD_BACK_WON_STENCIL));
++    glStencilFunc(GL_ALWAYS, set ? SUPPLEMENTAL_STENCIL : 0, SUPPLEMENTAL_STENCIL);
++    glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
++    glDepthMask(GL_FALSE);
++    glDepthFunc(set ? GL_LESS : GL_ALWAYS);
++    p_glUniform1i(s_uSemimode, semi < 0 ? 0 : semi);
++    p_glUniform1i(s_uSemipass, semi < 0 ? 3 : 4);
++    glDrawArrays(GL_TRIANGLES, 0, nverts);
++    if (set && kind == 2) {
++        s_fill_pass = PAST_SPAN_MARK_PASS;
++        geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 1);
++        glDepthFunc(GL_GREATER);
++        glDrawArrays(GL_TRIANGLES, 0, nverts);
++    }
++    s_fill_pass = 0.0f;
++    geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 1);
++    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
++    glStencilMask(0x01);
 +    glDepthFunc(GL_ALWAYS);
 +}
 +
@@ -5319,13 +5532,14 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +    p_glActiveTexture(PSXGL_TEXTURE0);
 +}
 +
-+static void flush_tex_batch(void) {
++static void flush_tex_batch_now(void) {
 +    if (s_tb_n == 0) return;
 +    int nverts = s_tb_n, semi = s_tb_semi;
 +    glEnable(PSXGL_DEPTH_CLAMP);  /* a near face is clipped by its w alone, its depth stops at the nearest */
 +    const int fillers = s_tb_fillers;
 +    const int world = s_tb_world;
 +    const int held = s_tb_held;
++    const int supp = mirror_depth() ? s_tb_supp : 0;
 +    s_tb_n = 0;                             /* clear first: re-entrancy safe */
 +    if (nverts == 0) return;
 +    double cw_t0 = cw_ms();
@@ -5347,7 +5561,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +    p_glBufferData(PSXGL_ARRAY_BUFFER, (ptrdiff_t)(nverts * TEXV * sizeof(float)), s_tb, PSXGL_STREAM_DRAW);
 +
 +    gz_begin(GZ_CANON);
-+    tex_batch_draw_passes(nverts, semi);
++    if (!s_tb_held_back) tex_batch_draw_passes(nverts, semi);  /* held back, it is one point in the canonical picture */
 +    gz_end(GZ_CANON);
 +
 +    /* Native-wide mirror — skipped for a batch fully inside the 4:3 frame (its
@@ -5361,13 +5575,19 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +        gl_perf_mirror_begin();
 +        wide_target_begin(dx, s_tex_uXoff, s_tex_uXhalf);
 +        geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 1);
++        sky_uniforms(s_tex_uSky, s_tex_uSkyFrame, s_tex_uSkyCells, s_tex_uSkyShape, &s_tex_sky_generation, &s_sky,
++                     (float)g_wide_cur_base + s_yaw_center_x, (float)s_off_y + s_yaw_center_y_relative, s_yaw_focal_x);
 +        wide_set_bd_scale(s_tex_uXscale, s_tex_uXcenter);
 +        s_draw_filler = mirror_depth() && fillers;
 +        s_draw_world = mirror_depth() && world;
 +        s_draw_held = held;
++        s_draw_supp = supp;
 +        temporal_draw(s_tb, s_tb_identity, nverts, 1, GL_TRIANGLES, semi, s_tb_mask,
 +                      s_tb_filter, s_tb_twin, s_tb_gate, 0);
 +        s_draw_filler = s_draw_world = s_draw_held = 0;
++        s_draw_supp = 0;
++        if (supp) supplemental_mark(nverts, semi, 1, supp);
++        s_supp_stencil = supp;
 +        if (s_ws_ablate != 2) {
 +            gz_begin(GZ_MIRROR_OUTLINE);
 +            if (mirror_depth() && s_crack_fill > 0.0f) tex_batch_outline(nverts, semi);
@@ -5393,7 +5613,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +        if (mirror_depth() && !world && s_ws_ablate != 2) {  /* the depth of the opaque fragments alone */
 +            glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
 +            glDisable(GL_BLEND);
-+            glDisable(GL_STENCIL_TEST);
++            depth_stencil_within();
 +            glDepthMask(GL_TRUE);
 +            if (held) glDepthFunc(GL_LEQUAL);  /* a farther sprite leaves the nearer surface's depth */
 +            p_glUniform1i(s_uSemipass, semi < 0 ? 3 : 4);
@@ -5402,6 +5622,8 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +            glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
 +        }
 +        gz_end(GZ_MIRROR_DEPTH);
++        s_supp_stencil = 0;
++        if (supp) supplemental_mark(nverts, semi, 0, supp);
 +        wide_clear_bd_scale(s_tex_uXscale, s_tex_uXcenter);
 +        geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 0);
 +        wide_target_end(s_tex_uXoff, s_tex_uXhalf);
@@ -5409,6 +5631,35 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +    }
 +    hr_end();
 +    if (--s_cw_flush_depth == 0) s_cw_flush_ms += cw_ms() - cw_t0;
++}
++
++/* The batch, then the faces of each supplemental kind it held back, pieces past their span before the widened walk's
++ * faces: by depth, so a nearer face drawn after them still covers. */
++static void flush_tex_batch(void) {
++    flush_tex_batch_now();
++    if (s_tp_n == 0) return;
++    const int world = s_tb_world, fillers = s_tb_fillers;
++    for (int kind = 2; kind >= 1; --kind) {
++        int n = 0;
++        for (int at = 0; at < s_tp_n; at += 3) {
++            if (s_tp_kind[at / 3] != kind) continue;
++            memcpy(&s_tb[n * TEXV], &s_tp[at * TEXV], 3 * TEXV * sizeof(float));
++            memcpy(&s_tb_identity[n], &s_tp_identity[at], 3 * sizeof(s_tb_identity[0]));
++            n += 3;
++        }
++        if (n == 0) continue;
++        s_tb_n = n;
++        s_tb_world = 1;
++        s_tb_fillers = 0;
++        s_tb_supp = kind;
++        s_tb_held_back = 1;
++        flush_tex_batch_now();
++        s_tb_held_back = 0;
++    }
++    s_tp_n = 0;
++    s_tb_world = world;
++    s_tb_fillers = fillers;
++    s_tb_supp = 0;
 +}
 +
 +/* Flat / gouraud GEO batch — MotK title/char-select starfields issue ~30k/s
@@ -5482,7 +5733,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +    int cut_corners = -1;
 +    if (mode == GL_TRIANGLES && n == 3) {
 +        visual_flags = take_visual_triangle(xs, ys, px, py, NULL, pz, pid) & 3;
-+        cut_corners = turn_clip(px, py, visual_flags, cut);
++        cut_corners = turn_clip(px, py, visual_flags, 0, 0.0f, 0.0f, cut);
 +    }
 +    else {
 +        s_next_world = 0;
@@ -5617,12 +5868,16 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +    const int visual_flags = take_visual_triangle(xs, ys, px, py, pq, pz, pid);
 +    PsxTurnCorner cut[PSX_TURN_CLIP_MAX];
 +    const int near_face = s_near_set;
-+    const int cut_corners = near_face ? -1 : turn_clip(px, py, visual_flags, cut);
++    const int banded = s_next_band, canonical = !banded || s_next_band_canonical;
++    s_next_band = 0;
++    if (near_face && !canonical) return;  /* uncut, a near face's first piece already drew all of it */
++    const int cut_corners = near_face ? -1 : turn_clip(px, py, visual_flags, banded, s_next_band_low, s_next_band_high, cut);
 +    const float whole_q[3] = {pq[0], pq[1], pq[2]};
 +    turned_perspective(px, pq, visual_flags);
 +    const int sprite = s_geometry_correction && s_sprite_depth > 0.0f && (visual_flags & 3) == 1;
 +    const int packet_fade = ctx_packet_fade();
 +    const int packet_raw = packet_fade >= 0 ? 2 | (packet_fade << 2) : ctx_hud_glyph() << 2;
++    const int sky_raw = ctx_sky_fogged() && sky_ends_in_clear(texpage, clut_x, clut_y, col, rawtex) ? RAW_SKY : 0;
 +    int lim_buf[4];
 +    int uv_buf[6];
 +    int plain_lim[4], marked_lim = 0;
@@ -5661,6 +5916,8 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +        const float turned_z[3] = {turned_depth(px[0], pz[0], visual_flags), turned_depth(px[1], pz[1], visual_flags),
 +                                   turned_depth(px[2], pz[2], visual_flags)};
 +        const uint64_t cut_id = pid[0] == pid[1] && pid[1] == pid[2] ? pid[0] : 0u;  /* a sprite's pieces stay a sprite's */
++        const int supp = near_face ? 0 : s_took_supplemental;
++        const int deferred = supp != 0 && mirror_depth();  /* kept in order each change of kind ended a batch: 300-640 batches a frame against 7-54 */
 +        float cut_z[PSX_TURN_CLIP_MAX];
 +        int world = near_face ? 0 : psx_world_depth_class(s_world_depth, visual_flags, turned_z, s_world_margin);
 +        for (int k = 0; k < cut_corners; ++k) cut_z[k] = turned_depth(cut[k].x, psx_turn_depth(&cut[k], pz), visual_flags);
@@ -5668,9 +5925,10 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +            const float piece_z[3] = {cut_z[0], cut_z[piece + 1], cut_z[piece + 2]};
 +            world = psx_world_depth_class(s_world_depth, visual_flags, piece_z, s_world_margin);
 +        }
-+        if (s_tb_n > 0 && world != s_tb_world) flush_tex_batch();
++        if (s_tb_n > 0 && !deferred && world != s_tb_world) flush_tex_batch();
 +        const int held = sprite && s_sprite_hold && !near_face;
 +        if (s_tb_n > 0 && held != s_tb_held) flush_tex_batch();
++        if (s_tb_n > 0 && (deferred ? s_tb_supp != 0 : supp != s_tb_supp)) flush_tex_batch();
 +        /* With mask checking off, opaque and mode-0 semi primitives use the
 +         * same dual-source blend state. The per-vertex a_semi flag selects
 +         * replace vs half-blend without breaking painter order. */
@@ -5706,46 +5964,64 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +            s_batch_reason[reason]++;
 +            flush_tex_batch();
 +        }
-+        if (s_tb_n + 3 + (cut_corners > 2 ? 3 * (cut_corners - 2) : 0) > TEXBATCH_MAXV) { s_batch_reason[6]++; flush_tex_batch(); }
++        if (s_tb_n + 3 + (cut_corners > 2 ? 3 * (cut_corners - 2) : 0) > TEXBATCH_MAXV ||
++            (deferred && s_tp_n + 3 + (cut_corners > 2 ? 3 * (cut_corners - 2) : 0) > TEXBATCH_MAXV)) { s_batch_reason[6]++; flush_tex_batch(); }
 +        if (s_tb_n == 0) {            /* opening a batch: capture its keyed state */
 +            s_tb_semi = batch_semi; s_tb_mask = s_mask_set; s_tb_filter = s_tex_filter; s_tb_gate = gate;
 +            s_tb_fillers = 0;
 +            s_tb_held = held;
 +            s_tb_world = world;
++            s_tb_supp = deferred ? 0 : supp;
 +            s_tb_twin[0] = twx; s_tb_twin[1] = twy; s_tb_twin[2] = tox; s_tb_twin[3] = toy;
 +        }
 +        float *vp = &s_tb[s_tb_n * TEXV];
 +        const float *whole = vp;
 +        for (int i = 0; i < 3; i++, vp += TEXV) {
-+            vp[0] = (float)xs[i];
-+            vp[1] = (float)ys[i];
++            vp[0] = (float)xs[canonical ? i : 0];  /* a later piece adds nothing to the game's picture */
++            vp[1] = (float)ys[canonical ? i : 0];
 +            vp[2] = (float)us[i];   vp[3] = (float)vs[i];
 +            vp[4] = col[i*3+0];     vp[5] = col[i*3+1];     vp[6] = col[i*3+2];   vp[7] = 1.0f;
 +            vp[8]  = (float)base_x;  vp[9]  = (float)base_y;        /* a_tpage  */
 +            vp[10] = (float)clut_x;  vp[11] = (float)clut_y;        /* a_clut   */
-+            vp[12] = (float)depth;   vp[13] = (float)((rawtex ? 1 : 0) | packet_raw);  /* a_depth, a_raw */
++            vp[12] = (float)depth;   vp[13] = (float)((rawtex ? 1 : 0) | packet_raw | sky_raw);  /* a_depth, a_raw */
 +            vp[14] = (float)lim[0];  vp[15] = (float)lim[1];        /* a_limits */
 +            vp[16] = (float)lim[2];  vp[17] = (float)lim[3];
 +            if (marked_lim) psx_world_texel_mark(lim, plain_lim, &vp[14]);
 +            vp[18] = semi >= 0 ? (float)(semi + 1) : 0.0f;          /* a_semi code */
 +            vp[19] = flat_picture_flags(visual_flags);               /* a_visual_flags */
-+            vp[20] = visual_flags || s_flat_sides[0] != 0.0f || s_flat_sides[1] != 0.0f ? px[cut_corners >= 0 ? 0 : i] : (float)xs[i];  /* a_visual_pos: a cut triangle is one point, nothing in the mirror */
-+            vp[21] = visual_flags ? py[cut_corners >= 0 ? 0 : i] : (float)ys[i];
++            vp[20] = visual_flags || s_flat_sides[0] != 0.0f || s_flat_sides[1] != 0.0f ? px[cut_corners >= 0 || deferred ? 0 : i] : (float)xs[i];  /* a_visual_pos: a cut triangle is one point, nothing in the mirror */
++            vp[21] = visual_flags ? py[cut_corners >= 0 || deferred ? 0 : i] : (float)ys[i];
 +            vp[22] = pq[i];                                          /* a_q (0 = affine) */
 +            if (!visual_flags && tile_placed()) {
 +                const int low = us[0] < us[1] ? (us[0] < us[2] ? us[0] : us[2]) : (us[1] < us[2] ? us[1] : us[2]);
 +                const int high = us[0] > us[1] ? (us[0] > us[2] ? us[0] : us[2]) : (us[1] > us[2] ? us[1] : us[2]);
-+                tile_corner(xs[i], (float)us[i], (float)(high - low), &vp[20], &vp[19], &vp[22], &vp[21]);  /* y's slot: the mirror takes a_pos.y */
++                tile_corner(xs[i], (float)us[i], (float)(high - low), sky_finds(&s_sky, vp[8], vp[9], vp[14], vp[15], vp[12]),
++                            &vp[20], &vp[19], &vp[22], &vp[21]);  /* y's slot: the mirror takes a_pos.y */
 +            }
 +            vp[23] = turned_z[i]; /* temporal identity only; no shader attribute */
 +            vp[24] = sprite ? s_sprite_ground[0] : 0.0f;
 +            vp[25] = sprite ? s_sprite_ground[1] : 0.0f;
 +            vp[26] = sprite ? s_sprite_depth : 0.0f;
 +            if (near_face) { vp[19] = 4.0f; vp[20] = s_near[i][0]; vp[21] = s_near[i][1]; vp[22] = s_near[i][2]; }
-+            s_tb_identity[s_tb_n + i] = cut_corners >= 0 ? TEMPORAL_CUT_IDENTITY : pid[i];
++            s_tb_identity[s_tb_n + i] = cut_corners >= 0 || deferred ? TEMPORAL_CUT_IDENTITY : pid[i];
 +        }
 +        if (visual_flags & 4) s_tb_fillers++;
 +        s_tb_n += 3;
++        uint64_t *const out_identity = deferred ? s_tp_identity : s_tb_identity;
++        int *const out_n = deferred ? &s_tp_n : &s_tb_n;
++        if (deferred) vp = &s_tp[s_tp_n * TEXV];
++        if (deferred && cut_corners < 0) {  /* uncut, the whole triangle is the mirror's piece */
++            for (int i = 0; i < 3; ++i, vp += TEXV) {
++                memcpy(vp, &whole[i * TEXV], TEXV * sizeof(float));
++                vp[0] = whole[0];
++                vp[1] = whole[1];
++                vp[20] = px[i];
++                vp[21] = py[i];
++                s_tp_identity[s_tp_n + i] = pid[i];
++            }
++            s_tp_kind[s_tp_n / 3] = (unsigned char)supp;
++            s_tp_n += 3;
++        }
 +        for (int piece = 0; piece + 2 < cut_corners; ++piece) {  /* its pieces for the mirror: one point in the canonical picture */
 +            const int corner_of[3] = {0, piece + 1, piece + 2};
 +            const int perspective = whole_q[0] > 0.0f && whole_q[1] > 0.0f && whole_q[2] > 0.0f;
@@ -5771,9 +6047,10 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +                vp[21] = corner->y;
 +                vp[22] = piece_q[i];
 +                vp[23] = cut_z[corner_of[i]];
-+                s_tb_identity[s_tb_n + i] = own >= 0 ? pid[own] : cut_id;
++                out_identity[*out_n + i] = own >= 0 ? pid[own] : cut_id;
 +            }
-+            s_tb_n += 3;
++            if (deferred) s_tp_kind[s_tp_n / 3] = (unsigned char)supp;
++            *out_n += 3;
 +        }
 +        if (isolate) flush_tex_batch();   /* draw this semi prim alone, in submission order */
 +    }
@@ -5935,6 +6212,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +        y + h - 1 >= s_area_y2) {
 +        s_clear_rgb[0] = r; s_clear_rgb[1] = g; s_clear_rgb[2] = b;
 +        s_clear_known = 1;
++        s_clear_serial = s_present_serial;
 +    }
 +    x &= VRAM_W - 1; y &= VRAM_H - 1;
 +    if (w > VRAM_W) w = VRAM_W;
@@ -6053,6 +6331,25 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +    }
 +}
 +
++static void glb_set_column_band(int low, int high, int canonical) {
++    s_next_band = 1;
++    s_next_band_low = (float)low;
++    s_next_band_high = (float)high;
++    s_next_band_canonical = canonical != 0;
++}
++
++static void glb_set_sky_cells(int rows, int columns, int period, int focal, const int32_t *cells) {
++    if (s_raster_ok) flush_tex_batch();
++    const int count = rows > 0 && columns > 0 && rows * columns <= SKY_CELLS && period > 0 && focal > 0 && cells ? rows * columns : 0;
++    s_sky.mode = sky_mode_now();
++    s_sky.rows = count ? rows : 0;
++    s_sky.columns = count ? columns : 0;
++    s_sky.texels_a_radian = count ? (float)(period / 6.28318530717958647692) : 0.0f;
++    s_sky.focal = count ? (float)focal : 0.0f;
++    if (count) memcpy(s_sky.cells, cells, (size_t)count * 2 * sizeof(int32_t));
++    ++s_sky.generation;
++}
++
 +static void glb_set_world_triangle(int world) {
 +    if (!s_raster_ok) return;
 +    s_next_world = world;  /* 2: the game's grown second copy */
@@ -6120,7 +6417,8 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +}
 +static void glb_set_screen_tile(const PsxWsPlacedTile *tile) {
 +    if (!s_raster_ok || !tile || !isfinite(tile->left + tile->right + tile->moved) || !(tile->scale > 0.0f) ||
-+        fabsf(tile->left) > 1.0f || fabsf(tile->right) > 1.0f || fabsf(tile->moved) > 64.0f) return;
++        fabsf(tile->left) > PSX_WS_SCREEN_TILE_OFFSET_MOST || fabsf(tile->right) > PSX_WS_SCREEN_TILE_OFFSET_MOST ||
++        fabsf(tile->moved) > 64.0f) return;
 +    s_next_tile = *tile;
 +    s_next_tile_set = 1;
 +}
@@ -6716,6 +7014,10 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +    s_tex_uVisual = p_glGetUniformLocation(s_tex_prog, "u_visual");
 +    s_tex_uCamera = p_glGetUniformLocation(s_tex_prog, "u_camera");
 +    s_tex_uVisualOptions = p_glGetUniformLocation(s_tex_prog, "u_visual_options");
++    s_tex_uSky = p_glGetUniformLocation(s_tex_prog, "u_sky");
++    s_tex_uSkyFrame = p_glGetUniformLocation(s_tex_prog, "u_sky_frame");
++    s_tex_uSkyCells = p_glGetUniformLocation(s_tex_prog, "u_sky_cells");
++    s_tex_uSkyShape = p_glGetUniformLocation(s_tex_prog, "u_sky_shape");
 +    s_tex_uFade = p_glGetUniformLocation(s_tex_prog, "u_fade");
 +    s_tex_uFadeAt = p_glGetUniformLocation(s_tex_prog, "u_fade_at");
 +    s_tex_uFadePower = p_glGetUniformLocation(s_tex_prog, "u_fade_power");
@@ -7307,6 +7609,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +    if (!s_ctx) return;
 +    interp_reset_history();
 +    int ww = 0, wh = 0; gl_visible_size(&ww, &wh);
++    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, 0);
 +    glDisable(GL_SCISSOR_TEST);
 +    glViewport(0, 0, ww, wh);
 +    glClearColor(0.f,0.f,0.f,1.f); glClear(GL_COLOR_BUFFER_BIT);
@@ -8028,6 +8331,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +    if (!s_ctx) return;
 +    interp_reset_history();
 +    int ww = 0, wh = 0; gl_visible_size(&ww, &wh);
++    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, 0);
 +    glDisable(GL_SCISSOR_TEST);
 +    glViewport(0, 0, ww, wh); glClearColor(0.f,0.f,0.f,1.f); glClear(GL_COLOR_BUFFER_BIT);
 +    pres_record(GL_PRES_BLANK, 0, 0, 0, 0, 0, 0, ww, wh);
@@ -8612,6 +8916,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +
 +/* Top of present (after flush_cpu_upload, before clear/blit). */
 +static void gl_perf_present_enter(void) {
++    s_present_serial++;
 +    /* Per-frame boundary for the 2D-backdrop stretch — runs from BOTH present
 +     * paths (4:3 present_vram AND native-wide present_wide_fbo), before the
 +     * perf-on gate so native-wide frames reset too. Snapshot this frame's
@@ -9363,7 +9668,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +typedef struct {
 +    TemporalScene *scene;
 +    TemporalAgainst against;
-+    uint64_t generation, presented;
++    uint64_t generation, presented, cycle;
 +    GLuint fbo;
 +    int y, h, dst, scale, linear, force_4_3, source_path;
 +} InterpMatchJob;
@@ -9374,9 +9679,35 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +static InterpMatchJob s_match_job;                    /* under s_match_mutex */
 +static int s_match_retired = -1;  /* drawing thread: the last job's slot, held until a capture after its publish */
 +
++/* A capsule's record of what was shown, and its replay's script of the same pictures: see gpu_presentation.h. The log is
++ * filled by whichever thread swaps and taken by the game's; the script lives under the present mutex. */
++static SDL_SpinLock   s_shown_log_lock;
++static PsxShownLog    s_shown_log;
++static PsxShownScript s_script;
++static SDL_cond      *s_script_cond = NULL;
++static uint64_t       s_interp_cur_cycle = 0;  /* the emulated clock at the present of the game frame held as the later one */
++static uint64_t       s_shown_log_first = 0, s_shown_log_period = 0;
++static SDL_atomic_t   s_shown_log_on;  /* a swap with no log running takes no lock */
++static int            s_script_index = -1;  /* the script's picture being shown, -1 when none */
++
 +/* With the present mutex held: the picture in `dst` becomes the current one. The blend lasts as long as the game took from
 + * the frame before, timed when the game's thread presented each (`presented`), whichever thread draws or publishes it. */
-+static void interp_capture_published(int dst, int scale, int linear, int force_4_3, int source_path, uint64_t presented) {
++/* With the present mutex held, before a frame's scene or picture is handed over: the script's pictures of the frames
++ * before it are shown first, two seconds at most. */
++static void interp_script_wait(void) {
++    if (!s_script.pictures || !s_script_cond) return;
++    const uint64_t until = SDL_GetTicks() + 2000u;
++    while (!psx_shown_script_drained(&s_script, psx_shown_frame_of(s_interp_cur_cycle, s_script.first, s_script.period))) {
++        if (SDL_GetTicks() >= until) {
++            s_script.timeouts++;
++            return;
++        }
++        SDL_CondWaitTimeout(s_script_cond, s_interp_mutex, 50);
++    }
++}
++
++static void interp_capture_published(int dst, int scale, int linear, int force_4_3, int source_path, uint64_t presented,
++                                     uint64_t cycle) {
 +    uint64_t now = SDL_GetPerformanceCounter();
 +    uint64_t freq = SDL_GetPerformanceFrequency();
 +    const uint64_t at = presented;
@@ -9401,6 +9732,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +    s_interp_linear = linear;
 +    s_interp_force_4_3 = force_4_3;
 +    s_interp_source_path = source_path;
++    s_interp_cur_cycle = cycle;
 +    s_interp_captures++;
 +}
 +
@@ -9409,10 +9741,11 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +    temporal_match_scene(job->scene, &job->against);
 +    const uint64_t worked = SDL_GetPerformanceCounter() - began;
 +    SDL_LockMutex(s_interp_mutex);
++    interp_script_wait();
 +    if (job->generation == s_temp_generation) {
 +        s_temp_ready = job->scene;
 +        temporal_publish(job->fbo, job->y, job->h);
-+        interp_capture_published(job->dst, job->scale, job->linear, job->force_4_3, job->source_path, job->presented);
++        interp_capture_published(job->dst, job->scale, job->linear, job->force_4_3, job->source_path, job->presented, job->cycle);
 +    } else {
 +        job->scene->active = 0;
 +    }
@@ -9491,13 +9824,14 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +
 +/* With the present mutex held: the scene and the picture in `dst` go to the matching thread. */
 +static void interp_match_post(TemporalScene *scene, GLuint fbo, int y, int w, int h, int dst, int linear,
-+                              int force_4_3, int source_path, uint64_t presented) {
++                              int force_4_3, int source_path, uint64_t presented, uint64_t cycle) {
 +    InterpMatchJob job;
 +    const int slot = (int)(scene - s_temp_build);
 +    job.scene = scene;
 +    temporal_against(scene, w, h, &job.against);
 +    job.generation = s_temp_generation;
 +    job.presented = presented;
++    job.cycle = cycle;
 +    job.fbo = fbo;
 +    job.y = y;
 +    job.h = h;
@@ -9579,6 +9913,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +#endif
 +    const int apart = s_interp_blend_mode == 2 && !under_lock && s_match_thread;
 +    const uint64_t presented = rth_replaying() ? s_rthx_presented : SDL_GetPerformanceCounter();
++    const uint64_t cycle = rth_replaying() ? s_rthx_cycle : psx_get_cycle_count();
 +    TemporalScene *scene = NULL;
 +    if (s_match_thread) interp_match_wait();  /* in any mode: the slot it holds is released below */
 +    if (apart) {
@@ -9591,6 +9926,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +    }
 +    SDL_LockMutex(s_interp_mutex);
 +    const uint64_t locked = SDL_GetPerformanceCounter();
++    interp_script_wait();  /* before any history this frame resets or replaces */
 +    if (s_interp_blend_mode == 2 && under_lock) {
 +        began = SDL_GetPerformanceCounter();
 +        temporal_prepare(fbo, y, w, h);
@@ -9644,7 +9980,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +        glFlush();
 +        p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, 0);
 +        ready = s_interp_valid >= 2;
-+        interp_match_post(scene, fbo, y, w, h, dst, linear, force_4_3, source_path, presented);
++        interp_match_post(scene, fbo, y, w, h, dst, linear, force_4_3, source_path, presented, cycle);
 +    } else {
 +        if (s_interp_blend_mode == 2) temporal_publish(fbo, y, h);
 +#ifndef PSX_NO_DEBUG_TOOLS
@@ -9663,7 +9999,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +        s_interp_fence[dst] = p_glFenceSync(PSXGL_SYNC_GPU_COMMANDS_COMPLETE, 0);
 +        glFlush();
 +        p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, 0);
-+        interp_capture_published(dst, s_scale, linear, force_4_3, source_path, presented);
++        interp_capture_published(dst, s_scale, linear, force_4_3, source_path, presented, cycle);
 +        ready = s_interp_valid >= 2;
 +    }
 +    if (s_interp_diag)
@@ -9774,7 +10110,8 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +static char     s_shown_dir[512];
 +static int      s_shown_skip = 0, s_shown_left = 0, s_shown_count = 0, s_shown_w = 0, s_shown_h = 0, s_shown_width = 640;
 +static uint8_t *s_shown_pixels = NULL;
-+static struct ShownMeta { uint64_t tick; float alpha; int kind; int placed[7]; } *s_shown_meta = NULL;
++static struct ShownMeta { uint64_t tick; float alpha; int kind; int script; int logged; int placed[7]; } *s_shown_meta = NULL;
++static int s_shown_logged = -1;  /* the capsule log's number of the picture being kept, -1 when none runs */
 +
 +int gl_renderer_record_shown(const char *folder, int skip, int count, int width) {
 +    GL_RT_SYNC(__func__);
@@ -9795,7 +10132,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +    FILE *list;
 +    snprintf(path, sizeof path, "%s/shown.csv", s_shown_dir);
 +    list = fopen(path, "wb");
-+    if (list) fprintf(list, "index,kind,alpha,microseconds,faces,camera_samples,camera_inliers,carried,held,conflicting,departed\n");
++    if (list) fprintf(list, "index,kind,alpha,microseconds,faces,camera_samples,camera_inliers,carried,held,conflicting,departed,script,logged\n");
 +    for (int i = 0; i < s_shown_count; ++i) {
 +        FILE *file;
 +        snprintf(path, sizeof path, "%s/shown_%04d.ppm", s_shown_dir, i);
@@ -9807,11 +10144,11 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +            fclose(file);
 +        }
 +        if (list)
-+            fprintf(list, "%d,%s,%.3f,%.0f,%d,%d,%d,%d,%d,%d,%d\n", i,
++            fprintf(list, "%d,%s,%.3f,%.0f,%d,%d,%d,%d,%d,%d,%d,%d,%d\n", i,
 +                    s_shown_meta[i].kind == 2 ? "drawn" : s_shown_meta[i].kind ? "between" : "frame", s_shown_meta[i].alpha,
 +                    (double)(s_shown_meta[i].tick - s_shown_meta[0].tick) * 1e6 / (double)SDL_GetPerformanceFrequency(),
 +                    s_shown_meta[i].placed[0], s_shown_meta[i].placed[1], s_shown_meta[i].placed[2], s_shown_meta[i].placed[3],
-+                    s_shown_meta[i].placed[4], s_shown_meta[i].placed[5], s_shown_meta[i].placed[6]);
++                    s_shown_meta[i].placed[4], s_shown_meta[i].placed[5], s_shown_meta[i].placed[6], s_shown_meta[i].script, s_shown_meta[i].logged);
 +    }
 +    if (list) fclose(list);
 +    free(s_shown_pixels);
@@ -9854,12 +10191,13 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +enum { SNAP_NONE, SNAP_ASKED, SNAP_READING, SNAP_WAITING };
 +static SDL_SpinLock s_snap_lock;
 +static int          s_snap_state = SNAP_NONE, s_snap_dropped = 0, s_snap_width = 0, s_snap_w = 0, s_snap_h = 0;
++static int          s_snap_sequence = -1, s_snap_taken_sequence = -1;  /* the logged picture read, -1 when no log runs */
 +static uint8_t     *s_snap_pixels = NULL;
 +
 +int gl_renderer_snap_shown(int width) {
 +    GL_RT_SYNC(__func__);
 +    int asked = 0;
-+    if (width < 64 || width > 1920) return 0;
++    if (width < 64 || width > 3840) return 0;
 +    SDL_AtomicLock(&s_snap_lock);
 +    if (s_snap_state == SNAP_NONE || s_snap_state == SNAP_WAITING) {
 +        s_snap_width = width;
@@ -9890,6 +10228,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +            memcpy(rgb, s_snap_pixels, (size_t)s_snap_w * s_snap_h * 3);
 +            *width = s_snap_w;
 +            *height = s_snap_h;
++            s_snap_taken_sequence = s_snap_sequence;
 +            taken = 1;
 +        }
 +    }
@@ -9897,7 +10236,15 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +    return taken;
 +}
 +
-+static void shown_snap(void) {
++/* The logged picture the last handed over one was read from, -1 when none was logged. */
++int gl_renderer_snap_taken_sequence(void) {
++    SDL_AtomicLock(&s_snap_lock);
++    const int sequence = s_snap_taken_sequence;
++    SDL_AtomicUnlock(&s_snap_lock);
++    return sequence;
++}
++
++static void shown_snap(int sequence) {
 +    int ww = 0, wh = 0, width = 0, height = 0, mine;
 +    uint8_t *up = NULL, *down = NULL;
 +    SDL_AtomicLock(&s_snap_lock);
@@ -9926,6 +10273,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +    s_snap_pixels = down;
 +    s_snap_w = width;
 +    s_snap_h = height;
++    s_snap_sequence = sequence;
 +    s_snap_state = down && !s_snap_dropped ? SNAP_WAITING : SNAP_NONE;
 +    s_snap_dropped = 0;
 +    SDL_AtomicUnlock(&s_snap_lock);
@@ -10026,6 +10374,8 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +    s_shown_meta[s_shown_count].tick = SDL_GetPerformanceCounter();
 +    s_shown_meta[s_shown_count].alpha = alpha;
 +    s_shown_meta[s_shown_count].kind = kind;
++    s_shown_meta[s_shown_count].script = s_script_index;
++    s_shown_meta[s_shown_count].logged = s_shown_logged;
 +    memset(s_shown_meta[s_shown_count].placed, 0, sizeof s_shown_meta[s_shown_count].placed);
 +#ifndef PSX_DISABLE_FRAME_INTERPOLATION
 +    if (kind == 1) {
@@ -10045,12 +10395,90 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +
 +/* Called with the finished picture in the back buffer, right before its swap. */
 +static void shown_capture(int kind, float alpha) {
-+    int ww = 0, wh = 0;
-+    shown_snap();
++    int ww = 0, wh = 0, sequence = -1;
++    gl_visible_size(&ww, &wh);
++    if (SDL_AtomicGet(&s_shown_log_on)) {  /* a game frame's own swap is named by its own present */
++        const uint64_t cycle = kind ? s_interp_cur_cycle : rth_replaying() ? s_rthx_cycle : psx_get_cycle_count();
++        SDL_AtomicLock(&s_shown_log_lock);
++        if (s_shown_log.on)
++            sequence = (int)psx_shown_log_add(&s_shown_log, psx_shown_frame_of(cycle, s_shown_log_first, s_shown_log_period), kind, alpha, ww, wh);
++        SDL_AtomicUnlock(&s_shown_log_lock);
++    }
++    shown_snap(sequence);
 +    shown_count(kind);
 +    if (shown_drawn_only()) return;
-+    gl_visible_size(&ww, &wh);
++    s_shown_logged = sequence;
 +    shown_keep(0, 0, 0, ww, wh, kind, alpha);
++    s_shown_logged = -1;
++}
++
++/* Its pictures name game frames by the VBlank of `period` cycles since the emulated clock `first`. */
++void gl_renderer_shown_log_begin(uint64_t first, uint64_t period) {
++    SDL_AtomicLock(&s_shown_log_lock);
++    psx_shown_log_begin(&s_shown_log);
++    s_shown_log_first = first;
++    s_shown_log_period = period;
++    SDL_AtomicUnlock(&s_shown_log_lock);
++    SDL_AtomicSet(&s_shown_log_on, 1);
++}
++
++void gl_renderer_shown_log_end(void) {
++    SDL_AtomicSet(&s_shown_log_on, 0);
++    SDL_AtomicLock(&s_shown_log_lock);
++    s_shown_log.on = 0;
++    SDL_AtomicUnlock(&s_shown_log_lock);
++}
++
++/* Pictures logged since the last call, `lost` those a full ring could not keep. */
++int gl_renderer_shown_log_take(PsxShownPicture *out, int room, unsigned *lost) {
++    if (!out || room <= 0) return 0;
++    SDL_AtomicLock(&s_shown_log_lock);
++    const uint32_t taken = psx_shown_log_take(&s_shown_log, out, (uint32_t)room);
++    if (lost) *lost = s_shown_log.lost;
++    SDL_AtomicUnlock(&s_shown_log_lock);
++    return (int)taken;
++}
++
++uint64_t gl_renderer_shown_captures(void) {
++    if (!s_interp_mutex) return 0u;
++    SDL_LockMutex(s_interp_mutex);
++    const uint64_t captures = s_interp_captures;
++    SDL_UnlockMutex(s_interp_mutex);
++    return captures;
++}
++
++/* From now the presenter shows these pictures and no others, each when its game frame is handed over, which waits for
++ * them: a replay sees what its recording saw. Frames are named as the log named them, from the clock `first`. */
++int gl_renderer_shown_script(const PsxShownPicture *pictures, int count, uint64_t first, uint64_t period) {
++    if (!pictures || count <= 0 || !s_interp_mutex) return 0;
++    PsxShownPicture *copy = (PsxShownPicture *)malloc((size_t)count * sizeof *copy);
++    if (!copy) return 0;
++    memcpy(copy, pictures, (size_t)count * sizeof *copy);
++    if (!s_script_cond) s_script_cond = SDL_CreateCond();
++    if (!s_script_cond) {
++        free(copy);
++        return 0;
++    }
++    SDL_LockMutex(s_interp_mutex);
++    free(s_script.pictures);
++    memset(&s_script, 0, sizeof s_script);
++    s_script.pictures = copy;
++    s_script.count = (uint32_t)count;
++    s_script.first = first;
++    s_script.period = period;
++    SDL_UnlockMutex(s_interp_mutex);
++    return 1;
++}
++
++void gl_renderer_shown_script_counts(unsigned *shown, unsigned *missed, unsigned *late, unsigned *timeouts, unsigned *left) {
++    if (!s_interp_mutex) return;
++    SDL_LockMutex(s_interp_mutex);
++    if (shown) *shown = s_script.shown;
++    if (missed) *missed = s_script.missed;
++    if (late) *late = s_script.late;
++    if (timeouts) *timeouts = s_script.timeouts;
++    if (left) *left = s_script.count - s_script.next;
++    SDL_UnlockMutex(s_interp_mutex);
 +}
 +
 +/* On the drawing thread: the game frame just copied out of `fbo`'s rectangle for the presenter. */
@@ -10081,10 +10509,19 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +}
 +
 +static int interp_present(void) {
-+    if (!s_ctx || !s_interp_enabled || s_interp_suspended || s_interp_valid < 2) return 0;
++    float scripted = -1.0f;
++    if (s_script.pictures) {
++        if (!s_ctx || !s_interp_enabled || s_interp_suspended) return 0;
++        const int step = psx_shown_script_step(&s_script, psx_shown_frame_of(s_interp_cur_cycle, s_script.first, s_script.period),
++                                               s_interp_valid >= 2, &scripted);
++        if (step != PSX_SHOWN_PRESENT) {
++            SDL_CondBroadcast(s_script_cond);
++            return 0;
++        }
++    } else if (!s_ctx || !s_interp_enabled || s_interp_suspended || s_interp_valid < 2) return 0;
 +    uint64_t now = SDL_GetPerformanceCounter();
-+    if (now <= s_interp_start || !s_interp_duration) return 0;
-+    double a = (double)(now - s_interp_start) / (double)s_interp_duration;
++    if (scripted < 0.0f && (now <= s_interp_start || !s_interp_duration)) return 0;
++    double a = scripted >= 0.0f ? (double)scripted : (double)(now - s_interp_start) / (double)s_interp_duration;
 +    /* Keep swapping at the host cadence after the blend completes.  Holding
 +     * alpha at one is visually identical to leaving the current image on the
 +     * front buffer, but avoids an irregular 2/3-swap pattern on 120/144/165 Hz
@@ -10115,7 +10552,13 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +    glFlush();
 +    pres_record(GL_PRES_INTERP, 0, 0, s_interp_w, s_interp_h,
 +                lx, ly, lw, lh);
++    s_script_index = scripted >= 0.0f ? (int)s_script.pictures[s_script.next].sequence : -1;
 +    shown_capture(1, shown);
++    s_script_index = -1;
++    if (scripted >= 0.0f) {
++        psx_shown_script_presented(&s_script);
++        SDL_CondBroadcast(s_script_cond);
++    }
 +    SDL_GL_SwapWindow(s_win);
 +    gz_frame(1);
 +    s_interp_swaps++;
@@ -10153,13 +10596,15 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
      uint64_t freq = SDL_GetPerformanceFrequency();
      uint64_t deadline = SDL_GetPerformanceCounter();
      uint64_t diag_start = deadline, diag_swaps = 0, diag_captures = 0;
-@@ -3473,11 +6747,12 @@
+@@ -3473,11 +7190,13 @@
      while (SDL_AtomicGet(&s_interp_thread_run)) {
          SDL_LockMutex(s_interp_mutex);
          double hz = s_interp_target_hz;
++        const int scripted = s_script.pictures != NULL;
 +        const int diag = s_interp_diag;
          SDL_UnlockMutex(s_interp_mutex);
-         int uncapped = hz < 0.0;
+-        int uncapped = hz < 0.0;
++        int uncapped = hz < 0.0 || scripted;  /* a script's pictures come as fast as their frames do */
          uint64_t now = SDL_GetPerformanceCounter();
          if (!uncapped) {
 -            if (hz < 50.0) hz = 60.0;
@@ -10167,7 +10612,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
              uint64_t period = (uint64_t)((double)freq / hz);
              if (!period) period = 1;
              deadline += period;
-@@ -3492,235 +6767,490 @@
+@@ -3492,235 +7211,495 @@
              }
              while (SDL_GetPerformanceCounter() < deadline) {}
              now = SDL_GetPerformanceCounter();
@@ -10536,8 +10981,10 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +        int32_t num = 1, den = 1;
 +        gte_ws_x_squash(&num, &den);
 +        const uint64_t now = SDL_GetPerformanceCounter();
-+        const int32_t v[] = {disp_x, disp_y, w, h, linear, force_4_3, num, den, (int32_t)(uint32_t)now, (int32_t)(uint32_t)(now >> 32)};
-+        if (rth_rec_call(RTH_PRESENT_VRAM, v, 10)) return;
++        const uint64_t cycle = psx_get_cycle_count();
++        const int32_t v[] = {disp_x, disp_y, w, h, linear, force_4_3, num, den, (int32_t)(uint32_t)now, (int32_t)(uint32_t)(now >> 32),
++                             (int32_t)(uint32_t)cycle, (int32_t)(uint32_t)(cycle >> 32)};
++        if (rth_rec_call(RTH_PRESENT_VRAM, v, 12)) return;
 +    }
 +    if (!s_ctx || !s_raster_ok) return;
 +    flush_flat_batch();
@@ -10819,6 +11266,8 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +    .set_texture_window = glb_set_texture_window, .set_color_modulation = glb_set_color_modulation,
 +    .set_geometry_correction = glb_set_geometry_correction,
 +    .set_world_triangle = glb_set_world_triangle,
++    .set_column_band = glb_set_column_band,
++    .set_sky_cells = glb_set_sky_cells,
 +    .set_precise_triangle = glb_set_precise_triangle,
 +    .set_unpinned_triangle = glb_set_unpinned_triangle,
 +    .set_perspective_triangle = glb_set_perspective_triangle,
@@ -10866,9 +11315,10 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a84774
 +        int32_t num = 1, den = 1;
 +        gte_ws_x_squash(&num, &den);
 +        const uint64_t now = SDL_GetPerformanceCounter();
++        const uint64_t cycle = psx_get_cycle_count();
 +        const int32_t v[] = {disp_x, disp_y, disp_h, linear, w, h, force_4_3, num, den, (int32_t)(uint32_t)now,
-+                             (int32_t)(uint32_t)(now >> 32)};
-+        if (rth_rec_call(RTH_PRESENT_WIDE, v, 11)) return;
++                             (int32_t)(uint32_t)(now >> 32), (int32_t)(uint32_t)cycle, (int32_t)(uint32_t)(cycle >> 32)};
++        if (rth_rec_call(RTH_PRESENT_WIDE, v, 13)) return;
 +    }
 +    if (!gl_renderer_present_wide_fbo(disp_x, disp_y, disp_h, linear))
 +        gl_renderer_present_vram(disp_x, disp_y, w, h, linear, force_4_3);

@@ -7,6 +7,7 @@
 #define RTHF_TAGGED  0x0002u
 #define RTHF_BD_SHIFT 2
 #define RTHF_FLAT    0x0010u
+#define RTHF_SKY     0x0020u
 
 static uint16_t *s_rth_vram_pub = NULL, *s_rth_vram_priv = NULL;
 static int s_rthm_area[4] = {0, 0, VRAM_W - 1, VRAM_H - 1};
@@ -25,6 +26,7 @@ static int ctx_prim_in_backdrop(void) { return rth_replaying() ? s_rthx_backdrop
 static int ctx_drawing_flat(void) { return rth_replaying() ? s_rthx_flat : gpu_ws_drawing_flat(); }
 static int ctx_packet_fade(void) { return rth_replaying() ? s_rthx_fade : gpu_current_packet_fade(); }
 static int ctx_hud_glyph(void) { return rth_replaying() ? s_rthx_glyph : gpu_current_hud_glyph(); }
+static int ctx_sky_fogged(void) { return rth_replaying() ? s_rthx_sky : gpu_sky_fogged(); }
 static int ctx_depth24(void) { return rth_replaying() ? 0 : gpu_display_is_depth24(); }
 static void ctx_x_squash(int32_t *num, int32_t *den) {
     if (rth_replaying()) { *num = s_rthx_squash[0]; *den = s_rthx_squash[1]; return; }
@@ -87,6 +89,7 @@ static uint16_t rth_prim_flags(void) {
     if (psx_ws_prim_is_tagged()) flags |= RTHF_TAGGED;
     flags |= (uint16_t)((psx_ws_prim_in_backdrop() & 3) << RTHF_BD_SHIFT);
     if (gpu_ws_drawing_flat()) flags |= RTHF_FLAT;
+    if (gpu_sky_fogged()) flags |= RTHF_SKY;
     return flags;
 }
 
@@ -108,6 +111,19 @@ static void rtb_set_geometry_correction(int enabled) {
     glb_set_geometry_correction(enabled);
 }
 static void rtb_set_world_triangle(int world) { if (rth_record_mode()) RTH_REC(RTH_WORLD, 0, world); glb_set_world_triangle(world); }
+static void rtb_set_sky_cells(int rows, int columns, int period, int focal, const int32_t *cells) {
+    if (rth_record_mode()) {
+        int32_t payload[4 + 2 * SKY_CELLS] = {rows, columns, period, focal};
+        const int count = rows > 0 && columns > 0 && rows * columns <= SKY_CELLS ? rows * columns : 0;
+        if (cells && count) memcpy(payload + 4, cells, (size_t)count * 2 * sizeof(int32_t));
+        if (rth_put(RTH_SKY_CELLS, 0, payload, sizeof payload)) return;
+    }
+    glb_set_sky_cells(rows, columns, period, focal, cells);
+}
+static void rtb_set_column_band(int low, int high, int canonical) {
+    if (rth_record_mode()) RTH_REC(RTH_COLUMN_BAND, 0, low, high, canonical);
+    glb_set_column_band(low, high, canonical);
+}
 static void rtb_set_precise_triangle(int enabled, int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t x2, int32_t y2) {
     if (rth_record_mode()) RTH_REC(RTH_PRECISE, 0, enabled, x0, y0, x1, y1, x2, y2);
     glb_set_precise_triangle(enabled, x0, y0, x1, y1, x2, y2);
@@ -338,6 +354,8 @@ static const GpuRenderBackend GL_RT_BACKEND = {
     .set_texture_window = rtb_set_texture_window, .set_color_modulation = rtb_set_color_modulation,
     .set_geometry_correction = rtb_set_geometry_correction,
     .set_world_triangle = rtb_set_world_triangle,
+    .set_column_band = rtb_set_column_band,
+    .set_sky_cells = rtb_set_sky_cells,
     .set_precise_triangle = rtb_set_precise_triangle,
     .set_unpinned_triangle = rtb_set_unpinned_triangle,
     .set_perspective_triangle = rtb_set_perspective_triangle,
@@ -384,6 +402,7 @@ static void rth_prim_begin(uint16_t flags, int fade, int glyph) {
     s_rthx_tagged = (flags & RTHF_TAGGED) != 0;
     s_rthx_backdrop = (flags >> RTHF_BD_SHIFT) & 3;
     s_rthx_flat = (flags & RTHF_FLAT) != 0;
+    s_rthx_sky = (flags & RTHF_SKY) != 0;
     s_rthx_fade = fade;
     s_rthx_glyph = glyph;
 }
@@ -401,6 +420,13 @@ static void gl_rth_exec(void *user, const RtCmd *c, const void *payload) {
     case RTH_MOD: glb_set_color_modulation(v[0], v[1], v[2], v[3]); break;
     case RTH_GEOMETRY: glb_set_geometry_correction(v[0]); break;
     case RTH_WORLD: glb_set_world_triangle(v[0]); break;
+    case RTH_COLUMN_BAND: glb_set_column_band(v[0], v[1], v[2]); break;
+    case RTH_SKY_CELLS: {
+        int32_t sky[4 + 2 * SKY_CELLS];
+        memcpy(sky, payload, sizeof sky);
+        glb_set_sky_cells(sky[0], sky[1], sky[2], sky[3], sky + 4);
+        break;
+    }
     case RTH_PRECISE: glb_set_precise_triangle(v[0], v[1], v[2], v[3], v[4], v[5], v[6]); break;
     case RTH_UNPINNED: glb_set_unpinned_triangle(v[0], v[1], v[2], v[3], v[4], v[5]); break;
     case RTH_PERSP: glb_set_perspective_triangle(v[0], rth_float(v[1]), rth_float(v[2]), rth_float(v[3])); break;
@@ -474,11 +500,13 @@ static void gl_rth_exec(void *user, const RtCmd *c, const void *payload) {
     case RTH_PRESENT_WIDE:
         s_rthx_squash[0] = v[7]; s_rthx_squash[1] = v[8];
         s_rthx_presented = (uint64_t)(uint32_t)v[9] | (uint64_t)(uint32_t)v[10] << 32;
+        s_rthx_cycle = (uint64_t)(uint32_t)v[11] | (uint64_t)(uint32_t)v[12] << 32;
         gl_renderer_present_wide_or_vram(v[0], v[1], v[2], v[3], v[4], v[5], v[6]);
         break;
     case RTH_PRESENT_VRAM:
         s_rthx_squash[0] = v[6]; s_rthx_squash[1] = v[7];
         s_rthx_presented = (uint64_t)(uint32_t)v[8] | (uint64_t)(uint32_t)v[9] << 32;
+        s_rthx_cycle = (uint64_t)(uint32_t)v[10] | (uint64_t)(uint32_t)v[11] << 32;
         gl_renderer_present_vram(v[0], v[1], v[2], v[3], v[4], v[5]);
         break;
     case RTH_PRESENT_BLANK: gl_renderer_present_blank(); break;

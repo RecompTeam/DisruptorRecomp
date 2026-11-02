@@ -73,7 +73,9 @@ require(
     "a replay must put the first VBlank at the recording's cycle, with the framework's own VBlank period",
 )
 require(
-    '        capsule.recording = Recording::kOn;\n        say("REC");\n        capsule.first_cycle = psx_get_cycle_count();\n        open_frame();\n'
+    '        capsule.recording = Recording::kOn;\n        say("REC");\n        capsule.first_cycle = psx_get_cycle_count();\n'
+    "        gl_renderer_shown_log_begin(capsule.first_cycle, kVBlankCycles);\n        capsule.shown_base = gl_renderer_shown_captures();\n"
+    "        open_frame();\n"
     in capsule
     and "    capsule.open.pad[0] = sio_get_pad_buttons_slot(0);\n    capsule.open.pad[1] = sio_get_pad_buttons_slot(1);\n"
     in capsule
@@ -113,8 +115,12 @@ require(
     "a replay must also restore weapon selection when the same frame holds a mouse yaw write",
 )
 require(
-    "    const bool in_step = capsule.same != 0 && capsule.last_same + kInStep >= capsule.replayed.size();\n" in capsule
-    and "constexpr size_t kSettle = 120, kInStep = 60, kLongest = 60 * 60 * 10;" in capsule,
+    "    const disruptor::capsule::Verdict verdict = disruptor::capsule::judge(capsule.replayed, capsule.seen);\n"
+    "    const bool in_step = verdict.in_step;\n"
+    in capsule
+    and "    verdict.in_step = verdict.same != 0 && verdict.last_same + kInStep > last_compared;\n" in capsule
+    and "inline constexpr size_t kInStep = 60;\n" in read("src/game/session/capsule.h")
+    and "constexpr size_t kSettle = 120, kLongest = 60 * 60 * 10;" in capsule,
     "a replay's exit code must say whether it still had the recording's memory in its last second",
 )
 require(
@@ -161,7 +167,10 @@ require(
     and "    return ctrl || recording ? Press::kRecord : Press::kLoad;\n" in capsule
     and "int key_held(const SDL_Event *event) {\n#if defined(PSX_SDL3)\n    return event->key.mod;\n#else\n    return event->key.keysym.mod;\n#endif\n}\n"
     in menu
-    and menu.count("KMOD_") == 2
+    and menu.count("KMOD_") == 3
+    and "    if (!g_menu.open && key_down(event, SDL_SCANCODE_F11) && (key_held(event) & KMOD_CTRL) != 0 &&\n"
+    "        disruptor_capsule_mark(event->key.repeat ? 1 : 0))\n        return 1;\n"
+    in menu
     and "    if (capsule.recording == Recording::kSaving) capsule.end_asked = true;\n"
     "    if (capsule.recording != Recording::kOff ||"
     in capsule
@@ -189,10 +198,13 @@ require(
 )
 require(
     "    out.close();\n    return !out.fail();\n" in capsule
-    and '    const bool stored = write(capsule.made / "capsule.toml", about) && input && !failed;\n' in capsule
+    and '    const bool stored = write(capsule.made / "capsule.toml", about) && input && settings && lists;\n'
+    in capsule
     and "    std::_Exit(stored ? 0 : 2);\n" in capsule
     and "    if (g_capsule.scripted == 0) return;\n    std::fflush(nullptr);\n    std::_Exit(2);" in capsule
-    and "    std::_Exit(!in_step ? 3 : capsule.unwritten != 0 ? 2 : 0);" in capsule,
+    and "    std::_Exit(!in_step ? 3 : capsule.unwritten != 0 ? 2 : !capsule.presented_whole ? 4 : 0);" in capsule
+    and "        capsule.presented_whole = late == 0 && timeouts == 0;\n" in capsule
+    and "    const bool settings = capsule.settings_kept;\n" in capsule,
     "a capsule that was not written whole must not be called recorded, and a script must never be left waiting",
 )
 require(
@@ -208,8 +220,10 @@ require(
     and "tools/replay_capsule.py" in guide
     and "PSX_DISRUPTOR_CAPSULE_REPLAY" in capsule
     and "| Save / load state | Shift+F1–F11 / F1–F11 |" in read("docs/PLAYING.md")
-    and "| Start / end a replay capsule | Ctrl+F12 |\n| Load the newest replay capsule | F12 |"
-    in read("docs/PLAYING.md"),
+    and "| Start / end a replay capsule | Ctrl+F12 |\n| Load the newest replay capsule | F12 |\n| Mark the moment in a capsule | Ctrl+F11 |"
+    in read("docs/PLAYING.md")
+    and "Ctrl+F11 while recording marks the moment" in guide
+    and "`PSX_DISRUPTOR_CAPSULE_AS_SHOWN=1`" in guide,
     "the build guide must say how a capsule is made and replayed, and the player's guide gives Ctrl+F12 to recording, F12 to "
     "loading the newest capsule and F1 to F11 to the save states",
 )
@@ -283,9 +297,12 @@ require(
     in renderer
     and "    s_snap_state = down && !s_snap_dropped ? SNAP_WAITING : SNAP_NONE;\n    s_snap_dropped = 0;\n    SDL_AtomicUnlock(&s_snap_lock);\n"
     in renderer
-    and renderer.count("SDL_AtomicLock(&s_snap_lock);") == 5
-    and renderer.count("SDL_AtomicUnlock(&s_snap_lock);") == 5
-    and "static void shown_capture(int kind, float alpha) {\n    int ww = 0, wh = 0;\n    shown_snap();\n    shown_count(kind);\n"
+    and renderer.count("SDL_AtomicLock(&s_snap_lock);") == 6
+    and renderer.count("SDL_AtomicUnlock(&s_snap_lock);") == 6
+    and "static void shown_capture(int kind, float alpha) {\n    int ww = 0, wh = 0, sequence = -1;\n    gl_visible_size(&ww, &wh);\n"
+    "    if (SDL_AtomicGet(&s_shown_log_on)) {"
+    in renderer
+    and "        SDL_AtomicUnlock(&s_shown_log_lock);\n    }\n    shown_snap(sequence);\n    shown_count(kind);\n"
     in renderer
     and "static void shown_keep(GLuint source, int x, int y, int ww, int wh, int kind, float alpha) {\n"
     "    if (s_shown_left <= 0) return;\n"
@@ -302,12 +319,14 @@ require(
     and "    if (write(capsule.made / disruptor::capsule::preview_name(disruptor::capsule::preview_slot(capsule.previews)),\n"
     in capsule
     and "        ++capsule.previews;\n" in capsule
-    and "    keep_preview();\n    gl_renderer_snap_cancel();\n    capsule.preview_asked = false;\n    char about[256];\n"
+    and "    keep_mark();\n    if (!capsule.mark_asked) keep_preview();\n    gl_renderer_snap_cancel();\n"
+    "    capsule.preview_asked = capsule.mark_asked = false;\n"
     in capsule
-    and "        gl_renderer_snap_cancel();\n        capsule.previews = 0;\n        capsule.preview_asked = false;\n        capsule.recording = Recording::kOn;\n"
+    and "        gl_renderer_snap_cancel();\n        capsule.previews = 0;\n        capsule.preview_asked = capsule.mark_asked = false;\n"
     in capsule
-    and "        keep_preview();\n"
-    "        if (disruptor::capsule::preview_due(capsule.recorded.size()) && gl_renderer_snap_shown(static_cast<int>(disruptor::capsule::kPreviewWidth)))\n"
+    and "        keep_mark();\n        if (!capsule.mark_asked) keep_preview();\n"
+    "        if (!capsule.mark_asked && disruptor::capsule::preview_due(capsule.recorded.size()) &&\n"
+    "            gl_renderer_snap_shown(static_cast<int>(disruptor::capsule::kPreviewWidth)))\n"
     "            capsule.preview_asked = true;\n"
     "        close_frame();\n"
     in capsule
@@ -345,6 +364,64 @@ require(
     and "Hold the mouse over a picture to see that capsule play." in playing,
     "the list shows each capsule's last picture and loads it again when it is replaced, plays its pictures under the mouse, frees "
     "what it no longer shows, takes no file that is not a whole picture, and the player's guide says so",
+)
+
+temporal_thread = read("psxrecomp/runtime/src/gpu_gl_render_thread.c.inc")
+require(
+    "        const uint64_t cycle = kind ? s_interp_cur_cycle : rth_replaying() ? s_rthx_cycle : psx_get_cycle_count();\n"
+    "        SDL_AtomicLock(&s_shown_log_lock);\n        if (s_shown_log.on)\n"
+    "            sequence = (int)psx_shown_log_add(&s_shown_log, psx_shown_frame_of(cycle, s_shown_log_first, s_shown_log_period), kind, alpha, ww, wh);\n"
+    in renderer
+    and "    s_interp_cur_cycle = cycle;\n    s_interp_captures++;\n}\n" in renderer
+    and "    const uint64_t cycle = rth_replaying() ? s_rthx_cycle : psx_get_cycle_count();\n" in renderer
+    and renderer.count("        const uint64_t cycle = psx_get_cycle_count();\n") == 2
+    and "        if (rth_rec_call(RTH_PRESENT_VRAM, v, 12)) return;\n" in renderer
+    and "        if (rth_rec_call(RTH_PRESENT_WIDE, v, 13)) return;\n" in renderer
+    and "        s_rthx_cycle = (uint64_t)(uint32_t)v[11] | (uint64_t)(uint32_t)v[12] << 32;\n" in temporal_thread
+    and "        s_rthx_cycle = (uint64_t)(uint32_t)v[10] | (uint64_t)(uint32_t)v[11] << 32;\n" in temporal_thread
+    and "    job.cycle = cycle;\n" in renderer
+    and "job->presented, job->cycle);\n" in renderer,
+    "every game frame reaches the presenter with the emulated clock of its present, whichever thread draws it, and each "
+    "picture shown while a capsule records is logged under the VBlank of the later frame it is placed before",
+)
+require(
+    "        const int step = psx_shown_script_step(&s_script, psx_shown_frame_of(s_interp_cur_cycle, s_script.first, s_script.period),\n"
+    "                                               s_interp_valid >= 2, &scripted);\n"
+    in renderer
+    and "    double a = scripted >= 0.0f ? (double)scripted : (double)(now - s_interp_start) / (double)s_interp_duration;\n"
+    in renderer
+    and renderer.index("    s_script_index = scripted >= 0.0f ? (int)s_script.pictures[s_script.next].sequence : -1;\n")
+    < renderer.index("    shown_capture(1, shown);\n")
+    < renderer.index("        psx_shown_script_presented(&s_script);\n        SDL_CondBroadcast(s_script_cond);\n")
+    and "    SDL_LockMutex(s_interp_mutex);\n    interp_script_wait();\n    if (job->generation == s_temp_generation) {\n"
+    in renderer
+    and "    const uint64_t locked = SDL_GetPerformanceCounter();\n    interp_script_wait();  /* before any history this frame resets or replaces */\n"
+    in renderer
+    and "            s_script.timeouts++;\n" in renderer
+    and "    s_script_index = scripted >= 0.0f ? (int)s_script.pictures[s_script.next].sequence : -1;\n" in renderer
+    and "        int uncapped = hz < 0.0 || scripted;" in renderer,
+    "a replay as shown presents each recorded picture between the same two game frames at the same place, and no game "
+    "frame's scene is handed over before the pictures of the one before are shown",
+)
+require(
+    "        capsule.first_cycle = psx_get_cycle_count();\n        gl_renderer_shown_log_begin(capsule.first_cycle, kVBlankCycles);\n"
+    in capsule
+    and "            if (!gl_renderer_shown_script(script.data(), static_cast<int>(script.size()), capsule.played_first_cycle, kVBlankCycles)) {\n"
+    in capsule
+    and "    capsule.open.residual = capsule.notes.residual;\n" in capsule
+    and "    take_shown();\n    capsule.recorded.push_back(capsule.open);\n" in capsule
+    and "    gl_renderer_shown_log_end();\n    take_shown();\n" in capsule
+    and "    if (!gl_renderer_snap_shown(kMarkWidth)) return 1;\n" in capsule
+    and capsule.index("    if (!write(capsule.made / disruptor::capsule::mark_name(")
+    < capsule.index("    mark.picture = gl_renderer_snap_taken_sequence();\n")
+    and capsule.count('        say("MARK NOT saved");\n') == 2
+    and "        if (++capsule.mark_waited < kMarkWait) return;\n" in capsule
+    and "    *yaw = static_cast<double>(capsule.replayed[capsule.at - 1].residual);\n" in capsule
+    and "    if (width < 64 || width > 3840) return 0;\n" in renderer
+    and "    s_snap_sequence = sequence;\n" in renderer
+    and "            s_snap_taken_sequence = s_snap_sequence;\n" in renderer,
+    "a recording keeps every picture shown from its first VBlank on, the turn's remainder each frame and a full picture for "
+    "each mark with the number of the picture it was read from, and a replay hands the remainder back",
 )
 
 print("Disruptor replay capsule source contract: PASS")

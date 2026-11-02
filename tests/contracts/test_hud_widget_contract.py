@@ -164,7 +164,7 @@ require(
     in rect
     and rect.rstrip().endswith("    memset(s_flat_sides, 0, sizeof(s_flat_sides));")
     and ": s_flat_sides[xs[i] == s_sprite_x ? 0 : 1]);" in renderer
-    and "vp[20] = visual_flags || s_flat_sides[0] != 0.0f || s_flat_sides[1] != 0.0f ? px[cut_corners >= 0 ? 0 : i] : (float)xs[i];"
+    and "vp[20] = visual_flags || s_flat_sides[0] != 0.0f || s_flat_sides[1] != 0.0f ? px[cut_corners >= 0 || deferred ? 0 : i] : (float)xs[i];"
     in renderer
     and '    "  if (u_visual > 0.5 && a_visual_flags < -0.5 && a_visual_flags > -1.5) p.x = a_visual_pos.x;\\n"\n'
     in renderer

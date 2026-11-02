@@ -1,4 +1,5 @@
 #include "gpu_sky_fog.h"
+#include "gpu_ws_screen_tile.h"
 
 #include <algorithm>
 #include <array>
@@ -53,7 +54,9 @@ std::vector<Tile> fill(PsxSkyFog &fog, std::uint32_t &key, std::int32_t left, st
 /* The palette the tile is drawn with, or 0 when it is drawn as the game made it. */
 std::uint16_t take(PsxSkyFog &fog, const Tile &tile) {
     std::uint16_t clut = 0u;
-    return psx_sky_fog_take(&fog, tile.key, tile.words.data(), &clut) ? clut : 0u;
+    std::int32_t step = -1;
+    if (!psx_sky_fog_take(&fog, tile.key, tile.words.data(), &clut, &step)) return 0u;
+    return clut == static_cast<std::uint16_t>(tile.words[2] >> 16) ? 0u : clut;
 }
 
 void test_the_clearest_sky_runs_across_openings_that_overlap() {
@@ -77,6 +80,62 @@ void test_openings_that_share_an_edge_are_one_sky() {
     const auto alone = fill(*apart, key, 133, 174, 240, 6);
     fill(*apart, key, 175, 374, 240, 0);
     expect(take(*apart, alone[0]) == 0u, "a column of something else between them keeps each its own fog");
+}
+
+/* An opening whose tiles reach `margin` columns past the span the game measured. */
+std::vector<Tile> fill_past(PsxSkyFog &fog, std::uint32_t &key, std::int32_t left, std::int32_t right, std::int32_t step,
+                            std::int32_t margin) {
+    std::vector<Tile> tiles;
+    psx_sky_fog_open(&fog, step);
+    for (std::int32_t x = left - margin; x < right + margin; x += 64) {
+        Tile tile{key += 0x18u, tile_words(x, 0, std::min(64, right + margin - x), 60, step)};
+        psx_sky_fog_tile(&fog, tile.key, tile.words.data());
+        tiles.push_back(tile);
+    }
+    psx_sky_fog_span(&fog, left, right);
+    return tiles;
+}
+
+void test_tiles_past_their_opening_join_no_other() {
+    for (std::int32_t gap = 1; gap <= 8; gap++) {
+        auto fog = std::make_unique<PsxSkyFog>();
+        std::uint32_t key = 0x800C0000u;
+        const auto far = fill_past(*fog, key, 64, 96, 6, 4);
+        fill_past(*fog, key, 96 + gap, 144, 0, 4);
+        expect(take(*fog, far[0]) == 0u, "openings the game kept apart keep each its own fog, however far their tiles reach");
+    }
+    auto fog = std::make_unique<PsxSkyFog>();
+    std::uint32_t key = 0x800C0000u;
+    const auto far = fill_past(*fog, key, 64, 96, 6, 4);
+    fill_past(*fog, key, 96, 144, 0, 4);
+    expect(take(*fog, far[0]) == clut_of(0), "measured spans that share an edge are still one sky");
+    for (const std::int32_t numerator : {3, 4, 5}) {
+        auto wide = std::make_unique<PsxSkyFog>();
+        const std::int32_t denominator = numerator == 3 ? 4 : numerator == 4 ? 7 : 6;
+        const auto widen = [&](std::int32_t x, int up) { return psx_ws_widen_about(x, 160, numerator, denominator, up); };
+        std::vector<Tile> near;
+        for (const auto &[left, right, step] : {std::array<std::int32_t, 3>{64, 95, 6}, std::array<std::int32_t, 3>{96, 144, 0}}) {
+            psx_sky_fog_open(wide.get(), step);
+            const Tile tile{key += 0x18u, tile_words(widen(left - 4, 0), 0, widen(right + 4, 1) - widen(left - 4, 0), 60, step)};
+            psx_sky_fog_tile(wide.get(), tile.key, tile.words.data());
+            psx_sky_fog_span(wide.get(), left, right);
+            if (step) near.push_back(tile);
+        }
+        expect(take(*wide, near[0]) == 0u, "a column apart in the game's frame stays apart however the widening rounds");
+    }
+    auto mixed = std::make_unique<PsxSkyFog>();
+    psx_sky_fog_open(mixed.get(), 6);
+    const Tile measured{key += 0x18u, tile_words(26, 0, 53, 60, 6)};
+    psx_sky_fog_tile(mixed.get(), measured.key, measured.words.data());
+    psx_sky_fog_span(mixed.get(), 64, 95);
+    psx_sky_fog_open(mixed.get(), 0);
+    const Tile unmeasured{key += 0x18u, tile_words(20, 0, 6, 60, 0)};
+    psx_sky_fog_tile(mixed.get(), unmeasured.key, unmeasured.words.data());
+    expect(take(*mixed, measured) == clut_of(0), "beside an opening with no measured span both are judged by their tiles");
+    auto once = std::make_unique<PsxSkyFog>();
+    psx_sky_fog_span(once.get(), 0, 320);
+    const auto alone = fill(*once, key, 0, 64, 60, 6);
+    expect(take(*once, alone[0]) == 0u, "a span told before any opening of the frame is dropped");
 }
 
 void test_the_clearest_sky_is_reached_through_other_openings() {
@@ -126,11 +185,12 @@ void test_a_tile_is_drawn_once_from_its_own_packet() {
     expect(take(*fog, changed) == 0u, "a packet whose words changed since it was built is drawn as it stands");
     expect(take(*fog, foggy[0]) == 0u, "and its record went with that draw");
     std::uint16_t clut = 0u;
-    expect(!psx_sky_fog_take(fog.get(), 0x800D0000u, foggy[0].words.data(), &clut), "an unknown packet is drawn as it stands");
+    std::int32_t step = -1;
+    expect(!psx_sky_fog_take(fog.get(), 0x800D0000u, foggy[0].words.data(), &clut, &step), "an unknown packet is drawn as it stands");
     const auto next = fill(*fog, key, 0, 64, 60, 6);
     expect(take(*fog, next[0]) == 0u, "a frame whose drawn tile had changed still ends, and its clear opening stays its own");
-    expect(!psx_sky_fog_take(fog.get(), 0u, foggy[0].words.data(), &clut), "so is one without an address");
-    expect(clut == 0u, "a tile drawn as it stands leaves the palette alone");
+    expect(!psx_sky_fog_take(fog.get(), 0u, foggy[0].words.data(), &clut, &step), "so is one without an address");
+    expect(clut == 0u && step == -1, "a tile drawn as it stands leaves the palette and the step alone");
 }
 
 void test_a_packet_built_again_keeps_one_record() {
@@ -253,9 +313,81 @@ void test_each_tile_takes_the_least_step_it_reaches() {
 
 }  // namespace
 
+void test_a_known_tile_tells_its_palette_and_step() {
+    auto fog = std::make_unique<PsxSkyFog>();
+    std::uint32_t key = 0x800C0000u;
+    const auto fogged = fill(*fog, key, 0, 320, 240, PSX_SKY_FOG_LAST_STEP);
+    const auto doorway = fill(*fog, key, 105, 210, 240, PSX_SKY_FOG_LAST_STEP);
+    const auto clear = fill(*fog, key, 400, 460, 240, 2);
+    std::uint16_t clut = 0u;
+    std::int32_t step = -1;
+    expect(psx_sky_fog_take(fog.get(), fogged[0].key, fogged[0].words.data(), &clut, &step) && clut == clut_of(PSX_SKY_FOG_LAST_STEP) &&
+               step == PSX_SKY_FOG_LAST_STEP,
+           "a tile of an opening that is the clearest it reaches is known, with its own palette and the last step");
+    expect(psx_sky_fog_take(fog.get(), doorway[0].key, doorway[0].words.data(), &clut, &step) && step == PSX_SKY_FOG_LAST_STEP,
+           "so is one of an equally fogged opening it meets");
+    expect(psx_sky_fog_take(fog.get(), clear[0].key, clear[0].words.data(), &clut, &step) && clut == clut_of(2) && step == 2,
+           "an opening that meets no other keeps its own step");
+}
+
+void test_a_tile_the_game_stops_above_the_frames_last_row_reaches_it() {
+    const auto tile = [](int32_t y, uint32_t rows) {
+        return std::array<uint32_t, 4>{0x64808080u, static_cast<uint32_t>(static_cast<uint16_t>(y)) << 16 | 170u, 0x57147800u,
+                                       rows << 16 | 64u};
+    };
+    expect(psx_sky_fog_rows(tile(180, 59).data(), 0, 239, 0) == (60u << 16 | 64u), "the last row comes from the tile's own block");
+    expect(psx_sky_fog_rows(tile(180, 59).data(), 256, 495, 0) == (60u << 16 | 64u), "in the other frame buffer too");
+    expect(psx_sky_fog_rows(tile(200, 39).data(), 0, 239, 0) == (40u << 16 | 64u), "a tile cut short by the view's pitch too");
+    expect(psx_sky_fog_rows(tile(120, 60).data(), 0, 239, 0) == (60u << 16 | 64u), "a tile above the last rows is as the game made it");
+    expect(psx_sky_fog_rows(tile(150, 50).data(), 0, 239, 0) == (50u << 16 | 64u), "and so is one whose opening ends inside the frame");
+    expect(psx_sky_fog_rows(tile(179, 60).data(), 0, 239, 0) == (60u << 16 | 64u), "a whole block has no row left to give");
+    expect(psx_sky_fog_rows(tile(180, 59).data(), 0, 495, 0) == (59u << 16 | 64u), "nor does a tile of the other frame");
+    expect(psx_sky_fog_rows(tile(200, 39).data(), 0, 239, 200) == (39u << 16 | 64u),
+           "an opening's top tile may be cut at its own top: the row below it may be another block's");
+
+    auto fog = std::make_unique<PsxSkyFog>();
+    psx_sky_fog_reset(fog.get());
+    psx_sky_fog_open(fog.get(), 0);
+    const auto upper = tile(150, 30), lower = tile(180, 59);
+    psx_sky_fog_tile(fog.get(), 0x1000u, upper.data());
+    psx_sky_fog_tile(fog.get(), 0x1020u, lower.data());
+    expect(psx_sky_fog_opening_top(fog.get(), 0x1020u) == 150 && psx_sky_fog_opening_top(fog.get(), 0x1000u) == 150,
+           "a recorded tile tells its opening's top row");
+    expect(psx_sky_fog_opening_top(fog.get(), 0x1040u) == INT32_MAX, "an unknown tile tells none, and so is never made taller");
+    uint16_t clut = 0u;
+    int32_t step = 0;
+    expect(psx_sky_fog_take(fog.get(), 0x1020u, lower.data(), &clut, &step) &&
+               psx_sky_fog_opening_top(fog.get(), 0x1020u) == INT32_MAX,
+           "a taken tile is forgotten: its opening's top is read before it is taken");
+}
+
+void test_the_drawn_sky_is_met_within_a_margin() {
+    auto cover = std::make_unique<PsxSkyCover>();
+    psx_sky_cover_reset(cover.get());
+    expect(!psx_sky_cover_meets(cover.get(), -1000, 1000, -1000, 1000), "a buffer with no tile has no sky");
+    psx_sky_cover_add(cover.get(), PsxSkyRect{100, 60, 164, 120});
+    expect(psx_sky_cover_meets(cover.get(), 90, 101, 70, 80), "a piece over a tile's columns and rows meets it");
+    expect(psx_sky_cover_meets(cover.get(), 90, 98, 70, 80) && !psx_sky_cover_meets(cover.get(), 90, 97, 70, 80),
+           "two columns short of it still do, three do not");
+    expect(psx_sky_cover_meets(cover.get(), 165, 170, 70, 80) && !psx_sky_cover_meets(cover.get(), 166, 170, 70, 80),
+           "the right side the same, past the tile's last column");
+    expect(!psx_sky_cover_meets(cover.get(), 90, 120, 123, 200) && psx_sky_cover_meets(cover.get(), 90, 120, 121, 200),
+           "and the rows below it");
+    for (uint32_t i = 1; i < PSX_SKY_COVER_RECTS; ++i) psx_sky_cover_add(cover.get(), PsxSkyRect{0, 0, 1, 1});
+    expect(!cover->full && !psx_sky_cover_meets(cover.get(), 300, 310, 300, 310), "a full table still tells");
+    psx_sky_cover_add(cover.get(), PsxSkyRect{0, 0, 1, 1});
+    expect(cover->full && psx_sky_cover_meets(cover.get(), 300, 310, 300, 310), "past it every place counts as sky");
+    psx_sky_cover_reset(cover.get());
+    expect(!cover->full && !psx_sky_cover_meets(cover.get(), 90, 101, 70, 80), "a new buffer forgets the old one's tiles");
+}
+
 int main() {
+    test_the_drawn_sky_is_met_within_a_margin();
+    test_a_tile_the_game_stops_above_the_frames_last_row_reaches_it();
+    test_a_known_tile_tells_its_palette_and_step();
     test_the_clearest_sky_runs_across_openings_that_overlap();
     test_openings_that_share_an_edge_are_one_sky();
+    test_tiles_past_their_opening_join_no_other();
     test_the_clearest_sky_is_reached_through_other_openings();
     test_openings_meet_across_rows_too();
     test_equal_or_foggier_openings_change_nothing();

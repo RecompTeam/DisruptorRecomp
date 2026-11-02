@@ -68,6 +68,7 @@ def main() -> int:
     parser.add_argument("capsule", type=Path, help="the capsule's folder")
     parser.add_argument("--pictures", type=Path, help="write every replayed frame here as a PNG, with memory.txt")
     parser.add_argument("--game", type=Path, help="the game executable (default: the build directory's)")
+    parser.add_argument("--pose", type=Path, help="write the camera's place and heading at every frame here as CSV")
     parser.add_argument(
         "--disc", type=Path, default=ROOT / "input" / "Disruptor (USA).cue", help="the US disc's cue sheet"
     )
@@ -85,11 +86,19 @@ def main() -> int:
 
     environment = dict(os.environ)
     environment["PSX_DISRUPTOR_CAPSULE_REPLAY"] = str(capsule)
-    for name in ("PSX_LOAD_SLOT", "PSX_DISRUPTOR_CAPSULE_RECORD", "PSX_DISRUPTOR_CAPSULE_FRAMES"):
+    for name in (
+        "PSX_LOAD_SLOT",
+        "PSX_DISRUPTOR_CAPSULE_RECORD",
+        "PSX_DISRUPTOR_CAPSULE_FRAMES",
+        "PSX_DISRUPTOR_CAPSULE_POSE",
+        "PSX_DISRUPTOR_CAPSULE_AS_SHOWN",
+    ):
         environment.pop(name, None)
     if args.pictures:
         args.pictures.mkdir(parents=True, exist_ok=True)
         environment["PSX_DISRUPTOR_CAPSULE_FRAMES"] = str(args.pictures.resolve())
+    if args.pose:
+        environment["PSX_DISRUPTOR_CAPSULE_POSE"] = str(args.pose.resolve())
     command = [str(game), "--headless", "--no-launcher", "--game", "game.toml", "--disc", str(args.disc.resolve())]
     finished = subprocess.run(
         command,

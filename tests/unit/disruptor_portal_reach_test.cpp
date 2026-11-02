@@ -219,6 +219,56 @@ void test_sight() {
     expect(sight.seen(sector_reach::kNoSector), "the list's empty room is always kept");
 }
 
+void test_the_game_walk_spans() {
+    Sight sight;
+    sight.clear();
+    const Visit open{};
+    const auto measure = [](const Wedge &own) { return measured(own, kAhead, same_column); };
+    const Span screen = measured(kScreen, kAhead, same_column), inner = measured(kInner, kAhead, same_column);
+    sight.enter(0u, 1u, kScreen, open, kLists, measure);
+    sight.enter(1u, 2u, kInner, open, kLists, measure);
+    expect(sight.span(1u).left == screen.left && sight.span(1u).right == screen.right && sight.span(2u).left == inner.left &&
+               sight.span(2u).right == inner.right && inner.left > 0 && inner.right < static_cast<int32_t>(kFullSpan),
+           "a room the game lists keeps the span its own wedge gives it");
+    sight.enter(1u, 3u, kMargin, open, kLists, measure);
+    expect(sight.span(3u).left == 0 && sight.span(3u).right == static_cast<int32_t>(kFullSpan), "a room it does not list counts whole");
+    sight.enter(1u, 2u, kScreen, open, kLists, measure);
+    expect(sight.span(2u).left == 0 && sight.span(2u).right == static_cast<int32_t>(kFullSpan), "a room it meets twice is whole");
+    Visit companions;
+    companions.companions = {10u, sector_reach::kNoSector};
+    sight.enter(1u, 9u, kInner, companions, kLists, measure);
+    expect(sight.span(10u).left == 0 && sight.span(10u).right == static_cast<int32_t>(kFullSpan), "a companion is listed whole");
+    Sight blind;
+    blind.clear();
+    blind.enter(0u, 1u, kScreen, open, kLists);
+    expect(blind.span(1u).left == 0 && blind.span(1u).right == static_cast<int32_t>(kFullSpan), "without a measure a room is whole");
+}
+
+void test_a_face_beside_its_span() {
+    const auto at = [](int32_t a, int32_t b, int32_t c, int32_t d) {
+        return std::array<uint32_t, 4>{static_cast<uint16_t>(a) | 0x00400000u, static_cast<uint16_t>(b) | 0x00400000u,
+                                       static_cast<uint16_t>(c) | 0x00400000u, static_cast<uint16_t>(d) | 0x00400000u};
+    };
+    expect(beside_span(at(10, 20, 30, 49), 50, 200) && beside_span(at(201, 250, 300, 400), 50, 200), "all left or all right is beside");
+    expect(!beside_span(at(10, 20, 30, 50), 50, 200) && !beside_span(at(200, 250, 300, 400), 50, 200),
+           "a corner on the span's edge keeps the face, as the game's sides take it");
+    expect(!beside_span(at(10, 20, 300, 400), 50, 200), "a face across the span is kept");
+    expect(beside_span(at(-20, -30, -9, -10), -8, 328), "screen x is signed");
+
+    disruptor::portal_reach::Span band{};
+    expect(crossed_band(at(45, 60, 70, 80), 50, 200, band) && band.left == 50 && band.right == disruptor::portal_reach::kBandFar,
+           "a face over the span's left edge is the wider walk's left of it");
+    expect(crossed_band(at(190, 210, 150, 160), 50, 200, band) && band.left == -disruptor::portal_reach::kBandFar && band.right == 200,
+           "and one over its right edge right of it");
+    expect(crossed_band(at(10, 20, 300, 400), 50, 200, band) && band.left == 50 && band.right == 200, "one across the span past both");
+    expect(!crossed_band(at(50, 60, 200, 100), 50, 200, band), "a face on the edges crosses none");
+    expect(!crossed_band(at(-20, 10, 20, 30), -8, 328, band) && !crossed_band(at(300, 340, 310, 320), -8, 328, band),
+           "a span at the frame's edge has no inner edge there: a widescreen picture shows past it");
+    expect(!crossed_band(at(-20, 10, 20, 30), 0, 320, band) && !crossed_band(at(300, 340, 310, 320), 0, 320, band),
+           "nor at the frame's edge itself");
+    expect(disruptor::portal_reach::kWholeFace.left > disruptor::portal_reach::kWholeFace.right, "a whole face has no band");
+}
+
 struct Bytes {
     std::unordered_map<uint32_t, uint8_t> bytes;
     uint32_t byte(uint32_t address) const { return bytes.contains(address) ? bytes.at(address) : 0u; }
@@ -351,6 +401,148 @@ void test_keep() {
     expect(memory.read(kList + kRoomByte) == 2u, "nor after a room the walk entered unread");
 }
 
+void test_beside() {
+    const sector_reach::Portal at_wall{11392, 2432, 11392, 2944};
+    expect(near_segment(at_wall, 11404, 2616, 12) && !near_segment(at_wall, 11404, 2616, 11),
+           "the measured camera stands 12 units from the portal's segment");
+    expect(near_segment(at_wall, 11404, 2300, 133) && !near_segment(at_wall, 11404, 2300, 132),
+           "past an end the distance is to that end, 132.5 here");
+    expect(near_segment(sector_reach::Portal{5, 5, 5, 5}, 8, 9, 5) && !near_segment(sector_reach::Portal{5, 5, 5, 5}, 8, 9, 4),
+           "a portal of no length is its point");
+    expect(!beside(sector_reach::Portal{1128, 999, 1129, 1255}, 1000, 1000, kAhead),
+           "a segment 128.003 units away is past the reach, with no rounding down");
+    const View measured{-132, 220};
+    expect(beside(at_wall, 11404, 2616, measured), "the measured portal runs past the camera, one end ahead and one behind");
+    expect(beside(at_wall, 11264, 2616, measured), "128 units from the segment, still running past the eye, it is beside");
+    expect(!beside(at_wall, 11263, 2616, measured), "129 units away it is the walk's own to judge");
+    expect(!beside(sector_reach::Portal{900, 1500, 1100, 1500}, 1000, 1000, kAhead), "a portal wholly ahead is the walk's");
+    expect(!beside(sector_reach::Portal{900, 950, 1100, 950}, 1000, 1000, kAhead), "so is one wholly behind");
+    expect(beside(sector_reach::Portal{1030, 900, 1030, 1100}, 1000, 1000, kAhead), "a portal from behind the eye to ahead is beside it");
+}
+
+constexpr uint32_t kEnd = 0x800717CCu;
+
+struct Map {
+    Bytes memory;
+    static constexpr uint32_t kSector = 0x80100000u, kBesideSector = 0x80100100u, kAheadSector = 0x80100200u, kPortals = 0x80102000u;
+    Map() {
+        memory.set_word(kList, kFullSpan);
+        memory.set_word(kList + kRoomByte, 1u);
+        memory.set_word(sector_reach::kSectors + 4u * 1u, kSector);
+        memory.set_word(sector_reach::kSectors + 4u * 2u, kBesideSector);
+        memory.set_word(sector_reach::kSectors + 4u * 3u, kAheadSector);
+        for (const uint32_t sector : {kSector, kBesideSector, kAheadSector}) memory.set_byte(sector + kSectorDoor, sector_reach::kNoSector);
+        memory.set_word(kSector + kSectorPortals, kPortals);
+        portal(kPortals, 1030, 900, 1030, 1100, 2u, 0u);
+        portal(kPortals + kPortalStride, 900, 1500, 1100, 1500, 3u, 0xFFu);
+        for (uint32_t room = 0; room < kMostRooms; ++room) memory.set_byte(kListedAt + room, 0xFFu);
+        memory.set_byte(kListedAt + 1u, 0u);
+        memory.set_word(kEnd, kList + 8u);
+    }
+    void portal(uint32_t gate, uint32_t x0, uint32_t z0, uint32_t x1, uint32_t z1, uint32_t room, uint32_t last) {
+        memory.set_word(gate, x0 | z0 << 16);
+        memory.set_word(gate + 4u, x1 | z1 << 16);
+        memory.set_byte(gate + sector_reach::kPortalSector, room);
+        memory.set_byte(gate + kPortalLast, last);
+    }
+    uint32_t add(Beside &beside) {
+        return beside.add(kList, kList + 8u, 8u, 1000, 1000, kAhead, memory,
+                          [this](uint32_t address, uint32_t word) { memory.set_word(address, word); },
+                          [this](uint32_t address, uint32_t byte) { memory.set_byte(address, byte); });
+    }
+    void close(Beside &beside) {
+        beside.close(kEnd, [this](uint32_t address) { return memory.word(address); },
+                     [this](uint32_t address) { return memory.byte(address); },
+                     [this](uint32_t address, uint32_t word) { memory.set_word(address, word); },
+                     [this](uint32_t address, uint32_t byte) { memory.set_byte(address, byte); });
+    }
+};
+
+void test_beside_rooms() {
+    Map map;
+    Beside beside;
+    const uint32_t end = map.add(beside);
+    map.memory.set_word(kEnd, end);
+    expect(end == kList + 16u && beside.added() == 1u, "the room behind the portal running past the camera is added, not the one ahead");
+    expect(beside.added_at(kList + 8u) && !beside.added_at(kList) && !beside.added_at(kList + 16u), "its entry is known as added, the game's are not");
+    expect(map.memory.word(kList + 8u) == kFullSpan && map.memory.byte(kList + 8u + kRoomByte) == 2u,
+           "it is drawn over the whole width");
+    expect(map.memory.byte(kListedAt + 2u) == 1u, "its gate byte names its entry, as the walk sets it");
+    map.close(beside);
+    expect(map.memory.word(kEnd) == kList + 8u && map.memory.byte(kListedAt + 2u) == 0xFFu && beside.added() == 0u,
+           "closing takes it out of the list and gives its gate byte back");
+    expect(map.memory.word(kList + 8u) == 0u && map.memory.word(kList + 8u + kRoomByte) == 0u,
+           "and the words under it are the game's again");
+
+    map.memory.set_word(kEnd, map.add(beside));
+    map.memory.set_byte(kListedAt + 2u, 7u);
+    map.memory.set_word(kEnd, kList + 24u);
+    map.close(beside);
+    expect(map.memory.byte(kListedAt + 2u) == 7u && map.memory.word(kEnd) == kList + 24u, "what the game set meanwhile stays");
+
+    map.memory.set_byte(kListedAt + 2u, 0xFFu);
+    map.memory.set_word(kEnd, map.add(beside));
+    map.memory.set_word(kEnd, kList + 24u);
+    map.close(beside);
+    expect(map.memory.byte(kListedAt + 2u) == 1u && map.memory.byte(kList + 8u + kRoomByte) == 2u,
+           "a list the game wrote past the added entry is its own: neither the entry nor its gate byte is touched");
+
+    map.memory.set_byte(kListedAt + 2u, 0xFFu);
+    map.memory.set_word(kEnd, map.add(beside));
+    map.memory.set_word(kList + 8u + kRoomByte, 9u);
+    map.close(beside);
+    expect(map.memory.word(kEnd) == kList + 16u && map.memory.byte(kListedAt + 2u) == 1u,
+           "a list the game rebuilt to the same end is its own too: nothing is put back");
+
+    map.memory.set_byte(kListedAt + 2u, 0xFFu);
+    map.memory.set_word(kEnd, map.add(beside));
+    beside.forget();
+    map.close(beside);
+    expect(map.memory.word(kEnd) == kList + 16u, "after a state load nothing is taken out");
+
+    Map listed;
+    listed.memory.set_word(kList + kRoomByte, 2u);
+    listed.memory.set_word(sector_reach::kSectors + 4u * 2u, Map::kSector);
+    Beside again;
+    expect(listed.add(again) == kList + 8u, "a room already listed is not added twice");
+
+    Map shut;
+    shut.memory.set_byte(Map::kBesideSector + kSectorDoor, 4u);
+    shut.memory.set_word(kObjects, 0x80110000u);
+    shut.memory.set_word(0x80110000u + 16u, 0x80120000u);
+    Beside door;
+    expect(shut.add(door) == kList + 16u, "a room whose own door is shut is still added, as the walk lists it");
+
+    Map behind_door;
+    behind_door.memory.set_byte(Map::kSector + kSectorDoor, 4u);
+    behind_door.memory.set_word(kObjects, 0x80110000u);
+    behind_door.memory.set_word(0x80110000u + 16u, 0x80120000u);
+    Beside walled;
+    expect(behind_door.add(walled) == kList + 8u, "nor a room past a listed room whose own door is shut, as the walk stops there");
+
+    Map gone;
+    gone.memory.set_word(sector_reach::kSectors + 4u * 2u, 0u);
+    Beside unloaded;
+    expect(gone.add(unloaded) == kList + 8u, "nor one out of memory");
+
+    Beside odd;
+    expect(odd.add(kList, kList + 4u, 8u, 1000, 1000, kAhead, map.memory, [](uint32_t, uint32_t) {}, [](uint32_t, uint32_t) {}) ==
+               kList + 4u && odd.added() == 0u,
+           "a list that is not whole entries is left alone");
+}
+
+void test_keep_bounds() {
+    Sight sight;
+    const Visit open{};
+    sight.enter(0u, 1u, kScreen, open, kLists);
+    Memory memory;
+    const auto read = [&memory](uint32_t address) { return memory.read(address); };
+    const auto write = [&memory](uint32_t address, uint32_t word) { memory.words[address] = word; };
+    expect(keep(kList, kList + 8u * kMostRooms + 1u, 8u, sight, read, write) == kList + 8u * kMostRooms + 1u,
+           "a list that is not whole entries is left alone");
+    expect(keep(kList, kList + 16u, 0u, sight, read, write) == kList + 16u, "so is one with no stride");
+}
+
 }  // namespace
 
 int main() {
@@ -362,9 +554,14 @@ int main() {
     test_facing();
     test_listed();
     test_sight();
+    test_the_game_walk_spans();
+    test_a_face_beside_its_span();
     test_visit_and_view();
     test_objects();
     test_keep();
+    test_beside();
+    test_beside_rooms();
+    test_keep_bounds();
     if (g_failures != 0) return 1;
     std::cout << "portal reach: PASS\n";
     return 0;

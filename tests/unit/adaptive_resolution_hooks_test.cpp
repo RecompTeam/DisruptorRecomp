@@ -15,21 +15,39 @@ void expect(bool condition, const char *message) {
 }
 
 void (*g_frame_hook)(void) = nullptr;
-double g_now = 100.0, g_busy_ms = 0.0;
+double g_now = 100.0, g_busy_ms = 0.0, g_weight = 1.0, g_step_seconds = 0.0;
 int g_scale = 3, g_sets = 0, g_refuse = 0, g_busy_wanted = 0;
 
 constexpr double kPeriod = 1.0 / 59.94;
 
 double clock_now() { return g_now; }
 
-/* A scene whose GPU time grows with the pixels: 33 ms at 3x, 18 ms at 2x, 9 ms at 1x; a frame lasts at least the period. */
+/* A scene whose GPU time grows with the pixels: 33 ms at 3x, 18 ms at 2x, 9 ms at 1x, times the weight; a frame lasts
+ * at least the period. */
 void frames(int count) {
     for (int i = 0; i < count; ++i) {
-        const double busy = (6.0 + 3.0 * g_scale * g_scale) / 1000.0;
+        const double busy = g_weight * (6.0 + 3.0 * g_scale * g_scale) / 1000.0;
         g_now += busy > kPeriod ? busy : kPeriod;
         g_busy_ms += busy * 1000.0;
         g_frame_hook();
     }
+}
+
+/* Frames whose GPU time is all their length, alternating between two lengths at 3x that shrink with the pixels. */
+void alternating(int count, double first, double second) {
+    for (int i = 0; i < count; ++i) {
+        const double busy = (i % 2 ? second : first) * (6.0 + 3.0 * g_scale * g_scale) / 33.0;
+        g_now += busy;
+        g_busy_ms += busy * 1000.0;
+        g_frame_hook();
+    }
+}
+
+/* The guest held up for `seconds` while the GPU worked through `busy` of queued frames. */
+void stall(double seconds, double busy) {
+    g_now += seconds;
+    g_busy_ms += busy * 1000.0;
+    g_frame_hook();
 }
 
 } // namespace
@@ -47,6 +65,7 @@ int psx_host_video_set_internal_scale(int scale) {
     ++g_sets;
     if (g_refuse) return 0;
     g_scale = scale;
+    g_now += g_step_seconds;
     return 1;
 }
 void disruptor_diagnostics_note(const char *, ...) {}
@@ -81,9 +100,56 @@ int main() {
     const int before = g_sets;
     const double began = g_now;
     frames(900);
-    expect(g_scale == 3 && g_sets - before <= static_cast<int>((g_now - began) / 10.0) + 1,
+    expect(g_scale == 3 && g_sets - before >= 2 && g_sets - before <= static_cast<int>((g_now - began) / 10.0) + 1,
            "a refused step is asked again once a 10 s hold is over, not every frame");
     g_refuse = 0;
+    disruptor_adaptive_resolution_set_enabled(0);
+
+    g_weight = 3.0;
+    disruptor_adaptive_resolution_set_enabled(1);
+    frames(300);
+    expect(g_scale < 3, "a GPU at 10 FPS, every frame longer than the controller's gap, still lowers the scale");
+    disruptor_adaptive_resolution_set_enabled(0);
+
+    g_weight = 1.0;
+    g_step_seconds = 0.040;
+    disruptor_adaptive_resolution_set_enabled(1);
+    frames(900);
+    const int heavy = g_scale;
+    g_weight = 0.2;
+    frames(3000);
+    expect(heavy < 3 && g_scale == 3, "steps of 40 ms, longer than a frame, still let a lighter scene climb back to 3x");
+    disruptor_adaptive_resolution_set_enabled(0);
+    g_step_seconds = 0.0;
+
+    g_weight = 0.2;
+    disruptor_adaptive_resolution_set_enabled(1);
+    for (int i = 0; i < 40; ++i) {
+        frames(30);
+        stall(0.35, 0.30);
+    }
+    expect(g_scale == 3, "lone stalls, each draining 300 ms of queued frames, are pauses and leave a light scene at 3x");
+    disruptor_adaptive_resolution_set_enabled(0);
+
+    g_weight = 3.0;
+    disruptor_adaptive_resolution_set_enabled(1);
+    frames(5);
+    disruptor_adaptive_resolution_set_enabled(0);
+    disruptor_adaptive_resolution_set_enabled(1);
+    g_weight = 0.2;
+    frames(1);
+    stall(10.0, 9.0);
+    stall(10.0, 9.0);
+    frames(120);
+    expect(g_scale == 3, "after a restart the first stall is a pause: no slow frame from before carries over");
+    disruptor_adaptive_resolution_set_enabled(0);
+
+    disruptor_adaptive_resolution_set_enabled(1);
+    frames(1);
+    alternating(300, 0.060, 0.090);
+    expect(g_scale < 3, "frames of 60 and 90 ms, around the gap, all GPU time, still lower the scale");
+    disruptor_adaptive_resolution_set_enabled(0);
+    g_weight = 1.0;
 
     if (g_failures) return 1;
     std::cout << "adaptive resolution hooks: PASS\n";

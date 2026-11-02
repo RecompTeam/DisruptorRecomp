@@ -5,6 +5,7 @@
 #include "mod_plugins.h"
 #include "psx_netplay.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -27,9 +28,10 @@ constexpr double kPeriod = 1.0 / 59.94;
 constexpr int kFloor = 1;
 constexpr double kEntryHold = 5.0;   // a level's first seconds stream its sectors in
 constexpr double kRefusedHold = 10.0;
+constexpr double kStepCostCap = kPeriod / 2;  // a step to 6x or 8x took 22 ms, more than any interval's idle: up steps stopped
 
 struct State {
-    bool enabled = false, world = false;
+    bool enabled = false, world = false, late = false;
     int ceiling = 0, requested = 0;  // the controller's top, and the player's scale kept apart from what is drawn
     DynresController controller{};
     double last = 0.0;
@@ -57,6 +59,7 @@ double seconds() { return g_clock(); }
 
 void restart(int ceiling) {
     g.ceiling = g.requested = ceiling;
+    g.late = false;
     DynresParams p;
     dynres_default_params(&p);
     dynres_init(&g.controller, &p, ceiling < kFloor ? ceiling : kFloor, ceiling, ceiling);
@@ -68,9 +71,10 @@ void apply(int level, double now) {
     if (level == from) return;
     const double began = seconds();
     if (psx_host_video_set_internal_scale(level)) {
-        dynres_note_step_cost(&g.controller, seconds() - began);
+        const double took = seconds() - began;
+        dynres_note_step_cost(&g.controller, std::min(took, kStepCostCap));
         std::fprintf(stdout, "disruptor: dynamic resolution %dx to %dx, GPU load %.2f, %s, %.1f ms\n", from, level,
-                     g.controller.last_load, g.controller.last_reason ? g.controller.last_reason : "", (seconds() - began) * 1000.0);
+                     g.controller.last_load, g.controller.last_reason ? g.controller.last_reason : "", took * 1000.0);
         return;
     }
     g.controller.level = from;
@@ -92,8 +96,12 @@ void frame() {
     const bool world = !gpu_ws_displayed_flat() && !gpu_ws_displayed_menu();
     if (world && !g.world) dynres_hold(&g.controller, now, kEntryHold);
     g.world = world;
-    const DynresSample sample{kPeriod, now - g.last, work_seconds(g.busy_ms, busy_ms) * g_work_scale,
+    const double wall = now - g.last, gpu = work_seconds(g.busy_ms, busy_ms);
+    const bool slow = gpu_bound(wall, gpu, kPeriod, g.controller.p.gap_factor);
+    const DynresSample sample{kPeriod, judged_wall(wall, slow, g.late, kPeriod, g.controller.p.gap_factor),
+                              gpu * g_work_scale,
                               held(world, psx_host_ui_gl_visible() != 0, g_replaying, psx_netplay_active() != 0)};
+    g.late = gpu_bound(wall, gpu, kPeriod, g.controller.p.late_factor);
     g.last = now;
     g.busy_ms = busy_ms;
     const unsigned long long windows = g.controller.windows + g.controller.held_windows;

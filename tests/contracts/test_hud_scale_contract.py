@@ -159,7 +159,7 @@ require(
     and "    const int packet_raw = packet_fade >= 0 ? 2 | (packet_fade << 2) : ctx_hud_glyph() << 2;\n" in renderer
     and '"bool glyph_edge(vec2 at, int glyph, out vec3 rgb, out int stp){\\n"' in renderer
     and '"  return t.x >= v_limits.x && t.x <= v_limits.z && t.y >= v_limits.y && t.y <= v_limits.w;\\n"' in renderer
-    and '"  if (!sample_texture(sample_uv, rgb, stp) && (glyph == 0 || !glyph_edge(sample_uv, glyph, rgb, stp))) discard;\\n"'
+    and '"                    : !sample_texture(sample_uv, rgb, stp) && (glyph == 0 || !glyph_edge(sample_uv, glyph, rgb, stp))) discard;\\n"'
     in renderer
     and "constexpr int kTextSource[4] = {512, 177, 8, 0};" in widgets
     and "    if (!strokes || strokes[0] != '0') gpu_ws_set_hud_text_source(kTextSource[0], kTextSource[1], kTextSource[2], kTextSource[3]);\n"

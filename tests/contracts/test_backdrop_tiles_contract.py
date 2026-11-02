@@ -153,6 +153,14 @@ require(
     and "x0 = psx_ws_squash_about(x0, centre, ws_xnum, ws_xden);" in gpu,
     "marked tiles must squash about the display centre through shared edges",
 )
+require(
+    gpu.index("x0 = psx_ws_squash_about(x0, centre, ws_xnum, ws_xden);")
+    < gpu.index("if (!psx_ws_screen_tile_keep(&x0, &right, ws_backdrop_placed() ? tile_pins : 0u)) return;")
+    < gpu.index("            if (ws_backdrop_placed()) {\n                /* The remainder of a turn")
+    and "if (right <= x0) return;" not in gpu,
+    "a placed tile squashed to no width keeps a pixel on its pinned end before its edges are placed, so the moved edge "
+    "of the next opening's tile never bares the clear colour",
+)
 
 image_path = ROOT / "input" / "SLUS_002.24.code"
 if image_path.exists():
@@ -235,7 +243,8 @@ require(
 )
 require(
     "    if (!s_raster_ok || !tile || !isfinite(tile->left + tile->right + tile->moved) || !(tile->scale > 0.0f) ||\n"
-    "        fabsf(tile->left) > 1.0f || fabsf(tile->right) > 1.0f || fabsf(tile->moved) > 64.0f) return;\n"
+    "        fabsf(tile->left) > PSX_WS_SCREEN_TILE_OFFSET_MOST || fabsf(tile->right) > PSX_WS_SCREEN_TILE_OFFSET_MOST ||\n"
+    "        fabsf(tile->moved) > 64.0f) return;\n"
     "    s_next_tile = *tile;\n    s_next_tile_set = 1;\n"
     in renderer
     and "    s_tile_set = s_next_tile_set && w > 0 && h > 0;  /* as a sprite's depth: for this rectangle alone */\n"
@@ -245,13 +254,16 @@ require(
     in renderer
     and "static int tile_placed(void) { return s_geometry_correction && s_tile_set; }\n" in renderer
     and "    if (s_tile.pins & (end ? 2u : 1u)) {\n        *place = (float)x;\n        *mark = end ? -4.0f : -3.0f;\n"
+    "        const int any = sky;  /* each pixel finds its texel in the cells: no column bounds the slide */\n"
     "        *slide = psx_ws_screen_tile_slide(offset, s_tile.moved, s_tile.scale, end,\n"
-    "                                          psx_ws_screen_tile_room(u, s_tile.column, end), across > 1.0f ? across - 1.0f : 0.0f);\n"
+    "                                          any ? 1.0e6f : psx_ws_screen_tile_room(u, s_tile.column, end),\n"
+    "                                          any ? 1.0e6f : across > 1.0f ? across - 1.0f : 0.0f);\n"
     "        *want = psx_ws_screen_tile_want(offset, s_tile.moved, s_tile.scale);\n"
     "    } else {\n        *place = (float)x + offset + s_tile.moved;\n        *mark = -2.0f;\n        *slide = *want = 0.0f;\n    }\n"
     in renderer
     and "            if (!visual_flags && tile_placed()) {\n" in renderer
-    and "                tile_corner(xs[i], (float)us[i], (float)(high - low), &vp[20], &vp[19], &vp[22], &vp[21]);  /* y's slot: the mirror takes a_pos.y */\n"
+    and "                tile_corner(xs[i], (float)us[i], (float)(high - low), sky_finds(&s_sky, vp[8], vp[9], vp[14], vp[15], vp[12]),\n"
+    "                            &vp[20], &vp[19], &vp[22], &vp[21]);  /* y's slot: the mirror takes a_pos.y */\n"
     in renderer,
     "a tile's placement is for its own rectangle and only with geometry correction: a free edge moves with the panorama, an "
     "end of the span stays on its whole pixel and slides its texture within its column and its own width",
@@ -281,7 +293,10 @@ require(
     and "    if (placed) v[2] +=" not in presenter
     and "        if (textured && v[19] < -1.5f) {\n"
     "            s->backdrop=1; s->backdrop_origin=s_tile.origin; s->backdrop_period=s_tile.period;\n"
-    "            s->backdrop_scale=s_tile.scale; s->backdrop_column=s_tile.column;\n        }\n"
+    "            s->backdrop_scale=s_tile.scale; s->backdrop_column=s_tile.column;\n"
+    "            s->sky=s_sky;\n"
+    "            s->sky_frame[0]=g_wide_cur_base+s_yaw_center_x+(direct ? 0 : wide_dx()); s->sky_frame[1]=s_off_y+s_yaw_center_y_relative;\n"
+    "            s->sky_frame[2]=s_yaw_focal_x;\n        }\n"
     in presenter
     and "    s->active = 1; s->bad = 0; s->nv = s->nt = s->nc = 0;\n    s->backdrop = 0; s->backdrop_back = 0.0f;\n"
     in presenter
@@ -303,7 +318,8 @@ require(
     and "            if (!(v[19]<-1.5f)) continue;\n" in presenter
     and "                if (corner[19]>-2.5f) { corner[0]=corner[20]=corner[0]+moved; continue; }\n"
     "                const int end=corner[19]<-3.5f;\n"
-    "                const float room=psx_ws_screen_tile_room(corner[2],s->backdrop_column,end);\n"
+    "                const int any=sky_finds(&s->sky,corner[8],corner[9],corner[14],corner[15],corner[12]);  /* as tile_corner */\n"
+    "                const float room=any ? 1.0e6f : psx_ws_screen_tile_room(corner[2],s->backdrop_column,end);\n"
     "                float carried=0.0f;\n"
     "                if (end ? moved>0.0f : moved<0.0f) {\n"
     "                    /* Past the texels its column has beyond the end the tile's texture would stretch. */\n"
@@ -313,7 +329,7 @@ require(
     "                }\n"
     "                corner[0]=corner[20]=corner[0]+carried;\n"
     "                corner[2]+=psx_ws_screen_tile_slide(0.0f,moved-carried-corner[22]*s->backdrop_scale,s->backdrop_scale,end,\n"
-    "                                                    room,high-low>1.0f ? high-low-1.0f : 0.0f);\n"
+    "                                                    room,any ? 1.0e6f : high-low>1.0f ? high-low-1.0f : 0.0f);\n"
     "                corner[22]=0.0f;\n"
     in presenter
     and '"  v_bill = a_visual_flags < -0.5 && a_visual_flags > -1.5 ? 0.75 : (a_visual_flags < 1.5 && a_order > -0.9999'
@@ -342,9 +358,16 @@ require(
 
 sky_rect = gpu[gpu.index("static void gp0_exec_sky_rect(void) {") : gpu.index("/* Execute 1x1 dot (GP0 0x68-0x6B) */")]
 require(
+    sky_rect.index("    const int32_t opening_top = psx_sky_fog_opening_top(&sky_fog, key);")
+    < sky_rect.index("!psx_sky_fog_take(&sky_fog, key, gp0_cmd_buf, &clut, &step)")
+    < sky_rect.index("psx_sky_fog_rows(gp0_cmd_buf, draw_offset_y, (int32_t)draw_area_bottom, opening_top)"),
+    "a sky tile reads its opening's top before taking the tile forgets it, and its last row is decided with it",
+)
+require(
     "constexpr uint32_t kFadeStepSlot = 80u;" in module
-    and "            if (address == kLoadLeftEdge && cpu->read_word)\n"
+    and "            if (address == kLoadLeftEdge && cpu->read_word) {\n"
     "                gpu_sky_fog_opening(static_cast<int32_t>(cpu->read_word(cpu->gpr[kStackRegister] + kFadeStepSlot)));\n"
+    "                tell_panorama(cpu);\n            }\n"
     in module
     and "            gpu_ws_tag_screen_tile(cpu, cpu->gpr[kPacketRegister]);\n"
     "            gpu_sky_fog_tile(cpu, cpu->gpr[kPacketRegister]);\n"
@@ -353,23 +376,39 @@ require(
     in gpu_header
     and "        case 0x64: case 0x65: case 0x66: case 0x67:\n            gp0_exec_sky_rect();\n" in gpu
     and "psx_sky_fog_tile(&sky_fog, psx_mod_gpu_dma_resolve_address(primitive_addr), words);" in gpu
-    and "    psx_sky_fog_reset(&sky_fog);\n\n    /* Reset GP0 state machine */" in gpu
-    and "the CPU copy is not it */\n    psx_sky_fog_reset(&sky_fog);\n" in gpu,
+    and "    psx_sky_fog_reset(&sky_fog);\n    psx_supplemental_reset(&supplemental);\n\n    /* Reset GP0 state machine */"
+    in gpu
+    and "the CPU copy is not it */\n    psx_sky_cover_reset(&sky_cover);\n    psx_sky_fog_reset(&sky_fog);\n" in gpu,
     "each sky opening tells its fog step from the routine's own stack word at its first row, each tile its packet, "
     "every variable-size textured rectangle goes through the sky's palette first, and a reset or a loaded state forgets the "
     "records",
 )
 require(
-    sky_rect.index("psx_sky_fog_take(&sky_fog, psx_mod_gpu_dma_resolve_address(gp0_cmd_source_addr - 4u)")
-    < sky_rect.index("    const uint32_t game = gp0_cmd_buf[2];\n")
+    sky_rect.index("!psx_sky_fog_take(&sky_fog, key, gp0_cmd_buf, &clut, &step)")
+    < sky_rect.index("    const uint32_t game = gp0_cmd_buf[2], rows = gp0_cmd_buf[3];\n")
     < sky_rect.index("    ws_screen_tile_kept = ws_screen_tile_take(&ws_screen_tile_kept_pins);\n")
     < sky_rect.index("    gp0_cmd_buf[2] = (uint32_t)clut << 16 | (game & 0xFFFFu);\n")
-    < sky_rect.index("    gp0_exec_textured_rect();\n    ws_screen_tile_kept = -1;\n    gp0_cmd_buf[2] = game;\n")
-    and sky_rect.count("gp0_cmd_buf[") == 3
+    < sky_rect.index(
+        "    gp0_cmd_buf[3] = psx_sky_fog_rows(gp0_cmd_buf, draw_offset_y, (int32_t)draw_area_bottom, opening_top);\n"
+    )
+    < sky_rect.index(
+        "    gp0_exec_textured_rect();\n    sky_fogged = 0;\n    ws_screen_tile_kept = -1;\n    gp0_cmd_buf[2] = game;\n"
+        "    gp0_cmd_buf[3] = rows;\n"
+    )
+    and sky_rect.count("gp0_cmd_buf[") == 6
     and "+runtime/include/gpu_sky_fog.h\n" in read("framework/FILES.txt")
     and "disruptor_unit_test(disruptor_gpu_sky_fog tests/unit/gpu_sky_fog_test.cpp RUNTIME_HEADERS)\n" in cmake,
-    "a tile drawn with a clearer palette takes its widescreen mark from the game's words and hands it to the draw, only "
-    "the palette changes, and the game's words come back after",
+    "a sky tile takes its widescreen mark from the game's words and hands it to the draw, only the palette and the rows "
+    "change, and the game's words come back after",
+)
+
+require(
+    sky_rect.index("    sky_fogged = step == PSX_SKY_FOG_LAST_STEP;\n")
+    < sky_rect.index("    gp0_exec_textured_rect();\n    sky_fogged = 0;\n    ws_screen_tile_kept = -1;\n")
+    and sky_rect.count("sky_fogged = 0;") == 1
+    and "int gpu_sky_fogged(void);\n" in gpu_header,
+    "while a sky tile is drawn the renderer is told whether its opening is at the last fog step, also when its own "
+    "palette is the clearest it reaches, and no later draw sees the mark",
 )
 
 checked = ", ".join(

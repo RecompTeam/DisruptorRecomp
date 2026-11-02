@@ -14,6 +14,7 @@ constexpr std::int32_t kFrameWidth = 320;
 constexpr std::int32_t kFrameCentre = kFrameWidth / 2;
 constexpr std::int32_t kPeriod = 0x500;
 constexpr std::int32_t kColumnWidth = 64;
+constexpr std::int32_t kMargin = 4;
 constexpr std::uint32_t kLeftSeam = 0x8003B328u;
 constexpr std::uint32_t kScrollSeam = 0x8003B338u;
 constexpr std::uint32_t kRightSeam = 0x8003B348u;
@@ -40,6 +41,7 @@ Aspect g_aspect{1, 1};
 bool g_widescreen = false;
 std::uint32_t g_now = 0;
 std::int32_t g_told_scroll = 0, g_told_period = 0, g_told_column = 0, g_told_left = 0, g_told_right = 0;
+std::int32_t g_own_told_left = 0, g_own_told_right = 0;
 int g_scrolls = 0, g_spans = 0;
 std::vector<std::int32_t> g_fog_steps;
 std::vector<std::uint32_t> g_fog_tiles;
@@ -100,8 +102,22 @@ void gpu_ws_backdrop_scroll(std::int32_t scroll, std::int32_t period, std::int32
 }
 
 void gpu_sky_fog_opening(std::int32_t step) { g_fog_steps.push_back(step); }
+struct PanoramaTold {
+    int rows, columns, period, focal;
+    std::int32_t first_x, first_y, last_x;
+};
+std::vector<PanoramaTold> g_panoramas;
+void gpu_sky_panorama(int rows, int columns, int period, int focal, const std::int32_t *cells) {
+    g_panoramas.push_back({rows, columns, period, focal, rows ? cells[0] : -1, rows ? cells[1] : -1,
+                           rows ? cells[2 * (rows * columns - 1)] : -1});
+}
 
 void gpu_sky_fog_tile(CPUState *, std::uint32_t primitive_addr) { g_fog_tiles.push_back(primitive_addr); }
+
+void gpu_sky_fog_span(std::int32_t left, std::int32_t right) {
+    g_own_told_left = left;
+    g_own_told_right = right;
+}
 
 void gpu_ws_backdrop_span(std::int32_t left, std::int32_t right) {
     g_told_left = left;
@@ -199,6 +215,12 @@ Row lay_row(std::int32_t left, std::int32_t right, std::uint8_t yaw,
     return row;
 }
 
+/* Where the routine's sky starts and stops: an edge inside the frame moves out by the margin, up to the frame's edge. */
+std::int32_t reach(std::int32_t edge, bool right_edge) {
+    if (edge == 0 || edge == kFrameWidth) return edge;
+    return right_edge ? std::min(edge + kMargin, kFrameWidth) : std::max(edge - kMargin, 0);
+}
+
 std::int32_t squashed(std::int32_t x) {
     return psx_ws_squash_about(x, kFrameCentre, g_aspect.numerator,
                                g_aspect.denominator);
@@ -228,9 +250,9 @@ void test_seams_for_every_edge_and_heading() {
                        "a widened opening must fit one panorama period");
                 const std::int32_t first = squashed(edges.cursor);
                 const std::int32_t last = squashed(edges.cursor + span);
-                expect(first <= left && first >= left - 1 && last >= right &&
-                           last <= right + 1,
-                       "the squashed span must cover the opening within a pixel");
+                expect(first <= reach(left, false) && first >= reach(left, false) - 1 && last >= reach(right, true) &&
+                           last <= reach(right, true) + 1,
+                       "the squashed span must cover the opening and its margin within a pixel");
             }
         }
     }
@@ -291,15 +313,74 @@ void test_native_aspect_is_untouched() {
             const Row row =
                 lay_row(left, kFrameWidth, static_cast<std::uint8_t>(yaw));
             const std::int32_t scroll = static_cast<std::uint8_t>(~yaw) * 5;
-            expect(row.edges.panorama_left == left + scroll,
-                   "4:3 must keep the retail panorama origin");
-            expect(!row.tiles.empty() && row.tiles.front().x == left,
-                   "4:3 must keep the retail left edge");
+            expect(row.edges.panorama_left == reach(left, false) + scroll,
+                   "4:3 must keep the retail panorama origin of the opened edge");
+            expect(!row.tiles.empty() && row.tiles.front().x == reach(left, false),
+                   "4:3 must start at the opened left edge");
             if (row.tiles.empty()) continue;
             const Tile &last = row.tiles.back();
             expect(last.x + last.width == kFrameWidth,
                    "4:3 must keep the retail right edge");
         }
+    }
+}
+
+void test_openings_reach_past_their_edges() {
+    g_widescreen = false;
+    const std::array<std::array<std::int32_t, 3>, 10> cases{{{0, 0, 0},
+                                                           {1, 0, 0},
+                                                           {4, 0, 0},
+                                                           {5, 1, 0},
+                                                           {69, 65, 0},
+                                                           {137, 141, 1},
+                                                           {315, 319, 1},
+                                                           {316, 320, 1},
+                                                           {319, 320, 1},
+                                                           {320, 320, 1}}};
+    for (const auto &[edge, expected, right_edge] : cases) {
+        CPUState cpu = make_cpu();
+        cpu.gpr[24] = static_cast<std::uint32_t>(edge);
+        run_seam(cpu, right_edge ? kRightSeam : kLeftSeam, right_edge ? kRightWord : kLeftWord);
+        expect(static_cast<std::int32_t>(cpu.gpr[24]) == expected,
+               "an edge inside the frame moves out by four pixels up to the frame's edge, the frame's edges stay");
+        if (!right_edge) {
+            cpu.gpr[24] = static_cast<std::uint32_t>(edge);
+            run_seam(cpu, kReloadSeam, kLeftWord);
+            expect(static_cast<std::int32_t>(cpu.gpr[24]) == expected, "the reloaded left edge moves the same");
+        }
+    }
+}
+
+void test_only_clear_openings_reach_past_their_edges() {
+    g_widescreen = false;
+    seed_word(80u, 3u);
+    CPUState cpu = make_cpu();
+    cpu.gpr[24] = 69u;
+    run_seam(cpu, kLeftSeam, kLeftWord);
+    const std::int32_t left = static_cast<std::int32_t>(cpu.gpr[24]);
+    cpu.gpr[24] = 69u;
+    run_seam(cpu, kReloadSeam, kLeftWord);
+    const std::int32_t reloaded = static_cast<std::int32_t>(cpu.gpr[24]);
+    cpu.gpr[24] = 137u;
+    run_seam(cpu, kRightSeam, kRightWord);
+    expect(left == 69 && reloaded == 69 && static_cast<std::int32_t>(cpu.gpr[24]) == 137,
+           "a fogged opening keeps the edges the game measured");
+    seed_word(80u, 0u);
+    cpu.gpr[24] = 69u;
+    run_seam(cpu, kLeftSeam, kLeftWord);
+    expect(static_cast<std::int32_t>(cpu.gpr[24]) == 65, "and the next clear one reaches past them again");
+}
+
+void test_the_fog_hears_the_measured_span() {
+    for (const bool wide : {false, true}) {
+        g_widescreen = wide;
+        g_aspect = {3, 4};
+        run_edge_seams(69, 137, 0);
+        expect(g_own_told_left == 69 && g_own_told_right == 137 && g_told_left == gpu_ws_widen_x(65, 0) &&
+                   g_told_right == gpu_ws_widen_x(141, 1),
+               "the fog is told the span the game measured in its own columns, the tiles reach the margin past it");
+        run_edge_seams(69, 137, 0, kReloadSeam);
+        expect(g_own_told_left == 69, "a later row's reload leaves the measured left edge alone");
     }
 }
 
@@ -461,6 +542,47 @@ void test_widening_rounds_outward() {
            "the squash must round to nearest like the renderer's other paths");
 }
 
+void test_a_pinned_end_squashed_to_nothing_keeps_a_pixel() {
+    std::int32_t left = psx_ws_squash_about(190, 160, 3, 4), right = psx_ws_squash_about(191, 160, 3, 4);
+    expect(left == 183 && right == 183, "the clear opening's first tile, 190..191 beside a fogged one, squashes to no width at 16:9");
+    expect(psx_ws_screen_tile_keep(&left, &right, psx_ws_screen_tile_pins(190, 1, 190, 374)) && left == 183 && right == 184,
+           "holding its span's left end it keeps a pixel there, under the moved edge of the tile beside it");
+    expect(psx_ws_screen_tile_edge(191, 160, 3, 4) - right >= -PSX_WS_SCREEN_TILE_OFFSET_MOST,
+           "its right end, placed off that pixel, stays within what the renderer accepts");
+    left = right = 183;
+    expect(psx_ws_screen_tile_keep(&left, &right, 2u) && left == 182 && right == 183, "a pinned right end keeps the pixel before it");
+    left = right = 183;
+    expect(!psx_ws_screen_tile_keep(&left, &right, 0u), "a tile of no width with no pinned end is not drawn");
+    left = right = 183;
+    expect(!psx_ws_screen_tile_keep(&left, &right, 3u) && left == 183 && right == 183,
+           "nor one with both ends pinned: a span of no width bares nothing, and a kept pixel would reach past it");
+    int kept = 0, within = 1;
+    for (const Aspect &aspect : kAspects) {
+        for (std::int32_t x = -300; x <= 620; x++) {
+            for (std::uint32_t pins = 1u; pins <= 2u; pins++) {
+                std::int32_t l = psx_ws_squash_about(x, kFrameCentre, aspect.numerator, aspect.denominator);
+                std::int32_t r = psx_ws_squash_about(x + 1, kFrameCentre, aspect.numerator, aspect.denominator);
+                if (r > l) continue;
+                within &= psx_ws_screen_tile_keep(&l, &r, pins);
+                ++kept;
+                const double off = pins == 1u
+                                       ? psx_ws_screen_tile_edge(x + 1, kFrameCentre, aspect.numerator, aspect.denominator) - r
+                                       : psx_ws_screen_tile_edge(x, kFrameCentre, aspect.numerator, aspect.denominator) - l;
+                within &= r - l == 1 && off >= -PSX_WS_SCREEN_TILE_OFFSET_MOST && off <= PSX_WS_SCREEN_TILE_OFFSET_MOST;
+            }
+        }
+    }
+    expect(kept > 0 && within,
+           "at every aspect a kept one-pixel tile's moved end stays within what the renderer places, 32:9 included");
+    left = right = psx_ws_squash_about(155, 160, 3, 8);
+    expect(psx_ws_screen_tile_keep(&left, &right, 2u) && left == 157 && right == 158 &&
+               psx_ws_screen_tile_edge(155, 160, 3, 8) - left == 1.125,
+           "at 32:9 a pinned right end's tie reaches 1.125 off the kept pixel, inside the bound");
+    left = 100;
+    right = 148;
+    expect(psx_ws_screen_tile_keep(&left, &right, 3u) && left == 100 && right == 148, "a tile with width is drawn as it is");
+}
+
 void test_the_panorama_is_placed_between_pixels() {
     expect(psx_ws_screen_tile_pins(-54, 48, -54, 374) == 1u && psx_ws_screen_tile_pins(326, 48, -54, 374) == 2u &&
                psx_ws_screen_tile_pins(-6, 48, -54, 374) == 0u && psx_ws_screen_tile_pins(-54, 428, -54, 374) == 3u &&
@@ -586,7 +708,45 @@ void test_each_opening_tells_its_fog_step() {
     expect(g_fog_steps.size() == 2u, "without a way to read memory no step is told");
 }
 
+void test_the_level_panorama_is_told_when_it_changes() {
+    constexpr std::uint32_t kStack = 0x801FFE00u, kTable = 0x800AF8C8u;
+    g_panoramas.clear();
+    CPUState cpu = make_cpu();
+    cpu.gpr[29] = kStack;
+    seed_word(0x80071704u, kTable);
+    seed_word(kTable, 4u);
+    seed_word(kTable + 4u, 20u);
+    for (std::uint32_t row = 0; row <= 4u; ++row) seed_word(kTable + 8u + 4u * row, 60u * row);
+    for (std::uint32_t column = 0; column <= 20u; ++column) seed_word(kTable + 32u + 4u * column, 64u * column);
+    for (std::uint32_t row = 0; row < 4u; ++row)
+        for (std::uint32_t column = 0; column < 20u; ++column) {
+            seed_word(kTable + 128u + 96u * row + 4u * column, 320u + 32u * (column % 5u));
+            seed_word(kTable + 704u + 96u * row + 4u * column, 256u + 60u * row);
+        }
+    seed_word(kVBlanks, 100u);
+    run_seam(cpu, kLeftSeam, kLeftWord);
+    run_seam(cpu, kLeftSeam, kLeftWord);
+    expect(g_panoramas.size() == 1u && g_panoramas[0].rows == 4 && g_panoramas[0].columns == 20 && g_panoramas[0].period == 1280 &&
+               g_panoramas[0].focal == 160 && g_panoramas[0].first_x == 320 && g_panoramas[0].first_y == 256 && g_panoramas[0].last_x == 448,
+           "the level's table is told with its turn and the world's focal, once a frame");
+    seed_word(kVBlanks, 101u);
+    run_seam(cpu, kLeftSeam, kLeftWord);
+    expect(g_panoramas.size() == 1u, "the same table is not told again");
+    for (std::uint32_t column = 0; column < 20u; column += 5u) seed_word(kTable + 128u + 4u * column, 480u);
+    seed_word(kVBlanks, 102u);
+    run_seam(cpu, kLeftSeam, kLeftWord);
+    expect(g_panoramas.size() == 2u && g_panoramas[1].first_x == 480, "a changed cell is, with its repeats");
+    seed_word(kVBlanks, 103u);
+    run_seam(cpu, kReloadSeam, kLeftWord);
+    seed_word(kTable + 4u, 16u);
+    run_seam(cpu, kLeftSeam, kLeftWord ^ 1u);
+    expect(g_panoramas.size() == 2u, "a row's reload or another instruction reads nothing");
+    run_seam(cpu, kLeftSeam, kLeftWord);
+    expect(g_panoramas.size() == 3u && g_panoramas[2].rows == 0, "a table the sky pass cannot draw is told as none");
+}
+
 int main() {
+    test_the_level_panorama_is_told_when_it_changes();
     test_each_opening_tells_its_fog_step();
     test_sky_behind_the_world();
     test_widening_rounds_outward();
@@ -594,9 +754,13 @@ int main() {
     test_seams_for_every_edge_and_heading();
     test_row_model_for_every_heading();
     test_native_aspect_is_untouched();
+    test_openings_reach_past_their_edges();
+    test_the_fog_hears_the_measured_span();
+    test_only_clear_openings_reach_past_their_edges();
     test_seams_are_guarded_by_their_instruction_words();
     test_mark_buys_one_draw_of_the_same_packet();
     test_marks_expire_and_survive_collisions();
+    test_a_pinned_end_squashed_to_nothing_keeps_a_pixel();
     test_the_panorama_is_placed_between_pixels();
     if (g_failures != 0) {
         std::cerr << g_failures << " backdrop tile check(s) failed\n";

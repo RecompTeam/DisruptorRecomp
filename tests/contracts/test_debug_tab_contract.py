@@ -140,7 +140,7 @@ require(
     and "int gl_renderer_recording_shown(void) { return s_shown_left > 0; }\n" in renderer
     and renderer.count("    shown_capture(0, 1.0f);\n") == 4
     and renderer.count("    shown_capture(1, shown);\n") == 1
-    and '"index,kind,alpha,microseconds,faces,camera_samples,camera_inliers,carried,held,conflicting,departed\\n"'
+    and '"index,kind,alpha,microseconds,faces,camera_samples,camera_inliers,carried,held,conflicting,departed,script,logged\\n"'
     in renderer
     and '            fprintf(file, "P6\\n%d %d\\n255\\n", s_shown_w, s_shown_h);\n' in renderer
     and "            for (int y = s_shown_h - 1; y >= 0; --y)\n" in renderer,
@@ -148,7 +148,7 @@ require(
     "captured, and the files are a list with a header and pictures written top row first",
 )
 
-flush = body(renderer, "static void flush_tex_batch(void) {")
+flush = body(renderer, "static void flush_tex_batch_now(void) {")
 require(
     "static int s_uv_view = 0;\n" in renderer
     and "void gl_renderer_set_uv_view(int enabled) {\n    GL_RT_SYNC(__func__);\n    s_uv_view = enabled != 0;\n    ssao_mode();\n}\nint gl_renderer_uv_view(void) { return s_uv_view; }\n"
@@ -174,7 +174,7 @@ require(
     in body(renderer, "static void geometry_visual_uniforms(GLint visual, GLint camera, GLint options,")
     and flush.index("    hr_begin(1);\n")
     < flush.index("geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 0);")
-    < flush.index("    tex_batch_draw_passes(nverts, semi);\n")
+    < flush.index("    if (!s_tb_held_back) tex_batch_draw_passes(nverts, semi);")
     < flush.index(
         "        wide_target_begin(dx, s_tex_uXoff, s_tex_uXhalf);\n"
         "        geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 1);\n"

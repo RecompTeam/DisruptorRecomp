@@ -17,8 +17,10 @@
  */
 
 #include "cpu_state.h"
+#include "game/render/sky_panorama.h"
 #include "gpu.h"
 
+#include <algorithm>
 #include <cstdint>
 
 namespace {
@@ -42,14 +44,39 @@ constexpr int kPacketRegister = 17;  /* $s1 */
 constexpr int kEdgeRegister = 24;    /* $t8 */
 constexpr int kStackRegister = 29;   /* $sp */
 constexpr uint32_t kFadeStepSlot = 80u;  /* the stack word holding the opening's fog step */
+constexpr int32_t kFrameRight = 320;
+constexpr int32_t kSkyMargin = 4;  /* frame pixels: a window's frames reach past the opening the game measures, the clear colour showed between */
 
 int32_t g_span_left = 0;
+int32_t g_own_left = 0;
+int32_t g_margin = 0;
 bool g_sky_seen = false;
 uint32_t g_sky_at = 0u;
+uint32_t g_cells_read_at = ~0u;
+disruptor::sky_panorama::Cells g_cells_told;
+
+/* The level's panorama table, read once a frame and told to the renderer when it changes. */
+void tell_panorama(const CPUState *cpu) {
+    namespace sky = disruptor::sky_panorama;
+    const uint32_t now = cpu->read_word(kVBlanks);
+    if (now == g_cells_read_at) return;
+    g_cells_read_at = now;
+    const auto word = [cpu](uint32_t address) { return cpu->read_word(address); };
+    const sky::Cells cells = sky::read(word, cpu->read_word(sky::kDescriptorPointer));
+    if (cells == g_cells_told) return;
+    g_cells_told = cells;
+    gpu_sky_panorama(cells.rows, cells.columns, sky::kPeriod, sky::kFocal, cells.xy.data());
+}
+
+/* An edge inside the frame moves out by the margin; one that reaches the frame's edge becomes it. */
+int32_t opened(int32_t edge, bool right_edge, int32_t margin) {
+    if (edge <= 0 || edge >= kFrameRight) return edge;
+    return right_edge ? std::min(edge + margin, kFrameRight) : std::max(edge - margin, 0);
+}
 
 uint32_t widened(uint32_t edge, bool right_edge) {
     return static_cast<uint32_t>(
-        gpu_ws_widen_x(static_cast<int32_t>(edge), right_edge ? 1 : 0));
+        gpu_ws_widen_x(opened(static_cast<int32_t>(edge), right_edge, g_margin), right_edge ? 1 : 0));
 }
 
 }  // namespace
@@ -61,13 +88,20 @@ extern "C" void disruptor_backdrop_tiles_instruction_hook(
         case kLoadLeftEdge:
         case kReloadLeftEdge:
             if (instruction != kLoadLeftEdgeWord) return;
+            g_own_left = static_cast<int32_t>(cpu->gpr[kEdgeRegister]);
+            /* a fogged opening is far, where walls dissolve over whatever lies behind them: only clear sky reaches past */
+            if (address == kLoadLeftEdge)
+                g_margin = cpu->read_word && cpu->read_word(cpu->gpr[kStackRegister] + kFadeStepSlot) == 0u ? kSkyMargin : 0;
             cpu->gpr[kEdgeRegister] = widened(cpu->gpr[kEdgeRegister], false);
             g_span_left = static_cast<int32_t>(cpu->gpr[kEdgeRegister]);
-            if (address == kLoadLeftEdge && cpu->read_word)
+            if (address == kLoadLeftEdge && cpu->read_word) {
                 gpu_sky_fog_opening(static_cast<int32_t>(cpu->read_word(cpu->gpr[kStackRegister] + kFadeStepSlot)));
+                tell_panorama(cpu);
+            }
             return;
         case kLoadRightEdge:
             if (instruction != kLoadRightEdgeWord) return;
+            gpu_sky_fog_span(g_own_left, static_cast<int32_t>(cpu->gpr[kEdgeRegister]));
             cpu->gpr[kEdgeRegister] = widened(cpu->gpr[kEdgeRegister], true);
             gpu_ws_backdrop_span(g_span_left, static_cast<int32_t>(cpu->gpr[kEdgeRegister]));
             return;

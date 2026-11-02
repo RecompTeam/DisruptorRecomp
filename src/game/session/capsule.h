@@ -20,7 +20,9 @@ struct Frame {
     uint8_t byte2 = 0;
     float pitch = 0.0f;                 /* the vertical look, which lives outside the game */
     uint8_t list = 0;                   /* the list a key showed: 1 the weapons', 2 the psionics' */
-    uint64_t memory = 0;
+    uint64_t memory = 0;                /* 0 for a frame no recording saw: a scripted walk's */
+    float residual = 0.0f;              /* the part of a game step smooth aim turned the picture by */
+    uint32_t captures = 0;              /* game frames handed to the presenter since the recording began */
 
     void note_byte(uint32_t address, uint8_t value) {
         if (byte_at == 0u || byte_at == address) {
@@ -36,6 +38,38 @@ struct Frame {
 /* first_cycle: the emulated clock at the first frame's VBlank, which places every later one. */
 std::string encode(const std::vector<Frame> &frames, uint64_t first_cycle);
 bool decode(std::string_view bytes, std::vector<Frame> &frames, uint64_t &first_cycle);
+
+/* A picture that reached the screen while recording: its number, the later of the two game frames it is placed between,
+ * named by the VBlank since the recording's first in which the game presented it, its place between them (kind 1) or a
+ * game frame's own swap (kind 0), the window's size. */
+struct Shown {
+    uint32_t sequence = 0, frame = 0;
+    float alpha = 1.0f;
+    uint16_t width = 0, height = 0;
+    uint8_t kind = 0;
+};
+inline constexpr const char *kShownFile = "presented.csv", *kMarksFile = "marks.csv";
+std::string shown_list(const std::vector<Shown> &pictures);
+/* Refused unless every line is whole and the pictures come in order. */
+bool shown_decode(std::string_view text, std::vector<Shown> &pictures);
+
+/* Ctrl+F11 while recording: the frame it came in and the picture of the screen kept for it, -1 until that is taken. */
+struct Mark {
+    uint32_t frame = 0;
+    int64_t picture = -1;
+    uint32_t width = 0, height = 0;
+};
+std::string marks_list(const std::vector<Mark> &marks);
+std::string mark_name(uint32_t number);
+
+/* What a replay's memory says of it. Frames whose recording holds no memory are a script's, not compared. In step: the
+ * recording's memory was seen within kInStep frames of the last compared one. */
+inline constexpr size_t kInStep = 60;
+struct Verdict {
+    size_t compared = 0, same = 0, last_same = 0, longest_apart = 0, scripted = 0;
+    bool in_step = false;
+};
+Verdict judge(const std::vector<Frame> &recorded, const std::vector<uint64_t> &seen);
 uint64_t digest(const uint8_t *bytes, size_t size);
 /* A 24-bit bottom-up BMP of `width` by `height` from rows of RGB. */
 std::string bitmap(const std::vector<uint8_t> &rgb, uint32_t width, uint32_t height);
@@ -63,7 +97,7 @@ std::vector<Stored> stored(const std::filesystem::path &all);
 /* The newest capsule whose recording was finished, or nothing. */
 std::string newest(const std::vector<Stored> &kept);
 /* The vertical look a capsule begins with: false unless its note and its input are whole and of one length. */
-inline constexpr uintmax_t kInputBytes = 1u << 20; /* the longest recording, ten minutes, is 972 KB */
+inline constexpr uintmax_t kInputBytes = 2u << 20; /* the longest recording, ten minutes, is 1.26 MB */
 bool begins(const std::filesystem::path &folder, float &pitch);
 /* Removes one capsule's folder. A name that is no capsule's is refused, so nothing else under `all` or outside it can be named. */
 bool discard(const std::filesystem::path &all, std::string_view name);
@@ -97,6 +131,11 @@ void disruptor_capsule_before_input(void);
 void disruptor_capsule_after_input(void);
 void disruptor_capsule_note_byte(uint32_t address, uint8_t value);
 void disruptor_capsule_note_list(uint8_t list);
+void disruptor_capsule_note_residual(double yaw);
+/* In a replay: the turn's remainder its recording had at this frame, 1 when it set one. */
+int disruptor_capsule_replay_residual(double *yaw);
+/* Ctrl+F11 while recording keeps this frame and a full picture of the screen: 1 when the key was the capsule's. */
+int disruptor_capsule_mark(int repeat);
 /* The frontend calls this when a save state has been loaded, before the game runs on. */
 void disruptor_capsule_state_loaded(void);
 /* A word to show for a second when a recording starts, ends or is refused, or null. A visible overlay holds the in-between frames off, so it is not shown longer. */

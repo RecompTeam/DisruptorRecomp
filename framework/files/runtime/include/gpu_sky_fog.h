@@ -15,6 +15,10 @@ extern "C" {
 #define PSX_SKY_FOG_PROBES 8u
 #define PSX_SKY_FOG_WORDS 4u /* SPRT: colour+code, xy, uv+clut, wh */
 #define PSX_SKY_FOG_OPCODE 0x64u
+#define PSX_SKY_FOG_LAST_STEP 11 /* (767 >> 6): the opening is wholly in the fog */
+#define PSX_SKY_FOG_TILE_ROWS 60 /* a panorama block's rows, four to a frame */
+#define PSX_SKY_COVER_RECTS 128u
+#define PSX_SKY_COVER_MARGIN 2 /* frame pixels: a tile is placed and a face is drawn apart from the game's integers */
 
 typedef struct {
     int32_t left, top, right, bottom;
@@ -24,6 +28,7 @@ typedef struct {
     PsxSkyRect rect;
     int32_t step;
     uint16_t clut;
+    int32_t own_left, own_right; /* the frame columns the game measured, before any widening; the tiles may reach past them */
 } PsxSkyOpening;
 
 typedef struct {
@@ -50,7 +55,47 @@ static inline PsxSkyRect psx_sky_fog_tile_rect(const uint32_t *words) {
     return rect;
 }
 
+/* The game clamps an opening's bottom to the frame's last row and fills only the rows above it. Below the opening's top
+ * tile a tile starts its block, so that row is still the block's: the top tile may be cut at its own top. */
+static inline uint32_t psx_sky_fog_rows(const uint32_t *words, int32_t offset_y, int32_t last_row, int32_t opening_top) {
+    const PsxSkyRect rect = psx_sky_fog_tile_rect(words);
+    return rect.bottom + offset_y == last_row && rect.top > opening_top && rect.bottom - rect.top < PSX_SKY_FOG_TILE_ROWS
+               ? words[3] + (1u << 16)
+               : words[3];
+}
+
 static inline PsxSkyFrame *psx_sky_fog_current(PsxSkyFog *fog) { return &fog->frames[fog->frame & 1u]; }
+
+/* The sky tiles drawn into the frame buffer in use, in VRAM pixels. */
+typedef struct {
+    PsxSkyRect rects[PSX_SKY_COVER_RECTS];
+    uint32_t count;
+    int full; /* more tiles than rects: all of it counts as sky */
+} PsxSkyCover;
+
+static inline void psx_sky_cover_reset(PsxSkyCover *cover) {
+    cover->count = 0u;
+    cover->full = 0;
+}
+
+static inline void psx_sky_cover_add(PsxSkyCover *cover, PsxSkyRect rect) {
+    if (cover->count < PSX_SKY_COVER_RECTS)
+        cover->rects[cover->count++] = rect;
+    else
+        cover->full = 1;
+}
+
+/* Whether a drawn tile, widened by the margin, meets columns low..high and rows top..bottom, both inclusive. */
+static inline int psx_sky_cover_meets(const PsxSkyCover *cover, int32_t low, int32_t high, int32_t top, int32_t bottom) {
+    if (cover->full) return 1;
+    for (uint32_t i = 0; i < cover->count; ++i) {
+        const PsxSkyRect *rect = &cover->rects[i];
+        if (low < rect->right + PSX_SKY_COVER_MARGIN && high >= rect->left - PSX_SKY_COVER_MARGIN &&
+            top < rect->bottom + PSX_SKY_COVER_MARGIN && bottom >= rect->top - PSX_SKY_COVER_MARGIN)
+            return 1;
+    }
+    return 0;
+}
 
 /* A reset or a loaded state: no record may meet a packet of the new timeline. */
 static inline void psx_sky_fog_reset(PsxSkyFog *fog) { memset(fog, 0, sizeof *fog); }
@@ -70,8 +115,16 @@ static inline void psx_sky_fog_open(PsxSkyFog *fog, int32_t step) {
         frame->count = PSX_SKY_FOG_OPENINGS + 1u; /* past the table: the frame's tiles are drawn as the game made them */
         return;
     }
-    const PsxSkyOpening opening = {{INT32_MAX, INT32_MAX, INT32_MIN, INT32_MIN}, step, 0u};
+    const PsxSkyOpening opening = {{INT32_MAX, INT32_MAX, INT32_MIN, INT32_MIN}, step, 0u, INT32_MAX, INT32_MIN};
     frame->openings[frame->count++] = opening;
+}
+
+/* The span the opening begun last was measured with, in the game's own frame columns. */
+static inline void psx_sky_fog_span(PsxSkyFog *fog, int32_t left, int32_t right) {
+    PsxSkyFrame *frame = psx_sky_fog_current(fog);
+    if (frame->frame != fog->frame || frame->count == 0u || frame->count > PSX_SKY_FOG_OPENINGS) return;
+    frame->openings[frame->count - 1u].own_left = left;
+    frame->openings[frame->count - 1u].own_right = right;
 }
 
 static inline PsxSkyTile *psx_sky_fog_slot(PsxSkyFog *fog, uint32_t key, uint32_t probe) {
@@ -106,15 +159,34 @@ static inline void psx_sky_fog_tile(PsxSkyFog *fog, uint32_t key, const uint32_t
     for (uint32_t i = 0; i < PSX_SKY_FOG_WORDS; i++) target->words[i] = words[i];
 }
 
-/* Whether two openings overlap or share an edge: the sky runs on from one into the other. */
-static inline int psx_sky_fog_meet(const PsxSkyRect *a, const PsxSkyRect *b) {
-    return a->left <= b->right && b->left <= a->right && a->top <= b->bottom && b->top <= a->bottom;
+/* Whether two openings overlap or share an edge: the sky runs on from one into the other. Columns are the measured spans
+ * when both are known, so neither tiles reaching past their opening nor the widening's rounding joins openings the game
+ * kept apart. */
+static inline int psx_sky_fog_meet(const PsxSkyOpening *a, const PsxSkyOpening *b) {
+    const int own = a->own_left <= a->own_right && b->own_left <= b->own_right;
+    const int32_t a_left = own ? a->own_left : a->rect.left, a_right = own ? a->own_right : a->rect.right;
+    const int32_t b_left = own ? b->own_left : b->rect.left, b_right = own ? b->own_right : b->rect.right;
+    return a_left <= b_right && b_left <= a_right && a->rect.top <= b->rect.bottom && b->rect.top <= a->rect.bottom;
 }
 
-/* Whether the tile drawn from `key` with `words` takes `clut`, the palette of the clearest opening its own one reaches
- * through openings that meet, so sky running on across openings shows one fog. A tile is drawn once: its record goes
- * with the draw. */
-static inline int psx_sky_fog_take(PsxSkyFog *fog, uint32_t key, const uint32_t *words, uint16_t *clut) {
+/* Whether the tile drawn from `key` with `words` is a sky tile of a known opening. Then `clut` and `step` are the palette
+ * and the fog step of the clearest opening its own one reaches through openings that meet, its own when that is the
+ * clearest, so sky running on across openings shows one fog. A tile is drawn once: its record goes with the draw. */
+/* The top row of the opening a recorded tile belongs to, or INT32_MAX when the tile is not known. */
+static inline int32_t psx_sky_fog_opening_top(PsxSkyFog *fog, uint32_t key) {
+    if (!key) return INT32_MAX;
+    for (uint32_t probe = 0; probe < PSX_SKY_FOG_PROBES; probe++) {
+        const PsxSkyTile *tile = psx_sky_fog_slot(fog, key, probe);
+        if (tile->key != key) continue;
+        const PsxSkyFrame *frame = &fog->frames[tile->frame & 1u];
+        return frame->frame == tile->frame && tile->opening < frame->count && frame->count <= PSX_SKY_FOG_OPENINGS
+                   ? frame->openings[tile->opening].rect.top
+                   : INT32_MAX;
+    }
+    return INT32_MAX;
+}
+
+static inline int psx_sky_fog_take(PsxSkyFog *fog, uint32_t key, const uint32_t *words, uint16_t *clut, int32_t *step) {
     if (!key) return 0;
     PsxSkyTile *found = 0;
     for (uint32_t probe = 0; probe < PSX_SKY_FOG_PROBES && !found; probe++) {
@@ -134,13 +206,13 @@ static inline int psx_sky_fog_take(PsxSkyFog *fog, uint32_t key, const uint32_t 
     seen[found->opening] = 1u;
     for (uint32_t at = 0; at < count; at++)
         for (uint32_t i = 0; i < frame->count; i++) {
-            if (seen[i] || !psx_sky_fog_meet(&frame->openings[reached[at]].rect, &frame->openings[i].rect)) continue;
+            if (seen[i] || !psx_sky_fog_meet(&frame->openings[reached[at]], &frame->openings[i])) continue;
             seen[i] = 1u;
             reached[count++] = i;
             if (frame->openings[i].step < frame->openings[best].step) best = i;
         }
-    if (best == found->opening) return 0;
     *clut = frame->openings[best].clut;
+    *step = frame->openings[best].step;
     return 1;
 }
 

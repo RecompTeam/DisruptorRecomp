@@ -59,10 +59,30 @@ int g_ls_mode = 0;
 
 PSXModFunctionEntryCallback g_sector_callback = nullptr;
 std::uint32_t g_sector_address = 0u;
+PSXModFunctionEntryCallback g_objects_callback = nullptr;
+std::uint32_t g_objects_address = 0u;
+std::vector<std::pair<std::uint32_t, std::uint32_t>> g_admitted;
+int g_admitted_frames = 0;
+
+void gpu_supplemental_frame(void) { ++g_admitted_frames; }
+void gpu_supplemental_packets(std::uint32_t start, std::uint32_t end) { g_admitted.emplace_back(start, end); }
+struct Band {
+    std::uint32_t start, end;
+    std::int32_t left, right;
+};
+std::vector<Band> g_bands;
+void gpu_supplemental_band(std::uint32_t start, std::uint32_t end, std::int32_t left, std::int32_t right) {
+    g_bands.push_back({start, end, left, right});
+}
 
 int psx_mod_register_function_entry_plugin(
         const char *id, std::uint32_t address,
         PSXModFunctionEntryCallback callback) {
+    if (id && std::string(id) == "disruptor.far_rendering.room_objects" && address && callback && !g_objects_callback) {
+        g_objects_address = address;
+        g_objects_callback = callback;
+        return 1;
+    }
     if (id && std::string(id) == "disruptor.far_rendering.sector_edges" && address && callback && !g_sector_callback) {
         g_sector_address = address;
         g_sector_callback = callback;
@@ -271,7 +291,7 @@ void invoke_first_far(CPUState *cpu) {
 }
 
 void invoke_first_fade(CPUState *cpu) {
-    invoke_load(cpu, kDistanceLoadSites[5], 0x8004106Cu);
+    invoke_load(cpu, kDistanceLoadSites[6], 0x800411ACu);
 }
 
 bool only_distance_writes() {
@@ -500,11 +520,11 @@ void test_all_sites_and_ancestry_contracts() {
     for (const DistanceLoadSite& site : kDistanceLoadSites) {
         const std::uint32_t destination = (site.opcode >> 16u) & 31u;
         const std::uint32_t expected =
-            site.kind == DistanceKind::Far ? 1536u : 768u;
+            site.kind == DistanceKind::Far ? 1536u : site.pc == 0x8003B2CCu ? 256u : 768u;
         for (std::uint8_t i = 0; i < site.allowed_return_count; ++i) {
             invoke_load(&cpu, site, site.allowed_return_addresses[i]);
             expect(cpu.gpr[destination] == expected,
-                   "every audited saved-RA ancestry reads the written value");
+                   "every audited saved-RA ancestry reads the written value, a sky opening the game's own fade start");
         }
 
         seed_word(cpu.gpr[29] + site.saved_ra_offset, 0x80001234u);
@@ -975,7 +995,8 @@ void test_fog_for_sprites() {
     disruptor_far_rendering_set_fog_exponent(1);
     enter(&cpu);
     expect(backdrop.pc == 0x8003B2CCu && shadow.pc == 0x8003D28Cu && weapon.pc == 0x8003FB0Cu, "the other fade loads are where they are taken to be");
-    expect(pressed(backdrop, 3u, 1800, 0x8004106Cu) - 900 == 386, "the backdrop fades by half the sum it holds");
+    expect(pressed(backdrop, 3u, 1800, 0x8004106Cu) == 1800 - 256,
+           "a sky opening keeps the game's own fade start: past all that is drawn, it is never clearer than a wall before it");
     expect(pressed(shadow, 23u, 900, 0x800411C4u) == 386, "a shadow fades out over the stretched fog too");
     cpu.gpr[2] = 10u;
     invoke_load(&cpu, weapon, 0x8004122Cu);
@@ -1438,6 +1459,136 @@ void test_rooms_only_the_wider_walk_reaches() {
            "the wider walk turns back at once from a room out of memory the game's walk does not enter");
     walk_into(&cpu, 1u, portal_of(5u), kInnerWedge);
     expect(cpu.gpr[19] == 1u, "one the game's walk enters asks for its area as it does");
+    exit_renderer(&cpu);
+}
+
+/* A face after the mesh renderer's drop test: its packets begin at `packet`, its corners at screen x `xs`. */
+void drop_test(CPUState *cpu, std::uint32_t packet, std::array<std::int32_t, 4> xs, std::uint32_t sides = 0u) {
+    constexpr std::uint32_t kRecords = 0x8005BACCu;
+    for (std::uint32_t corner = 0; corner < 4u; corner++) {
+        cpu->gpr[8 + corner] = kRecords + 12u * corner;
+        cpu->gpr[12 + corner] = 56u << 16;
+        seed_word(kRecords + 12u * corner + 4u, 100u << 16 | static_cast<std::uint16_t>(xs[corner]));
+    }
+    cpu->gpr[25] = packet;
+    cpu->gpr[1] = sides;
+    disruptor_far_rendering_instruction_hook(cpu, 0x80046C18u, 0x3021003Fu, DISRUPTOR_FAR_RENDERING_AFTER_INSTRUCTION);
+}
+
+void test_faces_only_the_wider_walk_admits() {
+    reset_state();
+    CPUState cpu{};
+    seed_live_game(&cpu);
+    cpu.read_word = psx_mod_read_word;
+    cpu.write_word = psx_mod_write_word;
+    g_arena_relocated = 1;
+    seed_word(disruptor::portal_reach::kCosines, 256u);
+    for (std::uint32_t room = 1u; room <= 3u; ++room) seed_room(room, true);
+    constexpr std::uint32_t kListed[] = {1u, 3u, 2u};
+    for (std::uint32_t index = 0; index < 3u; ++index) {
+        seed_word(kReviewedVisibleSpanBase + kVisibleSpanStride * index, (10u * index << 16) | (200u + index));
+        seed_word(kReviewedVisibleSpanBase + kVisibleSpanStride * index + 4u, 0x7700u | kListed[index]);
+    }
+    seed_word(kVisibleEnd, kReviewedVisibleSpanBase + 3u * kVisibleSpanStride);
+    expect(g_objects_callback && g_objects_address == 0x8003B78Cu, "the visible loop's call after a room's mesh is hooked");
+    const int frames = g_admitted_frames;
+    enter(&cpu);
+    expect(g_admitted_frames == frames + 1, "each frame of the renderer begins a frame of admitted packets");
+    walk_into(&cpu, 0u, portal_of(1u), kScreenWedge);
+    walk_into(&cpu, 1u, portal_of(3u), kMarginWedge);
+    walk_into(&cpu, 1u, portal_of(2u), kInnerWedge);
+    reach_visible_loop(&cpu, 3u);
+    const disruptor::portal_reach::Span inner =
+        disruptor::portal_reach::measured(kInnerWedge, disruptor::portal_reach::View{256, 0}, [](std::int32_t x) { return x; });
+    constexpr std::uint32_t kPackets = 0x800A0000u;
+    g_admitted.clear();
+
+    cpu.gpr[5] = 0x801FFD20u;
+    cpu.gpr[17] = kReviewedVisibleSpanBase + kVisibleSpanStride;  /* room 3, which only the wider walk lists */
+    g_sector_callback(&cpu, 0x80046134u);
+    drop_test(&cpu, kPackets, {150, 160, 170, 180});
+    drop_test(&cpu, kPackets + 52u, {150, 160, 170, 180}, 4u);
+    expect(g_admitted.size() == 1u && g_admitted[0] == std::make_pair(kPackets, kPackets + 52u),
+           "every face of a room the game's walk does not list is admitted only by ours, up to the next face's packets");
+    drop_test(&cpu, kPackets + 52u, {150, 160, 170, 180});
+    seed_word(0x800715ECu, 2112u);  /* the far distance word, which a range once took for its end */
+    seed_word(0x800714DCu, kPackets + 156u);
+    g_objects_callback(&cpu, 0x8003B78Cu);
+    expect(g_admitted.size() == 2u && g_admitted[1] == std::make_pair(kPackets + 52u, kPackets + 156u),
+           "the room's last face ends where the mesh renderer left the next packet");
+    g_objects_callback(&cpu, 0x8003B78Cu);
+    expect(g_admitted.size() == 2u, "and is told once");
+    g_sector_callback(&cpu, 0x80046134u);
+    drop_test(&cpu, kPackets + 156u, {150, 160, 170, 180});
+    seed_word(0x800714DCu, kPackets + 208u);
+    g_sector_callback(&cpu, 0x80046134u);
+    expect(g_admitted.size() == 3u && g_admitted[2] == std::make_pair(kPackets + 156u, kPackets + 208u),
+           "and where the next room's mesh begins");
+    g_admitted.pop_back();
+
+    cpu.gpr[17] = kReviewedVisibleSpanBase + 2u * kVisibleSpanStride;  /* room 2, which the game's walk lists */
+    g_sector_callback(&cpu, 0x80046134u);
+    drop_test(&cpu, kPackets + 200u, {inner.left, inner.left + 10, inner.right, inner.right});
+    drop_test(&cpu, kPackets + 252u, {inner.left - 40, inner.left - 30, inner.left - 20, inner.left - 1});
+    drop_test(&cpu, kPackets + 304u, {inner.right + 1, inner.right + 9, inner.right + 20, inner.right + 30});
+    drop_test(&cpu, kPackets + 356u, {inner.left - 1, inner.right + 1, inner.right + 2, inner.right + 3});
+    expect(g_admitted.size() == 4u && g_admitted[2] == std::make_pair(kPackets + 252u, kPackets + 304u) &&
+               g_admitted[3] == std::make_pair(kPackets + 304u, kPackets + 356u),
+           "a face of the game's room is admitted only by ours when it lies wholly beside the span the game's walk gives it");
+    g_bands.clear();
+    seed_word(0x800714DCu, kPackets + 400u);
+
+    cpu.gpr[17] = kReviewedVisibleSpanBase;  /* room 1 at the walk's start */
+    g_sector_callback(&cpu, 0x80046134u);
+    expect(inner.left > 0 && inner.right < 320 && g_bands.size() == 1u && g_bands[0].start == kPackets + 356u &&
+               g_bands[0].end == kPackets + 400u && g_bands[0].left == inner.left && g_bands[0].right == inner.right,
+           "a face of the game's room over its span's inner edges is told with them, ours past them");
+    drop_test(&cpu, kPackets + 400u, {-20, -15, -12, -9});
+    drop_test(&cpu, kPackets + 452u, {-7, -6, -5, -1});
+    drop_test(&cpu, kPackets + 504u, {0, 0, 0, 0});
+    expect(g_admitted.size() == 5u && g_admitted[4] == std::make_pair(kPackets + 400u, kPackets + 452u),
+           "a span at the frame's edge reaches eight past it as the game's span does: a face left of that is ours alone, one within the eight is the game's");
+    drop_test(&cpu, kPackets + 556u, {-30, -4, 10, 20});
+    seed_word(0x800714DCu, kPackets + 608u);
+    g_objects_callback(&cpu, 0x8003B78Cu);
+    expect(g_bands.size() == 1u, "a face over the frame's edge is the game's: a widescreen picture shows past it");
+    cpu.gpr[17] = 0x80100000u;
+    g_sector_callback(&cpu, 0x80046134u);
+    drop_test(&cpu, kPackets + 600u, {-100, -100, -100, -100});
+    drop_test(&cpu, kPackets + 652u, {-100, -100, -100, -100});
+    expect(g_admitted.size() == 5u, "a mesh drawn for no entry of the visible list admits nothing of its own");
+    cpu.gpr[17] = kReviewedVisibleSpanBase + kVisibleSpanStride;
+    g_sector_callback(&cpu, 0x80046134u);
+    drop_test(&cpu, kPackets + 700u, {150, 160, 170, 180});
+    disruptor_far_rendering_abandon_metrics();
+    drop_test(&cpu, kPackets + 752u, {150, 160, 170, 180});
+    expect(g_admitted.size() == 5u, "a state load forgets the face being told");
+    hook_after(&cpu, kAfterVisibleLoop, kAfterVisibleLoopOpcode);
+    exit_renderer(&cpu);
+
+    g_admitted.clear();
+    enter(&cpu);
+    reach_visible_loop(&cpu, 3u);
+    cpu.gpr[17] = kReviewedVisibleSpanBase + kVisibleSpanStride;
+    g_sector_callback(&cpu, 0x80046134u);
+    drop_test(&cpu, kPackets, {150, 160, 170, 180});
+    drop_test(&cpu, kPackets + 52u, {150, 160, 170, 180});
+    expect(g_admitted.empty(), "a frame without a walk of its own tells the game's faces from none");
+    exit_renderer(&cpu);
+
+    g_admitted.clear();
+    enter(&cpu);
+    walk_into(&cpu, 0u, portal_of(1u), kScreenWedge);
+    walk_into(&cpu, 1u, portal_of(3u), kMarginWedge);
+    walk_into(&cpu, 1u, portal_of(2u), kInnerWedge);
+    reach_visible_loop(&cpu, 3u);
+    cpu.gpr[17] = kReviewedVisibleSpanBase + kVisibleSpanStride;
+    g_sector_callback(&cpu, 0x80046134u);
+    drop_test(&cpu, kPackets + 800u, {150, 160, 170, 180});
+    seed_word(0x800714DCu, kPackets + 852u);
+    hook_after(&cpu, kAfterVisibleLoop, kAfterVisibleLoopOpcode);
+    expect(g_admitted.size() == 1u && g_admitted[0] == std::make_pair(kPackets + 800u, kPackets + 852u),
+           "a face still open when the visible loop ends ends where the mesh renderer left the next packet");
     exit_renderer(&cpu);
 }
 
@@ -1942,6 +2093,7 @@ int main() {
     test_a_sector_span_reaches_past_the_frame_edge();
     test_the_split_middle_moves_to_the_diagonal();
     test_a_face_with_a_marked_corner_is_tested_on_its_real_sides();
+    test_faces_only_the_wider_walk_admits();
     test_the_split_quarters_meet_at_texel_16();
     test_registration_and_written_distances();
     test_independent_depth_fade_modes();

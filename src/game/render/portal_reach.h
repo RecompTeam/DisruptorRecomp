@@ -103,14 +103,52 @@ Column column(const Ray &ray, const View &view, int32_t centre, Project project)
     return {std::clamp(project(sum(low(across, 160) / ahead, centre)), 0, static_cast<int32_t>(kFullSpan)), ahead};
 }
 
-/* Whether the walk lists a room it meets first with this wedge: not when the wedge lies wholly beside the screen (0x8003A69C). */
+struct Span {
+    int32_t left, right;
+};
+inline constexpr Span kWholeSpan{0, static_cast<int32_t>(kFullSpan)};
+
+/* The span the walk gives a room it meets first with this wedge (0x8003A4A8..0x8003A698). */
 template <typename Project>
-bool listed(const Wedge &wedge, const View &view, Project project) {
+Span measured(const Wedge &wedge, const View &view, Project project) {
     constexpr int32_t kFull = static_cast<int32_t>(kFullSpan);
     Column left = column(wedge.left, view, 160, project), right = column(wedge.right, view, 162, project);
     if (left.ahead < 128) left.x = std::max(left.x - 8, 0);
     if (right.ahead < 128) right.x = std::min(right.x + 8, kFull);
-    return left.x < kFull && right.x > 0; /* its exception under 9 ahead is inside the nudge's 128 */
+    return {left.x, right.x};
+}
+
+/* Whether the walk lists a room it meets first with this wedge: not when the wedge lies wholly beside the screen (0x8003A69C). */
+template <typename Project>
+bool listed(const Wedge &wedge, const View &view, Project project) {
+    const Span span = measured(wedge, view, project);
+    return span.left < static_cast<int32_t>(kFullSpan) && span.right > 0; /* its exception under 9 ahead is inside the nudge's 128 */
+}
+
+/* Whether a face the mesh renderer keeps lies wholly beside a span, as its drop test (0x80046C1C) takes the corners' screen x. */
+inline bool beside_span(const std::array<uint32_t, 4> &screen, int32_t left, int32_t right) {
+    bool all_left = true, all_right = true;
+    for (const uint32_t word : screen) {
+        const int32_t x = static_cast<int16_t>(word & 0xFFFFu);
+        all_left = all_left && x < left;
+        all_right = all_right && x > right;
+    }
+    return all_left || all_right;
+}
+
+inline constexpr int32_t kBandFar = 1 << 20;  /* a band's side with no edge, as PSX_SUPPLEMENTAL_FAR */
+inline constexpr Span kWholeFace{kBandFar, -kBandFar};
+
+/* A kept face crossing an inner edge of its span is the wider walk's past it; a widescreen picture shows past the frame's. */
+inline bool crossed_band(const std::array<uint32_t, 4> &screen, int32_t left, int32_t right, Span &band) {
+    bool past_left = false, past_right = false;
+    for (const uint32_t word : screen) {
+        const int32_t x = static_cast<int16_t>(word & 0xFFFFu);
+        past_left = past_left || (left > 0 && x < left);
+        past_right = past_right || (right < static_cast<int32_t>(kFrameEdge) && x > right);
+    }
+    band = {past_left ? left : -kBandFar, past_right ? right : kBandFar};
+    return past_left || past_right;
 }
 
 inline constexpr uint32_t kListedAt = 0x80076E64u; /* a byte a room: its entry in the visible list, 255 while unlisted */
@@ -160,10 +198,15 @@ public:
         walked_ = false;
     }
 
-    /* The walk entering `room` at `depth` with `wedge`, before it is widened. `lists` is the game's test of a new room.
-     * Returns whether the game's own walk enters it too. */
     template <typename Lists>
     bool enter(uint32_t depth, uint32_t room, const Wedge &wedge, const Visit &visit, Lists lists) {
+        return enter(depth, room, wedge, visit, lists, [](const Wedge &) { return kWholeSpan; });
+    }
+
+    /* The walk entering `room` at `depth` with `wedge`, before it is widened. `lists` is the game's test of a new room,
+     * `measure` the span it gives one. Returns whether the game's own walk enters it too. */
+    template <typename Lists, typename Measure>
+    bool enter(uint32_t depth, uint32_t room, const Wedge &wedge, const Visit &visit, Lists lists, Measure measure) {
         if (depth >= sector_reach::kDepthCap) return true;
         if (depth == 0u) {
             seen_.reset();
@@ -191,9 +234,9 @@ public:
                 kept = true;
         }
         if (kept) {
-            list(room);
+            list(room, reach == Reach::Open ? measure(own) : kWholeSpan);
             for (const uint32_t companion : visit.companions)
-                if (visit.door_open && companion < kMostRooms && companion != sector_reach::kNoSector) list(companion);
+                if (visit.door_open && companion < kMostRooms && companion != sector_reach::kNoSector) list(companion, kWholeSpan);
             if (!visit.door_open) reach = Reach::Shut;
         }
         reach_[depth] = reach;
@@ -205,6 +248,8 @@ public:
     bool seen(uint32_t room) const {
         return !walked_ || blind_ || room >= kMostRooms || room == sector_reach::kNoSector || seen_.test(room);
     }
+    /* The span the game's own walk gives a room it lists: a room it meets twice is whole. */
+    Span span(uint32_t room) const { return room < kMostRooms && seen_.test(room) ? spans_[room] : kWholeSpan; }
     /* Whether this frame's walk tells the game's rooms from the wider walk's. */
     bool judged() const { return walked_ && !blind_; }
     /* The rooms in the order the game's walk lists them. */
@@ -212,8 +257,12 @@ public:
     uint32_t order_count() const { return order_count_; }
 
 private:
-    void list(uint32_t room) {
-        if (seen_.test(room)) return;
+    void list(uint32_t room, Span span) {
+        if (seen_.test(room)) {
+            spans_[room] = kWholeSpan;
+            return;
+        }
+        spans_[room] = span;
         seen_.set(room);
         order_[order_count_++] = static_cast<uint8_t>(room);
     }
@@ -222,6 +271,7 @@ private:
     std::array<Reach, sector_reach::kDepthCap> reach_{};
     std::array<Wedge, sector_reach::kDepthCap> own_{};
     std::bitset<kMostRooms> seen_{};
+    std::array<Span, kMostRooms> spans_{};
     std::array<uint8_t, kMostRooms> order_{};
     uint32_t order_count_ = 0u;
     bool walked_ = false;
@@ -271,7 +321,8 @@ uint32_t keep(uint32_t first, uint32_t end, uint32_t stride, const Sight &sight,
     struct Entry {
         uint32_t span, room;
     };
-    if (!sight.judged() || end < first || (end - first) / stride > kMostRooms) return end;
+    if (!sight.judged() || stride == 0u || end < first || (end - first) % stride != 0u || (end - first) / stride > kMostRooms)
+        return end;
     std::array<Entry, kMostRooms> entries{};
     std::array<bool, kMostRooms> written{};
     uint32_t count = 0u;
@@ -296,6 +347,115 @@ uint32_t keep(uint32_t first, uint32_t end, uint32_t stride, const Sight &sight,
         if (!written[index] && sight.seen(entries[index].room & 0xFFu)) put(index);
     return kept;
 }
+
+inline constexpr uint32_t kSectorPortals = 20u; /* a sector's word: its portals, kPortalStride bytes each */
+inline constexpr uint32_t kPortalStride = 16u;
+inline constexpr uint32_t kPortalLast = 14u;    /* a portal's byte: 255 on its room's last (0x8003AF1C) */
+inline constexpr uint32_t kMostPortals = 64u;
+inline constexpr int64_t kBesideReach = 128;     /* floor-plan units, the walk's near-eye region; 12 measured at a wall */
+
+/* Whether the camera is within `reach` floor-plan units of a portal's segment, exactly: the across term squared is
+ * compared with reach squared times the length squared, both inside 64 bits. */
+inline bool near_segment(const sector_reach::Portal &portal, int32_t x, int32_t z, int64_t reach) {
+    const int64_t dx = int64_t{portal.second_x} - portal.first_x, dz = int64_t{portal.second_z} - portal.first_z;
+    const int64_t px = int64_t{x} - portal.first_x, pz = int64_t{z} - portal.first_z;
+    const int64_t length = dx * dx + dz * dz, along = px * dx + pz * dz;
+    if (length == 0 || along <= 0) return px * px + pz * pz <= reach * reach;
+    if (along >= length) {
+        const int64_t qx = int64_t{x} - portal.second_x, qz = int64_t{z} - portal.second_z;
+        return qx * qx + qz * qz <= reach * reach;
+    }
+    const int64_t across = px * dz - pz * dx, magnitude = across < 0 ? -across : across;
+    return magnitude <= (int64_t{1} << 31) && magnitude * magnitude <= reach * reach * length;
+}
+
+/* Whether a portal runs past the camera: one end ahead of the eye, the other at or behind it, within reach. The walk
+ * projects such a portal's far side behind the eye and never lists its room, while a wide picture shows the room. */
+inline bool beside(const sector_reach::Portal &portal, int32_t x, int32_t z, const View &view) {
+    const auto ahead = [&](int32_t px, int32_t pz) {
+        return int64_t{view.sine} * (int64_t{px} - x) + int64_t{view.cosine} * (int64_t{pz} - z);
+    };
+    return (ahead(portal.first_x, portal.first_z) > 0) != (ahead(portal.second_x, portal.second_z) > 0) &&
+           near_segment(portal, x, z, kBesideReach);
+}
+
+/* Rooms behind a portal of a listed room that runs past the camera, added to the visible list while the visible loop
+ * draws, each with its gate byte set as the walk sets it (0x80076E64). As the walk, a shut door stops the way out of a
+ * room, not the way in. Closing takes them out again. */
+class Beside {
+public:
+    /* The list's new end. */
+    template <class Memory, typename Write, typename WriteByte>
+    uint32_t add(uint32_t first, uint32_t end, uint32_t stride, int32_t x, int32_t z, const View &view, const Memory &memory,
+                 Write write, WriteByte write_byte) {
+        count_ = 0u;
+        if (stride == 0u || end < first || (end - first) % stride != 0u || (end - first) / stride >= kMostRooms) return end;
+        std::bitset<kMostRooms> listed;
+        for (uint32_t entry = first; entry < end; entry += stride) listed.set(memory.byte(entry + kRoomByte) & 0xFFu);
+        const uint32_t limit = first + kMostRooms * stride;
+        uint32_t at = end;
+        for (uint32_t entry = first; entry < end; entry += stride) {
+            const uint32_t source = memory.byte(entry + kRoomByte) & 0xFFu;
+            const uint32_t sector = memory.word(sector_reach::kSectors + 4u * source);
+            if (!ram_word(sector) || !visit_at(memory, source).door_open) continue; /* the walk goes no further than a shut door */
+            uint32_t gate = memory.word(sector + kSectorPortals);
+            for (uint32_t walked = 0u; ram_word(gate) && walked < kMostPortals; ++walked, gate += kPortalStride) {
+                const uint32_t room = memory.byte(gate + sector_reach::kPortalSector) & 0xFFu;
+                if (room != sector_reach::kNoSector && !listed.test(room) && at < limit &&
+                    beside(sector_reach::portal_at(memory, gate), x, z, view)) {
+                    if (visit_at(memory, room).loaded) {
+                        const uint32_t index = (at - first) / stride;
+                        added_[count_++] = {room, memory.byte(kListedAt + room) & 0xFFu, index, at, memory.word(at),
+                                            memory.word(at + kRoomByte)};
+                        write(at, kFullSpan);
+                        write(at + kRoomByte, room);
+                        write_byte(kListedAt + room, index);
+                        listed.set(room);
+                        at += stride;
+                    }
+                }
+                if ((memory.byte(gate + kPortalLast) & 0xFFu) == 0xFFu) break;
+            }
+        }
+        old_end_ = end;
+        new_end_ = at;
+        return at;
+    }
+
+    /* While the list's end and every added entry are still as added: the end, the words under the added entries and the
+     * gate bytes that still hold them back, so the memory is the game's own. A list the game has written since is its
+     * own: untouched. */
+    template <typename Read, typename ReadByte, typename Write, typename WriteByte>
+    void close(uint32_t end_address, Read read, ReadByte read_byte, Write write, WriteByte write_byte) {
+        bool ours = count_ != 0u && read(end_address) == new_end_;
+        for (uint32_t index = 0; ours && index < count_; ++index)
+            ours = read(added_[index].address) == kFullSpan && read(added_[index].address + kRoomByte) == added_[index].room;
+        if (ours) {
+            for (uint32_t index = 0; index < count_; ++index)
+                if ((read_byte(kListedAt + added_[index].room) & 0xFFu) == added_[index].entry)
+                    write_byte(kListedAt + added_[index].room, added_[index].gate);
+            write(end_address, old_end_);
+            for (uint32_t index = count_; index-- > 0u;) {
+                write(added_[index].address, added_[index].span);
+                write(added_[index].address + kRoomByte, added_[index].room_word);
+            }
+        }
+        count_ = 0u;
+    }
+
+    /* After a state load the list is the loaded one: nothing is taken out. */
+    void forget() { count_ = 0u; }
+    uint32_t added() const { return count_; }
+    /* Whether a visible list entry is one this frame added. */
+    bool added_at(uint32_t entry) const { return count_ != 0u && entry >= old_end_ && entry < new_end_; }
+
+private:
+    struct Added {
+        uint32_t room, gate, entry, address, span, room_word;
+    };
+    std::array<Added, kMostRooms> added_{};
+    uint32_t count_ = 0u, old_end_ = 0u, new_end_ = 0u;
+};
 
 /* The visible list's spans while the visible loop draws with them opened: every way a frame ends puts them back. */
 class Spans {

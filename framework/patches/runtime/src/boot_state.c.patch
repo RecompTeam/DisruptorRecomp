@@ -1,8 +1,8 @@
 diff --git a/runtime/src/boot_state.c b/runtime/src/boot_state.c
-index b4acb4175df98cced308fbcc84e64d56a9b98c0c..ebddfdbfff37cc40c50875ab6f2418e755a7a429 100644
+index b4acb4175df98cced308fbcc84e64d56a9b98c0c..34f16d5c500ca20e672aebc94fd579401ce4adc2 100644
 --- a/runtime/src/boot_state.c
 +++ b/runtime/src/boot_state.c
-@@ -1,8 +1,16 @@
+@@ -1,8 +1,17 @@
  #include "boot_state.h"
 +#include "mod_memory.h"
 +
@@ -12,6 +12,7 @@ index b4acb4175df98cced308fbcc84e64d56a9b98c0c..ebddfdbfff37cc40c50875ab6f2418e7
 +#define BS_SEC_CPU_COST 0x10u
  #include "overlay_api.h"   /* PSX_OVERLAY_CODEGEN_HASH / _ABI_TAG / _CODEGEN_VER */
  #include "gpu_render.h"    /* gr_vram_transfer_in / gr_vram_transfer_out          */
++#include "gpu_texture_row.h"
 +#include "interrupts.h"
  #include "psx_cycles.h"
  #include "pst_wire.h"
@@ -19,7 +20,7 @@ index b4acb4175df98cced308fbcc84e64d56a9b98c0c..ebddfdbfff37cc40c50875ab6f2418e7
  #include <stdio.h>
  #include <stdlib.h>
  #include <string.h>
-@@ -22,6 +30,8 @@
+@@ -22,6 +31,8 @@
  extern uint32_t  i_stat;
  extern uint32_t  i_mask;
  extern uint64_t  psx_cycle_count;
@@ -28,7 +29,7 @@ index b4acb4175df98cced308fbcc84e64d56a9b98c0c..ebddfdbfff37cc40c50875ab6f2418e7
  extern void timers_get_snapshot(uint16_t counter[3], uint32_t mode[3],
                                  uint16_t target[3], int32_t irq_line[3],
                                  uint32_t frac[3]);
-@@ -178,7 +188,7 @@
+@@ -178,7 +189,7 @@
      h.codegen_hash  = (uint32_t)PSX_OVERLAY_CODEGEN_HASH;
      h.abi_tag       = (int32_t)PSX_OVERLAY_ABI_TAG;
      h.codegen_ver   = (uint32_t)PSX_OVERLAY_CODEGEN_VER;
@@ -37,7 +38,7 @@ index b4acb4175df98cced308fbcc84e64d56a9b98c0c..ebddfdbfff37cc40c50875ab6f2418e7
  
      int ok = write_header_le(f, &h);
  
-@@ -242,6 +252,18 @@
+@@ -242,6 +253,18 @@
          }
      }
  
@@ -56,7 +57,7 @@ index b4acb4175df98cced308fbcc84e64d56a9b98c0c..ebddfdbfff37cc40c50875ab6f2418e7
      fclose(f);
      if (!ok)
          remove(path);
-@@ -250,8 +272,49 @@
+@@ -250,8 +273,49 @@
  
  /* ============================ LOAD ============================ */
  
@@ -107,7 +108,7 @@ index b4acb4175df98cced308fbcc84e64d56a9b98c0c..ebddfdbfff37cc40c50875ab6f2418e7
      switch (tag) {
      case BS_SEC_CPU: {
          PstR r;
-@@ -271,6 +334,15 @@
+@@ -271,6 +335,15 @@
              if (!pst_r_u32(&r, &cpu->gte_ctrl[i])) return 0;
          return 1;
      }
@@ -123,7 +124,7 @@ index b4acb4175df98cced308fbcc84e64d56a9b98c0c..ebddfdbfff37cc40c50875ab6f2418e7
      case BS_SEC_RAM:
          if (len != RAM_SIZE) return 0;
          memcpy(memory_get_ram_ptr(), p, RAM_SIZE);
-@@ -325,18 +397,12 @@
+@@ -325,18 +398,13 @@
      case BS_SEC_GPU:
          return gpu_snapshot_read(p, len);
      case BS_SEC_VRAM: {
@@ -140,12 +141,13 @@ index b4acb4175df98cced308fbcc84e64d56a9b98c0c..ebddfdbfff37cc40c50875ab6f2418e7
 -        }
 +        pst_r_init(&r, p, len);
 +        if (!pst_r_pod(&r, vbuf, VRAM_SIZE, 2)) return 0;
++        psx_texture_row_fix(vbuf, 0, 0, VRAM_W, VRAM_H);
          gr_vram_transfer_in(0, 0, VRAM_W, VRAM_H, vbuf);
 -        free(vbuf);
          return 1;
      }
      case BS_SEC_SPU:
-@@ -353,21 +419,14 @@
+@@ -353,21 +421,14 @@
          return sio_snapshot_read(p, len);
      case BS_SEC_DIRTY: {
          uint32_t wc;
@@ -171,7 +173,7 @@ index b4acb4175df98cced308fbcc84e64d56a9b98c0c..ebddfdbfff37cc40c50875ab6f2418e7
          return 1;
      }
      default:
-@@ -401,6 +460,12 @@
+@@ -401,6 +462,12 @@
          (1u<<BS_SEC_SIO)|(1u<<BS_SEC_DIRTY);
      uint32_t seen = 0;
      int ok = 1;
@@ -184,7 +186,7 @@ index b4acb4175df98cced308fbcc84e64d56a9b98c0c..ebddfdbfff37cc40c50875ab6f2418e7
  
      for (uint32_t i = 0; ok && i < h.section_count; i++) {
          uint8_t shdr[16];
-@@ -415,15 +480,29 @@
+@@ -415,15 +482,29 @@
          if (len > 64u * 1024u * 1024u) { ok = 0; break; }
          uint8_t* buf = (uint8_t*)malloc(len ? (size_t)len : 1);
          if (!buf) { ok = 0; break; }

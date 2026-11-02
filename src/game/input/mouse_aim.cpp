@@ -52,6 +52,13 @@ extern "C" int gpu_ws_present_native_43(void);
 extern "C" int ws_native_wide_active(void);
 extern "C" int ws_nw_extra(void);
 extern "C" void gpu_geometry_camera_yaw_residual_set(double yaw_units);
+
+/* A capsule keeps the turn's remainder, and its replay hands back the recorded one. */
+static void set_residual(double yaw_units) {
+    disruptor_capsule_replay_residual(&yaw_units);
+    disruptor_capsule_note_residual(yaw_units);
+    gpu_geometry_camera_yaw_residual_set(yaw_units);
+}
 extern "C" SDL_Window *sdl_window;
 extern "C" int psx_host_ui_game_input_captured(void);
 extern "C" int psx_netplay_active(void);
@@ -391,7 +398,7 @@ void set_capture(bool captured, const char *reason) {
     g_mouse.captured = captured;
     g_mouse.fractional_yaw = 0.0;
     g_mouse.shown_yaw_fraction = 0.0;
-    gpu_geometry_camera_yaw_residual_set(0.0);
+    set_residual(0.0);
     discard_relative_motion();
     log_event(reason);
     std::printf("disruptor: mouse %s (%s)\n", captured ? "captured" : "released", reason);
@@ -751,14 +758,17 @@ void mouse_aim_frame() {
         g_mouse.middle_was_down = (buttons & SDL_BUTTON_MMASK) != 0;
         g_mouse.left_was_down = (buttons & SDL_BUTTON_LMASK) != 0;
         discard_relative_motion();
-        gpu_geometry_camera_yaw_residual_set(0.0);
+        set_residual(0.0);
         return;
     }
     // A network game's pads are the runtime's alone: there the map's stick sources press, as in Classic.
     const bool netplay = psx_netplay_active() != 0;
     int16_t axes[4] = {};
     const bool pad = !netplay && !g_mouse.replaying && psx_input_pad_sticks(0, axes) != 0;
-    if ((!g_mouse.enabled && !pad) || !sdl_window) return;
+    if ((!g_mouse.enabled && !pad) || !sdl_window) {
+        set_residual(0.0);
+        return;
+    }
     ++g_mouse.frame;
 #ifndef PSX_NO_DEBUG_TOOLS
     if (g_mouse.sweep_counts != 0.0)
@@ -784,7 +794,7 @@ void mouse_aim_frame() {
         g_mouse.middle_was_down = (buttons & SDL_BUTTON_MMASK) != 0;
         g_mouse.left_was_down = (buttons & SDL_BUTTON_LMASK) != 0;
         discard_relative_motion();
-        gpu_geometry_camera_yaw_residual_set(0.0);
+        set_residual(0.0);
         return;
     }
 
@@ -864,7 +874,7 @@ void mouse_aim_frame() {
     const double shown = g_mouse.shown_yaw_fraction;
     g_mouse.shown_yaw_fraction = g_mouse.fractional_yaw;
     const bool stick_turns = pad && g_mouse.sticks.layout != disruptor::sticks::Layout::classic;
-    gpu_geometry_camera_yaw_residual_set(
+    set_residual(
         g_mouse.high_precision_camera && ((g_mouse.captured && g_mouse.mouse_aim_enabled) || stick_turns)
             ? shown
             : 0.0);
@@ -959,7 +969,7 @@ namespace {
 void reset_presentation_residual() {
     g_mouse.fractional_yaw = 0.0;
     g_mouse.shown_yaw_fraction = 0.0;
-    gpu_geometry_camera_yaw_residual_set(0.0);
+    set_residual(0.0);
 }
 
 void refresh_live_control_state(const char *event) {
@@ -974,7 +984,7 @@ void refresh_live_control_state(const char *event) {
         reset_presentation_residual();
     } else if (!g_mouse.mouse_aim_enabled ||
                !g_mouse.high_precision_camera) {
-        gpu_geometry_camera_yaw_residual_set(0.0);
+        set_residual(0.0);
     }
 
     /* Relative capture is only meaningful for the two input features.  Do

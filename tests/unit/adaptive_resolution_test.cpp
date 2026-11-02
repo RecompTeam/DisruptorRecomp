@@ -20,6 +20,19 @@ void work_is_the_busy_total_between_readings() {
     expect(work_seconds(100.0, 90.0) == 0.0, "a total that went back is no work, never a negative one");
 }
 
+void a_slow_frame_is_judged_and_a_pause_is_not() {
+    const double period = 1.0 / 59.94;
+    expect(gpu_bound(0.1, 0.09, period, 4.0), "100 ms with the GPU busy for 90 is past the gap and GPU-bound");
+    expect(!gpu_bound(0.1, 0.02, period, 4.0), "100 ms with the GPU busy for 20 is a pause");
+    expect(!gpu_bound(0.03, 0.03, period, 4.0), "a frame shorter than the gap is not past it");
+    expect(gpu_bound(0.03, 0.03, period, 1.1), "30 ms with the GPU busy all of it is a late GPU-bound frame");
+    expect(judged_wall(0.1, true, true, period, 4.0) == period * 4.0,
+           "past the gap after a late GPU-bound frame is a card too slow: judged, at the edge of the gap");
+    expect(judged_wall(0.1, true, false, period, 4.0) == 0.1, "a lone one stays a gap");
+    expect(judged_wall(0.1, false, true, period, 4.0) == 0.1, "a pause after a late frame stays a gap");
+    expect(judged_wall(0.03, false, false, period, 4.0) == 0.03, "a frame shorter than the gap is passed as it was");
+}
+
 void only_the_game_s_own_world_is_judged() {
     expect(!held(true, false, false, false), "the world shown with nothing else is judged");
     expect(held(false, false, false, false), "a menu, a movie or a load screen is held");
@@ -50,6 +63,7 @@ void the_controller_steps_down_under_load_and_never_below_the_floor() {
 
 int main() {
     work_is_the_busy_total_between_readings();
+    a_slow_frame_is_judged_and_a_pause_is_not();
     only_the_game_s_own_world_is_judged();
     the_controller_steps_down_under_load_and_never_below_the_floor();
     if (g_failures) return 1;

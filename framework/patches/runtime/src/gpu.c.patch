@@ -1,5 +1,5 @@
 diff --git a/runtime/src/gpu.c b/runtime/src/gpu.c
-index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad663562969c86 100644
+index 6d81477285f786cdd3658d14c424d4bfbab5d809..4d04f78bc1e437ddde3f108b8c487fd2eb76270a 100644
 --- a/runtime/src/gpu.c
 +++ b/runtime/src/gpu.c
 @@ -11,6 +11,7 @@
@@ -10,7 +10,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
  #include "mod_memory.h"
  #include "gpu_primitive_reject.h"
  #include "gpu_sw_renderer.h"
-@@ -24,7 +25,22 @@
+@@ -24,7 +25,24 @@
  #include "mod_runtime.h"
  #include "ws_cull_detect.h"
  #include "ws_aspect_cone_math.h"
@@ -19,10 +19,12 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
 +#include "gpu_ws_hud_scale.h"
 +#include "gpu_ws_hud_widget.h"
 +#include "gpu_sky_fog.h"
++#include "gpu_supplemental.h"
 +#include "gpu_ws_screen_tile.h"
 +#include "gpu_ws_tag_match.h"
 +#include "gpu_ws_frame_kind.h"
 +#include "gpu_ws_menu.h"
++#include "gpu_texture_row.h"
 +#include "gpu_temporal_sprite.h"
  #include "ws_ui_group.h"
 +#ifdef PSX_HAS_GAME_HOST
@@ -33,7 +35,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
  #include <stdint.h>
  #include <stdio.h>
  #include <stdlib.h>
-@@ -104,12 +120,54 @@
+@@ -104,12 +122,54 @@
   * in native-wide mode. */
  static int      ws_mode    = 0;
  static int      ws_cfg_num = 4, ws_cfg_den = 3;
@@ -89,7 +91,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
  static WsTag    ws_tags[WS_TAG_BUCKETS];
  static uint32_t ws_last_tag_stamp = (uint32_t)-1000; /* frame of newest tag */
  static uint32_t ws_last_3d_stamp  = (uint32_t)-1000; /* frame of newest shaded prim (diagnostic) */
-@@ -124,6 +182,8 @@
+@@ -124,6 +184,8 @@
  
  /* Forward decls: defined later but used by psx_ws_backdrop_x above them. */
  static int32_t ws_scale_about(int32_t x, int32_t ax);
@@ -98,7 +100,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
  static int32_t ws_disp_w(void);
  static void ws_clear_all_reveal_margins(void);
  
-@@ -177,6 +237,8 @@
+@@ -177,6 +239,8 @@
   * intro-cutscene flicker). Only a genuine full-2D screen — no GTE projection for
   * this many consecutive frames (save/options/memory-card) — reverts to 4:3. */
  #define WS_GTE_GAME_MODE_HYSTERESIS 45u
@@ -107,7 +109,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
  void gpu_ws_set_gte_game_mode(int on) { ws_gte_game_mode_cfg = on ? 1 : 0; }
  void gpu_ws_set_gameplay_state_gate(uint32_t addr,
                                      const uint32_t *values, int nvalues) {
-@@ -240,6 +302,7 @@
+@@ -240,6 +304,7 @@
  
  void psx_ws_note_gte_project(int nverts) {
      uint32_t f = (uint32_t)s_frame_count;
@@ -115,7 +117,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
      if (f != ws_gte_frame) {
          if (f == ws_gte_frame + 1u) ws_gte_prev_verts = ws_gte_count;
          else                        ws_gte_prev_verts = 0;
-@@ -262,14 +325,21 @@
+@@ -262,14 +327,21 @@
      if (env < 0) { const char *e = getenv("PSX_WS_FORCE_2D"); env = (e && e[0] == '1') ? 1 : 0; }
      return ws_full_2d || env;
  }
@@ -140,7 +142,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
  
  /* True when the current frame is presented at native 4:3 (NOT stretched), so
   * ALL squash must be suppressed and the content rendered pixel-native:
-@@ -304,9 +374,18 @@
+@@ -304,9 +376,18 @@
  static uint32_t s_ws_fmv_frame_cache = 0xFFFFFFFFu;
  static int      s_ws_fmv_cached = 0;
  
@@ -161,7 +163,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
      if (ws_2d_only_scene()) return 1;              /* 2D-only gameplay scene */
      uint32_t f = (uint32_t)s_frame_count;
      if (f != s_ws_fmv_frame_cache) {
-@@ -316,6 +395,17 @@
+@@ -316,6 +397,17 @@
      }
      return s_ws_fmv_cached;
  }
@@ -179,7 +181,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
  
  /* Squash applies only when configured AND the frame is being stretched. */
  static int ws_active(void) { return ws_configured() && !gpu_ws_present_native_43(); }
-@@ -599,6 +689,36 @@
+@@ -599,6 +691,36 @@
      if (widened > ws_angle_max_widened)
          ws_angle_max_widened = widened;
      return widened;
@@ -216,7 +218,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
  }
  
  int psx_ws_angle_site(uint32_t pc, uint32_t instr, uint32_t *out) {
-@@ -1086,7 +1206,7 @@
+@@ -1086,7 +1208,7 @@
   * Off-map columns fill tile 0 (the renderer skips them) = the engine's own void; at a
   * horizontal map-loop seam (engine early-return) we skip the column. Gated on
   * native-wide + ~320 mode, so 4:3 and the 512 hi-res title stay byte-identical. */
@@ -225,7 +227,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
  
  static void bg2d_clear_column(int layer, int ringcol, int worldY) {
      int rows = 0x12;
-@@ -1099,7 +1219,7 @@
+@@ -1099,7 +1221,7 @@
          uint32_t cell = ringbase
                        + (uint32_t)((ringcol & (int)(g_bg2d_ring_cols - 1u)) * 2)
                        + (uint32_t)((ringrow & 0x1f) * (int)(g_bg2d_ring_cols * 2u));
@@ -234,7 +236,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
          ringrow = (ringrow + 1) & 0x1f;
      }
  }
-@@ -1175,7 +1295,7 @@
+@@ -1175,7 +1297,7 @@
          uint16_t tile = psx_read_half(metaBase + (uint32_t)metaIdx * 0x200u
                                        + (uint32_t)(trowInMeta * 0x20) + (uint32_t)(tcolInMeta * 2));
          if (write) {
@@ -243,7 +245,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
          } else if (cmp_total) {
              (*cmp_total)++;
              if (psx_read_half(cell) != tile && cmp_bad) (*cmp_bad)++;
-@@ -1303,6 +1423,20 @@
+@@ -1303,6 +1425,20 @@
      return ((int32_t)sx < bound - psx_ws_x_margin()) ? 1 : 0;
  }
  
@@ -264,7 +266,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
  /* Signed left-edge widen for the funnel's `bltz maxSX, reject`: reject only
   * when the prim ends left of the REVEALED edge (maxSX < -margin). Returns the
   * branch predicate. Identity at margin 0 (4:3). */
-@@ -1403,6 +1537,24 @@
+@@ -1403,6 +1539,24 @@
      if (!ws_active()) return (int16_t)x;
      int32_t cx = ws_disp_w() / 2;                 /* screen centre (=160 @ 320) */
      return ws_scale_about((int16_t)x, cx);
@@ -289,7 +291,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
  }
  
  /* Backdrop PRELOAD predicate + value substitution ([widescreen.cull]
-@@ -1616,17 +1768,10 @@
+@@ -1616,17 +1770,10 @@
      ws_nw_sync_target();
  }
  
@@ -310,7 +312,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
      uint32_t now = (uint32_t)s_frame_count;
      uint32_t idx = (key >> 2) & (WS_TAG_BUCKETS - 1);
      uint32_t victim = idx;
-@@ -1638,8 +1783,243 @@
+@@ -1638,8 +1785,273 @@
      }
      ws_tags[victim].key      = key;
      ws_tags[victim].stamp    = now;
@@ -503,8 +505,38 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
 +
 +/* The game paints each sky opening with its room's fog palette, and the opening the GPU draws last owns an overlap. */
 +static PsxSkyFog sky_fog;
++static PsxSkyCover sky_cover;
++static int sky_fogged = 0; /* the sky tile being drawn is at the last fog step */
++
++int gpu_sky_fogged(void) { return sky_fogged; }
 +
 +void gpu_sky_fog_opening(int32_t step) { psx_sky_fog_open(&sky_fog, step); }
++void gpu_sky_fog_span(int32_t left, int32_t right) { psx_sky_fog_span(&sky_fog, left, right); }
++
++static PsxSupplemental supplemental;
++void gpu_supplemental_frame(void) { psx_supplemental_frame(&supplemental); }
++void gpu_sky_panorama(int rows, int columns, int period, int focal, const int32_t *cells) {
++    gr_set_sky_cells(rows, columns, period, focal, cells);
++}
++void gpu_supplemental_packets(uint32_t start, uint32_t end) {
++    const uint32_t key = psx_mod_gpu_dma_resolve_address(start);
++    if (key && end > start) psx_supplemental_add(&supplemental, key, key + (end - start));
++}
++void gpu_supplemental_band(uint32_t start, uint32_t end, int32_t left, int32_t right) {
++    const uint32_t key = psx_mod_gpu_dma_resolve_address(start);
++    if (key && end > start) psx_supplemental_band(&supplemental, key, key + (end - start), left, right);
++}
++static const PsxSupplementalRange *gp0_supplemental_range(void) {
++    if (gp0_cmd_source_addr == 0xFFFFFFFFu) return NULL;
++    const uint32_t key = psx_mod_gpu_dma_resolve_address(gp0_cmd_source_addr - 4u);
++    return key ? psx_supplemental_find(&supplemental, key) : NULL;
++}
++/* Whether the command being run comes from a packet only the widened walk admits. */
++static int gp0_supplemental(void) {
++    const PsxSupplementalRange *range = gp0_supplemental_range();
++    return range && range->left > range->right;
++}
++static int s_piece_outside = -1;  /* the piece of a face being drawn lies outside its band, see band_pieces */
 +
 +void gpu_sky_fog_tile(CPUState *cpu, uint32_t primitive_addr) {
 +    if (!cpu || !cpu->read_word) return;
@@ -555,7 +587,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
  }
  
  /* Look up the executing GP0 command's prim in the tag table. The command's
-@@ -1649,11 +2029,12 @@
+@@ -1649,11 +2061,12 @@
      if (!ws_active() || gp0_cmd_source_addr == 0xFFFFFFFFu) return 0;
      uint32_t now = (uint32_t)s_frame_count;
      for (int variant = 0; variant < 2; variant++) {
@@ -570,7 +602,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
                  *out_ax = t->anchor_x;
                  return 1;
              }
-@@ -1786,11 +2167,12 @@
+@@ -1786,11 +2199,12 @@
      if (!ws_engaged() || gp0_cmd_source_addr == 0xFFFFFFFFu) return 0;
      uint32_t now = (uint32_t)s_frame_count;
      for (int variant = 0; variant < 2; variant++) {
@@ -585,7 +617,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
          }
      }
      return 0;
-@@ -1820,6 +2202,12 @@
+@@ -1820,6 +2234,12 @@
      GpuDisplayInfo di;
      gpu_get_display_info(&di);
      return di.height ? (int32_t)di.height : 240;
@@ -598,7 +630,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
  }
  
  /* Full-screen fades and environmental filters are authored as 320x240 TILEs.
-@@ -1842,9 +2230,10 @@
+@@ -1842,9 +2262,10 @@
   * the middle third to centre. A composite (counter box + digits) sits inside
   * one zone, so its pieces share a pivot and stay aligned. (Full-2D menu
   * screens never reach here — they get zero squash + 4:3 pillarbox instead.) */
@@ -610,7 +642,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
      if (3 * cx < 2 * W) return 0;
      if (3 * cx > 4 * W) return W;
      return W / 2;
-@@ -1861,7 +2250,7 @@
+@@ -1861,7 +2282,7 @@
      if (!ws_auto_ui_squash || !ws_active() ||
          gp0_cmd_source_addr == 0xFFFFFFFFu)
          return 0;
@@ -619,7 +651,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
      for (uint32_t i = 0; i < ws_ui_prepass_count; i++) {
          if (ws_ui_prepass[i].src_addr != src) continue;
          if (out_anchor) *out_anchor = ws_ui_prepass[i].group.anchor;
-@@ -1946,20 +2335,112 @@
+@@ -1946,20 +2367,112 @@
      return 1;
  }
  
@@ -734,7 +766,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
          *x0 = ws_scale_about(*x0, ws_hud_pivot(*x0, w));
          return (int)ws_scale_len(w);
      }
-@@ -2024,6 +2505,10 @@
+@@ -2024,6 +2537,10 @@
   * the game's dedicated HUD packet arena reaches here, never world polygons. */
  static void ws_nw_hud_shift_vertices(int32_t *vx, int count) {
      if (count <= 0) return;
@@ -745,7 +777,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
      /* Sprite-tag titles: polygon/line prims are the GTE world and the tagged
       * character billboards, never HUD — only the rect-family sites (which
       * call ws_nw_hud_shift directly, with the untagged filter) re-anchor. */
-@@ -2103,6 +2588,7 @@
+@@ -2103,6 +2620,7 @@
   * CPU-visible transfer remains ordered because GP0 accepts no next command
   * until this payload is complete. Maximum PS1 transfer = full VRAM (1 MiB). */
  static uint16_t vram_write_pixels[1024 * 512];
@@ -753,7 +785,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
  
  /* Depth24 CPU→VRAM upload span (halfwords, exclusive end). See
   * gpu_depth24_rgb_limit — declared early so gpu_reset_state can clear it. */
-@@ -2110,6 +2596,56 @@
+@@ -2110,6 +2628,56 @@
  static int      s_d24_present_hold = 0; /* vblanks to skip Swap after GP1(07h) */
  static uint32_t s_d24_prev_disp_h = 0;  /* last GP1(07h) band height */
  static void depth24_note_upload(uint32_t x, uint32_t w);
@@ -810,9 +842,13 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
  
  static void gp0_commit_cpu_to_vram(void) {
      for (uint32_t row = 0; row < vram_write_h; row++)
-@@ -2120,6 +2656,11 @@
+@@ -2119,7 +2687,15 @@
+                      ((vram_write_x + col) & 1023u)];
      gr_vram_transfer_in(vram_write_x, vram_write_y,
                          vram_write_w, vram_write_h, vram_write_pixels);
++    if (psx_texture_row_fix(vram, (int)vram_write_x, (int)vram_write_y, (int)vram_write_w, (int)vram_write_h))
++        gr_vram_transfer_in(PSX_TEXTURE_ROW_X, PSX_TEXTURE_ROW_Y, PSX_TEXTURE_ROW_WORDS, 1,
++                            &vram[PSX_TEXTURE_ROW_Y * 1024 + PSX_TEXTURE_ROW_X]);
      depth24_note_upload(vram_write_x, vram_write_w);
 +    if (psx_ws_menu_is_picture(vram_write_x, vram_write_y, vram_write_w, vram_write_h)) {
 +        ws_menu_rows = 0; /* the renderer's rows are the game's again */
@@ -822,7 +858,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
      gp0_state = GP0_IDLE;
      vram_write_remaining = 0;
      text_xlate_vram_upload(vram_write_x, vram_write_y,
-@@ -2137,6 +2678,34 @@
+@@ -2137,6 +2713,34 @@
  /* Texture page / draw mode (set by GP0(E1h), reflected in GPUSTAT bits 0-10) */
  static uint32_t texpage_x;         /* bits 0-3: texture page X base (N*64) */
  static uint32_t texpage_y;         /* bit 4: texture page Y base (0 or 256) */
@@ -857,7 +893,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
  static uint32_t semi_transparency; /* bits 5-6 */
  static uint32_t texpage_colors;    /* bits 7-8: 4bit/8bit/15bit */
  static uint32_t dither_enabled;    /* bit 9 */
-@@ -2221,11 +2790,175 @@
+@@ -2221,11 +2825,175 @@
   * when native-wide is active and that buffer is a known display buffer; else
   * disable mirroring for this draw. Called when the draw env changes. */
  static void ws_nw_sync_target(void) {
@@ -1035,7 +1071,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
  }
  
  static void ws_clear_all_reveal_margins(void) {
-@@ -2239,18 +2972,24 @@
+@@ -2239,18 +3007,24 @@
   * stage art. A stale reveal tile is safer than deleting submitted content. */
  void gpu_ws_begin_linked_list(void) {
      gp0_ot_rank = 0xFFFFu;
@@ -1060,16 +1096,18 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
  }
  
  
-@@ -2308,6 +3047,8 @@
+@@ -2308,6 +3082,10 @@
      }
      gr_init(vram);
  
++    psx_sky_cover_reset(&sky_cover);
 +    psx_sky_fog_reset(&sky_fog);
++    psx_supplemental_reset(&supplemental);
 +
      /* Reset GP0 state machine */
      gp0_state = GP0_IDLE;
      gp0_words_collected = 0;
-@@ -2362,6 +3103,14 @@
+@@ -2362,6 +3140,14 @@
      s_d24_upload_x1 = 0;
      s_d24_present_hold = 0;
      s_d24_prev_disp_h = 0;
@@ -1084,7 +1122,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
  }
  
  void gpu_init(void) {
-@@ -2538,6 +3287,8 @@
+@@ -2538,6 +3324,8 @@
      }
      g_doff_min_this = 0x7fffffff; g_doff_max_this = -0x7fffffff; g_doff_cnt_this = 0;
      gpustat_poll_count = 0;
@@ -1093,7 +1131,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
      /* Trusted package-selected plugins run on guest VBlank, independent of
       * host presentation, pacing, turbo, or skipped frames. */
      mod_runtime_on_vblank();
-@@ -2757,73 +3508,536 @@
+@@ -2757,73 +3545,537 @@
      *y = sign_extend((word >> 16) & 0x7FFu, 11);
  }
  
@@ -1569,6 +1607,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
 +    ++ws_geometry_precise_triangles;
 +    gr_set_world_triangle(1);
 +    if (s_precise_grown) gr_set_world_triangle(2);  /* the game's grown second copy */
++    else if (s_piece_outside >= 0 ? s_piece_outside : gp0_supplemental()) gr_set_world_triangle(s_piece_outside > 0 ? 4 : 3);  /* admitted only by the widened walk */
 +#ifndef PSX_DISABLE_FRAME_INTERPOLATION
 +    gr_set_temporal_depth_triangle(psx_pinned_depth_mode(s_precise_vertex_depth[a], s_precise_vertex_depth[b], s_precise_vertex_depth[c]),
 +                                   (float)s_precise_vertex_depth[a],
@@ -1688,7 +1727,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
  }
  
  /* Write a single pixel to VRAM with draw area clipping and mask bit handling */
-@@ -2860,9 +4074,13 @@
+@@ -2860,9 +4112,13 @@
   * and contributed the original generalized fix in psxrecomp PR #73:
   * https://github.com/mstan/psxrecomp/pull/73
   * Keep that credit with this guarded framebuffer-target variant. */
@@ -1704,7 +1743,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
  }
  
  static inline void draw_area_host_x_bounds(int32_t *left, int32_t *right) {
-@@ -3009,8 +4227,7 @@
+@@ -3009,8 +4265,7 @@
      }
      if (draw_area_out_bbox(vx, vy, 3)) return;
      gr_set_semi_transparency(semi_trans, (int)semi_transparency);
@@ -1714,7 +1753,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
      gr_draw_flat_triangle(vx[0], vy[0], vx[1], vy[1], vx[2], vy[2], color);
  }
  
-@@ -3046,6 +4263,7 @@
+@@ -3046,6 +4301,7 @@
          gr_draw_flat_rect(x, y, w, h, color);
          return;
      }
@@ -1722,7 +1761,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
      ws_nw_backdrop_stretch_quad(vx, vy);   /* full-frame 2D backdrop stretch (no-op else) */
      ws_nw_hud_shift_vertices(vx, 4);
      for (int i = 0; i < 4; i++) {
-@@ -3054,18 +4272,17 @@
+@@ -3054,18 +4310,17 @@
      }
      if (draw_area_out_bbox(vx, vy, 4)) return;
      gr_set_semi_transparency(semi_trans, (int)semi_transparency);
@@ -1748,7 +1787,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
          gr_draw_flat_triangle(vx[2], vy[2], vx[1], vy[1], vx[3], vy[3], color);
      }
  }
-@@ -3088,8 +4305,7 @@
+@@ -3088,8 +4343,7 @@
      }
      if (draw_area_out_bbox(vx, vy, 3)) return;
      gr_set_semi_transparency(semi_trans, (int)semi_transparency);
@@ -1758,7 +1797,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
      gr_draw_gouraud_triangle(vx[0], vy[0], c[0],
                               vx[1], vy[1], c[1],
                               vx[2], vy[2], c[2]);
-@@ -3131,20 +4347,19 @@
+@@ -3131,20 +4385,19 @@
          }
      }
      gr_set_semi_transparency(semi_trans, (int)semi_transparency);
@@ -1786,19 +1825,60 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
          gr_draw_gouraud_triangle(vx[2], vy[2], c[2],
                                   vx[1], vy[1], c[1],
                                   vx[3], vy[3], c[3]);
-@@ -3215,9 +4430,8 @@
+@@ -3185,6 +4438,26 @@
+ }
+ 
+ /* Execute textured triangle (GP0 0x24-0x27) */
++/* A face over an inner edge of its span is cut there only when a piece past it may lie over a drawn sky tile. */
++static int band_pieces(const int32_t *vx, const int32_t *vy, int a, int b, int c, PsxSupplementalPiece pieces[3]) {
++    const PsxSupplementalRange *range = gte_geometry_correction_enabled() && gr_has_column_band() ? gp0_supplemental_range() : NULL;
++    if (!range || range->left > range->right) return 0;
++    const int32_t least = vx[a] < vx[b] ? (vx[a] < vx[c] ? vx[a] : vx[c]) : (vx[b] < vx[c] ? vx[b] : vx[c]);
++    const int32_t most = vx[a] > vx[b] ? (vx[a] > vx[c] ? vx[a] : vx[c]) : (vx[b] > vx[c] ? vx[b] : vx[c]);
++    const int32_t top = vy[a] < vy[b] ? (vy[a] < vy[c] ? vy[a] : vy[c]) : (vy[b] < vy[c] ? vy[b] : vy[c]);
++    const int32_t bottom = vy[a] > vy[b] ? (vy[a] > vy[c] ? vy[a] : vy[c]) : (vy[b] > vy[c] ? vy[b] : vy[c]);
++    const int count = psx_supplemental_pieces(least, most, range->left + draw_offset_x, range->right + draw_offset_x, pieces);
++    for (int piece = 0; piece < count; ++piece)
++        if (pieces[piece].outside && psx_sky_cover_meets(&sky_cover, pieces[piece].low > least ? pieces[piece].low : least,
++                                                         pieces[piece].high < most ? pieces[piece].high : most, top, bottom))
++            return count;
++    return 0;
++}
++static void band_piece(const PsxSupplementalPiece *pieces, int count, int piece) {
++    if (count == 0) return;
++    s_piece_outside = pieces[piece].outside;
++    if (count > 1) gr_set_column_band(pieces[piece].low, pieces[piece].high, piece == 0);
++}
+ static void gp0_exec_textured_tri(void) {
+     uint32_t color24 = gp0_cmd_buf[0] & 0xFFFFFFu;
+     int semi_trans = (gp0_cmd_buf[0] >> 25) & 1;
+@@ -3215,13 +4488,18 @@
      if (draw_area_out_bbox(vx, vy, 3)) return;
  
      setup_textured_draw(color24, semi_trans, raw_texture);
 -    prepare_precise_triangle(gp0_cmd_buf[1], gp0_cmd_buf[3], gp0_cmd_buf[5],
 -                             vx, vy);
 -    prepare_texture_triangle(1, 3, 5);
-+    const int precise = prepare_precise_triangle(1, 3, 5, vx, vy);
-+    prepare_texture_triangle(precise, 1, 3, 5);
-     gr_draw_textured_triangle(vx[0], vy[0], u[0], v[0],
-                               vx[1], vy[1], u[1], v[1],
-                               vx[2], vy[2], u[2], v[2],
-@@ -3252,11 +4466,16 @@
+-    gr_draw_textured_triangle(vx[0], vy[0], u[0], v[0],
+-                              vx[1], vy[1], u[1], v[1],
+-                              vx[2], vy[2], u[2], v[2],
+-                              clut_x, clut_y, tpage);
++    PsxSupplementalPiece band[3];
++    const int pieces = band_pieces(vx, vy, 0, 1, 2, band);
++    for (int piece = 0; piece < (pieces > 1 ? pieces : 1); ++piece) {
++        band_piece(band, pieces, piece);
++        const int precise = prepare_precise_triangle(1, 3, 5, vx, vy);
++        prepare_texture_triangle(precise, 1, 3, 5);
++        gr_draw_textured_triangle(vx[0], vy[0], u[0], v[0],
++                                  vx[1], vy[1], u[1], v[1],
++                                  vx[2], vy[2], u[2], v[2],
++                                  clut_x, clut_y, tpage);
++    }
++    s_piece_outside = -1;
+ }
+ 
+ /* Execute textured quad (GP0 0x2C-0x2F) */
+@@ -3252,11 +4530,16 @@
  
      /* Widescreen: tagged billboard quads carry CPU-computed pixel offsets the
       * GTE squash never saw — re-squash every X around the prim's anchor. */
@@ -1817,7 +1897,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
      ws_auto_ui_transform_quad(vx, vy);
      ws_nw_backdrop_stretch_quad(vx, vy);   /* full-frame 2D backdrop image stretch (no-op else) */
      ws_nw_hud_shift_vertices(vx, 4);
-@@ -3282,6 +4501,25 @@
+@@ -3282,6 +4565,25 @@
          int top_v   = vy[0] < vy[2] ? v[0] : v[2];
          int bot_v   = vy[0] < vy[2] ? v[2] : v[0];
          if (w > 0 && h > 0) {
@@ -1843,7 +1923,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
              if (right_u - left_u == w && bot_v - top_v == h) {
                  gr_draw_textured_rect(x, y, w, h, left_u, top_v,
                                        clut_x, clut_y, tpage);
-@@ -3294,23 +4532,28 @@
+@@ -3294,27 +4596,44 @@
          }
      }
  
@@ -1864,12 +1944,22 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
 -        prepare_precise_triangle(gp0_cmd_buf[1], gp0_cmd_buf[3],
 -                                 gp0_cmd_buf[5], tx, ty);
 -        prepare_texture_triangle(1, 3, 5);
-+        queue_precise_triangle(precise_quad, precise_x, precise_y, 0, 1, 2);
-+        queue_texture_triangle(perspective_quad, texture_q, 0, 1, 2);
-         gr_draw_textured_triangle(vx[0], vy[0], u[0], v[0],
-                                   vx[1], vy[1], u[1], v[1],
-                                   vx[2], vy[2], u[2], v[2],
-                                   clut_x, clut_y, tpage);
+-        gr_draw_textured_triangle(vx[0], vy[0], u[0], v[0],
+-                                  vx[1], vy[1], u[1], v[1],
+-                                  vx[2], vy[2], u[2], v[2],
+-                                  clut_x, clut_y, tpage);
++        PsxSupplementalPiece band[3];
++        const int pieces = band_pieces(vx, vy, 0, 1, 2, band);
++        for (int piece = 0; piece < (pieces > 1 ? pieces : 1); ++piece) {
++            band_piece(band, pieces, piece);
++            queue_precise_triangle(precise_quad, precise_x, precise_y, 0, 1, 2);
++            queue_texture_triangle(perspective_quad, texture_q, 0, 1, 2);
++            gr_draw_textured_triangle(vx[0], vy[0], u[0], v[0],
++                                      vx[1], vy[1], u[1], v[1],
++                                      vx[2], vy[2], u[2], v[2],
++                                      clut_x, clut_y, tpage);
++        }
++        s_piece_outside = -1;
      }
      if (!rej_b) {
 -        int32_t tx[3] = { vx[2], vx[1], vx[3] };
@@ -1877,24 +1967,52 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
 -        prepare_precise_triangle(gp0_cmd_buf[5], gp0_cmd_buf[3],
 -                                 gp0_cmd_buf[7], tx, ty);
 -        prepare_texture_triangle(5, 3, 7);
-+        queue_precise_triangle(precise_quad, precise_x, precise_y, 2, 1, 3);
-+        queue_texture_triangle(perspective_quad, texture_q, 2, 1, 3);
-         gr_draw_textured_triangle(vx[2], vy[2], u[2], v[2],
-                                   vx[1], vy[1], u[1], v[1],
-                                   vx[3], vy[3], u[3], v[3],
-@@ -3351,9 +4594,8 @@
+-        gr_draw_textured_triangle(vx[2], vy[2], u[2], v[2],
+-                                  vx[1], vy[1], u[1], v[1],
+-                                  vx[3], vy[3], u[3], v[3],
+-                                  clut_x, clut_y, tpage);
++        PsxSupplementalPiece band[3];
++        const int pieces = band_pieces(vx, vy, 2, 1, 3, band);
++        for (int piece = 0; piece < (pieces > 1 ? pieces : 1); ++piece) {
++            band_piece(band, pieces, piece);
++            queue_precise_triangle(precise_quad, precise_x, precise_y, 2, 1, 3);
++            queue_texture_triangle(perspective_quad, texture_q, 2, 1, 3);
++            gr_draw_textured_triangle(vx[2], vy[2], u[2], v[2],
++                                      vx[1], vy[1], u[1], v[1],
++                                      vx[3], vy[3], u[3], v[3],
++                                      clut_x, clut_y, tpage);
++        }
++        s_piece_outside = -1;
+     }
+ }
+ 
+@@ -3351,13 +4670,18 @@
      if (draw_area_out_bbox(vx, vy, 3)) return;
  
      gr_set_semi_transparency(semi_trans, (int)semi_transparency);
 -    prepare_precise_triangle(gp0_cmd_buf[1], gp0_cmd_buf[4], gp0_cmd_buf[7],
 -                             vx, vy);
 -    prepare_texture_triangle(1, 4, 7);
-+    const int precise = prepare_precise_triangle(1, 4, 7, vx, vy);
-+    prepare_texture_triangle(precise, 1, 4, 7);
-     gr_draw_shaded_textured_triangle(vx[0], vy[0], u[0], v[0], c[0],
-                                      vx[1], vy[1], u[1], v[1], c[1],
-                                      vx[2], vy[2], u[2], v[2], c[2],
-@@ -3399,23 +4641,28 @@
+-    gr_draw_shaded_textured_triangle(vx[0], vy[0], u[0], v[0], c[0],
+-                                     vx[1], vy[1], u[1], v[1], c[1],
+-                                     vx[2], vy[2], u[2], v[2], c[2],
+-                                     clut_x, clut_y, tpage, raw_texture);
++    PsxSupplementalPiece band[3];
++    const int pieces = band_pieces(vx, vy, 0, 1, 2, band);
++    for (int piece = 0; piece < (pieces > 1 ? pieces : 1); ++piece) {
++        band_piece(band, pieces, piece);
++        const int precise = prepare_precise_triangle(1, 4, 7, vx, vy);
++        prepare_texture_triangle(precise, 1, 4, 7);
++        gr_draw_shaded_textured_triangle(vx[0], vy[0], u[0], v[0], c[0],
++                                         vx[1], vy[1], u[1], v[1], c[1],
++                                         vx[2], vy[2], u[2], v[2], c[2],
++                                         clut_x, clut_y, tpage, raw_texture);
++    }
++    s_piece_outside = -1;
+ }
+ 
+ /* Execute shaded textured quad (GP0 0x3C-0x3F) */
+@@ -3399,27 +4723,44 @@
      if (draw_area_out_bbox(vx, vy, 4)) return;
  
      gr_set_semi_transparency(semi_trans, (int)semi_transparency);
@@ -1915,12 +2033,22 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
 -        prepare_precise_triangle(gp0_cmd_buf[1], gp0_cmd_buf[4],
 -                                 gp0_cmd_buf[7], tx, ty);
 -        prepare_texture_triangle(1, 4, 7);
-+        queue_precise_triangle(precise_quad, precise_x, precise_y, 0, 1, 2);
-+        queue_texture_triangle(perspective_quad, texture_q, 0, 1, 2);
-         gr_draw_shaded_textured_triangle(vx[0], vy[0], u[0], v[0], c[0],
-                                          vx[1], vy[1], u[1], v[1], c[1],
-                                          vx[2], vy[2], u[2], v[2], c[2],
-                                          clut_x, clut_y, tpage, raw_texture);
+-        gr_draw_shaded_textured_triangle(vx[0], vy[0], u[0], v[0], c[0],
+-                                         vx[1], vy[1], u[1], v[1], c[1],
+-                                         vx[2], vy[2], u[2], v[2], c[2],
+-                                         clut_x, clut_y, tpage, raw_texture);
++        PsxSupplementalPiece band[3];
++        const int pieces = band_pieces(vx, vy, 0, 1, 2, band);
++        for (int piece = 0; piece < (pieces > 1 ? pieces : 1); ++piece) {
++            band_piece(band, pieces, piece);
++            queue_precise_triangle(precise_quad, precise_x, precise_y, 0, 1, 2);
++            queue_texture_triangle(perspective_quad, texture_q, 0, 1, 2);
++            gr_draw_shaded_textured_triangle(vx[0], vy[0], u[0], v[0], c[0],
++                                             vx[1], vy[1], u[1], v[1], c[1],
++                                             vx[2], vy[2], u[2], v[2], c[2],
++                                             clut_x, clut_y, tpage, raw_texture);
++        }
++        s_piece_outside = -1;
      }
      if (!rej_b) {
 -        int32_t tx[3] = { vx[2], vx[1], vx[3] };
@@ -1928,12 +2056,26 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
 -        prepare_precise_triangle(gp0_cmd_buf[7], gp0_cmd_buf[4],
 -                                 gp0_cmd_buf[10], tx, ty);
 -        prepare_texture_triangle(7, 4, 10);
-+        queue_precise_triangle(precise_quad, precise_x, precise_y, 2, 1, 3);
-+        queue_texture_triangle(perspective_quad, texture_q, 2, 1, 3);
-         gr_draw_shaded_textured_triangle(vx[2], vy[2], u[2], v[2], c[2],
-                                          vx[1], vy[1], u[1], v[1], c[1],
-                                          vx[3], vy[3], u[3], v[3], c[3],
-@@ -3477,6 +4724,7 @@
+-        gr_draw_shaded_textured_triangle(vx[2], vy[2], u[2], v[2], c[2],
+-                                         vx[1], vy[1], u[1], v[1], c[1],
+-                                         vx[3], vy[3], u[3], v[3], c[3],
+-                                         clut_x, clut_y, tpage, raw_texture);
++        PsxSupplementalPiece band[3];
++        const int pieces = band_pieces(vx, vy, 2, 1, 3, band);
++        for (int piece = 0; piece < (pieces > 1 ? pieces : 1); ++piece) {
++            band_piece(band, pieces, piece);
++            queue_precise_triangle(precise_quad, precise_x, precise_y, 2, 1, 3);
++            queue_texture_triangle(perspective_quad, texture_q, 2, 1, 3);
++            gr_draw_shaded_textured_triangle(vx[2], vy[2], u[2], v[2], c[2],
++                                             vx[1], vy[1], u[1], v[1], c[1],
++                                             vx[3], vy[3], u[3], v[3], c[3],
++                                             clut_x, clut_y, tpage, raw_texture);
++        }
++        s_piece_outside = -1;
+     }
+ }
+ 
+@@ -3477,6 +4818,7 @@
      if (w > 1023) w = 1023;
      if (h > 511)  h = 511;
      ws_expand_fullscreen_rect(&x0, y0, &w, h);
@@ -1941,7 +2083,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
      x0 += ws_nw_hud_shift(x0, w);   /* native-wide HUD corner re-anchor (no-op else) */
      x0 += draw_offset_x; y0 += draw_offset_y;
      if (draw_area_out_rect(x0, y0, w, h)) return;
-@@ -3504,35 +4752,127 @@
+@@ -3504,35 +4846,136 @@
      /* Widescreen: tagged sprite parts squash around their projected anchor;
       * untagged SPRTs are screen-space 2D (HUD/menus) and squash around the
       * display centre. Texels keep full coverage via the scaled-rect path. */
@@ -1973,10 +2115,10 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
 +            /* Both edges go through one mapping, so neighbours keep touching. */
 +            const int32_t centre = ws_disp_w() / 2;
 +            const int32_t frame_x = x0;
-+            const int32_t right =
++            int32_t right =
 +                psx_ws_squash_about(x0 + w, centre, ws_xnum, ws_xden);
 +            x0 = psx_ws_squash_about(x0, centre, ws_xnum, ws_xden);
-+            if (right <= x0) return;
++            if (!psx_ws_screen_tile_keep(&x0, &right, ws_backdrop_placed() ? tile_pins : 0u)) return;
 +            ws_w = (int)(right - x0);
 +            if (ws_backdrop_placed()) {
 +                /* The remainder of a turn scrolls the panorama by its share of a heading step, against the heading. */
@@ -2063,25 +2205,34 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
 +                                 clut_x, clut_y, PSX_WS_MENU_KEPT_PAGE);
 +}
 +
-+/* A sky tile whose opening meets a clearer one is drawn with the clearest palette; its widescreen mark is taken from
-+ * the game's words before the palette changes them. */
++/* A sky tile whose opening meets a clearer one is drawn with the clearest palette, and one the game stops above the
++ * frame's last row reaches it; its widescreen mark is taken from the game's words before either changes them. */
 +static void gp0_exec_sky_rect(void) {
 +    uint16_t clut = 0u;
-+    if (gp0_cmd_source_addr == 0xFFFFFFFFu ||
-+        !psx_sky_fog_take(&sky_fog, psx_mod_gpu_dma_resolve_address(gp0_cmd_source_addr - 4u), gp0_cmd_buf, &clut)) {
++    int32_t step = 0;
++    const uint32_t key = gp0_cmd_source_addr == 0xFFFFFFFFu ? 0u : psx_mod_gpu_dma_resolve_address(gp0_cmd_source_addr - 4u);
++    const int32_t opening_top = psx_sky_fog_opening_top(&sky_fog, key);  /* take forgets the tile */
++    if (!key || !psx_sky_fog_take(&sky_fog, key, gp0_cmd_buf, &clut, &step)) {
 +        gp0_exec_textured_rect();
 +        return;
 +    }
-+    const uint32_t game = gp0_cmd_buf[2];
++    const uint32_t game = gp0_cmd_buf[2], rows = gp0_cmd_buf[3];
++    sky_fogged = step == PSX_SKY_FOG_LAST_STEP;
 +    ws_screen_tile_kept = ws_screen_tile_take(&ws_screen_tile_kept_pins);
 +    gp0_cmd_buf[2] = (uint32_t)clut << 16 | (game & 0xFFFFu);
++    gp0_cmd_buf[3] = psx_sky_fog_rows(gp0_cmd_buf, draw_offset_y, (int32_t)draw_area_bottom, opening_top);
++    const PsxSkyRect tile = psx_sky_fog_tile_rect(gp0_cmd_buf);
++    psx_sky_cover_add(&sky_cover, (PsxSkyRect){tile.left + draw_offset_x, tile.top + draw_offset_y, tile.right + draw_offset_x,
++                                               tile.bottom + draw_offset_y});
 +    gp0_exec_textured_rect();
++    sky_fogged = 0;
 +    ws_screen_tile_kept = -1;
 +    gp0_cmd_buf[2] = game;
++    gp0_cmd_buf[3] = rows;
  }
  
  /* Execute 1x1 dot (GP0 0x68-0x6B) */
-@@ -3541,6 +4881,7 @@
+@@ -3541,6 +4984,7 @@
      uint16_t color = rgb888_to_rgb555(gp0_cmd_buf[0] & 0xFFFFFFu);
      int32_t x, y;
      parse_vertex(gp0_cmd_buf[1], &x, &y);
@@ -2089,7 +2240,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
      x += ws_nw_hud_shift(x, 1);
      x += draw_offset_x; y += draw_offset_y;
      if (draw_area_out_point(x, y)) return;
-@@ -3555,13 +4896,12 @@
+@@ -3555,13 +4999,12 @@
      int raw_texture = (gp0_cmd_buf[0] >> 24) & 1;
      int32_t x0, y0;
      parse_vertex(gp0_cmd_buf[1], &x0, &y0);
@@ -2107,7 +2258,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
      int u0 = gp0_cmd_buf[2] & 0xFF;
      int v0 = (gp0_cmd_buf[2] >> 8) & 0xFF;
      uint16_t clut = (uint16_t)(gp0_cmd_buf[2] >> 16);
-@@ -3569,8 +4909,9 @@
+@@ -3569,8 +5012,9 @@
      uint16_t clut_y = (clut >> 6) & 0x1FF;
  
      setup_textured_draw(color24, semi_trans, raw_texture);
@@ -2119,7 +2270,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
                                       clut_x, clut_y, current_texpage());
      else
          gr_draw_textured_rect(x0, y0, 8, 8, u0, v0, clut_x, clut_y, current_texpage());
-@@ -3582,11 +4923,12 @@
+@@ -3582,11 +5026,12 @@
      uint16_t color = rgb888_to_rgb555(gp0_cmd_buf[0] & 0xFFFFFFu);
      int32_t x0, y0;
      parse_vertex(gp0_cmd_buf[1], &x0, &y0);
@@ -2134,7 +2285,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
  }
  
  /* Execute 16x16 textured sprite (GP0 0x7C-0x7F) */
-@@ -3599,7 +4941,8 @@
+@@ -3599,7 +5044,8 @@
      /* Never suppress MMX6 BG packets at a guessed finite-map boundary. The
       * classifier cannot distinguish an authored layer entering the reveal from
       * a stale ring slot; suppressing here caused the stage-start black flicker. */
@@ -2144,7 +2295,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
      x0 += ws_nw_hud_shift(x0, 16);   /* native-wide HUD corner re-anchor (no-op else) */
      x0 += draw_offset_x; y0 += draw_offset_y;
      int u0 = gp0_cmd_buf[2] & 0xFF;
-@@ -3608,13 +4951,12 @@
+@@ -3608,13 +5054,12 @@
      uint16_t clut_x = (clut & 0x3F) * 16;
      uint16_t clut_y = (clut >> 6) & 0x1FF;
  
@@ -2163,7 +2314,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
                                       clut_x, clut_y, current_texpage());
      else
          gr_draw_textured_rect(x0, y0, 16, 16, u0, v0, clut_x, clut_y, current_texpage());
-@@ -3642,12 +4984,13 @@
+@@ -3642,12 +5087,13 @@
      /* Fill ignores draw area, mask bits, and draw offset — writes directly to
       * VRAM. Routed through the renderer so it also fills the hi-res
       * supersampling mirror (no-op cost when supersampling is off). */
@@ -2181,7 +2332,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
          gr_wide_clear((int)dst_x, (int)dst_y, (int)height, color16);
      }
  }
-@@ -3682,6 +5025,11 @@
+@@ -3682,6 +5128,11 @@
      gr_set_texture_window(texture_window_value);
  }
  
@@ -2193,7 +2344,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
  static void gp0_exec_draw_area_tl(void) {
      /* 0xE3 — Set Drawing Area Top-Left
       * Bits 0-9: X
-@@ -3691,7 +5039,12 @@
+@@ -3691,7 +5142,12 @@
      draw_area_top  = (param >> 10) & 0x3FF;
      gr_set_draw_area((int)draw_area_left, (int)draw_area_top,
                       (int)draw_area_right, (int)draw_area_bottom);
@@ -2206,7 +2357,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
  }
  
  static void gp0_exec_draw_area_br(void) {
-@@ -3703,6 +5056,7 @@
+@@ -3703,6 +5159,7 @@
      draw_area_bottom = (param >> 10) & 0x3FF;
      gr_set_draw_area((int)draw_area_left, (int)draw_area_top,
                       (int)draw_area_right, (int)draw_area_bottom);
@@ -2214,7 +2365,18 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
      ws_nw_sync_target();  /* back buffer (draw_area_left) → wide mirror surface */
  }
  
-@@ -3799,8 +5153,13 @@
+@@ -3711,8 +5168,10 @@
+      * Bits 0-10: X (signed 11-bit)
+      * Bits 11-21: Y (signed 11-bit) */
+     uint32_t param = gp0_cmd_buf[0] & 0x00FFFFFFu;
++    const int32_t was_x = draw_offset_x, was_y = draw_offset_y;
+     draw_offset_x = sign_extend(param & 0x7FFu, 11);
+     draw_offset_y = sign_extend((param >> 11) & 0x7FFu, 11);
++    if (draw_offset_x != was_x || draw_offset_y != was_y) psx_sky_cover_reset(&sky_cover);
+     if (draw_offset_y < g_doff_min_this) g_doff_min_this = draw_offset_y;
+     if (draw_offset_y > g_doff_max_this) g_doff_max_this = draw_offset_y;
+     g_doff_cnt_this++;
+@@ -3799,8 +5258,13 @@
      /* 0 means max dimension */
      vram_write_w = (w == 0) ? 0x400 : (uint16_t)w;
      vram_write_h = (h == 0) ? 0x200 : (uint16_t)h;
@@ -2230,7 +2392,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
      if (a0_history_count < A0_HISTORY_CAP) {
          int slot = a0_history_count++;
          a0_history[slot].x = vram_write_x;
-@@ -3879,6 +5238,7 @@
+@@ -3879,6 +5343,7 @@
      uint32_t h = (gp0_cmd_buf[2] >> 16) & 0x1FFu;
      vram_read_w = (w == 0) ? 0x400 : (uint16_t)w;
      vram_read_h = (h == 0) ? 0x200 : (uint16_t)h;
@@ -2238,7 +2400,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
  
      /* Record for debug */
      if (c0_history_count < C0_HISTORY_CAP) {
-@@ -4047,7 +5407,7 @@
+@@ -4047,7 +5512,7 @@
      item->group.x = min_x;
      item->group.width = width;
      item->group.anchor = 0;
@@ -2247,7 +2409,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
      item->ot_rank = rank;
  }
  
-@@ -4397,8 +5757,13 @@
+@@ -4397,8 +5862,13 @@
      extern void ws_bg_phase_note(uint32_t op);
      ws_bg_phase_note(opcode);   /* native-wide 2D-backdrop stretch: background-phase latch */
  
@@ -2261,7 +2423,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
          int32_t cvx, cvy;
          parse_vertex(gp0_cmd_buf[1], &cvx, &cvy);
          ws_census_record(opcode, cvx, cvy);
-@@ -4487,7 +5852,7 @@
+@@ -4487,7 +5957,7 @@
              gp0_exec_mono_rect();
              break;
          case 0x64: case 0x65: case 0x66: case 0x67:
@@ -2270,7 +2432,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
              break;
          case 0x68: case 0x69: case 0x6A: case 0x6B:
              gp0_exec_mono_dot();
-@@ -4499,7 +5864,8 @@
+@@ -4499,7 +5969,8 @@
              int raw_texture = (gp0_cmd_buf[0] >> 24) & 1;
              int32_t x0, y0;
              parse_vertex(gp0_cmd_buf[1], &x0, &y0);
@@ -2280,7 +2442,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
              x0 += draw_offset_x; y0 += draw_offset_y;
              int u0 = gp0_cmd_buf[2] & 0xFF;
              int v0 = (gp0_cmd_buf[2] >> 8) & 0xFF;
-@@ -4522,9 +5888,10 @@
+@@ -4522,9 +5993,10 @@
              uint16_t color = rgb888_to_rgb555(gp0_cmd_buf[0] & 0xFFFFFFu);
              int32_t x0, y0;
              parse_vertex(gp0_cmd_buf[1], &x0, &y0);
@@ -2292,7 +2454,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
              break;
          }
          case 0x7C: case 0x7D: case 0x7E: case 0x7F:
-@@ -4549,7 +5916,17 @@
+@@ -4549,7 +6021,17 @@
              int h = (gp0_cmd_buf[3] >> 16) & 0x1FF;
              if (w == 0) w = 0x400;
              if (h == 0) h = 0x200;
@@ -2310,7 +2472,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
              break;
          }
  
-@@ -4777,6 +6154,7 @@
+@@ -4777,6 +6259,7 @@
          polyline_has_prev = 0;
          gr_set_semi_transparency(polyline_semi_trans, (int)semi_transparency);
          gp0_state = shaded ? GP0_POLYLINE_SHADED : GP0_POLYLINE_MONO;
@@ -2318,7 +2480,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
          gp0_draw_count++;
          /* Record polyline header (variable-length body not captured;
           * just enough so per-frame stream shows the polyline existed). */
-@@ -4901,7 +6279,10 @@
+@@ -4901,7 +6384,10 @@
      hres1 = val & 3;
      vres = (val >> 2) & 1;
      video_mode = (val >> 3) & 1;
@@ -2330,7 +2492,7 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
      vertical_interlace = (val >> 5) & 1;
      /* GPUSTAT.13 holds the legacy constant 0 in progressive (see the vblank
       * field flip); clear it on the switch so a title that toggles interlace
-@@ -5087,11 +6468,16 @@
+@@ -5087,11 +6573,16 @@
  }
  void gpu_snapshot_write(uint8_t *p) {
      PstW w; uint32_t n = gpu_snapshot_bytes();
@@ -2348,12 +2510,14 @@ index 6d81477285f786cdd3658d14c424d4bfbab5d809..81810b8e44408aa7410a4652f8ad6635
  void gpu_cosim_dump(char *out, int cap) {
      if (!out || cap <= 0) return;
      char *p = out;
-@@ -5136,10 +6522,14 @@
+@@ -5136,10 +6627,16 @@
      if (len != gpu_snapshot_bytes()) return 0;
      pst_r_init(&r, p, len);
      if (!gpu_snap_parse(&r)) return 0;
 +    ws_menu_lent = ws_menu_rows = ws_menu_logo = ws_menu_fresh = 0; /* the loaded video memory holds nothing of the wide menu's, and the CPU copy is not it */
++    psx_sky_cover_reset(&sky_cover);
 +    psx_sky_fog_reset(&sky_fog);
++    psx_supplemental_reset(&supplemental);
      /* Sync renderer clip/scissor to restored GP0(E3/E4); vars alone leave GL
       * on a stale draw area after savestate load. */
      gr_set_draw_area((int)draw_area_left, (int)draw_area_top,

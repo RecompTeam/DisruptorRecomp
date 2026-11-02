@@ -128,7 +128,7 @@ require(
     and "    s_near_set = exact && s_next_near_set && s_near_shader;\n    s_next_near_set = 0;\n" in renderer
     and "    s_next_precise = enabled ? 1 : 0;\n    s_next_near_set = 0;" in renderer
     and "        s_near_shader = tex_fs != NULL;\n" in renderer
-    and "    const int near_face = s_near_set;\n    const int cut_corners = near_face ? -1 : turn_clip(px, py, visual_flags, cut);\n"
+    and "    const int near_face = s_near_set;\n    const int banded = s_next_band, canonical = !banded || s_next_band_canonical;\n    s_next_band = 0;\n    if (near_face && !canonical) return;  /* uncut, a near face's first piece already drew all of it */\n    const int cut_corners = near_face ? -1 : turn_clip(px, py, visual_flags, banded, s_next_band_low, s_next_band_high, cut);\n"
     in renderer
     and "        int world = near_face ? 0 : psx_world_depth_class(s_world_depth, visual_flags, turned_z, s_world_margin);\n"
     in renderer

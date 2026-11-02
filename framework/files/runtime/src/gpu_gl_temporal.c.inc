@@ -18,6 +18,7 @@ typedef struct {
     int filler;  /* holds grown copies of the game's: they go under it, see s_crack_fill */
     int world;   /* holds only exact world polygons: drawn by depth when s_world_depth is on */
     int held;    /* holds only world sprites, see s_sprite_hold */
+    int supp;    /* 1: holds only polygons the widened walk alone admits, 2: pieces past their span, see SUPPLEMENTAL_STENCIL */
 } TemporalCommand;
 typedef struct {
     GLuint capture_fbo;
@@ -34,6 +35,8 @@ typedef struct {
     int backdrop;  /* it has placed backdrop tiles: the panorama's numbers below are theirs, see PsxWsPlacedTile */
     float backdrop_origin, backdrop_period, backdrop_scale, backdrop_column;
     float backdrop_back;  /* where the panorama stood a frame earlier, from where it stands */
+    SkyPanorama sky;      /* the level's panorama as the frame had it */
+    float sky_frame[3];   /* the projection's centre and focal in the presenter's units */
     GpuTemporalCamera camera;  /* the camera fitted to the frame before, for a near face's corners */
     GpuTemporalCamera onward;  /* its inverse, for the corners of a near face the game dropped */
     PsxNearCorner near_corners[TEMP_NEAR_CORNERS];  /* in the order drawn: where each stands, and its w */
@@ -67,6 +70,8 @@ static float s_temp_scratch[TEXBATCH_MAXV * TEXV], s_temp_under[TEXBATCH_MAXV * 
 typedef struct {
     GLint shift, xhalf, visual, options, twin, mask, filter, pass, semi, fade, fade_at, fade_power, fade_blocks, fade_block_count, dissolve, clear;
     GLint ground_samples, ground_share, ground_view, sample_at;
+    GLint sky, sky_frame, sky_cells, sky_shape;
+    int sky_sent;  /* the panorama generation its cells were sent for */
 } TemporalUniforms;
 static TemporalUniforms s_temp_uniforms[2];
 
@@ -367,6 +372,7 @@ static void temporal_draw(const float *vertices, const uint64_t *identities, int
     c->filler=textured && s_draw_filler;
     c->world=textured && s_draw_world;
     c->held=textured && s_draw_held;
+    c->supp=textured ? s_draw_supp : 0;
     c->sy=direct ? 0 : s_area_y1; c->sh=direct ? VRAM_H : s_area_y2-s_area_y1+1;
     if (twin) memcpy(c->twin, twin, sizeof(c->twin));
     c->texture=textured ? temporal_texture(s) : -1;
@@ -379,6 +385,9 @@ static void temporal_draw(const float *vertices, const uint64_t *identities, int
         if (textured && v[19] < -1.5f) {
             s->backdrop=1; s->backdrop_origin=s_tile.origin; s->backdrop_period=s_tile.period;
             s->backdrop_scale=s_tile.scale; s->backdrop_column=s_tile.column;
+            s->sky=s_sky;
+            s->sky_frame[0]=g_wide_cur_base+s_yaw_center_x+(direct ? 0 : wide_dx()); s->sky_frame[1]=s_off_y+s_yaw_center_y_relative;
+            s->sky_frame[2]=s_yaw_focal_x;
         }
         temporal_position(v, textured, gate, direct);
     }
@@ -522,6 +531,7 @@ static TemporalScene *temporal_prepare_scene(GLuint fbo, int y, int w, int h) {
         }
     }
     for (int i=0; i<s->near_count; ++i) s->near_corners[i].place[1]-=y;
+    s->sky_frame[1]-=y;  /* the horizon in the band's rows, as the vertices */
     for (int i=0; i<s->nt; ++i) {
         for (int j=0; j<3; ++j) s->triangles[i].y[j]-=y;
         s->matches[i]=-1;
@@ -609,6 +619,8 @@ static void temporal_uniforms_init(GLuint p, TemporalUniforms *u) {
     TEMP_U(filter,"u_filter"); TEMP_U(pass,"u_semipass"); TEMP_U(semi,"u_semimode");
     TEMP_U(fade,"u_fade"); TEMP_U(fade_at,"u_fade_at"); TEMP_U(fade_power,"u_fade_power"); TEMP_U(fade_blocks,"u_fade_blocks"); TEMP_U(fade_block_count,"u_fade_block_count"); TEMP_U(dissolve,"u_dissolve"); TEMP_U(clear,"u_clear");
     TEMP_U(ground_samples,"u_ground_samples"); TEMP_U(ground_share,"u_ground_share"); TEMP_U(ground_view,"u_ground_view"); TEMP_U(sample_at,"u_sample_at");
+    TEMP_U(sky,"u_sky"); TEMP_U(sky_frame,"u_sky_frame"); TEMP_U(sky_cells,"u_sky_cells"); TEMP_U(sky_shape,"u_sky_shape");
+    u->sky_sent=-1;
 #undef TEMP_U
     p_glUseProgram(p);
     p_glUniform1i(p_glGetUniformLocation(p,"u_scene_depth"),HOLD_DEPTH_UNIT);
@@ -641,7 +653,7 @@ static int temporal_worker_init(void) {
     s_temp_geo_prog=geo_vs ? build_program(geo_vs,GEO_FS) : 0;
     {   /* As the frame loop's programs: what a fragment is goes into the alpha for the shading to tell sprites and blends by. */
         char *marked_vs=tex_vs ? shader_variant(tex_vs,"flat out float v_bill; noperspective out float v_deep; uniform float u_pull; uniform float u_hold; layout(location=13) in vec3 a_ground; flat out vec3 v_ground; noperspective out float v_texel;\n","a_order, 1.0); }\n",
-            "u_visual_options.w >= 1.0 ? 0.99999 : (u_visual_options.w > 0.0 ? 0.9999995 "
+            "u_visual_options.w < -3.5 ? 0.99999925 : u_visual_options.w < -2.5 || u_visual_options.w >= 1.0 ? 0.99999 : ((u_visual_options.w > 0.0 || u_visual_options.w < -1.5) ? 0.9999995 "
             ": (u_pull > 0.0 && a_order > -0.99999 && a_order < 0.99999) ? "
             "max(1.0 - (1.0 - a_order)*(1.0 + u_pull), -1.0) : a_order), 1.0);\n"
             "  bool grown = a_visual_flags > 5.5;\n"
@@ -754,15 +766,32 @@ static void temporal_hold_end(const TemporalUniforms *u) {
     p_glActiveTexture(PSXGL_TEXTURE0+HOLD_DEPTH_MS_UNIT); glBindTexture(PSXGL_TEXTURE_2D_MULTISAMPLE,0);
     p_glActiveTexture(PSXGL_TEXTURE0);
 }
+static int s_temp_supp;  /* the command's draws keep within SUPPLEMENTAL_STENCIL */
+static int s_temp_won;   /* and a held-back command's colours within HELD_BACK_WON_STENCIL */
 static void temporal_mask(int check,int value) {
+    const GLint within=s_temp_supp ? SUPPLEMENTAL_STENCIL|(s_temp_won ? HELD_BACK_WON_STENCIL : 0) : 0;
     if (s_temp_filling) {
-        if (!check) { glDisable(GL_STENCIL_TEST); return; }
-        glEnable(GL_STENCIL_TEST); glStencilMask(0); glStencilFunc(GL_EQUAL,0,1); glStencilOp(GL_KEEP,GL_KEEP,GL_KEEP);
+        if (!check && !within) { glDisable(GL_STENCIL_TEST); return; }
+        glEnable(GL_STENCIL_TEST); glStencilMask(0); glStencilFunc(GL_EQUAL,within,(check?1:0)|within); glStencilOp(GL_KEEP,GL_KEEP,GL_KEEP);
         return;
     }
     glEnable(GL_STENCIL_TEST); glStencilMask(1);
-    glStencilFunc(check ? GL_EQUAL : GL_ALWAYS,check ? 0 : value,1);
+    glStencilFunc(check || within ? GL_EQUAL : GL_ALWAYS,check ? within : value|within,check ? 1|within : within ? within : 1);
     glStencilOp(GL_KEEP,GL_KEEP,check ? (value ? GL_INVERT : GL_KEEP) : GL_REPLACE);
+}
+/* As supplemental_mark, for a retained command: the samples still at the cleared depth, those of the world and the copies
+ * too for a piece past its span, or the mark taken back. */
+static void temporal_supp_mark(const TemporalScene *s,const TemporalCommand *c,const TemporalUniforms *u,int count,int set,
+                               GLenum depth_after,GLboolean write_after) {
+    glColorMask(GL_FALSE,GL_FALSE,GL_FALSE,GL_FALSE); glDisable(GL_BLEND);
+    glEnable(GL_STENCIL_TEST); glStencilMask(SUPPLEMENTAL_STENCIL|(set ? 0 : HELD_BACK_WON_STENCIL));
+    glStencilFunc(GL_ALWAYS,set?SUPPLEMENTAL_STENCIL:0,SUPPLEMENTAL_STENCIL); glStencilOp(GL_KEEP,GL_KEEP,GL_REPLACE);
+    p_glUniform4f(u->options,0,0,s->tint,set && c->supp==2 ? PAST_SPAN_COPY_PASS : SUPPLEMENTAL_MARK_PASS);
+    glDepthFunc(set?GL_LESS:GL_ALWAYS); glDepthMask(GL_FALSE);
+    p_glUniform1i(u->pass,c->semi<0?3:4); glDrawArrays(GL_TRIANGLES,0,count);
+    if (set && c->supp==2) { p_glUniform4f(u->options,0,0,s->tint,PAST_SPAN_MARK_PASS); glDepthFunc(GL_GREATER); glDrawArrays(GL_TRIANGLES,0,count); }
+    p_glUniform4f(u->options,0,0,s->tint,s_temp_underlaying ? -1.0f : 0.0f);
+    glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE); glStencilMask(1); glDepthFunc(depth_after); glDepthMask(write_after);
 }
 /* Draw part of one retained command with the scene's own state. */
 static float s_temp_fade_nearer=1.0f;  /* a carried face drawn over the scene has its depth handed over that much nearer */
@@ -800,6 +829,7 @@ static void temporal_submit(const TemporalScene *s,const TemporalCommand *c,int 
     glBindTexture(GL_TEXTURE_2D,s->textures[c->texture]);
     p_glUniform4i(u->twin,c->twin[0],c->twin[1],c->twin[2],c->twin[3]);
     p_glUniform1i(u->mask,c->mask); p_glUniform1i(u->filter,c->filter);
+    if (s->backdrop) sky_uniforms(u->sky,u->sky_frame,u->sky_cells,u->sky_shape,&u->sky_sent,&s->sky,s->sky_frame[0],s->sky_frame[1],s->sky_frame[2]);
     p_glUniform1i(u->semi,0); p_glUniform1i(u->pass,0);
     glDisable(GL_BLEND); glDisable(GL_STENCIL_TEST); glDepthFunc(GL_ALWAYS); glDepthMask(GL_FALSE);
     glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_FALSE);
@@ -834,7 +864,7 @@ static void temporal_submit_faces(const TemporalScene *s,const TemporalCommand *
     const int fill=s_temp_marked && s_temp_scene_depth && !s_temp_underlaying && t && c->mode==GL_TRIANGLES && s_temp_part!=2;
     const int fillers=fill && c->filler;
     const int opaque_depth=(s_ssao || (s_sprite_hold && s_geometry_correction)) && s_temp_scene_depth && !(s_world_depth && s_temp_underlaying);
-    const int by_depth=s_world_depth && c->world && s_temp_marked && s_temp_scene_depth && !s_temp_underlaying &&
+    const int by_depth=(s_world_depth || c->supp) && c->world && s_temp_marked && s_temp_scene_depth && !s_temp_underlaying &&
                        t && c->mode==GL_TRIANGLES && s_temp_part!=1;
     const int held=c->held && s_temp_marked && s_temp_scene_depth && !s_temp_underlaying && t &&
                    c->mode==GL_TRIANGLES && s_temp_part!=1;
@@ -847,6 +877,7 @@ static void temporal_submit_faces(const TemporalScene *s,const TemporalCommand *
         glBindTexture(GL_TEXTURE_2D,s->textures[c->texture]);
         p_glUniform4i(u->twin,c->twin[0],c->twin[1],c->twin[2],c->twin[3]);
         p_glUniform1i(u->mask,c->mask); p_glUniform1i(u->filter,c->filter);
+    if (s->backdrop) sky_uniforms(u->sky,u->sky_frame,u->sky_cells,u->sky_shape,&u->sky_sent,&s->sky,s->sky_frame[0],s->sky_frame[1],s->sky_frame[2]);
         p_glUniform1i(u->semi,c->semi<0?0:c->semi); p_glUniform1i(u->pass,c->semi<0?3:4);
         glColorMask(GL_FALSE,GL_FALSE,GL_FALSE,GL_FALSE); glDisable(GL_BLEND);
         glEnable(GL_STENCIL_TEST); glStencilMask(2);
@@ -875,7 +906,12 @@ static void temporal_submit_faces(const TemporalScene *s,const TemporalCommand *
     glBindTexture(GL_TEXTURE_2D,s->textures[c->texture]);
     p_glUniform4i(u->twin,c->twin[0],c->twin[1],c->twin[2],c->twin[3]);
     p_glUniform1i(u->mask,c->mask); p_glUniform1i(u->filter,c->filter);
+    if (s->backdrop) sky_uniforms(u->sky,u->sky_frame,u->sky_cells,u->sky_shape,&u->sky_sent,&s->sky,s->sky_frame[0],s->sky_frame[1],s->sky_frame[2]);
     p_glUniform1i(u->semi,c->semi<0?0:c->semi);
+    const int supp=s_temp_marked && c->mode==GL_TRIANGLES && (s_temp_scene_depth || s_temp_underlaying) ? c->supp : 0;
+    const GLenum depth_after=s_temp_underlaying && !s_temp_scene_depth ? GL_LESS : GL_ALWAYS;
+    const GLboolean write_after=!s_temp_underlaying || (s_temp_scene_depth && !s_world_depth);
+    if (supp) { temporal_supp_mark(s,c,u,count,1,depth_after,write_after); s_temp_supp=1; }
     if (fill && s_crack_fill>0.0f) {  /* the edges of the exact world polygons, see s_crack_fill */
         p_glUniform4f(u->options,0,0,s->tint,2.0f);
         glPolygonMode(GL_FRONT_AND_BACK,GL_LINE); glLineWidth(filler_line_width(s->scale));
@@ -897,11 +933,18 @@ static void temporal_submit_faces(const TemporalScene *s,const TemporalCommand *
         glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE); glStencilMask(1); s_temp_filling=0;
     }
     if (!round && by_depth) {  /* as tex_batch_by_depth: the nearest opaque depth, then the colours within the margin of it */
-        glColorMask(GL_FALSE,GL_FALSE,GL_FALSE,GL_FALSE); glDisable(GL_BLEND); glDisable(GL_STENCIL_TEST);
-        glDepthFunc(GL_LEQUAL); glDepthMask(GL_TRUE);
+        glColorMask(GL_FALSE,GL_FALSE,GL_FALSE,GL_FALSE); glDisable(GL_BLEND);
+        if (s_temp_supp && c->supp) {  /* as tex_batch_by_depth's held-back batch */
+            glEnable(GL_STENCIL_TEST); glStencilMask(HELD_BACK_WON_STENCIL);
+            glStencilFunc(GL_EQUAL,SUPPLEMENTAL_STENCIL|HELD_BACK_WON_STENCIL,SUPPLEMENTAL_STENCIL); glStencilOp(GL_KEEP,GL_KEEP,GL_REPLACE);
+        } else if (s_temp_supp) { glEnable(GL_STENCIL_TEST); glStencilMask(0); glStencilFunc(GL_EQUAL,SUPPLEMENTAL_STENCIL,SUPPLEMENTAL_STENCIL); }
+        else glDisable(GL_STENCIL_TEST);
+        if (c->supp) { glEnable(GL_POLYGON_OFFSET_FILL); glPolygonOffset(1.0f,1.0f); s_temp_won=s_temp_supp; }
+        glDepthFunc(c->supp?GL_LESS:GL_LEQUAL); glDepthMask(GL_TRUE);
         p_glUniform1i(u->pass,c->semi<0?3:4); glDrawArrays(GL_TRIANGLES,0,count);
         glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE); glDepthMask(GL_FALSE);
-        p_glUniform1f(s_temp_uPull,s_world_margin);
+        p_glUniform1f(s_temp_uPull,c->supp?0.0f:s_world_margin);
+        if (c->supp) glDepthFunc(GL_EQUAL);
         if (!c->check && c->semi==4) {
             glEnable(GL_BLEND);
             p_glBlendEquationSeparate(PSXGL_FUNC_ADD,PSXGL_FUNC_ADD);
@@ -918,6 +961,8 @@ static void temporal_submit_faces(const TemporalScene *s,const TemporalCommand *
             p_glUniform1i(u->pass,2); glDrawArrays(GL_TRIANGLES,0,count);
         }
         p_glUniform1f(s_temp_uPull,0.0f); glDepthFunc(GL_ALWAYS); glDepthMask(GL_TRUE);
+        if (c->supp) glDisable(GL_POLYGON_OFFSET_FILL);
+        s_temp_won=0;
         continue;
     }
     if (!round && held) {
@@ -977,6 +1022,7 @@ static void temporal_submit_faces(const TemporalScene *s,const TemporalCommand *
         glDepthFunc(GL_ALWAYS); glDepthMask(GL_TRUE); p_glUniform4f(u->options,0,0,s->tint,0);
         glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE); glStencilMask(1); s_temp_filling=0;
     }
+    if (supp) { s_temp_supp=0; temporal_supp_mark(s,c,u,count,0,depth_after,write_after); }
 }
 /* The game draws back to front and keeps no depth, so nothing says where a
  * face it stopped submitting belongs among the current ones. Camera depth
@@ -1123,7 +1169,8 @@ static int temporal_present(float alpha,int lx,int ly,int lw,int lh) {
                 float *corner=v+k*TEXV;
                 if (corner[19]>-2.5f) { corner[0]=corner[20]=corner[0]+moved; continue; }
                 const int end=corner[19]<-3.5f;
-                const float room=psx_ws_screen_tile_room(corner[2],s->backdrop_column,end);
+                const int any=sky_finds(&s->sky,corner[8],corner[9],corner[14],corner[15],corner[12]);  /* as tile_corner */
+                const float room=any ? 1.0e6f : psx_ws_screen_tile_room(corner[2],s->backdrop_column,end);
                 float carried=0.0f;
                 if (end ? moved>0.0f : moved<0.0f) {
                     /* Past the texels its column has beyond the end the tile's texture would stretch. */
@@ -1133,7 +1180,7 @@ static int temporal_present(float alpha,int lx,int ly,int lw,int lh) {
                 }
                 corner[0]=corner[20]=corner[0]+carried;
                 corner[2]+=psx_ws_screen_tile_slide(0.0f,moved-carried-corner[22]*s->backdrop_scale,s->backdrop_scale,end,
-                                                    room,high-low>1.0f ? high-low-1.0f : 0.0f);
+                                                    room,any ? 1.0e6f : high-low>1.0f ? high-low-1.0f : 0.0f);
                 corner[22]=0.0f;
             }
         }

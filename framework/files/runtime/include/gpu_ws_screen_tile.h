@@ -15,6 +15,7 @@ extern "C" {
 #define PSX_WS_SCREEN_TILE_WORDS 4u    /* SPRT: colour+code, xy, uv+clut, wh */
 #define PSX_WS_SCREEN_TILE_OPCODE 0x64u
 #define PSX_WS_SCREEN_TILE_MAX_AGE 60u /* frames before an undrawn mark's slot is reused */
+#define PSX_WS_SCREEN_TILE_OFFSET_MOST 1.5f /* an end's distance off its pixel: a kept collapsed tile's reaches 1.125 at 32:9 */
 
 typedef struct {
     uint32_t key;
@@ -113,6 +114,16 @@ static inline int psx_ws_screen_tile_take(PsxWsScreenTiles *tiles,
  * panorama is placed between two of them: the tiles end there, and a moved end would bare the clear colour. */
 static inline uint32_t psx_ws_screen_tile_pins(int32_t x, int32_t w, int32_t span_left, int32_t span_right) {
     return (x <= span_left ? 1u : 0u) | (x + w >= span_right ? 2u : 0u);
+}
+
+/* Whether a tile squashed to [*left, *right) is drawn. One squashed to no width is dropped unless exactly one end is
+ * pinned: then it keeps a pixel on that end, so the moved edge of the panorama beside it never bares the clear colour. */
+static inline int psx_ws_screen_tile_keep(int32_t *left, int32_t *right, uint32_t pins) {
+    if (*right > *left) return 1;
+    if ((pins & 3u) == 1u) *right = *left + 1;
+    else if ((pins & 3u) == 2u) *left = *right - 1;
+    else return 0;
+    return 1;
 }
 
 /* Where a tile's edge at frame x stands in the display's picture: the squash about the centre, not rounded. */

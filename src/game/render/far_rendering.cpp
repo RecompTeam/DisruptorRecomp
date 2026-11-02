@@ -70,7 +70,7 @@ constexpr uint32_t kQuarterUvOpcode = 0xAF290030u;
 
 constexpr uint32_t kFarDistance = 0x800715ECu;
 constexpr uint32_t kFadeStart = 0x800715E0u;
-constexpr uint32_t kPrimitivePointer = 0x800714DCu; /* $gp + 0x390 */
+constexpr uint32_t kPrimitivePointer = 0x800714DCu; /* $gp + 0x390, the next packet: the mesh renderer loads $t9 from it at 0x80046B50, stores it at 0x800470CC */
 constexpr uint32_t kRendererPrimitiveStartOffset = 0x70u;
 
 constexpr uint32_t kTraversalDepthLoad = 0x8003A0F8u;
@@ -95,6 +95,7 @@ constexpr uint32_t kAfterVisibleLoopOpcode = 0x8F8301D4u;
 constexpr uint32_t kVisibleSpanBase = 0x80079D18u;
 constexpr uint32_t kVisibleSpanStride = 8u;
 constexpr uint32_t kVisibleEnd = 0x800717CCu; /* $gp + 0x680 */
+constexpr uint32_t kRoomObjects = 0x8003B78Cu;     /* the visible loop's first call after a room's mesh */
 
 constexpr uint32_t kCurrentHealth = 0x80077660u;
 constexpr uint32_t kMaximumHealth = 0x80077664u;
@@ -220,8 +221,9 @@ struct FogSite {
     bool rows;                /* one sprite a packet, its row (range - start) / 64: the renderer blends its fraction */
     bool packet_in_register;  /* drawn after the renderer from a list, its packet in s5 */
 };
+constexpr uint32_t kSkyFogSite = 0x8003B2CCu; /* a sky opening's fade step */
 constexpr auto kFogSites = std::array<FogSite, 8>{{
-    {0x8003B2CCu, RangeFrom::HalfRegister, 3u, false, false},
+    {kSkyFogSite, RangeFrom::HalfRegister, 3u, false, false},
     {0x8003BA30u, RangeFrom::Register, 18u, true, false},
     {0x8003BE40u, RangeFrom::Register, 19u, true, false},
     {0x8003C628u, RangeFrom::Register, 23u, true, false},
@@ -317,7 +319,17 @@ SessionDiagnostics g_diagnostics;
 disruptor::sector_reach::Walk g_walk;
 disruptor::portal_reach::Spans g_spans;
 disruptor::portal_reach::Sight g_sight;
+/* The faces of the room being drawn that only the wider walk admits: a room the game's own walk does not list, or a face
+ * its own span drops. Set and read on the emulation thread, at a room's mesh and at each face. */
+struct FaceRule {
+    bool active = false, whole = false;
+    int32_t left = 0, right = 0;
+};
+FaceRule g_face_rule;
+uint32_t g_admitted_from = 0u;
+disruptor::portal_reach::Span g_admitted_band = disruptor::portal_reach::kWholeFace;
 disruptor::portal_reach::Objects g_objects;
+disruptor::portal_reach::Beside g_beside;
 /* A room the wider walk listed, shown unlisted to the walk's test of a portal seen edge-on (0x8003AC14). */
 struct Unlisted {
     uint32_t room = disruptor::sector_reach::kNoSector;
@@ -533,6 +545,11 @@ bool portal_reach_enabled() {
 void close_spans() {
     g_spans.close([](uint32_t address) { return psx_mod_read_word(address); },
                   [](uint32_t address, uint32_t word) { psx_mod_write_word(address, word); });
+    g_beside.close(
+        kVisibleEnd, [](uint32_t address) { return psx_mod_read_word(address); },
+        [](uint32_t address) { return static_cast<uint32_t>(psx_mod_read_byte(address)); },
+        [](uint32_t address, uint32_t word) { psx_mod_write_word(address, word); },
+        [](uint32_t address, uint32_t byte) { psx_mod_write_byte(address, static_cast<uint8_t>(byte)); });
 }
 
 /* Caller owns g_mutex. */
@@ -590,9 +607,10 @@ void widen_walk(CPUState *cpu) {
         room < disruptor::portal_reach::kMostRooms && room != disruptor::sector_reach::kNoSector
             ? disruptor::portal_reach::visit_at(disruptor::Guest{}, room)
             : disruptor::portal_reach::Visit{};
-    const bool entered = g_sight.enter(cpu->gpr[19], room, wedge, visit, [&view](const Wedge &own) {
-        return disruptor::portal_reach::listed(own, view, [](int32_t x) { return psx_ws_project_x(x); });
-    });
+    const auto project = [](int32_t x) { return psx_ws_project_x(x); };
+    const bool entered = g_sight.enter(
+        cpu->gpr[19], room, wedge, visit, [&view, &project](const Wedge &own) { return disruptor::portal_reach::listed(own, view, project); },
+        [&view, &project](const Wedge &own) { return disruptor::portal_reach::measured(own, view, project); });
     g_frame.extended = true;
     if (!entered && !visit.loaded) {
         cpu->gpr[19] = disruptor::sector_reach::kDepthCap;
@@ -606,23 +624,81 @@ void widen_walk(CPUState *cpu) {
     cpu->gpr[7] = static_cast<uint32_t>(wider.right.z);
 }
 
-void open_spans(const CPUState *cpu) {
+void open_spans(CPUState *cpu) {
     std::lock_guard<std::mutex> lock(g_mutex);
     if (!g_frame.active || !g_frame.reach || !g_frame.visible_spans_valid || !disruptor_render_arena_relocated()) return;
     const auto read = [](uint32_t address) { return psx_mod_read_word(address); };
     const auto write = [](uint32_t address, uint32_t word) { psx_mod_write_word(address, word); };
     g_spans.open(kVisibleSpanBase, cpu->gpr[2], kVisibleSpanStride, read, write);
+    if (g_sight.judged() && valid_visible_end(cpu->gpr[2])) {
+        const uint32_t end = g_beside.add(
+            kVisibleSpanBase, cpu->gpr[2], kVisibleSpanStride, static_cast<int32_t>(psx_mod_read_word(disruptor::sector_reach::kCamera)),
+            static_cast<int32_t>(psx_mod_read_word(disruptor::sector_reach::kCamera + 4u)),
+            disruptor::portal_reach::view_at(disruptor::Guest{}), disruptor::Guest{}, write,
+            [](uint32_t address, uint32_t byte) { psx_mod_write_byte(address, static_cast<uint8_t>(byte)); });
+        if (end != cpu->gpr[2]) {
+            psx_mod_write_word(kVisibleEnd, end);
+            cpu->gpr[2] = end;
+        }
+    }
     const uint32_t last = std::min(cpu->gpr[2], kVisibleSpanBase + disruptor::portal_reach::kMostRooms * kVisibleSpanStride);
     if (g_sight.judged())
         for (uint32_t entry = kVisibleSpanBase; entry < last; entry += kVisibleSpanStride) {
             const uint32_t room = psx_mod_read_byte(entry + disruptor::portal_reach::kRoomByte);
             if (!g_sight.seen(room)) g_objects.hide(room, read, write);
         }
-    if (g_spans.open() || g_objects.hidden()) g_frame.extended = true;
+    if (g_spans.open() || g_objects.hidden() || g_beside.added() != 0u) g_frame.extended = true;
+}
+
+/* The packets from `g_admitted_from` to `end` hold a face only the wider walk admits, outside `g_admitted_band`. */
+void close_admitted(uint32_t end) {
+    if (g_admitted_from != 0u && end > g_admitted_from) {
+        if (g_admitted_band.left > g_admitted_band.right)
+            gpu_supplemental_packets(g_admitted_from, end);
+        else
+            gpu_supplemental_band(g_admitted_from, end, g_admitted_band.left, g_admitted_band.right);
+    }
+    g_admitted_from = 0u;
+}
+
+bool visible_entry(uint32_t entry) {
+    const uint32_t end = psx_mod_read_word(kVisibleEnd);
+    return valid_visible_end(end) && entry >= kVisibleSpanBase && entry < end && (entry - kVisibleSpanBase) % kVisibleSpanStride == 0u;
+}
+
+/* A room's mesh begins: $s1 is the visible loop's entry. A room Beside adds is drawn as the game draws its own. */
+void note_room(const CPUState *cpu) {
+    using disruptor::portal_reach::turn_guarded_left, disruptor::portal_reach::turn_guarded_right;
+    close_admitted(psx_mod_read_word(kPrimitivePointer));
+    g_face_rule = FaceRule{};
+    std::lock_guard<std::mutex> lock(g_mutex);
+    const uint32_t entry = cpu->gpr[17];
+    if (!g_frame.active || !g_frame.reach || !g_sight.judged() || !visible_entry(entry) || g_beside.added_at(entry)) return;
+    const uint32_t room = psx_mod_read_byte(entry + disruptor::portal_reach::kRoomByte);
+    const disruptor::portal_reach::Span span = g_sight.span(room);
+    g_face_rule = {true, !g_sight.seen(room), static_cast<int32_t>(turn_guarded_left(static_cast<uint32_t>(span.left))),
+                   static_cast<int32_t>(turn_guarded_right(static_cast<uint32_t>(span.right)))};
+}
+
+/* After the drop test of a face: $t9 is where its packets begin, $at what its corners share, t0..t3 its corner records. */
+void note_face(const CPUState *cpu) {
+    const uint32_t packet = cpu->gpr[25];
+    close_admitted(packet);
+    if (!g_face_rule.active || cpu->gpr[1] != 0u || !cpu->read_word) return;
+    const std::array<uint32_t, 4> screen = {cpu->read_word(cpu->gpr[8] + 4u), cpu->read_word(cpu->gpr[9] + 4u),
+                                            cpu->read_word(cpu->gpr[10] + 4u), cpu->read_word(cpu->gpr[11] + 4u)};
+    if (g_face_rule.whole || disruptor::portal_reach::beside_span(screen, g_face_rule.left, g_face_rule.right)) {
+        g_admitted_from = packet;
+        g_admitted_band = disruptor::portal_reach::kWholeFace;
+    } else if (disruptor::portal_reach::crossed_band(screen, g_face_rule.left, g_face_rule.right, g_admitted_band)) {
+        g_admitted_from = packet;
+    }
 }
 
 /* After the visible loop the game reads the list for its own rooms (0x800240C4, 0x8002DAE0): the wider walk's go. */
 void keep_game_rooms() {
+    close_admitted(psx_mod_read_word(kPrimitivePointer));
+    g_face_rule = FaceRule{};
     std::lock_guard<std::mutex> lock(g_mutex);
     show_objects();
     if (!g_frame.active || !g_frame.reach || !g_frame.visible_spans_valid || !g_sight.judged()) return;
@@ -1099,6 +1175,11 @@ void shape_fade_load(CPUState *cpu, const DistanceLoadSite& site) {
     if (!g_fog.active || comparator_active() || psx_netplay_active() || !renderer_ancestry_matches(cpu, site)) return;
     const uint32_t loaded = (site.opcode >> 16u) & 31u;
     if (loaded == 0u || cpu->gpr[loaded] != psx_mod_read_word(kFadeStart)) return;
+    /* The sky lies past all that is drawn: it keeps the game's own fog, never clearer than a wall before it. */
+    if (fog->pc == kSkyFogSite) {
+        if (g_written.active) cpu->gpr[loaded] = static_cast<uint32_t>(g_written.source_fade);
+        return;
+    }
     const int64_t held = static_cast<int32_t>(cpu->gpr[fog->range_register]);
     const int64_t range = fog->from == RangeFrom::HalfRegister ? held >> 1
                           : fog->from == RangeFrom::WeaponDepth ? (30 - held) * 30 + 128
@@ -1226,13 +1307,20 @@ double percentile(std::array<double, kTimingHistory> values, size_t count,
     return values[std::min(index, count - 1u)];
 }
 
+void room_objects_entry(CPUState *cpu, uint32_t address) {
+    if (!cpu || address != kRoomObjects) return;
+    close_admitted(psx_mod_read_word(kPrimitivePointer));
+    g_face_rule = FaceRule{};
+}
+
 PSX_MOD_CONSTRUCTOR(register_disruptor_far_rendering) {
     if (!psx_mod_register_function_entry_plugin(
             "disruptor.far_rendering.renderer", kRendererEntry,
             disruptor_far_rendering_renderer_entry) ||
         !psx_mod_register_function_entry_plugin(
             "disruptor.far_rendering.sector_edges", kDrawSector,
-            disruptor_far_rendering_sector_entry)) {
+            disruptor_far_rendering_sector_entry) ||
+        !psx_mod_register_function_entry_plugin("disruptor.far_rendering.room_objects", kRoomObjects, room_objects_entry)) {
         std::fprintf(stderr,
                      "disruptor: failed to register far-rendering hook\n");
     }
@@ -1501,9 +1589,12 @@ extern "C" void disruptor_far_rendering_abandon_metrics(void) {
     g_fog.active = false;
     g_packet_fractions.clear();
     g_spans.forget();
+    g_beside.forget();
     g_objects.forget();
     g_sight.clear();
     g_unlisted = Unlisted{};
+    g_face_rule = FaceRule{};
+    g_admitted_from = 0u;
 }
 
 extern "C" void disruptor_far_rendering_state_saving(void) {
@@ -1587,6 +1678,7 @@ extern "C" void disruptor_far_rendering_renderer_entry(
 
 extern "C" void disruptor_far_rendering_sector_entry(CPUState *cpu, uint32_t address) {
     if (!cpu || address != kDrawSector || !cpu->read_word || !cpu->write_word) return;
+    note_room(cpu);
     disruptor::Guest guest;
     disruptor::misplaced_riser::fixed_parts(guest, cpu->gpr[4]);
     if (!gpu_geometry_correction_enabled()) return;
@@ -1609,6 +1701,9 @@ static void begin_renderer_frame(CPUState *cpu) {
         return;
     }
 
+    g_face_rule = FaceRule{};
+    g_admitted_from = 0u;
+    gpu_supplemental_frame();
     std::lock_guard<std::mutex> lock(g_mutex);
     ++g_diagnostics.renderer_entries;
     g_fog.active = false;
@@ -1700,6 +1795,7 @@ extern "C" void disruptor_far_rendering_instruction_hook(
 
     if (pc == kSharedSides && instruction == kSharedSidesOpcode) {
         keep_marked_faces_on_screen(cpu);
+        note_face(cpu);
         return;
     }
 

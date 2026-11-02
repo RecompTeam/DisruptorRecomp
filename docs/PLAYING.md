@@ -112,6 +112,7 @@ Delete it once the repaired copy works.
 | Name a save | Type it: letters, digits, Space, Backspace and Delete. Enter moves to DONE |
 | Start / end a replay capsule | Ctrl+F12 |
 | Load the newest replay capsule | F12 |
+| Mark the moment in a capsule | Ctrl+F11 |
 
 The table shows the Modern scheme, which a new installation has.
 
@@ -611,6 +612,8 @@ build's details.
 
 - **Ctrl+F12** starts a capsule and ends it. F12 alone also ends one that is
   recording.
+- **Ctrl+F11** while recording marks the moment you see a fault. The capsule
+  keeps a full picture of the screen for it.
 - **F12** loads the newest capsule: the game stands where that recording
   began. The save states have F1 to F11.
 - Every capsule is kept in `capsules/` in the folder of your files.

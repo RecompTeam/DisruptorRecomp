@@ -49,15 +49,18 @@ require(
     "and the palette's block of rows begins at the row a level's texture descriptor names, a palette no descriptor names keeps the game's row",
 )
 require(
-    '    "  int glyph = (v_raw & 2) == 0 && (u_twin.x | u_twin.y) == 0 ? v_raw >> 2 : 0;  /* a texture window samples past the limits */\\n"\n'
-    '    "  if (!sample_texture(sample_uv, rgb, stp) && (glyph == 0 || !glyph_edge(sample_uv, glyph, rgb, stp))) discard;\\n"\n'
+    '    "  int glyph = (v_raw & 2) == 0 && (u_twin.x | u_twin.y) == 0 ? (v_raw >> 2) & 0x3FFFF : 0;  '
+    '/* a texture window samples past the limits */\\n"\n'
+    '    "  if (v_sky_on != 0 ? !sky_sample(rgb, stp)\\n"\n'
+    '    "                    : !sample_texture(sample_uv, rgb, stp) && (glyph == 0 || !glyph_edge(sample_uv, glyph, rgb, stp))) discard;\\n"\n'
     '    "  if (level >= 0.0 && int(level) < rows - 1 && u_semipass < 3) {  /* passes 3 and 4 write depth alone */\\n"\n'
     '    "    vec3 next; int next_stp; g_row += 1;\\n"\n'
-    '    "    if (sample_texture(sample_uv, next, next_stp)) rgb = mix(rgb, next, fract(level));\\n"\n'
+    '    "    if (v_sky_on != 0 ? sky_sample(next, next_stp) : sample_texture(sample_uv, next, next_stp)) '
+    'rgb = mix(rgb, next, fract(level));\\n"\n'
     '    "  }\\n"\n'
     in renderer
     and '    "  g_row = v_clut.y;\\n"\n' in renderer
-    and renderer.count("), g_row);\\n") == 2
+    and renderer.count("), g_row);\\n") == 3
     and "v_clut.y);\\n" not in renderer,
     "the texel is taken from the row of the level and mixed with the next row by the level's fraction, and a triangle "
     "with no fade is sampled from its own row as before",
@@ -153,7 +156,7 @@ require(
     > renderer.index('"  if ((v_raw & 1) == 0) rgb = clamp(rgb * v_col.rgb * 2.0, 0.0, 1.0);\\n"')
     and renderer.index('"  if (dissolve > 0.0 && u_dissolve.z < 0.5 && (u_semipass < 3 || u_visual_options.w > 0.0)) {')
     < renderer.index('"  if (dissolve > 0.0 && dst_factor == 0.0) {')
-    and "    if (w >= EDGE_CLEAR_WIDTH && h >= EDGE_CLEAR_HEIGHT && x <= s_area_x1 && y <= s_area_y1 && x + w - 1 >= s_area_x2 &&\n        y + h - 1 >= s_area_y2) {\n        s_clear_rgb[0] = r; s_clear_rgb[1] = g; s_clear_rgb[2] = b;\n        s_clear_known = 1;\n    }\n"
+    and "    if (w >= EDGE_CLEAR_WIDTH && h >= EDGE_CLEAR_HEIGHT && x <= s_area_x1 && y <= s_area_y1 && x + w - 1 >= s_area_x2 &&\n        y + h - 1 >= s_area_y2) {\n        s_clear_rgb[0] = r; s_clear_rgb[1] = g; s_clear_rgb[2] = b;\n        s_clear_known = 1;\n        s_clear_serial = s_present_serial;\n    }\n"
     in renderer
     and renderer.count("s_clear_known = 1;") == 1
     and renderer.count("s_clear_rgb[0] = ") == 1
@@ -221,6 +224,27 @@ require(
     "past the last fog row the smooth fade goes on into the frame's background, for an opaque texel whose last shade is "
     "within a step and a half of it: the level's palettes stop a five-bit step short of their fog, which left the bright "
     "edges of far shapes as faint lines. The UV view keeps its values",
+)
+thread = read("psxrecomp/runtime/src/gpu_gl_render_thread.c.inc")
+require(
+    '    "  if ((v_raw & 0x100000) != 0 && u_clear.w > 0.5 && u_fade_at.w < 0.5) rgb = u_clear.rgb;  /* RAW_SKY */\\n"\n'
+    in renderer
+    and renderer.index('"  if ((v_raw & 1) == 0) rgb = clamp(rgb * v_col.rgb * 2.0, 0.0, 1.0);\\n"')
+    < renderer.index('"  if ((v_raw & 0x100000) != 0')
+    and "#define RAW_SKY 0x100000" in renderer
+    and "    if (!edge_dissolving() || !s_clear_known || s_clear_serial != s_present_serial || depth > 1 || !s_vram ||\n"
+    in renderer
+    and "            if (fabsf(v - s_clear_rgb[c]) > 1.5f / 31.0f) return 0;\n" in renderer
+    and "        s_clear_known = 1;\n        s_clear_serial = s_present_serial;\n" in renderer
+    and "static void gl_perf_present_enter(void) {\n    s_present_serial++;\n" in renderer
+    and "    const int sky_raw = ctx_sky_fogged() && sky_ends_in_clear(texpage, clut_x, clut_y, col, rawtex) ? RAW_SKY : 0;\n"
+    in renderer
+    and "    if (gpu_sky_fogged()) flags |= RTHF_SKY;\n" in thread
+    and "    s_rthx_sky = (flags & RTHF_SKY) != 0;\n" in thread,
+    "a sky tile at its opening's last fog step whose whole palette is within a step and a half of this frame's "
+    "background is drawn in it while the edge dissolves: the sky palettes stop a step short of the background, and a "
+    "far wall dissolving at the draw edge showed them as a patch. The flag goes with the primitive through the render "
+    "thread, and a background not filled this frame is not used",
 )
 require("    disruptor_contract(smooth_fade)\n" in cmake, "this contract must remain registered")
 

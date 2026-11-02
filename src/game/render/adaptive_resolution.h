@@ -1,6 +1,6 @@
 #pragma once
 
-/* Dynamic internal resolution: upstream's step controller fed with the GPU time of both contexts, see the .cpp. */
+/* Dynamic internal resolution: upstream's step controller fed with the game's own GPU time, see the .cpp. */
 
 #ifdef __cplusplus
 #include "dynamic_resolution.h"
@@ -10,6 +10,17 @@ namespace disruptor::adaptive_resolution {
 /* The GPU time between two readings of the renderer's busy total, in seconds. */
 inline double work_seconds(double before_ms, double after_ms) {
     return after_ms > before_ms ? (after_ms - before_ms) / 1000.0 : 0.0;
+}
+
+/* An interval longer than `factor` periods that the GPU was busy for most of. */
+inline bool gpu_bound(double wall, double work, double period, double factor) {
+    return wall > period * factor && work >= 0.75 * wall;
+}
+
+/* A GPU-bound interval past the gap right after a late GPU-bound one is judged at the gap's edge: a card too slow, also
+ * when its frames straddle the gap. A lone one, as a stall that drained queued frames, stays a pause. */
+inline double judged_wall(double wall, bool slow, bool after_late, double period, double gap_factor) {
+    return slow && after_late ? period * gap_factor : wall;
 }
 
 /* Nothing is judged while the picture is not the world or the frame is not the game's own. */

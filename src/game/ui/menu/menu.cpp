@@ -325,6 +325,9 @@ int on_sdl_event(void *, const SDL_Event *event) {
     }
     if (!g_menu.open && scancode_event(event, SDL_SCANCODE_ESCAPE))
         disruptor_intro_skip_request();
+    if (!g_menu.open && key_down(event, SDL_SCANCODE_F11) && (key_held(event) & KMOD_CTRL) != 0 &&
+        disruptor_capsule_mark(event->key.repeat ? 1 : 0))
+        return 1;
     if (!g_menu.open && key_down(event, SDL_SCANCODE_F12)) {
         const int held = key_held(event);
         disruptor_capsule_key(event->key.repeat ? 1 : 0, (held & KMOD_CTRL) != 0, (held & KMOD_SHIFT) != 0);

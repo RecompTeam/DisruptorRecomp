@@ -60,7 +60,7 @@ require(
     and "    const int visual_flags = take_visual_triangle(xs, ys, px, py, pq, pz, pid);\n"
     "    PsxTurnCorner cut[PSX_TURN_CLIP_MAX];\n"
     "    const int near_face = s_near_set;\n"
-    "    const int cut_corners = near_face ? -1 : turn_clip(px, py, visual_flags, cut);\n"
+    "    const int banded = s_next_band, canonical = !banded || s_next_band_canonical;\n    s_next_band = 0;\n    if (near_face && !canonical) return;  /* uncut, a near face's first piece already drew all of it */\n    const int cut_corners = near_face ? -1 : turn_clip(px, py, visual_flags, banded, s_next_band_low, s_next_band_high, cut);\n"
     "    const float whole_q[3] = {pq[0], pq[1], pq[2]};\n"
     "    turned_perspective(px, pq, visual_flags);\n"
     in renderer
@@ -77,21 +77,23 @@ require(
 )
 clip = between(renderer, "static int turn_clip(", "\n}\n")
 require(
-    "    if (!visual_flags ||\n"
-    "        !psx_turn_band(s_yaw_sin, s_yaw_cos, (float)g_wide_cur_base + s_yaw_center_x, s_yaw_focal_x, &low, &high))\n"
-    "        return -1;\n"
+    "    const int turned = visual_flags &&\n"
+    "        psx_turn_band(s_yaw_sin, s_yaw_cos, (float)g_wide_cur_base + s_yaw_center_x, s_yaw_focal_x, &low, &high);\n"
     in clip
+    and "    banded = banded && visual_flags;\n    if (!turned && !banded) return -1;\n" in clip
+    and "        low = low > band_low ? low : band_low;\n        high = high < band_high ? high : band_high;\n" in clip
     and "    if (px[0] >= low && px[0] <= high && px[1] >= low && px[1] <= high && px[2] >= low && px[2] <= high) return -1;\n"
     in clip
     and clip.endswith("    return psx_turn_clip(px, py, low, high, cut);"),
     "a triangle the picture turns is cut to the band of the turn it is drawn under, and only when a corner leaves the band",
 )
 require(
-    "        if (s_tb_n + 3 + (cut_corners > 2 ? 3 * (cut_corners - 2) : 0) > TEXBATCH_MAXV) { s_batch_reason[6]++; flush_tex_batch(); }\n"
+    "        if (s_tb_n + 3 + (cut_corners > 2 ? 3 * (cut_corners - 2) : 0) > TEXBATCH_MAXV ||\n"
+    "            (deferred && s_tp_n + 3 + (cut_corners > 2 ? 3 * (cut_corners - 2) : 0) > TEXBATCH_MAXV)) { s_batch_reason[6]++; flush_tex_batch(); }\n"
     in renderer
-    and "            vp[20] = visual_flags || s_flat_sides[0] != 0.0f || s_flat_sides[1] != 0.0f ? px[cut_corners >= 0 ? 0 : i] : (float)xs[i];"
+    and "            vp[20] = visual_flags || s_flat_sides[0] != 0.0f || s_flat_sides[1] != 0.0f ? px[cut_corners >= 0 || deferred ? 0 : i] : (float)xs[i];"
     in renderer
-    and "            vp[21] = visual_flags ? py[cut_corners >= 0 ? 0 : i] : (float)ys[i];\n" in renderer
+    and "            vp[21] = visual_flags ? py[cut_corners >= 0 || deferred ? 0 : i] : (float)ys[i];\n" in renderer
     and "        for (int piece = 0; piece + 2 < cut_corners; ++piece) {" in renderer
     and "            const int corner_of[3] = {0, piece + 1, piece + 2};\n"
     "            const int perspective = whole_q[0] > 0.0f && whole_q[1] > 0.0f && whole_q[2] > 0.0f;\n"
@@ -106,12 +108,12 @@ require(
     and "                vp[20] = corner->x;\n                vp[21] = corner->y;\n                vp[22] = piece_q[i];\n"
     in renderer
     and "        const uint64_t cut_id = pid[0] == pid[1] && pid[1] == pid[2] ? pid[0] : 0u;" in renderer
-    and "                s_tb_identity[s_tb_n + i] = own >= 0 ? pid[own] : cut_id;\n" in renderer,
+    and "                out_identity[*out_n + i] = own >= 0 ? pid[own] : cut_id;\n" in renderer,
     "a cut textured triangle keeps its canonical picture, is one point in the mirror, and its pieces are one point in the "
     "canonical picture with texture, colour and weights taken along the triangle",
 )
 require(
-    "        cut_corners = turn_clip(px, py, visual_flags, cut);\n" in renderer
+    "        cut_corners = turn_clip(px, py, visual_flags, 0, 0.0f, 0.0f, cut);\n" in renderer
     and "    if (s_fb_n + n + (cut_corners > 2 ? 3 * (cut_corners - 2) : 0) > FLATBATCH_MAXV)\n" in renderer
     and "        v[7] = visual_flags ? px[cut_corners >= 0 ? 0 : i] : (float)xs[i];" in renderer
     and "        v[8] = visual_flags ? py[cut_corners >= 0 ? 0 : i] : (float)ys[i];\n" in renderer
@@ -138,7 +140,8 @@ require(
 )
 require(
     "#define TEMPORAL_CUT_IDENTITY UINT64_C(0x1000000000000000)" in renderer
-    and "            s_tb_identity[s_tb_n + i] = cut_corners >= 0 ? TEMPORAL_CUT_IDENTITY : pid[i];\n" in renderer
+    and "            s_tb_identity[s_tb_n + i] = cut_corners >= 0 || deferred ? TEMPORAL_CUT_IDENTITY : pid[i];\n"
+    in renderer
     and "        s_fb_identity[s_fb_n] = cut_corners >= 0 ? TEMPORAL_CUT_IDENTITY : pid[i];\n" in renderer
     and "        const int cut = identities && identities[i]==TEMPORAL_CUT_IDENTITY &&\n"
     "            identities[i+1]==TEMPORAL_CUT_IDENTITY && identities[i+2]==TEMPORAL_CUT_IDENTITY;\n"
@@ -164,7 +167,7 @@ require(
     """    const double shown = g_mouse.shown_yaw_fraction;
     g_mouse.shown_yaw_fraction = g_mouse.fractional_yaw;
     const bool stick_turns = pad && g_mouse.sticks.layout != disruptor::sticks::Layout::classic;
-    gpu_geometry_camera_yaw_residual_set(
+    set_residual(
         g_mouse.high_precision_camera && ((g_mouse.captured && g_mouse.mouse_aim_enabled) || stick_turns)
             ? shown
             : 0.0);
@@ -172,7 +175,13 @@ require(
     in mouse
     and mouse.count("    g_mouse.fractional_yaw = 0.0;\n    g_mouse.shown_yaw_fraction = 0.0;\n") == 2
     and mouse.count("g_mouse.shown_yaw_fraction = 0.0;") == 2
-    and "    double shown_yaw_fraction = 0.0;  // what fractional_yaw was a frame ago\n" in mouse,
+    and "    double shown_yaw_fraction = 0.0;  // what fractional_yaw was a frame ago\n" in mouse
+    and "static void set_residual(double yaw_units) {\n    disruptor_capsule_replay_residual(&yaw_units);\n"
+    "    disruptor_capsule_note_residual(yaw_units);\n    gpu_geometry_camera_yaw_residual_set(yaw_units);\n}\n"
+    in mouse
+    and mouse.count("gpu_geometry_camera_yaw_residual_set(") == 2
+    and "    if ((!g_mouse.enabled && !pad) || !sdl_window) {\n        set_residual(0.0);\n        return;\n    }\n"
+    in mouse,
     "the renderer is handed the remainder of a frame ago, only while the mouse is captured and aims or a stick turns, "
     "and a reset clears both",
 )

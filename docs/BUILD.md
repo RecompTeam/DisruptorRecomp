@@ -262,6 +262,17 @@ A recording ends by itself after ten minutes, or when a save state is loaded.
 The word REC shows in a corner for a second when a recording starts, and REC
 saved when it ends.
 
+Ctrl+F11 while recording marks the moment: the capsule keeps the frame and a
+full-size picture of the screen as `mark_000.ppm` and on, listed in
+`marks.csv` with the number of the shown picture it was read from. MARK shows
+for a second once the picture is kept.
+
+The capsule also keeps every picture that reached the screen in
+`presented.csv`: the game frame it showed, named by the VBlank the game
+presented it in, its place between that frame and the one before when it is
+an in-between picture, and the window's size. Each frame of `input.bin` holds
+the part of a game step smooth aim turned the picture by.
+
 ```sh
 python tools/replay_capsule.py capsules/1791553413 --pictures out
 ```
@@ -272,10 +283,17 @@ replay is the same run every time. It is not the recorded run bit for bit: a
 loaded state takes its interrupts a few instructions apart, so some frames
 differ from the recording in a few bytes of the game's memory, from one in ten
 to seven in ten in the runs measured. A replay counts as in step when it has the
-recording's memory at some frame of its last 60.
+recording's memory at some frame of its last 60. It also prints how many
+frames matched and the longest run that did not.
 
-A capsule holds the pad buttons, the heading the mouse wrote, direct weapon
-selections and the pitch of
+`--pose out.csv` writes the camera's place and heading at every frame. With
+a window, `PSX_DISRUPTOR_CAPSULE_AS_SHOWN=1` makes the replay present exactly
+the pictures of `presented.csv` instead of its own: each in-between picture
+between the same two game frames at the same place, which the game waits
+for. `PSX_GL_SHOWN_DUMP` then writes them with their number in the list.
+
+A capsule holds the pad buttons, the heading the mouse wrote and the part of a
+step it turned the picture by, direct weapon selections and the pitch of
 the vertical look. It does not hold analog sticks, cheats or anything changed
 in the settings menu while it was recorded. It plays in the build that made
 it and with the settings it was made with, and it is not recorded in a network
