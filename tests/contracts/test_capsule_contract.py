@@ -286,6 +286,8 @@ require(
     and renderer.count("SDL_AtomicLock(&s_snap_lock);") == 5
     and renderer.count("SDL_AtomicUnlock(&s_snap_lock);") == 5
     and "static void shown_capture(int kind, float alpha) {\n    int ww = 0, wh = 0;\n    shown_snap();\n    shown_count(kind);\n"
+    in renderer
+    and "static void shown_keep(GLuint source, int x, int y, int ww, int wh, int kind, float alpha) {\n"
     "    if (s_shown_left <= 0) return;\n"
     in renderer
     and "    if (!rgb || width <= 0 || height <= 0 || width > 4096 || height > 4096) return 0;\n" in renderer

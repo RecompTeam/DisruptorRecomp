@@ -1,8 +1,8 @@
 diff --git a/runtime/src/gpu_gl_renderer.c b/runtime/src/gpu_gl_renderer.c
-index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b49f3be684021180889cc2f393e28b086c457fb9 100644
+index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..4fceee751069373e7fb4c31682a8477490b409c2 100644
 --- a/runtime/src/gpu_gl_renderer.c
 +++ b/runtime/src/gpu_gl_renderer.c
-@@ -1,747 +1,1417 @@
+@@ -1,747 +1,1419 @@
 -/* gpu_gl_renderer.c — hardware OpenGL renderer backend.
 - *
 - * ARCHITECTURE (v2 — GPU-authoritative VRAM)
@@ -410,6 +410,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b49f3be684021180889cc2f393e28b08
 +static int s_rth_on = 0;
 +static int s_rthx_tagged = 0, s_rthx_backdrop = 0, s_rthx_flat = 0, s_rthx_fade = -1, s_rthx_glyph = 0;
 +static int32_t s_rthx_squash[2] = {1, 1};
++static uint64_t s_rthx_presented = 0;  /* when the game's thread recorded the present being replayed */
 +static inline int rth_replaying(void) { return s_rth_on && rt_on_render_thread(); }
 +static int ctx_prim_tagged(void);
 +static int ctx_prim_in_backdrop(void);
@@ -1360,6 +1361,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b49f3be684021180889cc2f393e28b08
 +static int interp_thread_main(void *opaque);
 +static int interp_present(void);
 +static void shown_capture(int kind, float alpha);
++static void shown_drawn(GLuint fbo, int x, int y, int w, int h);
 +int gl_renderer_record_shown(const char *folder, int skip, int count, int width);
 +static float interp_draw_quad(float alpha, int lx, int ly, int lw, int lh);
 +static uint64_t s_temporal_raw_generation = 1;
@@ -2152,7 +2154,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b49f3be684021180889cc2f393e28b08
  static const char *INTERP_FS =
      "#version 330\n"
      "in vec2 v_uv; uniform sampler2D u_prev; uniform sampler2D u_curr;\n"
-@@ -757,2715 +1427,5291 @@
+@@ -757,2715 +1429,5317 @@
      "  }\n"
      "  frag=mix(prev,curr,alpha);\n"
      "}\n";
@@ -9361,7 +9363,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b49f3be684021180889cc2f393e28b08
 +typedef struct {
 +    TemporalScene *scene;
 +    TemporalAgainst against;
-+    uint64_t generation;
++    uint64_t generation, presented;
 +    GLuint fbo;
 +    int y, h, dst, scale, linear, force_4_3, source_path;
 +} InterpMatchJob;
@@ -9370,20 +9372,22 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b49f3be684021180889cc2f393e28b08
 +static SDL_cond *s_match_cond = NULL;
 +static int s_match_run, s_match_queued, s_match_busy;  /* under s_match_mutex */
 +static InterpMatchJob s_match_job;                    /* under s_match_mutex */
-+static int s_match_retired = -1;  /* game thread: the last job's slot, held until a capture after its publish */
++static int s_match_retired = -1;  /* drawing thread: the last job's slot, held until a capture after its publish */
 +
-+/* With the present mutex held: the picture in `dst` becomes the current one. */
-+static void interp_capture_published(int dst, int scale, int linear, int force_4_3, int source_path) {
++/* With the present mutex held: the picture in `dst` becomes the current one. The blend lasts as long as the game took from
++ * the frame before, timed when the game's thread presented each (`presented`), whichever thread draws or publishes it. */
++static void interp_capture_published(int dst, int scale, int linear, int force_4_3, int source_path, uint64_t presented) {
 +    uint64_t now = SDL_GetPerformanceCounter();
 +    uint64_t freq = SDL_GetPerformanceFrequency();
-+    if (s_interp_valid > 0 && s_interp_last_capture && now > s_interp_last_capture) {
-+        uint64_t d = now - s_interp_last_capture;
++    const uint64_t at = presented;
++    if (s_interp_valid > 0 && s_interp_last_capture && at > s_interp_last_capture) {
++        uint64_t d = at - s_interp_last_capture;
 +        uint64_t lo = freq / 240u, hi = freq / 10u;
 +        if (d < lo) d = lo;
 +        if (d > hi) d = hi;
 +        s_interp_duration = d;
 +    }
-+    s_interp_last_capture = now;
++    s_interp_last_capture = at;
 +    s_interp_start = now;
 +    if (s_interp_valid == 0) {
 +        s_interp_cur = dst;
@@ -9408,7 +9412,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b49f3be684021180889cc2f393e28b08
 +    if (job->generation == s_temp_generation) {
 +        s_temp_ready = job->scene;
 +        temporal_publish(job->fbo, job->y, job->h);
-+        interp_capture_published(job->dst, job->scale, job->linear, job->force_4_3, job->source_path);
++        interp_capture_published(job->dst, job->scale, job->linear, job->force_4_3, job->source_path, job->presented);
 +    } else {
 +        job->scene->active = 0;
 +    }
@@ -9452,7 +9456,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b49f3be684021180889cc2f393e28b08
 +    if (!s_match_thread) interp_match_stop();
 +}
 +
-+/* Game thread, never with the present mutex held: a job still in matching is published first. */
++/* Drawing thread, never with the present mutex held: a job still in matching is published first. */
 +static void interp_match_wait(void) {
 +    if (!s_match_thread) return;
 +    SDL_LockMutex(s_match_mutex);
@@ -9487,12 +9491,13 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b49f3be684021180889cc2f393e28b08
 +
 +/* With the present mutex held: the scene and the picture in `dst` go to the matching thread. */
 +static void interp_match_post(TemporalScene *scene, GLuint fbo, int y, int w, int h, int dst, int linear,
-+                              int force_4_3, int source_path) {
++                              int force_4_3, int source_path, uint64_t presented) {
 +    InterpMatchJob job;
 +    const int slot = (int)(scene - s_temp_build);
 +    job.scene = scene;
 +    temporal_against(scene, w, h, &job.against);
 +    job.generation = s_temp_generation;
++    job.presented = presented;
 +    job.fbo = fbo;
 +    job.y = y;
 +    job.h = h;
@@ -9573,6 +9578,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b49f3be684021180889cc2f393e28b08
 +    }
 +#endif
 +    const int apart = s_interp_blend_mode == 2 && !under_lock && s_match_thread;
++    const uint64_t presented = rth_replaying() ? s_rthx_presented : SDL_GetPerformanceCounter();
 +    TemporalScene *scene = NULL;
 +    if (s_match_thread) interp_match_wait();  /* in any mode: the slot it holds is released below */
 +    if (apart) {
@@ -9638,7 +9644,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b49f3be684021180889cc2f393e28b08
 +        glFlush();
 +        p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, 0);
 +        ready = s_interp_valid >= 2;
-+        interp_match_post(scene, fbo, y, w, h, dst, linear, force_4_3, source_path);
++        interp_match_post(scene, fbo, y, w, h, dst, linear, force_4_3, source_path, presented);
 +    } else {
 +        if (s_interp_blend_mode == 2) temporal_publish(fbo, y, h);
 +#ifndef PSX_NO_DEBUG_TOOLS
@@ -9657,13 +9663,14 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b49f3be684021180889cc2f393e28b08
 +        s_interp_fence[dst] = p_glFenceSync(PSXGL_SYNC_GPU_COMMANDS_COMPLETE, 0);
 +        glFlush();
 +        p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, 0);
-+        interp_capture_published(dst, s_scale, linear, force_4_3, source_path);
++        interp_capture_published(dst, s_scale, linear, force_4_3, source_path, presented);
 +        ready = s_interp_valid >= 2;
 +    }
 +    if (s_interp_diag)
 +        interp_spread_add(&s_interp_hold, (double)(SDL_GetPerformanceCounter() - locked) * 1000.0 /
 +                                          (double)SDL_GetPerformanceFrequency());
 +    SDL_UnlockMutex(s_interp_mutex);
++    shown_drawn(fbo, x * s_scale, y * s_scale, pw, ph);
 +    return ready;
 +}
 +
@@ -9800,7 +9807,8 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b49f3be684021180889cc2f393e28b08
 +            fclose(file);
 +        }
 +        if (list)
-+            fprintf(list, "%d,%s,%.3f,%.0f,%d,%d,%d,%d,%d,%d,%d\n", i, s_shown_meta[i].kind ? "between" : "frame", s_shown_meta[i].alpha,
++            fprintf(list, "%d,%s,%.3f,%.0f,%d,%d,%d,%d,%d,%d,%d\n", i,
++                    s_shown_meta[i].kind == 2 ? "drawn" : s_shown_meta[i].kind ? "between" : "frame", s_shown_meta[i].alpha,
 +                    (double)(s_shown_meta[i].tick - s_shown_meta[0].tick) * 1e6 / (double)SDL_GetPerformanceFrequency(),
 +                    s_shown_meta[i].placed[0], s_shown_meta[i].placed[1], s_shown_meta[i].placed[2], s_shown_meta[i].placed[3],
 +                    s_shown_meta[i].placed[4], s_shown_meta[i].placed[5], s_shown_meta[i].placed[6]);
@@ -9812,9 +9820,8 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b49f3be684021180889cc2f393e28b08
 +    s_shown_meta = NULL;
 +}
 +
-+/* Called with the finished picture in the back buffer, right before its swap. kind: 0 a game frame's own swap, 1 the
-+ * in-between presenter's, whose alpha is the picture's place between the last two game frames (1 is the later one). */
-+static void shown_read(int ww, int wh, int width, int height, uint8_t *into) {
++/* The picture in `source`'s rectangle, the back buffer where `source` is 0, read back `width` by `height`. */
++static void shown_read(GLuint source, int x, int y, int ww, int wh, int width, int height, uint8_t *into) {
 +    GLint bound = 0;
 +    GLuint fbo = 0, texture = 0;
 +    const GLboolean scissor = glIsEnabled(GL_SCISSOR_TEST);
@@ -9827,10 +9834,10 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b49f3be684021180889cc2f393e28b08
 +    p_glGenFramebuffers(1, &fbo);
 +    p_glBindFramebuffer(PSXGL_DRAW_FRAMEBUFFER, fbo);
 +    p_glFramebufferTexture2D(PSXGL_DRAW_FRAMEBUFFER, PSXGL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, texture, 0);
-+    p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, 0);
-+    glReadBuffer(GL_BACK);
++    p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, source);
++    if (!source) glReadBuffer(GL_BACK);
 +    glDisable(GL_SCISSOR_TEST);
-+    p_glBlitFramebuffer(0, 0, ww, wh, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_LINEAR);
++    p_glBlitFramebuffer(x, y, x + ww, y + wh, 0, 0, width, height, GL_COLOR_BUFFER_BIT, GL_LINEAR);
 +    p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, fbo);
 +    glPixelStorei(GL_PACK_ALIGNMENT, 1);
 +    glReadPixels(0, 0, width, height, GL_RGB, GL_UNSIGNED_BYTE, into);
@@ -9907,7 +9914,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b49f3be684021180889cc2f393e28b08
 +        down = (uint8_t *)malloc((size_t)width * height * 3);
 +    }
 +    if (up && down) {
-+        shown_read(ww, wh, width, height, up);
++        shown_read(0, 0, 0, ww, wh, width, height, up);
 +        for (int y = 0; y < height; ++y) memcpy(down + (size_t)y * width * 3, up + (size_t)(height - 1 - y) * width * 3, (size_t)width * 3);
 +    } else {
 +        free(down);
@@ -9985,13 +9992,19 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b49f3be684021180889cc2f393e28b08
 +    SDL_AtomicUnlock(&s_shown_count_lock);
 +}
 +
-+static void shown_capture(int kind, float alpha) {
-+    int ww = 0, wh = 0;
-+    shown_snap();
-+    shown_count(kind);
++/* PSX_GL_SHOWN_DUMP_DRAWN=1 records each game frame as drawn, read where it is copied out for the in-between presenter,
++ * which a run repeats picture for picture, and not the pictures shown. */
++static int shown_drawn_only(void) {
++    static int only = -1;
++    if (only < 0) { const char *e = getenv("PSX_GL_SHOWN_DUMP_DRAWN"); only = e && e[0] == '1'; }
++    return only;
++}
++
++/* kind: 0 a game frame's own swap, 1 the in-between presenter's, whose alpha is the picture's place between the last two
++ * game frames (1 is the later one), 2 a game frame as drawn. */
++static void shown_keep(GLuint source, int x, int y, int ww, int wh, int kind, float alpha) {
 +    if (s_shown_left <= 0) return;
 +    if (s_shown_skip > 0) { --s_shown_skip; return; }
-+    gl_visible_size(&ww, &wh);
 +    if (ww <= 0 || wh <= 0) return;
 +    if (!s_shown_pixels) {
 +        s_shown_w = s_shown_width < ww ? s_shown_width : ww;
@@ -10009,13 +10022,13 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b49f3be684021180889cc2f393e28b08
 +            return;
 +        }
 +    }
-+    shown_read(ww, wh, s_shown_w, s_shown_h, s_shown_pixels + (size_t)s_shown_count * s_shown_w * s_shown_h * 3);
++    shown_read(source, x, y, ww, wh, s_shown_w, s_shown_h, s_shown_pixels + (size_t)s_shown_count * s_shown_w * s_shown_h * 3);
 +    s_shown_meta[s_shown_count].tick = SDL_GetPerformanceCounter();
 +    s_shown_meta[s_shown_count].alpha = alpha;
 +    s_shown_meta[s_shown_count].kind = kind;
 +    memset(s_shown_meta[s_shown_count].placed, 0, sizeof s_shown_meta[s_shown_count].placed);
 +#ifndef PSX_DISABLE_FRAME_INTERPOLATION
-+    if (kind) {
++    if (kind == 1) {
 +        int *placed = s_shown_meta[s_shown_count].placed;
 +        placed[0] = s_temp_shown_faces;
 +        placed[1] = s_temp_shown_stats.camera_samples;
@@ -10028,6 +10041,21 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b49f3be684021180889cc2f393e28b08
 +#endif
 +    ++s_shown_count;
 +    if (--s_shown_left == 0) shown_write();
++}
++
++/* Called with the finished picture in the back buffer, right before its swap. */
++static void shown_capture(int kind, float alpha) {
++    int ww = 0, wh = 0;
++    shown_snap();
++    shown_count(kind);
++    if (shown_drawn_only()) return;
++    gl_visible_size(&ww, &wh);
++    shown_keep(0, 0, 0, ww, wh, kind, alpha);
++}
++
++/* On the drawing thread: the game frame just copied out of `fbo`'s rectangle for the presenter. */
++static void shown_drawn(GLuint fbo, int x, int y, int w, int h) {
++    if (shown_drawn_only()) shown_keep(fbo, x, y, w, h, 2, 1.0f);
 +}
 +
 +/* On the presenter, under its lock: the shown layer over the picture. ImGui's blending leaves its colours premultiplied. */
@@ -10125,7 +10153,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b49f3be684021180889cc2f393e28b08
      uint64_t freq = SDL_GetPerformanceFrequency();
      uint64_t deadline = SDL_GetPerformanceCounter();
      uint64_t diag_start = deadline, diag_swaps = 0, diag_captures = 0;
-@@ -3473,11 +6719,12 @@
+@@ -3473,11 +6747,12 @@
      while (SDL_AtomicGet(&s_interp_thread_run)) {
          SDL_LockMutex(s_interp_mutex);
          double hz = s_interp_target_hz;
@@ -10139,7 +10167,7 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b49f3be684021180889cc2f393e28b08
              uint64_t period = (uint64_t)((double)freq / hz);
              if (!period) period = 1;
              deadline += period;
-@@ -3492,235 +6739,487 @@
+@@ -3492,235 +6767,490 @@
              }
              while (SDL_GetPerformanceCounter() < deadline) {}
              now = SDL_GetPerformanceCounter();
@@ -10507,8 +10535,9 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b49f3be684021180889cc2f393e28b08
 +    if (rth_record_mode()) {
 +        int32_t num = 1, den = 1;
 +        gte_ws_x_squash(&num, &den);
-+        const int32_t v[] = {disp_x, disp_y, w, h, linear, force_4_3, num, den};
-+        if (rth_rec_call(RTH_PRESENT_VRAM, v, 8)) return;
++        const uint64_t now = SDL_GetPerformanceCounter();
++        const int32_t v[] = {disp_x, disp_y, w, h, linear, force_4_3, num, den, (int32_t)(uint32_t)now, (int32_t)(uint32_t)(now >> 32)};
++        if (rth_rec_call(RTH_PRESENT_VRAM, v, 10)) return;
 +    }
 +    if (!s_ctx || !s_raster_ok) return;
 +    flush_flat_batch();
@@ -10836,8 +10865,10 @@ index ec8bc5f74bd7dc13d6d7d1867f5864940e720767..b49f3be684021180889cc2f393e28b08
 +    if (rth_record_mode()) {
 +        int32_t num = 1, den = 1;
 +        gte_ws_x_squash(&num, &den);
-+        const int32_t v[] = {disp_x, disp_y, disp_h, linear, w, h, force_4_3, num, den};
-+        if (rth_rec_call(RTH_PRESENT_WIDE, v, 9)) return;
++        const uint64_t now = SDL_GetPerformanceCounter();
++        const int32_t v[] = {disp_x, disp_y, disp_h, linear, w, h, force_4_3, num, den, (int32_t)(uint32_t)now,
++                             (int32_t)(uint32_t)(now >> 32)};
++        if (rth_rec_call(RTH_PRESENT_WIDE, v, 11)) return;
 +    }
 +    if (!gl_renderer_present_wide_fbo(disp_x, disp_y, disp_h, linear))
 +        gl_renderer_present_vram(disp_x, disp_y, w, h, linear, force_4_3);

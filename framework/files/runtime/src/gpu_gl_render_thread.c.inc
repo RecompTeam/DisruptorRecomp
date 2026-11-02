@@ -33,13 +33,15 @@ static void ctx_x_squash(int32_t *num, int32_t *den) {
 
 static int gl_rth_eligible(void) {
     extern int psx_netplay_active(void);
-    return s_raster_ok && s_ctx && !gpu_display_is_depth24() && !s_interp_enabled && !psx_netplay_active() &&
+    return s_raster_ok && s_ctx && !gpu_display_is_depth24() && !psx_netplay_active() &&
            !psx_host_ui_gl_visible() && !s_ddgi_light && !s_ddgi_shadows && !s_ddgi_lamps && !ddgi_sun_active();
 }
 
 static void gl_rth_acquire(const char *reason) {
     if (!s_rth_on || rt_on_render_thread() || rt_held() || rth_thread_id() != s_rth_emu_thread) return;
     rt_acquire(reason);
+    /* The replayed uploads, a save state's whole VRAM among them, reached only the render thread's copy. */
+    memcpy(s_rth_vram_pub, s_rth_vram_priv, (size_t)VRAM_W * VRAM_H * sizeof(uint16_t));
     s_vram = s_rth_vram_pub;
     sw_renderer_rebind_vram(s_rth_vram_pub);
     s_rth_syncs++;
@@ -148,7 +150,12 @@ static void rtb_set_temporal_sprite_ground(float ground, float reach) {
     glb_set_temporal_sprite_ground(ground, reach);
 }
 static void rtb_set_sprite_card(const float card[8]) {
-    if (rth_record_mode() && card && rth_put(RTH_SPRITE_CARD, 0, card, 8 * sizeof(float))) return;
+    if (rth_record_mode()) {
+        float v[9] = {0};
+        if (card) memcpy(v, card, 8 * sizeof(float));
+        v[8] = card ? 1.0f : 0.0f;
+        if (rth_put(RTH_SPRITE_CARD, 0, v, sizeof v)) return;
+    }
     glb_set_sprite_card(card);
 }
 #endif
@@ -406,7 +413,7 @@ static void gl_rth_exec(void *user, const RtCmd *c, const void *payload) {
         break;
     }
     case RTH_SPRITE: glb_set_temporal_sprite(fv[0], fv[5] != 0.0f ? &fv[1] : NULL); break;
-    case RTH_SPRITE_CARD: glb_set_sprite_card(fv); break;
+    case RTH_SPRITE_CARD: glb_set_sprite_card(fv[8] != 0.0f ? fv : NULL); break;
     case RTH_SPRITE_GROUND: glb_set_temporal_sprite_ground(fv[0], fv[1]); break;
 #endif
     case RTH_TILE: {
@@ -466,10 +473,12 @@ static void gl_rth_exec(void *user, const RtCmd *c, const void *payload) {
     case RTH_WIDE_COPY_ROWS: glb_wide_copy_rows(v[0], v[1], v[2], v[3], v[4], v[5], v[6]); break;
     case RTH_PRESENT_WIDE:
         s_rthx_squash[0] = v[7]; s_rthx_squash[1] = v[8];
+        s_rthx_presented = (uint64_t)(uint32_t)v[9] | (uint64_t)(uint32_t)v[10] << 32;
         gl_renderer_present_wide_or_vram(v[0], v[1], v[2], v[3], v[4], v[5], v[6]);
         break;
     case RTH_PRESENT_VRAM:
         s_rthx_squash[0] = v[6]; s_rthx_squash[1] = v[7];
+        s_rthx_presented = (uint64_t)(uint32_t)v[8] | (uint64_t)(uint32_t)v[9] << 32;
         gl_renderer_present_vram(v[0], v[1], v[2], v[3], v[4], v[5]);
         break;
     case RTH_PRESENT_BLANK: gl_renderer_present_blank(); break;

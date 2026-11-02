@@ -326,8 +326,7 @@ defaults**: the file is kept beside it as `settings.unreadable.toml`.
   card cannot keep up and raises it back when it can. It is meant for weaker
   graphics cards, integrated ones above all. It starts off.
 - **Render thread** can make the game smoother on slower processors and
-  integrated graphics. It has no effect with in-between frames on. It starts
-  off.
+  integrated graphics. It starts on.
 
 ### Enhancements
 

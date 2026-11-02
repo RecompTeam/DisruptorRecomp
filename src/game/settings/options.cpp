@@ -213,10 +213,9 @@ constexpr Option option_list[] = {
            "An exclusive fullscreen's display mode, the nearest the display has\nAn ordinary window's size\nBorderless fullscreen keeps the desktop's",
            disruptor::resolution::kChoices, saved<&Settings::has_resolution>, resolution, set_resolution),
     toggle<&Settings::has_render_thread, &Settings::render_thread>(
-        "disruptor.render_thread", "Render thread", 0,
+        "disruptor.render_thread", "Render thread", 1,
         "Can make the game smoother on slower processors and integrated graphics\n"
-        "Sends the drawing to the graphics card from a thread of its own\n"
-        "Has no effect with in-between frames on"),
+        "Sends the drawing to the graphics card from a thread of its own"),
     choice("video.vsync", "VSync", 2,
            "Synchronised: waits for the display, the picture never tears\n"
            "Immediate: does not wait\n"

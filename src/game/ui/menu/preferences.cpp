@@ -370,7 +370,7 @@ void apply_saved_preferences(const PSXRecompV4::UserSettings &settings) {
         (void)disruptor_adaptive_resolution_set_scale(settings.supersampling);
     if (settings.has_dynamic_resolution) disruptor_adaptive_resolution_set_enabled(settings.dynamic_resolution ? 1 : 0);
     if (settings.has_resolution) (void)apply_resolution(settings.resolution);
-    if (settings.has_render_thread) gl_renderer_render_thread_request(settings.render_thread ? 1 : 0);
+    gl_renderer_render_thread_request(!settings.has_render_thread || settings.render_thread ? 1 : 0);
     if (settings.has_fullscreen)
         g_menu.fullscreen_apply_failed =
             psx_host_video_set_fullscreen_mode(settings.fullscreen) == 0;
