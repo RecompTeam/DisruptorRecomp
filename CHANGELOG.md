@@ -2,6 +2,13 @@
 
 What changed in each release. The launcher shows the section of its own version on its home page.
 
+## v0.10.1
+
+### Bug fixes
+
+- Game package: the game's own enhancements and fixes run again, 0.10.0's files left their package out
+- Main menu: EXIT is back under CREDITS and closes the game, in 0.10.0 that item read RETURN TO MAIN MENU and opened the death screen
+
 ## v0.10.0
 
 ### Changes
