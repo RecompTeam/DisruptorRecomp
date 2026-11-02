@@ -1,26 +1,33 @@
 # Project status
 
-Last verified: **16 October 2026**. The project is in development. The whole
-campaign can be played through.
+Last verified: **3 November 2026**, release 0.10.2. The project is in alpha.
+The whole campaign can be played through.
 
 | Area | Current state |
 | --- | --- |
-| Platform and disc | Windows x64 and Linux x64 (an AppImage for glibc 2.35 and newer); Disruptor USA, SLUS-00224 only. On Linux the build and its tests pass. The AppImage's launcher imports the disc and starts the game, tested under WSLg on Ubuntu 22.04 up to the save-name screen. A level has not been played there yet. |
-| Gameplay | Boot, menus, FMVs, audio, and the first mission have been exercised on Windows. 60 FPS gameplay is on at first. Doors, a ridden lift, enemies and shots move on every frame under it. |
-| Rendering | OpenGL supports 1x–8x resolution and widescreen up to 32:9, with 4x and 4:3 at first. Exact geometry, perspective textures, gap filling, a depth-sorted world and a smooth distance fade are on at first. Ambient occlusion and anti-aliasing (MSAA / SSAA) are optional. Movies show all 320 columns, cleaned of their blocks and scaled smoothly under Movie filter (OpenGL, Vulkan scales them bilinear). Minor edge gaps and localized texture wobble can remain. |
-| Controls | Modern or Classic controls, smooth mouse turning (on at first), a gamepad beside the keyboard, keys and gamepad buttons rebound in the launcher, and keyboard save naming. Vertical look and weapon aim remain experimental. |
-| Settings | One settings table for the launcher (Display, Enhancements, Controls, Audio, Experimental, Troubleshooting) and the in-game menu (Display, Enhancements, Controls, Experimental, Language, System, Debug, Cheats). Each launcher settings page except Troubleshooting resets on its own. |
-| Interpolation and diagnostics | In-between frames start off. The Debug tab offers diagnostic views and screen recording; Ctrl+F12 records replay capsules and F12 loads the newest. |
-| Ultrawide corruption | Fixed primitive-buffer overflow. The user's 8x / 32:9 training retest stayed correct through 8,934 frames and closed normally. |
-| Save states | A save state loads in a build with the same generated code and in the language it was made in. After an update the launcher tries each state of the earlier build once and carries over those that load. The alpha.3 code-generation changes make alpha.1 and alpha.2 states incompatible; use memory-card saves for progress across releases. |
-| Automated checks | All 110 root CTests pass on Windows (MSVC), the source contracts among them. The Linux builds (GCC 15, and GCC 13 on Ubuntu 22.04) passed all 108 before the game config test was added. |
-| Player package | A Windows installer, a portable Windows ZIP and a Linux AppImage. Each holds the launcher, OpenBIOS, the player's guide, the MIT license and dependency licenses; players supply their supported BIN/CUE. |
-| Launcher | Disc import and verification, updates through Velopack (by default a new release is looked for at start, and only what changed is downloaded when it can be), the player's guide on a Help page, a problem report with an optional detailed log, and optional French/German/Japanese content from a second owned disc. USA remains the required game disc. |
-| Intro and widescreen fixes | Optional intro skipping, complete widescreen map and selection lists, reduced movie-edge noise, and near-wall hole fixes. |
-| Recent fixes and options | Widescreen front-end menus, loading-screen and pause-text fixes, borderless fullscreen and mouse-focus fixes, improved state resumption, bodies whole over the floor they lie on, walls beside the player drawn whole, world textures no longer jumping a texel, the sky and sprites turning with smooth mouse turning, and movies at their full width. |
+| Release | 0.10.2. Since 0.10.0 the game runs on PSXRecomp v0.3.4-alpha. That move touched almost every feature, so 0.10.x may still break something that worked in 0.9.0. |
+| Platform and disc | Windows x64 and Linux x64, an AppImage for glibc 2.35 and newer. Disruptor USA, SLUS-00224 only. Before each release the AppImage starts its launcher, and the game from power-on through the intro, under WSLg on Ubuntu 22.04. A level has not been played on Linux yet. |
+| Gameplay | The whole campaign can be played through on Windows. 60 FPS gameplay is on at first. Doors, a ridden lift, enemies and shots move on every frame under it. |
+| Rendering | OpenGL supports 1x–8x resolution and widescreen up to 32:9 or the window's shape, with 4x and 4:3 at first. Exact geometry, perspective textures, gap filling, a depth-sorted world and a smooth distance fade are on at first. Ambient occlusion, anti-aliasing (MSAA / SSAA) and sprites that face the camera are optional. Movies show all 320 columns, cleaned of their blocks and scaled smoothly under Movie filter. Minor edge gaps and localized texture wobble can remain. |
+| Motion | 60 FPS gameplay, the render thread and smooth mouse turning are on at first. In-between frames start off and add frames up to 320 FPS. |
+| Controls | Modern or Classic controls, a gamepad beside the keyboard with dual analog sticks, keys and gamepad buttons rebound in the launcher, and keyboard save naming. Weapon and psionic wheels and vertical mouse look remain experimental. |
+| Settings | One settings table for the launcher and the in-game menu. The lighting options stay closed in releases while they are tested. |
+| Achievements | RetroAchievements sign-in in the launcher, with a choice of how unlocks show. |
+| Languages | A French, German or Japanese disc of the player's own can give the game its language. USA remains the required game disc. |
+| Save states | A save state loads in a build with the same generated code and memory layout, and in the language it was made in. 0.10.2 does not load the states of 0.9.0, 0.10.0 and 0.10.1. After an update the launcher tries each older state once and carries over those that load. Memory cards carry across every release, so keep progress there. |
+| Automated checks | All 174 CTests pass on Windows (MSVC), the source contracts among them, and all 173 on Ubuntu 22.04 (GCC 13). CI builds and tests the sources without the game on Linux (GCC) and Windows (MinGW-w64). |
+| Release checks | Before a release goes out, a smoke test starts the packed Windows ZIP and the AppImage the way the launcher does. On Windows a recorded replay must stay in step. The update from the previous release is tried through the launcher. Only the files that passed are uploaded, after CI passed on their commit. |
+| Player package | A Windows installer, a portable Windows ZIP and a Linux AppImage. Each holds the launcher, the game with its own enhancement package, OpenBIOS, the player's guide, the MIT license and dependency licenses. Each is signed with Sigstore. Players supply their supported BIN/CUE. |
+| Launcher | Disc import and verification, updates through Velopack (by default a new release is looked for at start, and only what changed is downloaded when it can be), the player's guide on a Help page, and a problem report with an optional detailed log. |
+
+What changed in each release is in the [changelog](../CHANGELOG.md).
 
 ## Remaining limits
 
+- 0.10.x may still break features that worked in 0.9.0. Please
+  [open an issue](https://github.com/RecompTeam/DisruptorRecomp/issues/new)
+  for anything that works worse.
+- A level has not been played on Linux yet.
 - Broad memory-card regression coverage remains unverified.
 - The source build requires local generation from the verified game executable.
   Prebuilt release users only need their supported BIN/CUE disc image.
@@ -37,8 +44,8 @@ campaign can be played through.
   with the items lying over them, so the floor under them does not cut them.
   A wall or a shut door standing in front of one keeps it behind, also where
   the game itself drew a pickup lying under a shut door over the door.
-- The widescreen sky and skyline backdrop draws extra tile columns to keep its
-  proportions. Checked at 16:9, 21:9, and 32:9 in the first mission only.
+- The widescreen sky and skyline are checked at 16:9, 21:9 and 32:9 in the
+  first mission only.
 - Vertical aim needs broader actor, room-edge, and level-transition testing.
 - 5x–7x resolution settings have automated coverage but have not been
   individually exercised live.
