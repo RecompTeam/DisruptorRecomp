@@ -37,7 +37,9 @@ require(
     in interrupts[interrupts.index("void interrupts_resync_after_restore(void) {") :].split("\n}\n")[0]
     and read("psxrecomp/runtime/src/savestate.c").count("            interrupts_resync_after_restore();\n") == 1
     and state.index("        psx_cycle_count = cyc;")
-    < state.index("        cpu->gte_ts_done = psx_cycle_count + gte_rem;\n        cpu->muldiv_ts_done = psx_cycle_count + md_rem;\n"),
+    < state.index(
+        "        cpu->gte_ts_done = psx_cycle_count + gte_rem;\n        cpu->muldiv_ts_done = psx_cycle_count + md_rem;\n"
+    ),
     "a state loaded into a running game puts the clock back: the delivery deadline and the two stall deadlines of the old "
     "clock are dropped, or no interrupt arrives until the clock is there again",
 )
@@ -92,7 +94,8 @@ require(
     and "void memory_keep_low_boot_scratch(void) { s_low_scratch_is_the_games = 1; }\n" in memory
     and "void memory_clear_low_boot_scratch(void) {\n    if (s_low_scratch_is_the_games) return;\n    memset(ram, 0, 0x10u);\n}\n"
     in memory
-    and "    s_low_scratch_is_the_games = 0;\n    psx_ram_apply_size_request();\n    memset(ram, 0, sizeof(ram));\n" in memory
+    and "    s_low_scratch_is_the_games = 0;\n    psx_ram_apply_size_request();\n    memset(ram, 0, sizeof(ram));\n"
+    in memory
     and memory.count("s_low_scratch_is_the_games") == 4
     and "    memory_clear_low_boot_scratch();\n" in latch,
     "the entry latch of a fresh process must not clear the first 16 bytes of a loaded game, and a new session clears them again",
@@ -103,8 +106,7 @@ require(
     and "        if (unlocked || !follows) set_cpu_shift(g_cpu_shift.load(std::memory_order_relaxed));\n" in rate
     and "    if (waits) set_cpu_shift(0u);\n" in rate
     and "    if (scale != psx_guest_cycle_scale_config()) psx_guest_cycle_scale_set(scale);\n" in rate,
-    "a state holds the framework's guest cycle scale frame unlock sets, "
-    "and frame unlock sets it only where it changes",
+    "a state holds the framework's guest cycle scale frame unlock sets, and frame unlock sets it only where it changes",
 )
 
 require(

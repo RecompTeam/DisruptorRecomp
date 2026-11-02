@@ -328,9 +328,7 @@ def emitted_instruction_count(shard_text: str, site: str) -> int:
         if not line.endswith(comment):
             continue
         before = line[: -len(comment)].strip()
-        if before == statement:
-            count += 1
-        elif (
+        if before == statement or (
             index > 0
             and before.startswith("PGXP_")
             and before.endswith("); }")
@@ -374,7 +372,9 @@ REGISTER_ASSIGNMENT = re.compile(
 GENERAL_REGISTER = re.compile(r"cpu->gpr\[(\d+)\]")
 # The PGXP shadow wrapper of a register instruction: the operands kept for the host-only shadow, then the instruction.
 PGXP_SHADOW = re.compile(r"^\{ ((?:uint32_t _pgx\d+ = cpu->gpr\[\d+\]; )+)(.+)$")
-PGXP_ALU_LINE = re.compile(r"^PGXP_ALU\((?:0x[0-9A-F]+u|\d+u|cpu->gpr\[\d+\]|cpu->hi|cpu->lo|_pgx\d+)(?:, (?:0x[0-9A-F]+u|\d+u|cpu->gpr\[\d+\]|cpu->hi|cpu->lo|_pgx\d+))*\);(?: \})?$")
+PGXP_ALU_LINE = re.compile(
+    r"^PGXP_ALU\((?:0x[0-9A-F]+u|\d+u|cpu->gpr\[\d+\]|cpu->hi|cpu->lo|_pgx\d+)(?:, (?:0x[0-9A-F]+u|\d+u|cpu->gpr\[\d+\]|cpu->hi|cpu->lo|_pgx\d+))*\);(?: \})?$"
+)
 CAST_TYPES = {"uint32_t", "int32_t", "uint16_t", "int16_t", "uint8_t", "int8_t", "uint64_t", "int64_t"}
 REGISTER_MARKS = set(" ()+-<>|^~!=?:&_@")
 

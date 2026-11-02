@@ -28,7 +28,9 @@ def between(source: str, opening: str, closing: str) -> str:
 cmake = read("CMakeLists.txt")
 interrupts = read("psxrecomp/runtime/src/interrupts.c")
 require("    disruptor_contract(save_point)\n" in cmake, "this contract is registered")
-require("runtime/src/interrupts.c" in read("framework/FILES.txt").split(), "the rule is a patch on the framework's check")
+require(
+    "runtime/src/interrupts.c" in read("framework/FILES.txt").split(), "the rule is a patch on the framework's check"
+)
 check = between(interrupts, "void psx_check_interrupts(CPUState* cpu) {", "\nvoid psx_check_interrupts_at(")
 require(
     check.startswith(

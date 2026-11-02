@@ -354,7 +354,8 @@ def main() -> int:
         "resident packet-copy callback must run after the exact SW",
     )
     require(
-        translate.index("translate_sw(instr, memory_addr)") < translate.index('" gte_precision_scratch_store_pc_word("'),
+        translate.index("translate_sw(instr, memory_addr)")
+        < translate.index('" gte_precision_scratch_store_pc_word("'),
         "resident scratch callback must be appended after the exact SW",
     )
     require(

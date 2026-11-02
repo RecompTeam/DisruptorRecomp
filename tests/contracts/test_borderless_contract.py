@@ -26,8 +26,7 @@ keep = host[
 ]
 require(
     "#if defined(_WIN32) && defined(PSX_SDL3)\n/* Keeps a borderless OpenGL window" in host
-    and "    int hidden = 0;\n    if (sdl_window && g_video_renderer == 1 && s_window_fullscreen.mode == 1) {\n"
-    in keep
+    and "    int hidden = 0;\n    if (sdl_window && g_video_renderer == 1 && s_window_fullscreen.mode == 1) {\n" in keep
     and "GetMonitorInfoW(MonitorFromWindow(handle, MONITOR_DEFAULTTONEAREST), &info) && GetWindowRect(handle, &now)"
     in keep
     and "            if (psx_borderless_wanted(window, screen, &wanted) &&\n"
@@ -70,8 +69,7 @@ require(
 
 fullscreen = read("psxrecomp/runtime/include/window_fullscreen.h")
 require(
-    "    if (mode == 1) {\n#if defined(_WIN32) && defined(PSX_SDL3)\n"
-    in fullscreen
+    "    if (mode == 1) {\n#if defined(_WIN32) && defined(PSX_SDL3)\n" in fullscreen
     and "        if (!SDL_SetWindowFullscreen(window, true)) return -1;\n        SDL_SyncWindow(window);\n#elif defined(_WIN32)\n"
     in fullscreen,
     "on Windows borderless is SDL's desktop fullscreen: a plain borderless window the size of the screen stayed D3D full "

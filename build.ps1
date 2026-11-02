@@ -117,6 +117,8 @@ if ($LASTEXITCODE -ne 0) {
     Invoke-Checked { git -C $Framework fetch --quiet origin $Pin }
 }
 Invoke-Checked { git -C $Framework checkout --detach $Pin }
+# Rewind's snapshot ring: the framework does not configure without it.
+Invoke-Checked { git -C $Framework submodule update --init --recursive -- lib/retcomm-rbengine }
 Invoke-Checked {
     python (Join-Path $Root 'tools/framework.py') apply --framework $Framework
 }

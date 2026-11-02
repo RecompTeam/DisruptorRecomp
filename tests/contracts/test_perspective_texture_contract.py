@@ -129,9 +129,11 @@ def main() -> int:
     require("video_geometry" not in env_gate, "the texture environment gate must not mutate geometry correction")
     require(
         "    pgxp_cfg.video_geometry = g_video_geometry_correction || gpu_geometry_correction_enabled();\n"
-        "    pgxp_cfg.video_texture = g_video_perspective_texturing || gpu_texture_correction_enabled();\n" in main_cpp
+        "    pgxp_cfg.video_texture = g_video_perspective_texturing || gpu_texture_correction_enabled();\n"
+        in main_cpp
         and "    gpu_geometry_correction_set(pgxp_arm.geometry);\n"
-        "    gpu_texture_correction_set(pgxp_arm.texture && pgxp_arm.geometry ? 1 : 0);\n" in main_cpp,
+        "    gpu_texture_correction_set(pgxp_arm.texture && pgxp_arm.geometry ? 1 : 0);\n"
+        in main_cpp,
         "a session's start must keep the player's saved corrections and apply them to the GPU, textures only over exact geometry",
     )
 

@@ -369,8 +369,7 @@ for token in (
 ):
     require(token in resize_scale, f"transactional GL internal-scale rebuild is missing {token}")
 require(
-    "gl_renderer_set_display_aspect(num, den);" in main_cpp
-    and main_cpp.count("refresh_widescreen_projection();") >= 2,
+    "gl_renderer_set_display_aspect(num, den);" in main_cpp and main_cpp.count("refresh_widescreen_projection();") >= 2,
     "aspect requests apply at a VBlank, through the framework's projection refresh",
 )
 for config_name, config in (
@@ -790,7 +789,10 @@ require(
     and "s_volume = clamp_pct(percent);" in read("psxrecomp/runtime/src/host_osd.c"),
     "master-volume API must validate and publish 0..100 percent",
 )
-require("s_audio_muted = muted != 0;" in function_body(main_cpp, "psx_host_audio_set_muted"), "mute API must publish a boolean latch")
+require(
+    "s_audio_muted = muted != 0;" in function_body(main_cpp, "psx_host_audio_set_muted"),
+    "mute API must publish a boolean latch",
+)
 background_setter = function_body(main_cpp, "psx_host_audio_set_mute_in_background")
 focus = function_body(main_cpp, "audio_track_window_focus")
 require(
@@ -811,7 +813,8 @@ require(
     "both host outputs take the player's volume, silenced by the mute and by the background mute",
 )
 require(
-    main_cpp.index("if (us.has_master_volume) host_volume_set(us.master_volume);") < main_cpp.index("psx_sdl_audio_open(")
+    main_cpp.index("if (us.has_master_volume) host_volume_set(us.master_volume);")
+    < main_cpp.index("psx_sdl_audio_open(")
     and main_cpp.index("if (us.has_audio_muted) s_audio_muted") < main_cpp.index("psx_sdl_audio_open("),
     "persisted host-audio controls must load before the audio device opens",
 )
@@ -819,11 +822,14 @@ host = read("src/game/host.cpp")
 require(
     main_cpp.count("psx_game_audio_output(") == 2
     and (audio_pump := function_body(main_cpp, "sdl_audio_pump")).index(
-        "    frames = host_frames;\n#ifdef PSX_HAS_GAME_HOST\n    psx_game_audio_output(sdl_audio_buf, frames, 44100);\n")
+        "    frames = host_frames;\n#ifdef PSX_HAS_GAME_HOST\n    psx_game_audio_output(sdl_audio_buf, frames, 44100);\n"
+    )
     < audio_pump.index("if (sdl_audio_fadein_left > 0)")
     < audio_pump.index("const int vol = audio_silenced() ? 0 : host_volume_get();")
     < audio_pump.index("rab_push(&s_drc, sdl_audio_buf, frames);")
-    and (audio_update := function_body(main_cpp, "sdl_audio_update")).index("tail = (int)spu_output_pop(sdl_audio_buf, (uint32_t)tail);")
+    and (audio_update := function_body(main_cpp, "sdl_audio_update")).index(
+        "tail = (int)spu_output_pop(sdl_audio_buf, (uint32_t)tail);"
+    )
     < audio_update.index("psx_game_audio_output(sdl_audio_buf, tail, 44100);")
     < audio_update.index("sdl_audio_gain_ramp(sdl_audio_buf, tail, g0, 0.0f);")
     and "disruptor::audio::shape_output(stereo, frames, rate);" in function_body(host, "psx_game_audio_output")
@@ -864,8 +870,9 @@ require(
 
 saved = function_body(menu, "apply_saved_preferences")
 require(
-    "    if (settings.has_geometry_correction &&\n        !env_override_present(\"PSX_GEOMETRY_CORRECTION\"))\n" in saved
-    and "    if (settings.has_perspective_textures &&\n        !env_override_present(\"PSX_TEXTURE_CORRECTION\")) {\n" in saved
+    '    if (settings.has_geometry_correction &&\n        !env_override_present("PSX_GEOMETRY_CORRECTION"))\n' in saved
+    and '    if (settings.has_perspective_textures &&\n        !env_override_present("PSX_TEXTURE_CORRECTION")) {\n'
+    in saved
     and "    pgxp_cfg.video_geometry = g_video_geometry_correction || gpu_geometry_correction_enabled();\n" in main_cpp
     and 'std::getenv("PSX_TEXTURE_CORRECTION")' in main_cpp,
     "saved enhancements must load before explicit environment overrides",
@@ -1177,7 +1184,8 @@ require(
     'deadzone = 12000\ndefault_mode = "digital"\n# A connected gamepad plays beside the keyboard and mouse.\n'
     'p1_device = "keyboard+gamepad"\n'
     in read("game.toml")
-    and "if (gc.runtime.has_default_p1_device)\n                player_device[0] = gc.runtime.default_p1_device;" in runtime
+    and "if (gc.runtime.has_default_p1_device)\n                player_device[0] = gc.runtime.default_p1_device;"
+    in runtime
     and runtime.index("if (gc.runtime.has_default_p1_device)")
     < runtime.index("if (us.has_p_device[i]) player_device[i] = us.p_device[i];")
     and 'd == "auto" || d == "gamepad" || d == "controller" || d == "keyboard+gamepad"' in runtime,

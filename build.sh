@@ -28,6 +28,8 @@ if [ ! -d "$FRAMEWORK/.git" ]; then
 fi
 git -C "$FRAMEWORK" fetch --quiet origin "$PIN"
 git -C "$FRAMEWORK" checkout --detach "$PIN"
+# Rewind's snapshot ring: the framework does not configure without it.
+git -C "$FRAMEWORK" submodule update --init --recursive -- lib/retcomm-rbengine
 python3 "$ROOT/tools/framework.py" apply --framework "$FRAMEWORK"
 
 GENERATOR=""
@@ -52,9 +54,6 @@ if [ -z "$WITHOUT_GAME" ]; then
     "$FRAMEWORK/recompiler/build/psxrecomp-game" --config game.toml
     python3 tools/audit_codegen.py
 fi
-
-cd "$FRAMEWORK"
-bash tools/regen_bios.sh --config bios/OpenBIOS.toml
 
 cd "$ROOT"
 if [ -n "$WITHOUT_GAME" ]; then

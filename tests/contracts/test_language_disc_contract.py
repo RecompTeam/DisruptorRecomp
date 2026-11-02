@@ -108,7 +108,8 @@ require(
     "        read_ok = mod_runtime_read_disc_extent(lba, 0, buffer, size) || reader->ReadSector(lba, buffer);\n    }\n"
     in reader
     and "    const bool read_ok = stood_in > 0 ||\n        (stood_in == 0 && (mod_runtime_read_disc_extent(lba, 1, buffer, size) || "
-    "reader->ReadRawSector(lba, buffer)));\n" in reader
+    "reader->ReadRawSector(lba, buffer)));\n"
+    in reader
     and "    return handle && static_cast<PS1::ISOReader*>(handle)->ReadRawSector(lba, buffer) ? 1 : 0;" in reader
     and "    if (handle) g_plain.push_back(handle);" in reader
     and "    g_plain.erase(std::remove(g_plain.begin(), g_plain.end(), handle), g_plain.end());" in reader

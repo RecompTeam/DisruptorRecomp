@@ -72,7 +72,8 @@ require(
     "a game must be able to tell the kind of the frame it begins, as it tells it, and nothing else may",
 )
 require(
-    "    if (!ws_active()) return 0;\n    /* The reveal is a fraction of the game's own half-width" in body(gpu, "int psx_ws_x_margin(void)")
+    "    if (!ws_active()) return 0;\n    /* The reveal is a fraction of the game's own half-width"
+    in body(gpu, "int psx_ws_x_margin(void)")
     and "static int ws_active(void) { return ws_configured() && !gpu_ws_present_native_43(); }" in gpu,
     "unless it is forced or native-wide, the cull's margin must follow the kind of the frame being built: a world's first frame gets its moved arena by it",
 )
@@ -118,9 +119,11 @@ require(
 )
 native = body(gpu, "static int ws_native_43(int displayed)")
 require(
-    "    if (!ws_engaged()) return 0;\n    if (displayed ? gpu_ws_displayed_menu() : ws_menu_frame()) return 0;\n" in native
+    "    if (!ws_engaged()) return 0;\n    if (displayed ? gpu_ws_displayed_menu() : ws_menu_frame()) return 0;\n"
+    in native
     and "    int game_mode = ws_game_mode_of(displayed);\n" in native
-    and "    int native_43 = !game_mode || ws_2d_only_scene();\n    if (!hold_enabled && native_43) return 1;" in native,
+    and "    int native_43 = !game_mode || ws_2d_only_scene();\n    if (!hold_enabled && native_43) return 1;"
+    in native,
     "the native 4:3 answer must follow the frame it is asked about",
 )
 require(

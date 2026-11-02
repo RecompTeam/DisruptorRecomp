@@ -48,7 +48,8 @@ require(
     "    s_resume_pc_given = 1;\n"
     "    psx_check_interrupts(cpu); \n"
     "    s_compiled_interrupt_resume_pc = prev;\n"
-    "}\n" in interrupts
+    "}\n"
+    in interrupts
     and "    const int save_point = s_resume_pc_given || g_dirty_safe_resume_pc != 0u;\n    s_resume_pc_given = 0;\n"
     in interrupts,
     "the edge check stays out of line over the framework's longer check (mission 13 costs 2.09 ms of CPU a frame against "

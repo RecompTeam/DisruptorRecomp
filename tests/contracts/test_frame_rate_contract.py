@@ -235,9 +235,8 @@ muldiv = c_body(cycle_source, "void psx_muldiv_set(CPUState* cpu, uint32_t laten
 gte_set = c_body(cycle_source, "void psx_gte_set(")
 charge = c_body(cycles_header, "static inline void psx_cpu_charge(uint32_t cycles) {")
 require(
-    "    return PSX_GCS_ACTIVE() ? psx_gcs_scale(cpu_cycles) : cpu_cycles;" in c_body(
-        cycles_header, "static inline uint32_t psx_cpu_cycles(uint32_t cpu_cycles) {"
-    )
+    "    return PSX_GCS_ACTIVE() ? psx_gcs_scale(cpu_cycles) : cpu_cycles;"
+    in c_body(cycles_header, "static inline uint32_t psx_cpu_cycles(uint32_t cpu_cycles) {")
     and muldiv.index("    latency = psx_cpu_cycles(latency);")
     < muldiv.index("    cpu->muldiv_ts_done = psx_cycle_count + (uint64_t)latency;")
     and gte_set.index("    latency = psx_cpu_cycles(latency);")
@@ -267,7 +266,8 @@ require(
     "                if (scale > 1u && gpu->active) gpu->cycles_remaining = (gpu->cycles_remaining + scale / 2u) / scale;\n"
     in dma
     and "        const uint32_t gpu_cycles = scale > 1u ? (cycles > UINT32_MAX / scale ? UINT32_MAX : cycles * scale) : cycles;\n"
-    "        dma_gpu_ll_advance(&gpu_linked_list, gpu_cycles, &gpu_ll_ops, NULL);\n" in dma
+    "        dma_gpu_ll_advance(&gpu_linked_list, gpu_cycles, &gpu_ll_ops, NULL);\n"
+    in dma
     and dma.count("psx_guest_cycle_scale()") == 2,
     "a GPU transfer ends as much sooner as the overclock runs the CPU, the other channels keep their time: "
     "at 8x the pause menu's pictures went into the sprite chain's area before it ended",
