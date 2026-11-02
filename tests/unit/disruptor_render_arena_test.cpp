@@ -21,6 +21,7 @@ int preset = 0;
 int edge_margin = 0;
 uint32_t drawn_far = 1280u;
 int32_t drawn_fade = 512;
+PSXModActivationCallback activation = nullptr;
 float ssao_from = 0.0f, ssao_to = 0.0f, palette_start = 0.0f, palette_step = 0.0f;
 uint8_t *bytes(uint32_t address) {
     uint32_t offset;
@@ -33,6 +34,7 @@ void require(bool condition, const char *message) {
 }
 }
 extern "C" {
+uint32_t g_psx_ram_mask = 0x1FFFFFu;
 int g_ls_mode = 0;
 int g_ls_replay_active = 0;
 uint32_t psx_mod_gpu_dma_memory_bytes(void) { return allocated; }
@@ -75,6 +77,10 @@ void psx_mod_write_word(uint32_t address, uint32_t value) {
 uint32_t psx_mod_alloc_gpu_dma_memory(uint32_t size, uint32_t) {
     if (allocation_fails || allocated || size > aperture.size()) return 0;
     allocated = size; return PSX_MOD_GPU_DMA_GUEST_BASE;
+}
+int psx_mod_register_activation_plugin(const char *, PSXModActivationCallback callback) {
+    activation = callback;
+    return 1;
 }
 int psx_mod_register_function_entry_plugin(
         const char *, uint32_t, PSXModFunctionEntryCallback) { return 1; }
@@ -252,5 +258,19 @@ int main() {
     renderer_entry(&cpu, kRendererEntry);
     require(palette_start == 8.0f * 256.0f && palette_step == 8.0f * 1280.0f / 12.0f && published_power == 3,
             "the palette fade spans the fog the far rendering hands over, with its power");
+    allocated = 0;
+    g_arena_base = 0;
+    require(activation != nullptr, "the arena registers no activation");
+    activation();
+    activation();
+    require(allocated == 2u * kArenaBytes && g_arena_base == PSX_MOD_GPU_DMA_GUEST_BASE,
+            "activation did not take the arena once, before the guest runs");
+    margin = 0;
+    renderer_entry(&cpu, kRendererEntry);
+    require(psx_mod_read_word(kContexts[1] + kArenaOffset) == original[1], "4:3 drew into the reserved arena");
+    margin = 267;
+    renderer_entry(&cpu, kRendererEntry);
+    require(psx_mod_read_word(kContexts[1] + kArenaOffset) == PSX_MOD_GPU_DMA_GUEST_BASE + kArenaOffsets[1],
+            "widescreen did not draw into the reserved arena");
     std::puts("PASS: dense ultrawide packets preserve textures and 24-bit DMA links");
 }

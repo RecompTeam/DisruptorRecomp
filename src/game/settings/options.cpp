@@ -79,12 +79,18 @@ void set_resolution(Settings& settings, int index) {
 // settings.toml keeps the dead zone in the stick's raw units, 0 to 32767: shown as a share of the stick's travel.
 constexpr int runtime_deadzone = 12000;
 int percent_of(int raw) { return static_cast<int>(std::lround(raw * 100.0 / 32767.0)); }
-int deadzone_percent(const Settings& settings) { return percent_of(settings.deadzone); }
+int deadzone_percent(const Settings& settings) {
+    return percent_of(settings.has_p_deadzone[0] ? settings.p_deadzone[0] : settings.has_deadzone ? settings.deadzone : runtime_deadzone);
+}
 void set_deadzone_percent(Settings& settings, int percent) {
     settings.has_deadzone = true;
     // The runtime's own 12000 is no whole share: its share, the reset value, writes it back exactly.
     settings.deadzone = percent == percent_of(runtime_deadzone) ? runtime_deadzone
                                                                 : static_cast<int>(std::lround(percent * 32767.0 / 100.0));
+    for (int player = 0; player < Settings::kMaxControllerPlayers; ++player) {  /* the framework reads each player's own first */
+        settings.p_deadzone[player] = settings.deadzone;
+        settings.has_p_deadzone[player] = true;
+    }
 }
 int scheme(const Settings& settings) { return settings.modern_controls ? 1 : 0; }
 void set_scheme(Settings& settings, int index) {

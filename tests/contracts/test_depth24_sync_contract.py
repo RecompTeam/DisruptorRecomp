@@ -47,8 +47,8 @@ require(
 
 mode = body(gpu, "static void gp1_display_mode(uint32_t val)")
 require(
-    "    const uint32_t depth = (val >> 4) & 1;\n" in mode
-    and "    if (depth && !display_depth) (void)gr_vram_read(0, 0);\n    display_depth = depth;\n" in mode
+    "    uint32_t new_depth = (val >> 4) & 1;\n" in mode
+    and "    if (new_depth && !display_depth) (void)gr_vram_read(0, 0);\n    display_depth = new_depth;\n" in mode
     and mode.count("display_depth = ") == 1
     and mode.count("gr_vram_read(") == 1,
     "the CPU copy of VRAM must be brought up to date once, as the display goes from 15-bit to 24-bit, and before the depth changes",
@@ -73,12 +73,12 @@ require(
     "the GL backend drops pending uploads only once the display is 24-bit, which is after the sync above",
 )
 
-margin = body(main, "static void depth24_fix_trailing_margin(uint32_t *buf, uint32_t w, uint32_t h,")
+margin = body(gpu, "uint32_t gpu_depth24_stage_scanout(const GpuDisplayInfo *di, uint32_t *buf,")
 require(
-    "    const uint32_t margin = (uint32_t)g_video_depth24_trailing_margin;\n"
-    "    if (margin == 0u || margin >= w) return;\n    uint32_t start = w - margin;\n"
+    "    if (rows == 0u || w < 8u || margin == 0u || margin >= w)\n        return rows;\n    uint32_t start = w - margin;\n"
     in margin
-    and "8u;" not in margin,
+    and "8u;" not in margin
+    and "di, buf, w, (uint32_t)g_video_depth24_trailing_margin);\n" in main,
     "a 24-bit frame must keep every column when the title sets no trailing margin, and blank only the margin it sets",
 )
 require(

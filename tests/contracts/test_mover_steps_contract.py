@@ -269,7 +269,7 @@ require(
 frontend = read("psxrecomp/runtime/src/main.cpp")
 saving = read("psxrecomp/runtime/src/savestate.c")
 require(
-    "            psx_frontend_before_savestate_save();\n            CPUState snap = *cpu;\n" in saving
+    "                psx_frontend_before_savestate_save();\n                CPUState snap = *cpu;\n" in saving
     and 'extern "C" void psx_frontend_before_savestate_save(void) {\n#ifdef PSX_HAS_GAME_HOST\n    psx_game_state_saving();\n#endif\n}\n'
     in frontend
     and "void psx_game_state_saving(void);\n" in read("psxrecomp/runtime/include/game_host.h")

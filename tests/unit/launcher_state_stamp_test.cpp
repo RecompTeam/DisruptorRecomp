@@ -20,12 +20,18 @@ void expect(bool condition, const char* message) {
     ++g_failures;
 }
 
+std::uint32_t word_at(const std::string& bytes, std::size_t at) {
+    std::uint32_t value = 0;
+    for (std::size_t index = 0; index < 4; ++index) value |= static_cast<std::uint32_t>(static_cast<unsigned char>(bytes[at + index])) << (8 * index);
+    return value;
+}
+
 void put_word(std::string& bytes, std::size_t at, std::uint32_t value) {
     for (std::size_t index = 0; index < 4; ++index) bytes[at + index] = static_cast<char>((value >> (8 * index)) & 0xFF);
 }
 
 // A state as boot_state.c writes it: the header's nine words, then sections the launcher never reads.
-void put_state(const fs::path& file, const StateStamp& stamp, std::uint32_t magic = 0x50535842u, std::uint32_t version = 3) {
+void put_state(const fs::path& file, const StateStamp& stamp, std::uint32_t magic = 0x50535842u, std::uint32_t version = 9) {
     std::string bytes(36 + 64, '\x5A');
     put_word(bytes, 0, magic);
     put_word(bytes, 4, version);
@@ -67,6 +73,12 @@ void test_reading_and_finding() {
     expect(state && state->slot == 3 && state->entry == 0x80048CE4u && state->stamp == foreign,
            "a state's slot, entry and stamp are read");
     expect(!read_state(saves / state_name(0x80048CE4u, 4)), "a file of another magic is no state");
+    const auto own_state = read_state(saves / state_name(0x80048CE4u, 0));
+    expect(own_state && own_state->stamp == own && own_state->layout == 0u, "a state's layout word is read");
+    expect(saved_states(saves).size() == 3, "every state is listed, this build's too");
+    expect(stale_states(saves, {{"", 0x0BADF00Du}}).size() == 3,
+           "a state of this build's stamp with another layout word than the build writes is of another build");
+    expect(stale_states(saves, {{"German", 0u}}).size() == 2, "a word known for one folder leaves the others to their stamps");
     expect(!read_state(saves / state_name(0x80048CE4u, 5)), "nor one of another format version");
     expect(!read_state(saves / "state_80048CE4_slot03.pst.bak"), "nor a file of another name");
 
@@ -87,6 +99,10 @@ void test_reading_and_finding() {
     expect(after.size() == bytes->size() && after.substr(36) == bytes->substr(36) && after.substr(0, 16) == bytes->substr(0, 16),
            "only the stamp's words change");
     expect(differing > 0 && differing <= 12, "and they do");
+    const std::string relaid = restamped(*bytes, own, 0x0BADF00Du);
+    expect(word_at(relaid, 32) == 0x0BADF00Du && relaid.substr(36) == bytes->substr(36) && relaid.substr(0, 32) == after.substr(0, 32),
+           "a layout word given goes into its place, the rest as the stamp alone leaves it");
+    expect(word_at(after, 32) == word_at(*bytes, 32), "and without one the word stays");
     const auto other = read_whole(saves / state_name(0x80048CE4u, 4));
     expect(other && restamped(*other, own).empty(), "bytes that are no state are not restamped");
     expect(write_whole(saves / "written.pst", after) && read_whole(saves / "written.pst") == after, "bytes are written whole");

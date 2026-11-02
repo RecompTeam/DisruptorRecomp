@@ -1,8 +1,8 @@
 diff --git a/recompiler/tests/recompiler_patch_test.cpp b/recompiler/tests/recompiler_patch_test.cpp
-index 05f9cd45d963df9fd098b35522822c17191a739d..19125131038d312fe36111cd17e0b6b61bd297d5 100644
+index 5387ed6220c6d67da47902a8e9092f226259371f..3bbdc3927d86c7061c795a2dcfe73a1c2f00f41e 100644
 --- a/recompiler/tests/recompiler_patch_test.cpp
 +++ b/recompiler/tests/recompiler_patch_test.cpp
-@@ -206,6 +206,32 @@
+@@ -247,6 +247,32 @@
                std::vector<uint32_t>{0x80012340u},
            "parser preserves negsub cull sites");
  
@@ -32,14 +32,14 @@ index 05f9cd45d963df9fd098b35522822c17191a739d..19125131038d312fe36111cd17e0b6b6
 +                  changed_manual_window_config),
 +          "manual screen-window sites change overlay cache identity");
 +
-     const auto vxrange = write_config(root, "vxrange", R"toml(
+     const auto branch_keep = write_config(root, "branch-keep", R"toml(
  [widescreen.cull]
- vxrange_sites = ["0x80012340"]
-@@ -324,6 +350,65 @@
-     check_throws([&] { (void)PSXRecompV4::load_game_config(bad_angle); },
+ branch_keep_sites = ["0x80012340"]
+@@ -436,7 +462,66 @@
                   "expected must be ADDI/ADDIU rt,zero,imm",
                   "parser rejects non-constant terrain-angle instructions");
-+
+ 
+-    const std::string aspect_tables = R"toml(
 +    const auto yaw_cone = write_config(root, "yaw-cone", R"toml(
 +[[widescreen.cull.yaw_cone]]
 +address = "0x80040FE8"
@@ -98,10 +98,12 @@ index 05f9cd45d963df9fd098b35522822c17191a739d..19125131038d312fe36111cd17e0b6b6
 +        [&] { (void)PSXRecompV4::load_game_config(bad_horizontal_slt); },
 +        "signed register-register SLT",
 +        "parser rejects unsigned horizontal side-plane compares");
- 
-     const auto aspect_cone = write_config(root, "aspect-cone", R"toml(
++
++    const auto aspect_cone = write_config(root, "aspect-cone", R"toml(
  [widescreen.cull.aspect_cone]
-@@ -622,6 +707,67 @@
+ forward_addr = "0x1F8000E8"
+ object_type_offset = 12
+@@ -752,6 +837,67 @@
      check(overlay_mismatch.find("ws cull negsub") == std::string::npos,
            "overlay nonmatching negsub variant remains unchanged");
  
@@ -169,7 +171,7 @@ index 05f9cd45d963df9fd098b35522822c17191a739d..19125131038d312fe36111cd17e0b6b6
      PSXRecomp::CodeGenConfig vxrange_config;
      vxrange_config.ws_cull_vxrange_sites.insert(0x80010000u);
      const std::string vxrange = generate_first_instruction(
-@@ -747,6 +893,37 @@
+@@ -976,6 +1122,37 @@
      check(angle_overlay_mismatch.find("psx_ws_angle_widen") ==
                std::string::npos,
            "overlay full-word mismatch leaves terrain angle unchanged");

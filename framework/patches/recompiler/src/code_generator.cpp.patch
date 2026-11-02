@@ -1,8 +1,8 @@
 diff --git a/recompiler/src/code_generator.cpp b/recompiler/src/code_generator.cpp
-index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..01d0279a5d77796348a7f89a1782c340f925cc21 100644
+index f9ccf79ff38fd915386a22213bacd943bf362050..fd9779ed3c707d875795fe83be5091f99d66beca 100644
 --- a/recompiler/src/code_generator.cpp
 +++ b/recompiler/src/code_generator.cpp
-@@ -11,12 +11,331 @@
+@@ -12,13 +12,333 @@
  #include "../../runtime/include/psx_instr_cost.h"  /* single-source CPU cycle cost (shared with interp) */
  #include <fmt/format.h>
  #include <algorithm>
@@ -11,6 +11,7 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..01d0279a5d77796348a7f89a1782c340
  #include <set>
  #include <stdexcept>
 +#include <string_view>
+ #include <unordered_set>
  #include <vector>
  
  namespace PSXRecomp {
@@ -331,13 +332,44 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..01d0279a5d77796348a7f89a1782c340
 +    }
 +    return nullptr;
 +}
++
  
- static bool codegen_cycle_per_insn() {
-     // DEFAULT ON for the faithful-timing (cycle-audit) branch: each instruction
-@@ -723,6 +1042,36 @@
-     uint32_t opcode = (instr >> 26) & 0x3F;
-     uint32_t rs = get_rs(instr);
-     uint32_t rt = get_rt(instr);
+ /* Reserved MIPS-II branch-likely words often appear when discovery sweeps
+  * ASCII/data as code. Emit the RI raise every time (faithfulness), but do not
+@@ -835,6 +1155,66 @@
+                                reg_name(rs), addr, cmp, reg_name(rs), cmp);
+         return "";
+     };
++
++    // Explicit manual-screen lower-edge branches. Disruptor-class portal and
++    // wall renderers project in CPU code and use zero-bound branches rather
++    // than the usual SLTI/BLTZ funnel. Move that zero edge to -x_margin while
++    // retaining the original branch sense. At margin 0 these expressions are
++    // exactly the vanilla predicates.
++    if (config_.ws_cull_lower_branch_sites.count(addr)) {
++        if (opcode == 0x01) {
++            const uint32_t regimm_op = (instr >> 16) & 0x1Fu;
++            if (regimm_op == 0x00u)
++                return fmt::format("(int32_t){} < -psx_ws_x_margin()"
++                                   " /* ws manual lower edge */", reg_name(rs));
++            if (regimm_op == 0x01u)
++                return fmt::format("(int32_t){} >= -psx_ws_x_margin()"
++                                   " /* ws manual lower edge */", reg_name(rs));
++        }
++        if (opcode == 0x06u || opcode == 0x16u)
++            return fmt::format("(int32_t){} <= -psx_ws_x_margin()"
++                               " /* ws manual lower edge */", reg_name(rs));
++        if (opcode == 0x07u || opcode == 0x17u)
++            return fmt::format("(int32_t){} > -psx_ws_x_margin()"
++                               " /* ws manual lower edge */", reg_name(rs));
++        if (!config_.overlay_mode) {
++            fmt::print(stderr,
++                       "ERROR: [widescreen.cull] lower_branch site 0x{:08X} "
++                       "is not bltz/bgez/blez/bgtz (0x{:08X})\n",
++                       addr, instr);
++            std::exit(1);
++        }
++    }
 +
 +    // Explicit manual-screen lower-edge branches. Disruptor-class portal and
 +    // wall renderers project in CPU code and use zero-bound branches rather
@@ -371,7 +403,7 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..01d0279a5d77796348a7f89a1782c340
  
      // REGIMM branches. R3000A hardware decodes EVERY rt value here, not just
      // the four assembler mnemonics: the branch sense is rt bit 0 (0 = bltz,
-@@ -784,6 +1133,89 @@
+@@ -1039,6 +1419,89 @@
  
      std::string code;
  
@@ -461,7 +493,7 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..01d0279a5d77796348a7f89a1782c340
      // Full-word-guarded terrain-frustum half-angle constants. Scaling the
      // tangent is the geometric counterpart of widening the horizontal
      // projection; adding screen pixels directly to 12-bit angle units is not.
-@@ -812,6 +1244,67 @@
+@@ -1067,6 +1530,67 @@
              "{} = psx_ws_angle_widen({}u);"
              "  /* aspect-scaled terrain frustum half-angle */{}",
              reg_name(dst), (uint32_t)vanilla, comment);
@@ -529,7 +561,7 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..01d0279a5d77796348a7f89a1782c340
      }
  
      for (const auto& site : config_.ws_signed_x_bound_sites) {
-@@ -971,6 +1464,76 @@
+@@ -1344,6 +1868,76 @@
      // same address holds different code across scene variants, so a mismatch is
      // expected — apply the transform only where the bytes match, else fall
      // through to the vanilla translation (see CodeGenConfig::overlay_mode).
@@ -603,10 +635,10 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..01d0279a5d77796348a7f89a1782c340
 +        }
 +    }
 +
-     if (config_.ws_cull_bias_sites.count(addr)) {
+     if (config_.ws_cull_bias_sites.count(addr) ||
+         config_.ws_cull_bias_lower_sites.count(addr)) {
          if (opcode == 0x08 || opcode == 0x09) {  // addi / addiu
-             uint32_t rs = get_rs(instr), rt = get_rt(instr);
-@@ -1217,11 +1780,15 @@
+@@ -1683,11 +2277,15 @@
          }
          // Overlay variant at the same address: leave nonmatching code unchanged.
      }
@@ -627,7 +659,7 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..01d0279a5d77796348a7f89a1782c340
      if (config_.ws_backdrop_x_sites.count(addr)) {
          if (opcode == 0x29) {  // sh
              uint32_t rs = get_rs(instr), rt = get_rt(instr);
-@@ -1232,9 +1799,16 @@
+@@ -1701,9 +2299,16 @@
                                     reg_name(rs), reg_name(rt), comment);
              return store_pc + fmt::format("psx_store_cycle_barrier(); cpu->write_half({} + {}, (uint16_t)psx_ws_backdrop_x((int16_t){}));{}",
                                 reg_name(rs), offset, reg_name(rt), comment);
@@ -645,18 +677,20 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..01d0279a5d77796348a7f89a1782c340
              std::exit(1);
          }
          // overlay variant: addr is different code here — fall through to vanilla.
-@@ -1486,11 +2060,26 @@
+@@ -1958,10 +2563,24 @@
                      const std::string gte_read = fmt::format(
                          "\n#ifdef PSX_ENABLE_BLOCK_CYCLES\n    psx_gte_read(cpu, {});\n#endif\n    ", rt);
                      if (cop_op == 0x00) { // MFC2 - move from COP2 data
+-                        const std::string value =
+-                            PSXRecompGTERegisters::data_read_needs_helper(static_cast<uint8_t>(rd))
+-                                ? fmt::format("gte_read_data(cpu, {})", rd)
+-                                : fmt::format("cpu->gte_data[{}]", rd);
 +                        std::string value;
-                         if (PSXRecompGTERegisters::data_read_needs_helper(static_cast<uint8_t>(rd))) {
--                            code = gte_read + fmt::format("{} = gte_read_data(cpu, {});  /* mfc2 */", reg_name(rt), rd);
++                        if (PSXRecompGTERegisters::data_read_needs_helper(static_cast<uint8_t>(rd))) {
 +                            value = fmt::format("gte_read_data(cpu, {})", rd);
-                         } else {
--                            code = gte_read + fmt::format("{} = cpu->gte_data[{}];  /* mfc2 */", reg_name(rt), rd);
++                        } else {
 +                            value = fmt::format("cpu->gte_data[{}]", rd);
-                         }
++                        }
 +                        if (disruptor_precision_mfc2_pc(addr)) {
 +                            if (rt != 10u || rd != 14u || instr != 0x480A7000u) {
 +                                throw std::runtime_error(fmt::format(
@@ -669,22 +703,20 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..01d0279a5d77796348a7f89a1782c340
 +                                "0x{:08X}u, {}, {})",
 +                                addr, instr, rd, value);
 +                        }
-+                        code = gte_read + fmt::format(
-+                            "{} = {};  /* mfc2 */", reg_name(rt), value);
-                     } else if (cop_op == 0x02) { // CFC2 - move from COP2 control
-                         if (PSXRecompGTERegisters::ctrl_read_needs_helper(static_cast<uint8_t>(rd))) {
-                             code = gte_read + fmt::format("{} = gte_read_ctrl(cpu, {});  /* cfc2 */", reg_name(rt), rd);
-@@ -1521,7 +2110,35 @@
-             case 0x20: code = translate_lb(instr); break;     // lb
-             case 0x21: code = translate_lh(instr); break;     // lh
-             case 0x22: code = translate_lwl(instr); break;    // lwl
--            case 0x23: code = translate_lw(instr); break;     // lw
+                         code = gte_read + (rt == 0
+                             ? fmt::format("(void){};  /* mfc2 to $zero: read preserved, write discarded */", value)
+                             : fmt::format("{} = {};  /* mfc2 */", reg_name(rt), value));
+@@ -1997,7 +2616,35 @@
+             case 0x20: code = translate_lb(instr, memory_addr); break;     // lb
+             case 0x21: code = translate_lh(instr, memory_addr); break;     // lh
+             case 0x22: code = translate_lwl(instr, memory_addr); break;    // lwl
+-            case 0x23: code = translate_lw(instr, memory_addr); break;     // lw
 +            case 0x23: {                                      // lw
 +                const DisruptorPrecisionCopySite *site =
 +                    disruptor_precision_copy_site(
 +                        kDisruptorPrecisionCopyLoads, addr);
 +                if (!site) {
-+                    code = translate_lw(instr);
++                    code = translate_lw(instr, memory_addr);
 +                    break;
 +                }
 +                const uint32_t rs = get_rs(instr);
@@ -696,7 +728,7 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..01d0279a5d77796348a7f89a1782c340
 +                        "matches word 0x{:08X}/r{} (found 0x{:08X})",
 +                        addr, site->instruction, site->gpr, instr));
 +                }
-+                const std::string load_addr = offset == 0
++                const std::string load_addr = !memory_addr.empty() ? memory_addr : offset == 0
 +                    ? reg_name(rs)
 +                    : fmt::format("{} + {}", reg_name(rs), offset);
 +                code = fmt::format(
@@ -708,14 +740,14 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..01d0279a5d77796348a7f89a1782c340
 +                    addr, instr, rt, reg_name(rt));
 +                break;
 +            }
-             case 0x24: code = translate_lbu(instr); break;    // lbu
-             case 0x25: code = translate_lhu(instr); break;    // lhu
-             case 0x26: code = translate_lwr(instr); break;    // lwr
-@@ -1533,7 +2150,69 @@
-             case 0x28: code = fmt::format("g_debug_last_store_pc = 0x{:08X}u; ", addr) + translate_sb(instr); break;     // sb
-             case 0x29: code = fmt::format("g_debug_last_store_pc = 0x{:08X}u; ", addr) + translate_sh(instr); break;     // sh
-             case 0x2A: code = fmt::format("g_debug_last_store_pc = 0x{:08X}u; ", addr) + translate_swl(instr); break;    // swl
--            case 0x2B: code = fmt::format("g_debug_last_store_pc = 0x{:08X}u; ", addr) + translate_sw(instr); break;     // sw
+             case 0x24: code = translate_lbu(instr, memory_addr); break;    // lbu
+             case 0x25: code = translate_lhu(instr, memory_addr); break;    // lhu
+             case 0x26: code = translate_lwr(instr, memory_addr); break;    // lwr
+@@ -2009,7 +2656,69 @@
+             case 0x28: code = fmt::format("g_debug_last_store_pc = 0x{:08X}u; ", runtime_pc(addr)) + translate_sb(instr, memory_addr); break;     // sb
+             case 0x29: code = fmt::format("g_debug_last_store_pc = 0x{:08X}u; ", runtime_pc(addr)) + translate_sh(instr, memory_addr); break;     // sh
+             case 0x2A: code = fmt::format("g_debug_last_store_pc = 0x{:08X}u; ", runtime_pc(addr)) + translate_swl(instr, memory_addr); break;    // swl
+-            case 0x2B: code = fmt::format("g_debug_last_store_pc = 0x{:08X}u; ", runtime_pc(addr)) + translate_sw(instr, memory_addr); break;     // sw
 +            case 0x2B: {                                       // sw
 +                const DisruptorPrecisionCopySite *copy_site =
 +                    disruptor_precision_copy_site(
@@ -733,7 +765,7 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..01d0279a5d77796348a7f89a1782c340
 +                            addr, copy_site->instruction,
 +                            copy_site->gpr, instr));
 +                    }
-+                    const std::string store_addr = offset == 0
++                    const std::string store_addr = !memory_addr.empty() ? memory_addr : offset == 0
 +                        ? reg_name(rs)
 +                        : fmt::format("{} + {}", reg_name(rs), offset);
 +                    code = fmt::format(
@@ -746,11 +778,11 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..01d0279a5d77796348a7f89a1782c340
 +                        "gte_precision_copy_pc_word(0x{:08X}u, "
 +                        "0x{:08X}u, {}, _precision_copy_addr, "
 +                        "_precision_copy_value); }}",
-+                        addr, store_addr, reg_name(rt), addr, instr, rt);
++                        runtime_pc(addr), store_addr, reg_name(rt), addr, instr, rt);
 +                    break;
 +                }
-+                code = fmt::format("g_debug_last_store_pc = 0x{:08X}u; ", addr) +
-+                       translate_sw(instr);
++                code = fmt::format("g_debug_last_store_pc = 0x{:08X}u; ", runtime_pc(addr)) +
++                       translate_sw(instr, memory_addr);
 +                if (disruptor_precision_store_pc(addr) ||
 +                    disruptor_precision_scratch_store_pc(addr)) {
 +                    const uint32_t rs = get_rs(instr);
@@ -763,7 +795,7 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..01d0279a5d77796348a7f89a1782c340
 +                            "matches SW r10,4(r5) (word 0x{:08X})",
 +                            addr, instr));
 +                    }
-+                    const std::string store_addr = fmt::format(
++                    const std::string store_addr = !memory_addr.empty() ? memory_addr : fmt::format(
 +                        "{} + {}", reg_name(rs), offset);
 +                    if (disruptor_precision_scratch_store_pc(addr)) {
 +                        code += fmt::format(
@@ -779,10 +811,10 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..01d0279a5d77796348a7f89a1782c340
 +                }
 +                break;
 +            }
-             case 0x2E: code = fmt::format("g_debug_last_store_pc = 0x{:08X}u; ", addr) + translate_swr(instr); break;    // swr
+             case 0x2E: code = fmt::format("g_debug_last_store_pc = 0x{:08X}u; ", runtime_pc(addr)) + translate_swr(instr, memory_addr); break;    // swr
              case 0x2F:                                         // CACHE - cache op (no-op for static recomp)
                  code = "/* cache (no-op: static recompilation has no I/D cache) */";
-@@ -1592,7 +2271,291 @@
+@@ -2074,6 +2783,49 @@
          }
      }
  
@@ -829,6 +861,12 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..01d0279a5d77796348a7f89a1782c340
 +            config_.indent, addr, instr);
 +    }
 +
+     PSXRecomp::append_pgxp_hooks(instr, code, memory_addr);
+     /* The trailing disassembly comment must not land ON a preprocessor
+      * directive line -- it would be swallowed as extra tokens and dropped,
+@@ -2086,6 +2838,278 @@
+         PSXRecomp::emission_ends_on_preprocessor_directive(code))
+         return config_.indent + code + "\n" + config_.indent + comment;
      return config_.indent + code + comment;
 +}
 +
@@ -889,6 +927,37 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..01d0279a5d77796348a7f89a1782c340
 +    }
 +    std::string_view text = trim_blank(code);
 +    if (text.empty()) return true;
++    /* The PGXP shadow wrapper of a register instruction: host-only state, no guest time. */
++    if (text.starts_with("PGXP_ALU(")) {
++        std::string_view args = text.substr(9);
++        if (args.ends_with(" }")) args.remove_suffix(2);
++        if (!args.ends_with(");")) return false;
++        args.remove_suffix(2);
++        for (std::size_t at = 0; at < args.size(); ++at) {
++            const char c = args[at];
++            if (c == '(' || c == ';' || c == '{' || c == '}' || c == '=') return false;
++            const std::string_view from = args.substr(at);
++            if (from.starts_with("->") && !from.starts_with("->gpr[") && !from.starts_with("->hi") &&
++                !from.starts_with("->lo"))
++                return false;
++        }
++        return true;
++    }
++    if (text.starts_with("{ uint32_t _pgx")) {
++        text.remove_prefix(2);
++        while (text.starts_with("uint32_t _pgx")) {
++            const std::size_t semi = text.find(';');
++            if (semi == std::string_view::npos) return false;
++            const std::string_view decl = text.substr(13, semi - 13);
++            const std::size_t equals = decl.find(" = cpu->gpr[");
++            if (equals == std::string_view::npos || decl.find_first_not_of("0123456789") != equals ||
++                general_register_end(decl, equals + 3) != decl.size())
++                return false;
++            text.remove_prefix(semi + 1);
++            text = trim_blank(text);
++        }
++        return !text.empty() && is_register_only_line(text);
++    }
 +    if (text.starts_with("uint32_t ")) text.remove_prefix(9);
 +    else if (text.starts_with("int ")) text.remove_prefix(4);
 +    std::size_t target_end = 0;
@@ -1074,7 +1143,7 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..01d0279a5d77796348a7f89a1782c340
  }
  
  std::string CodeGenerator::translate_basic_block(
-@@ -2269,7 +3232,15 @@
+@@ -2984,7 +4008,15 @@
          }
      }
  
@@ -1091,10 +1160,10 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..01d0279a5d77796348a7f89a1782c340
  }
  
  bool CodeGenerator::func_has_screen_extent_cull(const ControlFlowGraph& cfg) const {
-@@ -2984,6 +3955,13 @@
-     ss << "#endif\n";
-     ss << "extern int  psx_datashard_enter(CPUState* cpu, uint32_t key);  /* data-shard replay/capture (data_shards.c) */\n";
-     ss << "extern void psx_mod_function_entry(CPUState* cpu, uint32_t address);  /* trusted opt-in game-mod hook */\n";
+@@ -3774,6 +4806,13 @@
+     ss << "extern int psx_ws_masked_reject(uint32_t flags, uint32_t mask); /* guarded packed-coordinate reject */\n";
+     ss << "extern int psx_ws_nclip_branch(uint32_t pc, uint32_t instr, int32_t mac0, int vanilla);\n";
+     ss << "extern int psx_mod_try_function_replacement(CPUState* cpu, uint32_t address);\n";
 +    ss << "extern void disruptor_vertical_camera_instruction_hook(CPUState* cpu, uint32_t address, uint32_t instruction, int phase);  /* version-pinned vertical-camera seam */\n";
 +    ss << "extern void disruptor_far_rendering_instruction_hook(CPUState* cpu, uint32_t address, uint32_t instruction, int phase);  /* version-pinned far-rendering seam */\n";
 +    ss << "extern void disruptor_billboard_aspect_instruction_hook(CPUState* cpu, uint32_t address, uint32_t instruction, int phase);  /* version-pinned world-billboard seam */\n";
@@ -1105,7 +1174,7 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..01d0279a5d77796348a7f89a1782c340
      ss << "extern void psx_datashard_ret(CPUState* cpu);                  /* data-shard capture finalize */\n";
      ss << "extern int  psx_vsync_query_hle_enter(CPUState* cpu, uint32_t func, uint32_t counter_addr, uint32_t gpustat_ptr_addr, uint32_t timer1_ptr_addr, uint32_t timer1_cache_addr);  /* load_accel.c */\n";
      ss << "extern void psx_ws_sprite_tag(CPUState* cpu);  /* widescreen prim tag (gpu.c) */\n";
-@@ -2993,6 +3971,9 @@
+@@ -3786,6 +4825,9 @@
      ss << "extern int  psx_ws_cull_sltiu(uint32_t sx, uint32_t imm);  /* ws auto screen-x cull (gpu.c) */\n";
      ss << "extern int  psx_ws_cull_slti(uint32_t sx, uint32_t imm);   /* ws cull signed right edge (gpu.c) */\n";
      ss << "extern int  psx_ws_cull_slti_lower(uint32_t sx, uint32_t imm); /* ws cull signed lower edge (gpu.c) */\n";
@@ -1113,10 +1182,10 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..01d0279a5d77796348a7f89a1782c340
 +    ss << "extern int32_t psx_ws_cull_upper_value(int32_t vanilla);  /* ws manual upper bound (gpu.c) */\n";
 +    ss << "extern uint32_t psx_ws_cull_span_value(uint32_t vanilla); /* ws packed [left,right] span (gpu.c) */\n";
      ss << "extern int  psx_ws_cull_bltz(uint32_t v);                  /* ws cull signed left edge (gpu.c) */\n";
-     ss << "extern int  psx_ws_cull_vxrange(uint32_t x, uint32_t imm); /* ws masked-u16 X window */\n";
-     ss << "extern int32_t psx_ws_depth_bound(int32_t imm);            /* ws aspect-scaled far bound */\n";
-@@ -3001,7 +3982,10 @@
-     ss << "extern uint32_t psx_ws_cull_keep_result(uint32_t vanilla, uint32_t forced); /* ws guarded keep compare (gpu.c) */\n";
+     ss << "extern int  psx_ws_cull_bgez(uint32_t v);                  /* ws cull signed left keep (gpu.c) */\n";
+     ss << "extern uint32_t psx_ws_clip_edge_x(uint32_t v, uint32_t w); /* ws cull clip-edge bound load (gpu.c) */\n";
+@@ -3809,7 +4851,10 @@
+         ss << "#include \"ws_cull_edge.h\"\n";
      ss << "extern uint32_t psx_ws_aspect_cone_result(uint32_t site, uint32_t vanilla, uint32_t object, int32_t x, int32_t z, int32_t y); /* aspect-aware participation cone */\n";
      ss << "extern uint32_t psx_ws_angle_widen(uint32_t vanilla); /* aspect-scaled 12-bit terrain-frustum half-angle */\n";
 +    ss << "extern int32_t psx_ws_yaw_cone_offset(int32_t vanilla, uint32_t full_turn); /* aspect-scaled wrapping yaw half-FOV */\n";
@@ -1126,7 +1195,7 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..01d0279a5d77796348a7f89a1782c340
      ss << "extern int  psx_ws_bg2d_cols(int base);                    /* ws 2D bg tile-loop widen: col count (gpu.c) */\n";
      ss << "extern int  psx_ws_bg2d_startcol(int col, unsigned mask);  /* ws 2D bg tile-loop widen: start tile col (gpu.c) */\n";
      ss << "extern int  psx_ws_bg2d_startx(int x);                     /* ws 2D bg tile-loop widen: start screen-x (gpu.c) */\n";
-@@ -3013,6 +3997,11 @@
+@@ -3821,6 +4866,11 @@
      ss << "extern int  psx_game_option_store(uint32_t addr, int val);  /* persisted OPTION restore-at-init (game_options.c) */\n";
      ss << "extern uint32_t psx_ws_backdrop_value(uint32_t orig, int is_end, int window_cols);  /* ws backdrop preload (gpu.c) */\n";
      ss << "extern void gte_ws_set_suppress(int on);  /* widescreen far-backdrop un-squash (gte.cpp) */\n";
@@ -1135,6 +1204,6 @@ index a2154f104ac7f6fb7a1f2bb9db772de7a4745099..01d0279a5d77796348a7f89a1782c340
 +    ss << "extern void gte_precision_scratch_store_pc_word(uint32_t pc, uint32_t insn, uint32_t addr, uint32_t packed);  /* reviewed scratchpad SW */\n";
 +    ss << "extern uint32_t gte_precision_copy_pc_read(uint32_t pc, uint32_t insn, uint8_t gpr, uint32_t addr, uint32_t packed);  /* reviewed packet-copy LW */\n";
 +    ss << "extern void gte_precision_copy_pc_word(uint32_t pc, uint32_t insn, uint8_t gpr, uint32_t addr, uint32_t packed);  /* reviewed packet-copy SW */\n";
+     if (!config_.overlay_mode && !config_.draw_distance_clamp_sites.empty())
+         ss << "extern uint32_t g_psx_draw_distance_clamp;  /* [[draw_distance.clamp]] switch (draw_distance.c) */\n";
      ss << "extern uint32_t g_debug_last_store_pc;  /* exact PC of the executing SW/SH/SB — wtrace/readtrace producer attribution (debug_server.c) */\n\n";
- }
- 

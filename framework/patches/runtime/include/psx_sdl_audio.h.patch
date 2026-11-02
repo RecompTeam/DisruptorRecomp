@@ -1,8 +1,8 @@
 diff --git a/runtime/include/psx_sdl_audio.h b/runtime/include/psx_sdl_audio.h
-index a2055e832da55f6ec98fe30b39ed83183fd48043..b8d5a5e510e523f2f8f25a69d124dbbd4e320da4 100644
+index 1be1a538097c5c629dd5b8fffa457393d3e5a282..d70f1cf47d7980d0da8e8b51bfd226cdb2420633 100644
 --- a/runtime/include/psx_sdl_audio.h
 +++ b/runtime/include/psx_sdl_audio.h
-@@ -28,6 +28,11 @@
+@@ -31,6 +31,11 @@
      SDL_AudioDeviceID device, const void *data, Uint32 bytes);
  void psx_sdl_audio_lock(SDL_AudioDeviceID device);
  void psx_sdl_audio_unlock(SDL_AudioDeviceID device);

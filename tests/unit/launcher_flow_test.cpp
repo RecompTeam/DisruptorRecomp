@@ -406,7 +406,7 @@ void test_the_sliders() {
     const Option* deadzone = find_option("controller.deadzone");
     disruptor::settings::Settings stick;
     require(deadzone && disruptor::settings::stored(stick, *deadzone) == 37 && value_text(*deadzone, 37) == L"37%" &&
-                deadzone->initial == static_cast<int>(std::lround(stick.deadzone * 100.0 / 32767.0)),
+                deadzone->initial == static_cast<int>(std::lround(12000 * 100.0 / 32767.0)),
             "a fresh installation's dead zone is the runtime's, 12000 of 32767, shown as 37%");
     deadzone->set(stick, 50);
     require(deadzone->saved(stick) && stick.deadzone == 16384 && deadzone->get(stick) == 50,

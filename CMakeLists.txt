@@ -51,6 +51,7 @@ set(DISRUPTOR_EXTRA_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/control_probe.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/diagnostics.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/far_rendering.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/precision_routes.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/movie_smoothing.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/frame/frame_rate.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/frame/stock_frames.cpp"
@@ -76,7 +77,6 @@ set(DISRUPTOR_EXTRA_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/psionic_change.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/selection_wheel.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/weapon_list.cpp"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/precision_routes.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/render_arena.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/grown_quad.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/hud_widgets.cpp"
@@ -194,7 +194,65 @@ if(DISRUPTOR_USE_CAPTURED_STATIC_OVERLAY)
         "${CMAKE_CURRENT_SOURCE_DIR}/generated/overlays_static.c")
 endif()
 
-psxrecomp_add_runtime_target(psx-runtime
+# The framework runs a statically linked plugin only when a package declares it: the game's own, one hidden feature on by default.
+set(DISRUPTOR_PLUGINS
+    disruptor.baton_choice
+    disruptor.ddgi.vsync
+    disruptor.ddgi.world
+    disruptor.far_rendering.renderer
+    disruptor.far_rendering.room_objects
+    disruptor.far_rendering.sector_edges
+    disruptor.frame_rate.vsync
+    disruptor.god_mode.damage
+    disruptor.intro_skip.renderer
+    disruptor.language.briefing
+    disruptor.language.hint.move
+    disruptor.language.hint.read
+    disruptor.language.hint.stage
+    disruptor.language.layout
+    disruptor.language.movie_sound
+    disruptor.language.text
+    disruptor.list_message.draw
+    disruptor.list_message.loads
+    disruptor.list_message.sent
+    disruptor.list_message.tick
+    disruptor.main_menu_exit.draw
+    disruptor.main_menu_exit.menu
+    disruptor.mover_motion.draw
+    disruptor.mover_motion.drawn
+    disruptor.mover_motion.tick
+    disruptor.mover_motion.vsync
+    disruptor.mover_motion.world
+    disruptor.name_entry
+    disruptor.psionic_change.tick
+    disruptor.render_arena
+    disruptor.stock_frames.effects
+    disruptor.stock_frames.message
+    disruptor.stock_frames.sounds
+    disruptor.stock_frames.tick
+    disruptor.stock_frames.vsync
+    disruptor.streamed_reads
+    disruptor.vertical_camera.renderer
+)
+if(DISRUPTOR_DEV_TOOLS)
+    list(APPEND DISRUPTOR_PLUGINS disruptor.mission_select)
+endif()
+set(DISRUPTOR_PRELOADED_MODS "${CMAKE_CURRENT_BINARY_DIR}/disruptor_mods")
+set(disruptor_manifest "format_version = 5\nid = \"disruptor.game\"\nversion = \"1.0.0\"\nname = \"Disruptor Recompiled\"\nauthor = \"Disruptor Recompiled\"\ndescription = \"The game's own enhancements and fixes, set in its own menu.\"\nresolver = \"declarative\"\nsave_compatibility = \"shared\"\n\n[[target]]\ngame_id = \"SLUS-00224\"\n\n[[feature]]\nid = \"game\"\nname = \"Disruptor Recompiled\"\ndescription = \"The game's own enhancements and fixes, set in its own menu.\"\ndefault_enabled = true\nhidden = true\n")
+foreach(plugin IN LISTS DISRUPTOR_PLUGINS)
+    string(APPEND disruptor_manifest "\n[[plugin]]\nfeature = \"game\"\nid = \"${plugin}\"\n")
+endforeach()
+file(CONFIGURE OUTPUT "${DISRUPTOR_PRELOADED_MODS}/packages/disruptor.game/1.0.0/manifest.toml"
+     CONTENT "${disruptor_manifest}")
+
+option(DISRUPTOR_PGXP "Compile the generated code with the framework's PGXP dataflow hooks" OFF)
+set(DISRUPTOR_PGXP_ARG)
+if(DISRUPTOR_PGXP)
+    set(DISRUPTOR_PGXP_ARG PGXP)
+endif()
+psxrecomp_add_runtime_target(psx-runtime ${DISRUPTOR_PGXP_ARG}
+    PRELOADED_MODS_DIR "${DISRUPTOR_PRELOADED_MODS}"
+    APP_ICON "${CMAKE_CURRENT_SOURCE_DIR}/src/launcher/assets/app.ico"
     GAME_GENERATED_FULL_C ${GAME_GENERATED_FULL}
     GAME_GENERATED_DISPATCH_C "${GAME_GENERATED_DISPATCH}"
     GAME_OVERLAY_STATIC_C "${GAME_OVERLAY_STATIC}"
@@ -226,17 +284,25 @@ if(WIN32)
     target_compile_definitions(
         psx-runtime PRIVATE "$<$<COMPILE_LANGUAGE:CXX>:NOMINMAX>")
 endif()
+target_sources(psx-runtime PRIVATE "${PSXRECOMP_ROOT}/runtime/src/disruptor_renderer_compat.c")
 if(MSVC)
-    # audio_trace.c is the sole runtime source using C11 atomics. Keep the
-    # generated C in MSVC's extension-compatible C mode: its static tables use
-    # address constants that strict /std:c11 rejects.
-    set_property(SOURCE "${PSXRECOMP_ROOT}/runtime/src/audio_trace.c" "${PSXRECOMP_ROOT}/runtime/src/render_thread.c"
-        APPEND PROPERTY COMPILE_OPTIONS
-        "/std:c11" "/experimental:c11atomics")
+    # The runtime sources with C11 atomics only: generated C stays in MSVC's extension-compatible mode, strict /std:c11 rejects its address constants.
+    foreach(source audio_trace autocompile boot_state debug_server gpu_gl_renderer guest_tty host_overlay host_span_ring
+                   overlay_capture render_thread starvation_ring)
+        set_property(SOURCE "${PSXRECOMP_ROOT}/runtime/src/${source}.c" APPEND PROPERTY COMPILE_OPTIONS
+            "/std:c11" "/experimental:c11atomics")
+    endforeach()
+    # The framework's texture-pack and mod sources treat u8string() as std::string (C++17).
+    foreach(source texture_pack_install duckstation_texture_pack gpu_hd_textures mod_packages mod_runtime)
+        set_property(SOURCE "${PSXRECOMP_ROOT}/runtime/src/${source}.cpp" APPEND PROPERTY COMPILE_OPTIONS "/Zc:char8_t-")
+    endforeach()
+else()
+    foreach(source texture_pack_install duckstation_texture_pack gpu_hd_textures mod_packages mod_runtime)
+        set_property(SOURCE "${PSXRECOMP_ROOT}/runtime/src/${source}.cpp" APPEND PROPERTY COMPILE_OPTIONS "-fno-char8_t")
+    endforeach()
 endif()
 
 if(WIN32)
-    target_sources(psx-runtime PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/game/icon.rc")
     # UTF-8 as the game's code page: a path in settings.toml may hold letters the system's own page lacks.
     if(MINGW)
         target_sources(psx-runtime PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/game/disruptor.rc")
@@ -262,10 +328,11 @@ if(BUILD_TESTING)
 
     disruptor_contract(backdrop_tiles RETAIL)
     disruptor_contract(sky_pass)
+    disruptor_contract(host_present)
     disruptor_contract(depth24_sync)
     disruptor_contract(geometry_provenance)
     disruptor_contract(step_fusion RETAIL)
-    disruptor_contract(hot_paths RETAIL)
+    disruptor_contract(hot_paths)
     disruptor_contract(phase_a)
     disruptor_contract(perspective_texture)
     disruptor_contract(pinned_corner)
@@ -457,6 +524,7 @@ disruptor_unit_test(disruptor_bass_cut tests/unit/disruptor_bass_cut_test.cpp
         RUNTIME_HEADERS SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/launcher/menu_art.cpp" "${CMAKE_CURRENT_SOURCE_DIR}/src/launcher/chd_image.cpp"
             "${PSXRECOMP_ROOT}/runtime/src/iso_reader.cpp" "${PSXRECOMP_ROOT}/runtime/src/cue_sheet.cpp")
     target_link_libraries(disruptor-launcher-menu-art-test PRIVATE chdr-static)
+    target_include_directories(disruptor-launcher-menu-art-test PRIVATE "${PSXRECOMP_ROOT}/recompiler/include")
     disruptor_unit_test(disruptor_language_overlay tests/unit/disruptor_language_overlay_test.cpp
         INCLUDES
             "${PSXRECOMP_ROOT}/runtime/include"
@@ -503,10 +571,9 @@ disruptor_unit_test(disruptor_gpu_sky_fog tests/unit/gpu_sky_fog_test.cpp RUNTIM
     disruptor_unit_test(disruptor_gpu_near_face tests/unit/gpu_near_face_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_gpu_world_texel tests/unit/gpu_world_texel_test.cpp RUNTIME_HEADERS
         INCLUDES "${PSXRECOMP_ROOT}/runtime/src")
-    disruptor_unit_test(disruptor_save_point tests/unit/save_point_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_presentation_yaw_math tests/unit/presentation_yaw_math_test.cpp)
     disruptor_unit_test(disruptor_gte_precision_store_pc tests/unit/gte_precision_store_pc_test.cpp RUNTIME_HEADERS
-        SOURCES "${PSXRECOMP_ROOT}/runtime/src/gte.cpp"
+        SOURCES "${PSXRECOMP_ROOT}/runtime/src/gte.cpp" "${PSXRECOMP_ROOT}/runtime/src/pgxp.cpp"
         DEFINITIONS PSX_NO_DEBUG_TOOLS=1 PSX_GTE_REGISTER_TEST=1 PSX_ENABLE_BLOCK_CYCLES=1)
     disruptor_unit_test(disruptor_resolution tests/unit/resolution_test.cpp INCLUDES "${CMAKE_CURRENT_SOURCE_DIR}/src")
     disruptor_unit_test(psxrecomp_render_thread_core tests/unit/render_thread_core_test.cpp RUNTIME_HEADERS
@@ -527,6 +594,7 @@ disruptor_unit_test(disruptor_gpu_sky_fog tests/unit/gpu_sky_fog_test.cpp RUNTIM
 
     disruptor_unit_test(host_pick_slot tests/unit/host_pick_slot_test.cpp)
     disruptor_unit_test(host_borderless tests/unit/host_borderless_test.cpp)
+    disruptor_unit_test(host_pad_edits tests/unit/pad_edits_test.cpp)
     add_test(NAME host_borderless_contract
         COMMAND "${Python3_EXECUTABLE}" -B
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/contracts/test_borderless_contract.py")

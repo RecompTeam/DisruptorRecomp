@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <filesystem>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
@@ -27,12 +28,18 @@ struct SavedState {
     int slot = 0;         // 0 is the state F1 loads
     std::uint32_t entry = 0;
     StateStamp stamp;
+    std::uint32_t layout = 0; // the header's word for the enhancement memory, the execution profile and the providers
 };
+
+// The layout word a build writes, by the folder of a language disc's slots, empty for the US disc's.
+using Layouts = std::map<std::string, std::uint32_t>;
 
 // A save state's header, when the file is one in the format this build reads.
 std::optional<SavedState> read_state(const std::filesystem::path& file);
-// The states in `saves` and its language folders whose stamp is not this build's.
-std::vector<SavedState> stale_states(const std::filesystem::path& saves);
+// Every state in `saves`, its BIOS folders and their language folders.
+std::vector<SavedState> saved_states(const std::filesystem::path& saves);
+// Those whose stamp is not this build's, or whose layout word is not the one `layouts` holds for their folder.
+std::vector<SavedState> stale_states(const std::filesystem::path& saves, const Layouts& layouts = {});
 // The name the game gives the file of `slot` for the disc whose game starts at `entry`.
 std::string state_name(std::uint32_t entry, int slot);
 
@@ -40,8 +47,9 @@ std::string state_name(std::uint32_t entry, int slot);
 std::optional<std::string> read_whole(const std::filesystem::path& file);
 // Writes the bytes and says whether every one reached the file.
 bool write_whole(const std::filesystem::path& file, std::string_view bytes);
-// A state's bytes with `stamp` in its header and the rest as they were. Empty when the bytes are no state.
-std::string restamped(std::string bytes, const StateStamp& stamp);
+// A state's bytes with `stamp`, and `layout` when given, in its header and the rest as they were. Empty when the bytes
+// are no state.
+std::string restamped(std::string bytes, const StateStamp& stamp, std::optional<std::uint32_t> layout = std::nullopt);
 // A short name for the bytes, so that a changed file is not taken for one already tried.
 std::string fingerprint(std::string_view bytes);
 

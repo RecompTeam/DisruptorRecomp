@@ -376,7 +376,7 @@ require(
     in gpu_header
     and "        case 0x64: case 0x65: case 0x66: case 0x67:\n            gp0_exec_sky_rect();\n" in gpu
     and "psx_sky_fog_tile(&sky_fog, psx_mod_gpu_dma_resolve_address(primitive_addr), words);" in gpu
-    and "    psx_sky_fog_reset(&sky_fog);\n    psx_supplemental_reset(&supplemental);\n\n    /* Reset GP0 state machine */"
+    and "    psx_sky_fog_reset(&sky_fog);\n    psx_supplemental_reset(&supplemental);\n\n    /* Reset GP0 state machine"
     in gpu
     and "the CPU copy is not it */\n    psx_sky_cover_reset(&sky_cover);\n    psx_sky_fog_reset(&sky_fog);\n" in gpu,
     "each sky opening tells its fog step from the routine's own stack word at its first row, each tile its packet, "

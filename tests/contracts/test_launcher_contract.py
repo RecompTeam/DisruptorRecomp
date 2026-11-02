@@ -10,18 +10,21 @@ ROOT = Path(__file__).resolve().parents[2]
 
 # Keys the game saves and the launcher leaves to the in-game menu, the command line or a hand edit.
 NOT_OFFERED = {
+    # The framework's own since v0.3.4: not for this game, or not until its render thread is the game's.
+    "controller.jogcon_force_feedback",
+    "controller.multitap",
+    "controller.multitap_analog",
+    "video.fov_scale",
+    "video.frame_generation",
+    "video.present_thread",
+    "video.render_thread",
     "video.renderer",
     "video.window_width",
-    "video.antialiasing",
-    "video.texture_filtering",
-    "video.crt_filter",
     "video.auto_skip_fmv",
-    "video.turbo_loads",
     "video.fast_boot",
     "video.bios_hle",
     "video.low_latency_input",
     "video.frame_interpolation_blend",
-    "audio.spu_hq",
     "disruptor.diagnostic_view",
     # Withdrawn for now on the user's word: the game keeps both off whatever the file says.
     "disruptor.downscale_averaging",
@@ -37,6 +40,8 @@ NOT_OFFERED = {
 }
 # Keys written together with a launcher row, by the language row, or by the Keys table's second column.
 COVERED = {
+    "controller.p1_deadzone",
+    "controller.p2_deadzone",
     "video.adaptive_view",
     "disruptor.language_disc",
     "disruptor.language_discs",
@@ -141,6 +146,7 @@ for header, key in re.findall(r'f << "(?:\\n)?\[(\w+)\]\\n|f << "(\w+)\s*= ', wr
     section = header or section
     if key and section in SHOWN_SECTIONS:
         saved.add(f"{section}.{key}")
+saved |= {f"controller.{key}" for key in re.findall(r'"(p[12]_(?:device|mode|deadzone))"', writer)}
 require(len(saved) >= 34, "the settings writer was not read as expected")
 undecided = saved - set(keys) - NOT_OFFERED - COVERED
 require(not undecided, f"decide whether the launcher shows these saved keys: {sorted(undecided)}")
@@ -167,7 +173,7 @@ require(
 )
 require(
     "        PSXRecompV4::UserSettings us =\n            PSXRecompV4::load_user_settings(settings_path);\n"
-    "#ifdef PSX_HAS_GAME_HOST\n        psx_game_settings_defaults(us);\n#endif\n        if (us.parse_error) {"
+    "#ifdef PSX_HAS_GAME_HOST\n        psx_game_settings_defaults(us);\n#endif\n        user_settings_has_renderer = us.has_renderer;\n"
     in main_cpp
     and "    settings = disruptor::settings::with_defaults(settings);" in read("src/game/host.cpp")
     and "    apply_saved_preferences(disruptor::settings::with_defaults(settings));"
@@ -364,7 +370,7 @@ require(
 
 boot_state = read("psxrecomp/runtime/src/boot_state.c")
 header_writer = boot_state[
-    boot_state.index("static int write_header_le(") : boot_state.index("static int read_header_le(")
+    boot_state.index("static int write_header_le(") : boot_state.index("static int write_section_raw(")
 ]
 fields = re.findall(r"pst_w_(?:u32|i32)\(&w, h->(\w+)\)", header_writer)
 stamp = read("src/launcher/state_stamp.cpp")
@@ -382,29 +388,42 @@ require(
         "section_count",
         "reserved",
     ]
-    and "constexpr std::size_t hash_at = 16, abi_at = 20, version_at = 24;" in stamp
-    and "word(header, 0) != BOOT_STATE_MAGIC || word(header, 4) != BOOT_STATE_VERSION" in stamp
+    and "constexpr std::size_t hash_at = 16, abi_at = 20, version_at = 24, layout_at = 32;" in stamp
+    and fields.index("reserved") * 4 == 32
+    and "    if (layout) put_word(bytes, layout_at, *layout);\n" in stamp
+    and "        if (const auto layout = recorded_layout(trial)) {\n" in upgrade
+    and "    const std::vector<Waiting> states = stuck || cancelled ? std::vector<Waiting>{} : untried(saves, layouts, key);\n"
+    in upgrade
+    and "                const std::string carried = restamped(waiting.bytes, build_stamp(), layout->second);\n"
+    in upgrade
+    and upgrade.index("                if (layout == layouts.end()) {\n")
+    < upgrade.index("                const std::string carried = restamped(")
+    and '                const fs::path slots = trial / "saves" / state.path.parent_path().lexically_relative(saves);\n'
+    in upgrade
+    and upgrade.count("tried_line(saves, state, ") == 2
+    and upgrade.count("target(key, layouts, state.language)") == 2
+    and "word(header, 0) != BOOT_STATE_MAGIC || version < BOOT_STATE_VERSION_MIN_READ || version > BOOT_STATE_VERSION"
+    in stamp
     and "SavedState state{file, {}, *slot, word(header, 12)};" in stamp
-    and '"%s%sstate_%08X_slot%02d.pst"' in read("psxrecomp/runtime/src/savestate.c")
-    and 'fprintf(stderr, "savestate: LOADED slot %d -> resuming pc=0x%08X\\n",'
-    in read("psxrecomp/runtime/src/savestate.c")
-    and 'fprintf(stderr, "savestate: LOAD FAILED slot %d (missing/mismatched) %s\\n",'
-    in read("psxrecomp/runtime/src/savestate.c")
+    and '"%s%sstate_%08X%s%s_slot%02d.%s"' in read("psxrecomp/runtime/src/savestate.c")
+    and '"savestate: LOADED slot %d -> resuming pc=0x%08X "' in read("psxrecomp/runtime/src/savestate.c")
+    and '"savestate: LOAD FAILED slot %d %s\\n",' in read("psxrecomp/runtime/src/savestate.c")
     and 'log->find("savestate: LOADED slot 0")' in upgrade
     and 'log->find("savestate: LOAD FAILED slot 0")' in upgrade
     and '"disruptor: capsule: %zu frames in %s (%s)\\n"' in read("src/game/session/capsule.cpp")
     and 'rest.starts_with(" frames in ") && rest.ends_with(" (the asked length)")' in upgrade
     and 'std::getenv("PSX_HIDDEN_WINDOW")' in read("psxrecomp/runtime/src/main.cpp")
     and '{"PSX_HIDDEN_WINDOW", "1"}' in upgrade,
-    "the launcher reads and restamps a save state by the header boot_state.c writes, and judges a trial by the lines "
-    "the game prints when it loads a slot and when a recording ends, with the game's window hidden",
+    "the launcher reads and restamps a save state by the header boot_state.c writes, its layout word (enhancement "
+    "memory, execution profile, providers) learned from a state the build writes itself, and judges a trial by the "
+    "lines the game prints when it loads a slot and when a recording ends, with the game's window hidden",
 )
 
 runtime_main = read("psxrecomp/runtime/src/main.cpp")
 folder = read("src/game/settings/user_folder.cpp")
 program_sites = re.findall(r"exe_dir_from_argv\((?:argv0|argv\[0\])\)", runtime_main)
 require(
-    len(program_sites) == 10
+    len(program_sites) == 24
     and "        g_user_dir = psx_game_user_folder(exe_dir_from_argv(argv[0]), problem);\n" in runtime_main
     and runtime_main.index("psx_game_user_folder(") < runtime_main.index("    psx_crash_trace_install_handlers();")
     and "    if (!psx_set_note_folder(user_dir_from_argv(argv[0]).string().c_str())) {\n" in runtime_main
@@ -418,11 +437,11 @@ require(
     and "    return path.is_relative() ? user_dir_from_argv(argv0) / path : in_user_dir(path, argv0);\n" in runtime_main
     and runtime_main.index("static std::filesystem::path in_user_dir(")
     < runtime_main.index("static std::filesystem::path under_user_dir(")
-    and runtime_main.count('user_dir_from_argv(argv[0]) / "settings.toml"') == 3
+    and runtime_main.count('user_dir_from_argv(argv[0]) / "settings.toml"') == 6
     and '    fs::path config_path = user_dir_from_argv(argv0) / "input.ini";\n' in runtime_main
     and "    return user_dir_from_argv(argv0) / filename;\n" in runtime_main
     and 'user_dir_from_argv(argv[0]) / "mods", game_id,' in runtime_main
-    and 'std::string cache_dir = (user_dir / "cache").string();' in runtime_main
+    and 'std::string cache_dir = (user_dir_from_argv(argv[0]) / "cache").string();' in runtime_main
     and "memcard_dir   = in_user_dir(gc.runtime.memcard_dir, argv[0]);" in runtime_main
     and 'psx_note_path("psx_cps_exit_trace.json"' in runtime_main
     and 'psx_note_path("psx_last_run_report.json", kReportPath, sizeof(kReportPath));'
@@ -437,7 +456,7 @@ require(
     "in the source, each writable path of the game, from settings to the notes of a crash, is named in the user folder "
     "the game host gives before anything else runs, a configured memory card folder is moved there by the rule the "
     "user folder test checks, also from the binary's own folder (an AppImage's read-only mount), and exe_dir_from_argv "
-    "is left only at its ten program-file sites",
+    "is left only at its 24 program-file sites, each a read",
 )
 require(
     'constexpr const char* kInstalledName = "DisruptorRecompData";' in read("src/game/settings/user_folder.h")

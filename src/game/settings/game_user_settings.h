@@ -50,7 +50,6 @@ struct GameUserSettings {
     bool has_occlusion_strength = false; int occlusion_strength = 100; // percent, 0..100
     bool has_smooth_fade = false; bool smooth_fade = false;
     bool has_dynamic_resolution = false; bool dynamic_resolution = false;
-    bool has_render_thread = false; bool render_thread = false;
     bool has_resolution = false; std::string resolution;  // "1920x1080", "" the desktop's
     bool has_multisampling = false; int multisampling = 0;  // samples a pixel, one of kDisruptorSampleCounts
     bool has_sample_shading = false; bool sample_shading = false;

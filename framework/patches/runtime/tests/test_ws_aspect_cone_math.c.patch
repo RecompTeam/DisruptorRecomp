@@ -1,8 +1,8 @@
 diff --git a/runtime/tests/test_ws_aspect_cone_math.c b/runtime/tests/test_ws_aspect_cone_math.c
-index 30ca90a49e62012c1115db3cd4675d0929f8a3e8..5575a2d22c88cd40f19fc8f69d0ccd53b53181a5 100644
+index 40c6dd7b2046b34e361f7f1d0add0356be44dd18..384b129d3dbcfcd0977813bd601dc3f88ba28288 100644
 --- a/runtime/tests/test_ws_aspect_cone_math.c
 +++ b/runtime/tests/test_ws_aspect_cone_math.c
-@@ -64,5 +64,18 @@
+@@ -84,5 +84,18 @@
      check(psx_ws_widen_angle_q12(1023, 256) <= 1023,
            "terrain angle remains below a quarter turn");
  

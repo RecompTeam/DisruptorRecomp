@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <string_view>
 
@@ -45,5 +47,7 @@ constexpr bool draws_exit(uint32_t returns_to, uint32_t item) { return returns_t
 constexpr std::string_view word(std::string_view language) {
     return language == "French" ? "QUITTER" : language == "German" ? "BEENDEN" : "EXIT";
 }
+
+inline constexpr size_t kLongestWord = std::max({word("French").size(), word("German").size(), word("").size()});
 
 } // namespace disruptor::main_menu_exit

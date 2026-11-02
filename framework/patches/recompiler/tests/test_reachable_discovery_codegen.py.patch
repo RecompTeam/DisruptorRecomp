@@ -1,8 +1,8 @@
 diff --git a/recompiler/tests/test_reachable_discovery_codegen.py b/recompiler/tests/test_reachable_discovery_codegen.py
-index db87e2bea0f88e85d6930b3c687472c91f8e1784..26fd31f8575e5ec96dbcbe054a15fcc05a41b558 100644
+index 5f28d8b35d31441c52fa79536adc86f4747e2f2c..1d399aae2f51ba51a7da57a38dc9e3df253fbe9f 100644
 --- a/recompiler/tests/test_reachable_discovery_codegen.py
 +++ b/recompiler/tests/test_reachable_discovery_codegen.py
-@@ -90,6 +90,11 @@
+@@ -92,6 +92,11 @@
  
      failures = []
      with tempfile.TemporaryDirectory() as tmp:

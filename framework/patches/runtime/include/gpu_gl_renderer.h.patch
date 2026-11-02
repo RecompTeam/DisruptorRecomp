@@ -1,8 +1,17 @@
 diff --git a/runtime/include/gpu_gl_renderer.h b/runtime/include/gpu_gl_renderer.h
-index 895bd537f34518af1fdee2800300c6a94c01121c..f56409991e37dc8a4a49c77fd673293be71f8f84 100644
+index c53aece8f8d7f02ec4ee26fdbd3813d0041ef0c8..1c75f8b5b3487870079479c115457aeacec6a3a1 100644
 --- a/runtime/include/gpu_gl_renderer.h
 +++ b/runtime/include/gpu_gl_renderer.h
-@@ -42,9 +42,10 @@
+@@ -48,7 +48,7 @@
+  * most recent stable display images on the owning render thread/context; this
+  * does not generate motion vectors or true intermediate object positions. */
+ void gl_renderer_set_interpolation(int enabled, double host_hz, double target_hz,
+-                                   double source_hz, int blend_mode);
++                                   int blend_mode);
+ void gl_renderer_set_interpolation_suspended(int suspended);
+ /* Change only the blend mode (0 linear, 1 change-adaptive, 2 hold), keeping
+  * the history and schedule; takes effect at the next present. */
+@@ -182,12 +182,10 @@
   * are authored 4:3 and get no GTE squash to compensate the stretch).
   * content_w: if 0 < content_w < src_w, only columns [0, content_w) are shown
   * (left-aligned in the letterbox; the rest stays cleared black). Used to hide
@@ -10,12 +19,15 @@ index 895bd537f34518af1fdee2800300c6a94c01121c..f56409991e37dc8a4a49c77fd673293b
 + * a trailing depth24 margin without changing CRTC width / stretching.
 + * movie: a movie frame, scaled by a Mitchell filter instead of `linear`'s. */
  void gl_renderer_present(const uint32_t *pixels, int src_w, int src_h, int linear,
--                         int force_4_3, int content_w);
+-                         int force_4_3, int content_w, uint64_t guest_cycle,
+-                         uint64_t guest_frame, uint64_t guest_epoch,
+-                         uint64_t stream_generation, int stream_lba, int delivered_lba,
+-                         uint32_t decode_serial);
 +                         int force_4_3, int content_w, int movie);
  
- /* Clear to black + swap (display-disabled frame). */
- void gl_renderer_present_blank(void);
-@@ -163,6 +164,19 @@
+ /* Bezel art shown in the letterbox/pillarbox margins. Takes RGBA8 pixels; the
+  * caller owns them and may free them on return. Passing NULL clears it.
+@@ -581,6 +579,19 @@
   * sets/frame avg, [17]=wide FBO creations/frame avg. GPU phases are true
   * GL_TIME_ELAPSED times (CPU-overhead independent). Returns the count. */
  int gl_renderer_perf_aggregate(int wide_filter, double out[18]);
@@ -31,7 +43,7 @@ index 895bd537f34518af1fdee2800300c6a94c01121c..f56409991e37dc8a4a49c77fd673293b
 +void gl_renderer_render_thread_request(int on);
 +void gl_renderer_render_thread_frame_boundary(void);
 +void gl_renderer_render_thread_stats(uint64_t *frames, uint64_t *syncs, const char **last_sync);
-+void gl_renderer_present_wide_or_vram(int disp_x, int disp_y, int disp_h, int linear, int w, int h, int force_4_3);
++void gl_renderer_present_wide_or_vram(int disp_x, int disp_y, int disp_h, int linear, int w, int h, int force_4_3, int canonical_x);
  
  /* Native-wide mirror ablation (perf attribution, debug cmd gl_ws_ablate):
   * 0 = normal, 1 = skip the whole mirror pass (incl. wide_clear), 2 = full mirror

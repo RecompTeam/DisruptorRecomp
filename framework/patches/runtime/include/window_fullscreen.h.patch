@@ -1,0 +1,17 @@
+diff --git a/runtime/include/window_fullscreen.h b/runtime/include/window_fullscreen.h
+index 8cce2e3e68e7fc87927c6e73e3e136957014bfd7..8722ee5fb4f900fa03a51fee853187627c9196be 100644
+--- a/runtime/include/window_fullscreen.h
++++ b/runtime/include/window_fullscreen.h
+@@ -78,7 +78,11 @@
+     SDL_SyncWindow(window);
+ #endif
+     if (mode == 1) {
+-#if defined(_WIN32)
++#if defined(_WIN32) && defined(PSX_SDL3)
++        /* A plain borderless window the size of the screen is taken by the driver for D3D full screen even one row taller (host_borderless.h): SDL's desktop fullscreen is not. */
++        if (!SDL_SetWindowFullscreen(window, true)) return -1;
++        SDL_SyncWindow(window);
++#elif defined(_WIN32)
+         SDL_SetWindowBordered(window, SDL_FALSE);
+         SDL_SetWindowResizable(window, SDL_FALSE);
+         SDL_SetWindowPosition(window, desktop.x, desktop.y);

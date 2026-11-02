@@ -14,9 +14,10 @@ extern "C" uint8_t psx_read_byte(uint32_t address);
 extern "C" uint32_t psx_read_word(uint32_t address);
 extern "C" void psx_host_write_byte(uint32_t address, uint8_t value);
 extern "C" uint16_t sio_get_pad_buttons_slot(int slot);
-extern "C" void sio_set_pad_state_slot(int slot, uint16_t buttons);
+extern "C" void psx_game_pad_word(int slot, uint16_t word);
+extern "C" void psx_game_pad_release(int slot, uint16_t mask);
+extern "C" void psx_game_pad_sticks(int slot, uint8_t lx, uint8_t ly, uint8_t rx, uint8_t ry);
 extern "C" void sio_get_pad_sticks(int slot, uint8_t out[4]);
-extern "C" void sio_set_pad_sticks(int slot, uint8_t lx, uint8_t ly, uint8_t rx, uint8_t ry);
 extern "C" int psx_netplay_active(void);
 extern "C" int psx_host_ui_game_input_captured(void);
 extern "C" SDL_Window *sdl_window;
@@ -207,8 +208,12 @@ extern "C" void disruptor_selection_wheel_guard_input(void) {
     sio_get_pad_sticks(0, g_wheel.guarded_sticks.data());
     const bool open = disruptor_selection_wheel_open() != 0;
     g_wheel.guarded_output = open ? 0xFFFFu : static_cast<uint16_t>(g_wheel.guarded_pad | kSelectors);
-    sio_set_pad_state_slot(0, g_wheel.guarded_output);
-    if (open) sio_set_pad_sticks(0, 128, 128, 128, 128);
+    if (open) {
+        psx_game_pad_word(0, g_wheel.guarded_output);
+        psx_game_pad_sticks(0, 128, 128, 128, 128);
+    } else {
+        psx_game_pad_release(0, kSelectors);
+    }
 }
 
 extern "C" int disruptor_selection_wheel_frame(void) {
@@ -249,8 +254,8 @@ extern "C" int disruptor_selection_wheel_frame(void) {
         const bool consumed = was_open || g_wheel.closing;
         g_wheel.closing = false;
         if (consumed) {
-            sio_set_pad_state_slot(0, 0xFFFFu);
-            sio_set_pad_sticks(0, 128, 128, 128, 128);
+            psx_game_pad_word(0, 0xFFFFu);
+            psx_game_pad_sticks(0, 128, 128, 128, 128);
         }
         return consumed ? 1 : 0;
     }
@@ -309,7 +314,11 @@ extern "C" int disruptor_selection_wheel_frame(void) {
     const bool consumed = was_open || opened || g_wheel.closing;
     g_wheel.closing = false;
     const uint16_t blocked = static_cast<uint16_t>(g_wheel.swallowed | kSelectors);
-    sio_set_pad_state_slot(0, consumed ? 0xFFFFu : static_cast<uint16_t>(sio_get_pad_buttons_slot(0) | blocked));
-    if (consumed) sio_set_pad_sticks(0, 128, 128, 128, 128);
+    if (consumed) {
+        psx_game_pad_word(0, 0xFFFFu);
+        psx_game_pad_sticks(0, 128, 128, 128, 128);
+    } else {
+        psx_game_pad_release(0, blocked);
+    }
     return consumed ? 1 : 0;
 }

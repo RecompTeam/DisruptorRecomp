@@ -1,5 +1,5 @@
 diff --git a/runtime/CMakeLists.txt b/runtime/CMakeLists.txt
-index 6e6df7651c4a9240a4423d977052975f25d7c237..efeecd26a0422c4ee3347bf3113ef59697c9f2e7 100644
+index 95cb813af4c6be76e254fc421ff758dcc64e279f..09e581dfdec9333ffcf221d5aa25f3fd1e1d4981 100644
 --- a/runtime/CMakeLists.txt
 +++ b/runtime/CMakeLists.txt
 @@ -16,6 +16,18 @@
@@ -19,5 +19,5 @@ index 6e6df7651c4a9240a4423d977052975f25d7c237..efeecd26a0422c4ee3347bf3113ef596
 +        "/std:c11" "/experimental:c11atomics")
 +endif()
  
- if(BUILD_TESTING)
-     add_executable(launcher_device_roundtrip_test
+ # With -DPSX_PGXP_VARIANT=ON, psxrecomp_add_runtime_target auto-clones a
+ # psx-runtime-pgxp sibling (PSXRecomp_pgxp.exe) compiled with -DPSX_PGXP=1 —

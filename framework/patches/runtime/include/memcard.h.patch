@@ -1,8 +1,8 @@
 diff --git a/runtime/include/memcard.h b/runtime/include/memcard.h
-index 1275ebcf823b3a70e9627c8da1b8b62f05136392..4b3b0f2995ece5d6f45175a133fab56d4ef862bc 100644
+index 720432c9c7537defc00cb7108569df0ab77b8a2d..01023979958b48d94d269e98efc5c6fd3b8f5885 100644
 --- a/runtime/include/memcard.h
 +++ b/runtime/include/memcard.h
-@@ -54,6 +54,8 @@
+@@ -78,6 +78,8 @@
  /* Flush pending writes to disk */
  void memcard_flush(int card);
  void memcard_flush_all(void);

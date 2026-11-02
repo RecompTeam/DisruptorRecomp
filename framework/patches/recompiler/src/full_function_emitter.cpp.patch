@@ -1,8 +1,8 @@
 diff --git a/recompiler/src/full_function_emitter.cpp b/recompiler/src/full_function_emitter.cpp
-index 6d7f80bf721ec298f293ebd8cb39449f52865668..4ca5e6822568f91cb59c2ba5a14b632a23103d5c 100644
+index 765e3786f9300e7eaa0935f350a01e896285336a..b875b06fbaff4f2442a65270b547154847319922 100644
 --- a/recompiler/src/full_function_emitter.cpp
 +++ b/recompiler/src/full_function_emitter.cpp
-@@ -1745,6 +1745,21 @@
+@@ -2004,6 +2004,21 @@
      }
      out += "};\n\n";
  
@@ -21,19 +21,10 @@ index 6d7f80bf721ec298f293ebd8cb39449f52865668..4ca5e6822568f91cb59c2ba5a14b632a
 +        }
 +    }
 +
-     // --- Kernel body-extent table (runtime kernel-image bless) ---
-     // The BIOS copies Kernel Part 2 from ROM [0x1FC10000,0x1FC18000) to RAM
-     // [0x500,0x8500) at boot; the functions above with keys in that window
-@@ -1792,7 +1807,7 @@
-                            g_sym_prefix, kb_count);
-         out += kb;
-         out += "};\n";
--        out += fmt::format("static const uint32_t {}psx_bios_kernel_body_count = {}u;\n\n",
-+        out += fmt::format("enum {{ {}psx_bios_kernel_body_count = {}u }};\n\n",
-                            g_sym_prefix, kb_count);
-     }
- 
-@@ -1989,7 +2004,9 @@
+     // Segment variants (docs/SEGMENT_AWARE_CODE.md §5.4): bodies compiled for
+     // one exact runtime PC in another segment than their window's. Keyed by
+     // the full PC; the normalized table above still finds the word (and its
+@@ -2372,7 +2387,9 @@
      out += "        }\n";
      out += "#endif\n";
      out += "        uint32_t phys = normalize(addr);\n";

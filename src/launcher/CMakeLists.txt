@@ -36,7 +36,7 @@ endif()
 add_library(disruptor-launcher-disc-reader STATIC
     "${PSXRECOMP_ROOT}/runtime/src/iso_reader.cpp" "${PSXRECOMP_ROOT}/runtime/src/cue_sheet.cpp")
 target_compile_features(disruptor-launcher-disc-reader PUBLIC cxx_std_20)
-target_include_directories(disruptor-launcher-disc-reader PUBLIC "${PSXRECOMP_ROOT}/runtime/include")
+target_include_directories(disruptor-launcher-disc-reader PUBLIC "${PSXRECOMP_ROOT}/runtime/include" "${PSXRECOMP_ROOT}/recompiler/include")
 target_link_libraries(disruptor-launcher-disc-reader PRIVATE ${DISRUPTOR_LAUNCHER_CHDR_LIBRARY})
 
 add_library(disruptor-disc-import STATIC disc_import.cpp chd_image.cpp)

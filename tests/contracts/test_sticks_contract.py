@@ -30,9 +30,9 @@ require(
     "the map's stick sources press nothing while the game reads the sticks, and press again in a network game",
 )
 require(
-    "controller_pad_buttons(p.handle, suppress_stick_axes)"
+    "controller_pad_buttons(controller_map_for(p), p.handle,"
     in between(runtime, "static uint16_t pad_buttons_for(", "\n}\n")
-    and "controller_pad_buttons(h, suppress_stick_axes)"
+    and "controller_pad_buttons(controller_map_for(tmp), h,"
     in between(runtime, "static uint16_t dev_all_controllers_buttons(", "\n}\n")
     and runtime.count("controller_pad_buttons(") == 4,
     "every pad sample folds the map through that one function, so no path folds the sticks beside it",

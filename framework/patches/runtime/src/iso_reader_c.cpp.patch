@@ -1,17 +1,18 @@
 diff --git a/runtime/src/iso_reader_c.cpp b/runtime/src/iso_reader_c.cpp
-index 13c0beb274a76941b174bd8083f89c92266cc403..a3fd420284513192ff70b4446bcb50e9b1adf02c 100644
+index f26415c9d3ab7f8de6a08794934e00c19856b8db..bbfeca8d28b00fa24cfcd26b9d32915f08aef42e 100644
 --- a/runtime/src/iso_reader_c.cpp
 +++ b/runtime/src/iso_reader_c.cpp
-@@ -4,9 +4,25 @@
+@@ -4,11 +4,26 @@
   * Provides iso_open() / iso_read_sector() / iso_close() for use by cdrom.c
   */
  
 +#include "iso_overlay.h"
+ #include "host_span_ring.h"
  #include "iso_reader.h"
  #include "mod_runtime.h"
 +#include <algorithm>
  #include <cstdio>
-+#include <cstring>
+ #include <cstring>
 +#include <vector>
 +
 +namespace {
@@ -28,7 +29,7 @@ index 13c0beb274a76941b174bd8083f89c92266cc403..a3fd420284513192ff70b4446bcb50e9
  
  extern "C" {
  
-@@ -16,14 +32,39 @@
+@@ -18,14 +33,43 @@
          delete reader;
          return nullptr;
      }
@@ -57,40 +58,45 @@ index 13c0beb274a76941b174bd8083f89c92266cc403..a3fd420284513192ff70b4446bcb50e9
  }
  
  int iso_read_sector(void* handle, uint32_t lba, uint8_t* buffer, int size) {
-     if (!handle) return 0;
+     if (!handle || !buffer || size < 2048) return 0;
      auto* reader = static_cast<PS1::ISOReader*>(handle);
-     (void)size; /* ReadSector always reads 2048 bytes */
--    if (!reader->ReadSector(lba, buffer)) return 0;
+     const uint64_t span_t0 = host_span_begin();
+-    const bool read_ok = mod_runtime_read_disc_extent(lba, 0, buffer, size) || reader->ReadSector(lba, buffer);
 +    uint8_t raw[2352];
 +    const int stood_in = overlaid(handle) && g_overlay->read ? g_overlay->read(handle, lba, raw) : 0;
-+    if (stood_in < 0) return 0;
-+    if (stood_in > 0) std::memcpy(buffer, raw + 24, 2048);
-+    else if (!reader->ReadSector(lba, buffer)) return 0;
++    bool read_ok = false;
++    if (stood_in > 0) {
++        std::memcpy(buffer, raw + 24, 2048);
++        read_ok = true;
++    } else if (stood_in == 0) {
++        read_ok = mod_runtime_read_disc_extent(lba, 0, buffer, size) || reader->ReadSector(lba, buffer);
++    }
+     host_span_end(HSPAN_DISC_READ, span_t0, lba);   /* a stalled disk shows here, not as an unexplained frame */
+     if (!read_ok) return 0;
      mod_runtime_patch_disc_sector(lba, 0, buffer, 2048);
-     return 1;
- }
-@@ -31,15 +72,17 @@
- int iso_read_raw_sector(void* handle, uint32_t lba, uint8_t* buffer, int size) {
-     if (!handle || size < 2352) return 0;
+@@ -36,7 +80,9 @@
+     if (!handle || !buffer || size < 2352) return 0;
      auto* reader = static_cast<PS1::ISOReader*>(handle);
--    if (!reader->ReadRawSector(lba, buffer)) return 0;
+     const uint64_t span_t0 = host_span_begin();
+-    const bool read_ok = mod_runtime_read_disc_extent(lba, 1, buffer, size) || reader->ReadRawSector(lba, buffer);
 +    const int stood_in = overlaid(handle) && g_overlay->read ? g_overlay->read(handle, lba, buffer) : 0;
-+    if (stood_in < 0) return 0;
-+    if (stood_in == 0 && !reader->ReadRawSector(lba, buffer)) return 0;
++    const bool read_ok = stood_in > 0 ||
++        (stood_in == 0 && (mod_runtime_read_disc_extent(lba, 1, buffer, size) || reader->ReadRawSector(lba, buffer)));
+     host_span_end(HSPAN_DISC_READ, span_t0, lba);
+     if (!read_ok) return 0;
      mod_runtime_patch_disc_sector(lba, 1, buffer, 2352);
-     return 1;
- }
+@@ -76,8 +122,8 @@
  
  uint32_t iso_sector_count(void* handle) {
      if (!handle) return 0;
 -    auto* reader = static_cast<PS1::ISOReader*>(handle);
--    return reader->GetSectorCount();
+-    return mod_runtime_disc_sector_count(reader->GetSectorCount());
 +    const uint32_t stood_in = overlaid(handle) && g_overlay->sectors ? g_overlay->sectors(handle) : 0;
-+    return stood_in ? stood_in : iso_sector_count_plain(handle);
++    return stood_in ? stood_in : mod_runtime_disc_sector_count(iso_sector_count_plain(handle));
  }
  
  /* CD-track TOC accessors (multi-track / CD-DA support). track is 1-based. */
-@@ -65,6 +108,9 @@
+@@ -106,6 +152,9 @@
  
  void iso_close(void* handle) {
      if (!handle) return;

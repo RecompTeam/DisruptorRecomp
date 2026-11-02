@@ -501,7 +501,7 @@ static void gl_rth_exec(void *user, const RtCmd *c, const void *payload) {
         s_rthx_squash[0] = v[7]; s_rthx_squash[1] = v[8];
         s_rthx_presented = (uint64_t)(uint32_t)v[9] | (uint64_t)(uint32_t)v[10] << 32;
         s_rthx_cycle = (uint64_t)(uint32_t)v[11] | (uint64_t)(uint32_t)v[12] << 32;
-        gl_renderer_present_wide_or_vram(v[0], v[1], v[2], v[3], v[4], v[5], v[6]);
+        gl_renderer_present_wide_or_vram(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[13]);
         break;
     case RTH_PRESENT_VRAM:
         s_rthx_squash[0] = v[6]; s_rthx_squash[1] = v[7];
@@ -585,6 +585,10 @@ void gl_renderer_render_thread_stop(void) {
 }
 
 int gl_renderer_render_thread_active(void) { return s_rth_on; }
+
+/* The framework's main loop asks for these: the swap interval it set, and the GL context before it touches GL itself. */
+int gl_renderer_get_swap_interval(void) { return s_swap_interval; }
+void gl_renderer_render_thread_sync(const char *reason) { gl_rth_acquire(reason ? reason : "framework"); }
 
 static int s_rth_want = -1;  /* asked: 1 on, 0 off, -1 not yet read from PSX_RENDER_THREAD */
 /* The thread starts or stops at the next frame boundary, where the emulation thread holds the context. */

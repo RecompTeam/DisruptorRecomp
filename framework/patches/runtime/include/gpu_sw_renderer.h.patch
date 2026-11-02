@@ -1,8 +1,8 @@
 diff --git a/runtime/include/gpu_sw_renderer.h b/runtime/include/gpu_sw_renderer.h
-index b8cea0e3a63da893772e2beccd97dc2ebec2559b..5b55ee1d059a8e18d4056c3239e85ea3d0fcda3a 100644
+index 8564c320e01c0eaf62a6bb199bf389d649bb2b31..e3db4c250eb512027d989135a422010d7a968857 100644
 --- a/runtime/include/gpu_sw_renderer.h
 +++ b/runtime/include/gpu_sw_renderer.h
-@@ -8,10 +8,11 @@
+@@ -8,7 +8,7 @@
  #endif
  
  /* Maximum internal-resolution supersampling factor (linear, per axis). */
@@ -11,7 +11,3 @@ index b8cea0e3a63da893772e2beccd97dc2ebec2559b..5b55ee1d059a8e18d4056c3239e85ea3
  
  /* Initialize software renderer */
  void sw_renderer_init(uint16_t* vram);
-+void sw_renderer_rebind_vram(uint16_t* vram);
- 
- /* Internal-resolution supersampling (SSAA).
-  * scale == 1 : disabled, renderer behaves exactly as native VRAM only.

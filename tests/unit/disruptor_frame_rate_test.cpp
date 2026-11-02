@@ -47,8 +47,21 @@ void expect(bool condition, const char *message) {
 
 }  // namespace
 
-uint32_t g_psx_cyc_overclock_shift = 0;
-uint32_t g_psx_cyc_overclock_carry = 0;
+uint32_t g_guest_cycle_scale = 1;
+int g_guest_cycle_scale_sets = 0;
+
+void psx_guest_cycle_scale_set(uint32_t scale) {
+    g_guest_cycle_scale = scale;
+    ++g_guest_cycle_scale_sets;
+}
+
+uint32_t psx_guest_cycle_scale_config(void) { return g_guest_cycle_scale; }
+
+static uint32_t cpu_shift() {
+    uint32_t shift = 0;
+    while ((1u << shift) < g_guest_cycle_scale) ++shift;
+    return shift;
+}
 
 uint8_t psx_mod_read_byte(uint32_t address) {
     return g_ram[physical(address)];
@@ -87,7 +100,7 @@ std::uint32_t vsync(std::uint32_t argument, std::uint32_t return_address) {
 std::uint32_t poll(std::uint32_t return_address) {
     (void)vsync(1u, kElsewhere);
     (void)vsync(kPoll, return_address);
-    return g_psx_cyc_overclock_shift;
+    return cpu_shift();
 }
 
 void retail_state() {
@@ -152,27 +165,23 @@ int main() {
            "a poll outside the frame loop does not start it");
     (void)vsync(kPoll, kLoopBegin);
     (void)vsync(kPoll, kElsewhere);
-    expect(g_psx_cyc_overclock_shift != 0u,
+    expect(cpu_shift() != 0u,
            "a poll from library code does not end the fast section");
     (void)vsync(0u, kElsewhere);
-    expect(g_psx_cyc_overclock_shift == 0u,
+    expect(cpu_shift() == 0u,
            "any waiting VSync ends the fast section");
     expect(poll(kLoopBegin) == 3u, "a section at eight times");
-    g_psx_cyc_overclock_carry = 3u;
+    const int sets = g_guest_cycle_scale_sets;
     (void)vsync(kPoll, kElsewhere);
     (void)vsync(kPoll, kLoopBegin);
-    expect(g_psx_cyc_overclock_carry == 3u, "keeps its carry through library and frame loop polls");
+    expect(g_guest_cycle_scale_sets == sets, "library and frame loop polls inside a section leave the scale alone");
     (void)vsync(0u, kElsewhere);
-    expect(g_psx_cyc_overclock_shift == 0u && g_psx_cyc_overclock_carry == 0u,
-           "and the wait that ends it ends its carry");
+    expect(cpu_shift() == 0u, "and the wait that ends it ends the scale");
     disruptor_frame_rate_set_cpu_multiplier(4);
-    expect(poll(kLoopBegin) == 2u && g_psx_cyc_overclock_carry == 0u,
-           "so a section at another divisor starts from none");
-    g_psx_cyc_overclock_carry = 3u;
+    expect(poll(kLoopBegin) == 2u, "a section at another divisor takes it");
     disruptor_frame_rate_set_cpu_multiplier(8);
     (void)vsync(kPoll, kLoopBegin);
-    expect(g_psx_cyc_overclock_shift == 3u && g_psx_cyc_overclock_carry == 0u,
-           "and a divisor changed between two polls of one section drops the carry too");
+    expect(cpu_shift() == 3u, "and a divisor changed between two polls of one section applies at the next");
     (void)vsync(0u, kElsewhere);
 
     seed_word(kFixedStepWord, 1u);

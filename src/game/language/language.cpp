@@ -206,6 +206,13 @@ private:
     uint32_t left_;
 };
 
+/* Taken at activation, so every state of a session holds the same memory whatever the disc laid over. */
+uint32_t scratch() {
+    if (g_scratch != 0u) return g_scratch;
+    g_scratch = psx_mod_alloc_guest_memory(static_cast<uint32_t>(kLongestString) + 1u, 4u);
+    return g_scratch;
+}
+
 int take_pack(const uint8_t *data, uint32_t size) {
     if (!data) return 0;
     PackReader pack(data, size);
@@ -257,8 +264,7 @@ int take_pack(const uint8_t *data, uint32_t size) {
         if (!sized || !rules::sign_fits(sign[0], drawn) || !given[sign[0]].empty()) return 0;
         given[sign[0]] = drawn;
     }
-    g_scratch = psx_mod_alloc_guest_memory(static_cast<uint32_t>(kLongestString) + 1u, 4u);
-    if (g_scratch == 0u) return 0;
+    if (scratch() == 0u) return 0;
     g_words = std::move(whole);
     g_formats = std::move(formats);
     g_places = std::move(placed);
@@ -306,7 +312,11 @@ void place_entry(CPUState *cpu, uint32_t routine) {
     else if (static_cast<int32_t>(cpu->gpr[x]) == home_x) cpu->gpr[x] = static_cast<uint32_t>(other_x);
 }
 
+void reserve_scratch() { (void)scratch(); }
+
 PSX_MOD_CONSTRUCTOR(register_disruptor_language) {
+    if (!psx_mod_register_activation_plugin("disruptor.language.text", reserve_scratch))
+        std::fprintf(stderr, "disruptor: failed to register the language scratch's activation\n");
     for (const uint32_t routine : kTextRoutines) {
         if (!psx_mod_register_function_entry_plugin("disruptor.language.text", routine, text_entry))
             std::fprintf(stderr, "disruptor: failed to register the text hook at 0x%08X\n", routine);

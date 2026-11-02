@@ -1,47 +1,11 @@
 diff --git a/runtime/src/psx_cycles.c b/runtime/src/psx_cycles.c
-index 72cbe9b496991cbb84b10afb8813c5282c7dd0cf..9d0a58e56b12e83e1e79b381314fb9122b6238d7 100644
+index 86528dbea22ea54bc7d6d63e7ad70de744ed54fe..b49bfcffb0147112ae448f7955ba53bf683de989 100644
 --- a/runtime/src/psx_cycles.c
 +++ b/runtime/src/psx_cycles.c
-@@ -1,6 +1,7 @@
- /* psx_cycles.c — PSX guest CPU cycle clock. */
- 
- #include "psx_cycles.h"
-+#include "psx_cyc_overclock.h"
- #include "cpu_state.h"
- #include <stdlib.h>
- #if defined(_MSC_VER)
-@@ -20,6 +21,8 @@
- uint32_t g_psx_cyc_batch = 0;
- uint32_t g_psx_cyc_batch_limit = 0;
- int      g_psx_cyc_bb_defer = 0;
-+uint32_t g_psx_cyc_overclock_shift = 0;
-+uint32_t g_psx_cyc_overclock_carry = 0;
- static int      s_cycle_replay_active = 0;
- static uint64_t s_cycle_replay_live = 0;
- 
-@@ -582,7 +585,7 @@
- /* DIV/DIVU latency is the fixed constant 37 — emitted directly at the op site. */
- 
- void psx_muldiv_set(CPUState* cpu, uint32_t latency) {
--    cpu->muldiv_ts_done = psx_cycle_count + (uint64_t)latency;
-+    cpu->muldiv_ts_done = psx_cycle_count + (uint64_t)psx_cyc_overclocked_latency(latency);
- }
- 
- void psx_muldiv_stall(CPUState* cpu) {
-@@ -672,7 +675,7 @@
-     if (cpu->gte_ts_done > psx_cycle_count) {
-         psx_advance_cycles((uint32_t)(cpu->gte_ts_done - psx_cycle_count));
-     }
--    cpu->gte_ts_done = psx_cycle_count + (uint64_t)latency;
-+    cpu->gte_ts_done = psx_cycle_count + (uint64_t)psx_cyc_overclocked_latency(latency);
- }
- 
- void psx_gte_stall(CPUState* cpu) {
-@@ -680,3 +683,63 @@
-         psx_advance_cycles((uint32_t)(cpu->gte_ts_done - psx_cycle_count));
+@@ -1161,6 +1161,66 @@
      }
  }
-+
+ 
 +#if !defined(PSX_OVERLAY_DLL_BUILD)
 +#include "psx_cyc.h"
 +
@@ -64,7 +28,7 @@ index 72cbe9b496991cbb84b10afb8813c5282c7dd0cf..9d0a58e56b12e83e1e79b381314fb912
 +    psx_cyc_run_inline(cpu, masks, 4u);
 +}
 +
-+/* psx_cyc_charge from after the overclock on, as it was before its batch add was split out for inlining. */
++/* psx_cyc_charge from after the scale check on, as it was before its batch add was split out for inlining. */
 +void psx_cyc_charge_slow(uint32_t cycles) {
 +    if (g_ls_replay_active || g_event_step_conservative) {
 +        psx_advance_cycles(cycles);
@@ -101,3 +65,7 @@ index 72cbe9b496991cbb84b10afb8813c5282c7dd0cf..9d0a58e56b12e83e1e79b381314fb912
 +    psx_advance_cycles(cycles); /* publishes any pending batch first */
 +}
 +#endif
++
+ static void freeze_save(PsxCycleFreeze *save) {
+     extern uint64_t g_psx_cycle_fast_limit;
+     save->cycle_count = psx_cycle_count;

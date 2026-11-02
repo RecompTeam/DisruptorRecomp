@@ -124,17 +124,16 @@ def main() -> int:
     # Texture correction switches independently of geometry, for a same-geometry A/B.
     env_pos = main_cpp.find('std::getenv("PSX_TEXTURE_CORRECTION")')
     require(env_pos >= 0, "main must expose the independent PSX_TEXTURE_CORRECTION gate")
-    env_gate = main_cpp[env_pos : env_pos + 240]
-    require("g_texture_correction" in env_gate, "the texture environment gate must update its own setting")
+    env_gate = main_cpp[env_pos : env_pos + 120]
+    require("pgxp_cfg.video_texture = " in env_gate, "the texture environment gate must update its own setting")
+    require("video_geometry" not in env_gate, "the texture environment gate must not mutate geometry correction")
     require(
-        "g_geometry_correction =" not in env_gate, "the texture environment gate must not mutate geometry correction"
+        "    pgxp_cfg.video_geometry = g_video_geometry_correction || gpu_geometry_correction_enabled();\n"
+        "    pgxp_cfg.video_texture = g_video_perspective_texturing || gpu_texture_correction_enabled();\n" in main_cpp
+        and "    gpu_geometry_correction_set(pgxp_arm.geometry);\n"
+        "    gpu_texture_correction_set(pgxp_arm.texture && pgxp_arm.geometry ? 1 : 0);\n" in main_cpp,
+        "a session's start must keep the player's saved corrections and apply them to the GPU, textures only over exact geometry",
     )
-    require(
-        re.search(r"gpu_texture_correction_set\s*\(\s*g_texture_correction\s*\?\s*1\s*:\s*0\s*\)", main_cpp)
-        is not None,
-        "startup must apply the independent texture-correction setting",
-    )
-    require("gpu_geometry_correction_set" in main_cpp, "texture correction must not replace the geometry startup gate")
 
     # The GPU front-end uses renderer dispatch and gates q on exact provenance before any per-vertex depth.
     require(
@@ -231,10 +230,10 @@ def main() -> int:
     require("perspective_valid" in projection, "the depth-validity verdict must travel with copied provenance")
     capture = function_body(gte, "gte_rtps_internal")
     for token in (
-        "gte->H != 0",
+        "gte_h_scaled(gte) != 0",
         "gte->MAC3 > 0",
         "gte->MAC3 <= 0xFFFF",
-        "(uint32_t)gte->SZ[3] * 2u > (uint32_t)gte->H",
+        "(uint32_t)gte->SZ[3] * 2u > (uint32_t)gte_h_scaled(gte)",
     ):
         require(token in capture, f"strict perspective capture predicate missing: {token}")
 

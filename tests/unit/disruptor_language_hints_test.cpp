@@ -53,6 +53,11 @@ uint32_t psx_mod_alloc_guest_memory(uint32_t size, uint32_t) {
     g_allocated_bytes = size;
     return g_allocated_at;
 }
+PSXModActivationCallback g_activation = nullptr;
+int psx_mod_register_activation_plugin(const char *, PSXModActivationCallback callback) {
+    g_activation = callback;
+    return 1;
+}
 int psx_mod_register_function_entry_plugin(const char *, uint32_t address, PSXModFunctionEntryCallback callback) {
     if (++g_registrations == g_registration_that_fails) return 0;
     g_hooks.emplace_back(address, callback);
@@ -231,6 +236,17 @@ void test_three_hooks_or_none() {
 
 }  // namespace
 
+void test_the_rectangle_is_taken_at_activation() {
+    g_tall_stage = 0;
+    const int allocations = g_allocations, writes = g_writes;
+    g_activation();
+    g_activation();
+    expect(g_allocations == allocations + 1 && g_writes == writes + 4 && tall_rect_at(g_tall_stage),
+           "the activation takes and writes the rectangle once, before the guest runs");
+    expect(read_tall() && staged_tall() && moved_tall() && g_allocations == allocations + 1,
+           "a tall hint then takes nothing more");
+}
+
 int main() {
     test_three_routines_are_hooked();
     test_nothing_changes_without_a_tall_disc();
@@ -239,6 +255,7 @@ int main() {
     test_only_the_hint_calls_are_touched();
     test_no_mod_memory_no_tall_hint();
     test_three_hooks_or_none();
+    test_the_rectangle_is_taken_at_activation();
     if (g_failures != 0) return 1;
     std::cout << "disruptor language hints: PASS\n";
     return 0;

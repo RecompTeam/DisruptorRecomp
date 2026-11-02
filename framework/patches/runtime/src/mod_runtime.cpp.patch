@@ -1,8 +1,8 @@
 diff --git a/runtime/src/mod_runtime.cpp b/runtime/src/mod_runtime.cpp
-index acfaf51d7a30fba962f2bd682971fbe399fafa49..beb17634460a0c057601f173eb31362ba61d1d7a 100644
+index c2095254a35878c9b2b7380a29e84afa0d4742eb..7f7e0e2ad786a2736fa62cfd42a4a9e76da617ec 100644
 --- a/runtime/src/mod_runtime.cpp
 +++ b/runtime/src/mod_runtime.cpp
-@@ -35,10 +35,13 @@
+@@ -76,10 +76,13 @@
  
  extern "C" uint8_t psx_read_byte(uint32_t addr);
  extern "C" void psx_write_byte(uint32_t addr, uint8_t value);
@@ -16,96 +16,3 @@ index acfaf51d7a30fba962f2bd682971fbe399fafa49..beb17634460a0c057601f173eb31362b
  extern "C" uint32_t psx_mod_memory_alloc(uint32_t size, uint32_t alignment);
  extern "C" uint32_t psx_mod_gpu_dma_memory_alloc(uint32_t size,
                                                    uint32_t alignment);
-@@ -509,6 +512,21 @@
-     std::fprintf(stdout, "psxrecomp: cached derived disc %s\n", cached.string().c_str());
-     out = cached;
-     return true;
-+}
-+
-+/* Only an enabled package matches the image's digest: hashing it for none cost 6 s a start on a CHD, 1.7 s on a BIN. */
-+const std::string& disc_digest() {
-+    RuntimeMods& s = state();
-+    if (!s.disc_sha256.empty() || s.disc_path.empty()) return s.disc_sha256;
-+    for (const auto& [id, versions] : s.manager.packages()) {
-+        (void)versions;
-+        const ModPackage* package = selected_package(id);
-+        if (!package || !package_has_enabled_feature(*package)) continue;
-+        std::string hash_error;
-+        if (!sha256_file(s.disc_path, s.disc_sha256, &hash_error)) s.disc_sha256.clear();
-+        break;
-+    }
-+    return s.disc_sha256;
- }
- 
- #if defined(RECOMP_LAUNCHER)
-@@ -806,7 +824,7 @@
-     }
-     if (!state().disc_path.empty())
-         state().validation = state().manager.resolve(
--            state().game_id, state().exe_sha256, state().disc_sha256);
-+            state().game_id, state().exe_sha256, disc_digest());
-     else
-         state().validation = {};
-     state().error.clear();
-@@ -939,14 +957,11 @@
-     RuntimeMods& s = state();
-     if (!s.initialized) return true;
-     if (disc_path != s.disc_path) {
--        std::string hash_error;
--        std::string digest;
--        if (!sha256_file(disc_path, digest, &hash_error)) digest.clear();
-         s.disc_path = disc_path;
--        s.disc_sha256 = std::move(digest);
-+        s.disc_sha256.clear();
-     }
-     ModResolution plan =
--        s.manager.resolve(s.game_id, s.exe_sha256, s.disc_sha256);
-+        s.manager.resolve(s.game_id, s.exe_sha256, disc_digest());
-     s.validation = plan;
-     if (!plan.ok) {
-         s.error.clear();
-@@ -1029,7 +1044,7 @@
-         if (write.target != ModPatchTarget::MainExe) continue;
-         if (write.fields.empty()) {
-             for (size_t i = 0; i < write.replacement.size(); ++i)
--                psx_write_byte((uint32_t)write.location + (uint32_t)i,
-+                psx_host_write_byte((uint32_t)write.location + (uint32_t)i,
-                                write.replacement[i]);
-             dirty_ram_mark_executable_range(
-                 (uint32_t)write.location & 0x1FFFFFFFu,
-@@ -1037,7 +1052,7 @@
-         } else {
-             for (const ModResolution::Write::Field& field : write.fields) {
-                 for (size_t i = 0; i < field.replacement.size(); ++i)
--                    psx_write_byte(
-+                    psx_host_write_byte(
-                         (uint32_t)write.location +
-                             (uint32_t)field.offset + (uint32_t)i,
-                         field.replacement[i]);
-@@ -1105,7 +1120,7 @@
- }
- 
- extern "C" void psx_mod_write_byte(uint32_t address, uint8_t value) {
--    psx_write_byte(address, value);
-+    psx_host_write_byte(address, value);
- }
- 
- extern "C" uint16_t psx_mod_read_half(uint32_t address) {
-@@ -1113,7 +1128,7 @@
- }
- 
- extern "C" void psx_mod_write_half(uint32_t address, uint16_t value) {
--    psx_write_half(address, value);
-+    psx_host_write_half(address, value);
- }
- 
- extern "C" uint32_t psx_mod_read_word(uint32_t address) {
-@@ -1121,7 +1136,7 @@
- }
- 
- extern "C" void psx_mod_write_word(uint32_t address, uint32_t value) {
--    psx_write_word(address, value);
-+    psx_host_write_word(address, value);
- }
- 
- extern "C" uint32_t psx_mod_alloc_guest_memory(uint32_t size,

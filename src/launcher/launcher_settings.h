@@ -69,7 +69,7 @@ public:
     // UTF-8 paths. An empty language disc means the US disc alone.
     const std::string& language_disc() const { return settings_.language_disc; }
     // Player 1's device where settings.toml names one, empty where game.toml's default applies.
-    std::string player_device() const { return settings_.has_p1_device ? settings_.p1_device : std::string(); }
+    std::string player_device() const { return settings_.has_p_device[0] ? settings_.p_device[0] : std::string(); }
     std::vector<std::string> language_discs() const;
     bool choose_language_disc(const std::string& path);
     bool forget_language_disc(const std::string& path);

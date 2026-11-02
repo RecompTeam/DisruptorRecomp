@@ -89,7 +89,7 @@ require(
     "        return GTE_PRECISION_LOOKUP_PERSPECTIVE_INVALID;\n"
     in weight
     and gte.count("!projection->perspective_valid") == 1
-    and "                s_precise_sxy[2].unbounded = nearer >= 1.0 && gte->H != 0 && gte->MAC3 > 0 && gte->MAC3 <= 0xFFFF ? 2 : 1;\n"
+    and "                s_precise_sxy[2].unbounded = nearer >= 1.0 && gte_h_scaled(gte) != 0 && gte->MAC3 > 0 && gte->MAC3 <= 0xFFFF ? 2 : 1;\n"
     in gte,
     "a corner drawn at its exact place is textured by the depth that place was divided by, when the place was not brought "
     "nearer and the depth is the camera's own, and no other corner the GTE gave no depth",
@@ -162,12 +162,13 @@ require(
 require(
     "void gr_set_unpinned_triangle(int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t x2, int32_t y2);"
     in render_header
-    and "    void (*set_unpinned_triangle)(int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t x2, int32_t y2);\n} GpuRenderBackend;"
+    and "    void (*set_unpinned_triangle)(int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t x2, int32_t y2);\n"
     in render_header
     and "void gr_set_unpinned_triangle(int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t x2, int32_t y2) {\n"
     "    if (g_b->set_unpinned_triangle) g_b->set_unpinned_triangle(x0, y0, x1, y1, x2, y2);\n}"
-    in render,
-    "the backend's member must stay last, so that a table written without it leaves it null, and a null one must be skipped",
+    in render
+    and "static const GpuRenderBackend SW_BACKEND = {\n    .name " in render,
+    "a backend table written without the member must leave it null, so tables are designated, and a null one must be skipped",
 )
 take = body(renderer, "static int take_visual_triangle(const int *xs, const int *ys,")
 require(

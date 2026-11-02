@@ -1,8 +1,8 @@
 diff --git a/runtime/include/ws_aspect_cone_math.h b/runtime/include/ws_aspect_cone_math.h
-index abb3adacf76f3836c11201dc7990ae9a6faba856..e8ea6fe4f27e28722f7f34bd6fdb2b9d4f8b57f7 100644
+index 56aed2939ab7b9db338329c6a637c57e000d6efb..92f6f2fd920ac76e3467e17548f6f3b969b7798e 100644
 --- a/runtime/include/ws_aspect_cone_math.h
 +++ b/runtime/include/ws_aspect_cone_math.h
-@@ -24,6 +24,13 @@
+@@ -26,6 +26,13 @@
   * when extent_pixels is zero. Results stay below a 90-degree half-angle. */
  uint32_t psx_ws_widen_angle_q12(uint32_t vanilla, int extent_pixels);
  

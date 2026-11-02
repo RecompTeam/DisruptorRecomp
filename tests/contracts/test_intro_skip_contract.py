@@ -171,10 +171,10 @@ require(
     "        !psx_netplay_active() && g_fast_forward_query() != 0;\n"
     in host
     and host.count("g_fast_forward_query()") == 1
-    and "                     module_fast_forward ||\n"
-    "                     (turbo_loads_active && g_turbo_audio_sink_enabled));"
-    in host
-    and "    if (g_headless || module_fast_forward) {\n        netplay_tail.skip_pace();\n        return;\n    }"
+    and "        const int accelerated_audio_sink = module_fast_forward || (psx_audio_sync_enabled() &&\n" in host
+    and "        (turbo_loads_active || fmv_skip_active || module_fast_forward) ? 1 : 0;\n" in host
+    and "    if (g_headless || module_fast_forward) {\n#ifndef PSX_NO_DEBUG_TOOLS\n"
+    "        if (g_headless) headless_present_image_ring_capture();\n#endif\n        ep.skip_pace = 1;\n        return ep;\n    }"
     in host
     and host.index("const bool module_fast_forward")
     < host.index("    if (g_headless || module_fast_forward) {")

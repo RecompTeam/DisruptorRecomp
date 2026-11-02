@@ -51,6 +51,11 @@ uint32_t psx_mod_alloc_guest_memory(uint32_t size, uint32_t) {
     g_scratch_end = kModMemory + g_allocated;
     return g_scratch_first;
 }
+PSXModActivationCallback g_activation = nullptr;
+int psx_mod_register_activation_plugin(const char *, PSXModActivationCallback callback) {
+    g_activation = callback;
+    return 1;
+}
 int psx_mod_register_function_entry_plugin(const char *, uint32_t address, PSXModFunctionEntryCallback callback) {
     g_hooks.emplace_back(address, callback);
     return 1;
@@ -498,6 +503,22 @@ void test_only_ram_is_read() {
 
 }  // namespace
 
+void test_the_scratch_is_taken_at_activation() {
+    forget();
+    const int before = g_allocations;
+    g_activation();
+    g_activation();
+    const std::uint32_t reserved = g_scratch_first;
+    expect(g_allocations == before + 1 && g_scratch == reserved && g_scratch_end - reserved == 97u,
+           "the activation takes the scratch string once, before the guest runs");
+    g_started = 1;
+    g_disc_pack = pack(kGood);
+    const auto [address, words] = drawn(kResume);
+    expect(address == reserved && words == "REPRENDRE" && g_allocations == before + 1,
+           "a pack read later writes into that string and takes nothing more");
+    g_disc_pack.clear();
+}
+
 int main() {
     put(kResume, "RESUME MISSION");
     put(kPickedUp, "PICKED UP %s");
@@ -520,6 +541,7 @@ int main() {
     test_a_string_made_in_two_ways_is_left_alone();
     test_the_large_font_takes_its_signs();
     test_only_ram_is_read();
+    test_the_scratch_is_taken_at_activation();
     expect(g_writes > 0 && g_stray_writes == 0, "every write must land in the scratch string the module was given");
     if (g_failures != 0) return 1;
     std::cout << "disruptor language: PASS\n";

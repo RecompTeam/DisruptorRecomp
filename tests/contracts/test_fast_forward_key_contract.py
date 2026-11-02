@@ -15,15 +15,15 @@ def faults(sources: dict[str, str]) -> list[str]:
     found = []
     main, host, entry = sources["main"], sources["host"], sources["entry"]
     if not (
-        "#ifdef PSX_HAS_GAME_HOST\n        const int turbo_key = psx_game_fast_forward_key();\n#else\n"
-        "        const int turbo_key = SDL_SCANCODE_RIGHTBRACKET;\n#endif\n"
-        in main
-        and "            turbo_key >= 0 && turbo_key < count && keys[turbo_key]) {" in main
+        "#ifdef PSX_HAS_GAME_HOST\n" in main
+        and "        const int turbo_key = psx_game_fast_forward_key();\n" in main
+        and "            turbo_key >= 0 && turbo_key < count && keys[turbo_key];\n#else\n" in main
+        and "            host_keymap_down(HOST_KEYMAP_TURBO, host_keys, (int)SDL_GetModState());\n#endif\n" in main
         and "const Uint8* keys = SDL_GetKeyboardState(&count);" in main
     ):
         found.append("the framework must ask the game for the key and check it against the keyboard's size")
-    if main.count("SDL_SCANCODE_RIGHTBRACKET") != 1:
-        found.append("] must stay only as the key of a build without a game host")
+    if main.count("psx_game_fast_forward_key()") != 1:
+        found.append("the framework's own Turbo binding must stay only as the key of a build without a game host")
     if "int psx_game_fast_forward_key(void);" not in sources["header"]:
         found.append("the game host header must declare the question")
     if (
@@ -65,7 +65,7 @@ if said:
     raise AssertionError("; ".join(said))
 
 seeded = {
-    "a key the framework reads itself": ("main", "keys[turbo_key]) {", "keys[SDL_SCANCODE_B]) {"),
+    "a key the framework reads itself": ("main", "keys[turbo_key];\n#else\n", "keys[SDL_SCANCODE_B];\n#else\n"),
     "no bound on the scancode": ("main", "turbo_key >= 0 && turbo_key < count && ", "turbo_key >= 0 && "),
     "another key": ("host", "    return SDL_SCANCODE_B;\n", "    return SDL_SCANCODE_V;\n"),
     "B while the rows take letters": ("host", "disruptor_name_entry_taking_text() || ", ""),

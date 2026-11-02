@@ -161,7 +161,13 @@ void renderer_entry(CPUState *cpu, uint32_t address) {
     psx_mod_write_word(root_address, destination);
 }
 
+/* Before the guest runs: an arena taken in a level changed the memory layout, and the framework refused its states. */
+void reserve_arena() {
+    if (!psx_mod_gpu_dma_memory_bytes()) g_arena_base = psx_mod_alloc_gpu_dma_memory(2u * kArenaBytes, 16u);
+}
+
 PSX_MOD_CONSTRUCTOR(register_disruptor_render_arena) {
+    psx_mod_register_activation_plugin("disruptor.render_arena", reserve_arena);
     psx_mod_register_function_entry_plugin(
         "disruptor.render_arena", kRendererEntry, renderer_entry);
 }

@@ -101,7 +101,7 @@ require(
 require(
     "disruptor" not in interpreter.lower()
     and interpreter.count("psx_game_instruction_ran(") == 1
-    and "    const int rv = exec_one_fetched_inner(cpu, pc, insn, next_pc_out);\n"
+    and "    const int rv = exec_one_fetched_inner(cpu, pc, insn, next_pc_out, original_instruction);\n"
     "\n"
     "#ifdef PSX_HAS_GAME_HOST\n"
     "    psx_game_instruction_ran(cpu, pc, insn);\n"

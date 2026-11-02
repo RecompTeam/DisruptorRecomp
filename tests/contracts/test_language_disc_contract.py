@@ -103,10 +103,12 @@ require(
 require(
     "    return g_overlay && std::find(g_plain.begin(), g_plain.end(), handle) == g_plain.end();" in reader
     and reader.count("overlaid(handle) && g_overlay->read ? g_overlay->read(handle, lba, ") == 2
-    and reader.count("    if (stood_in < 0) return 0;\n") == 2
-    and "    if (stood_in > 0) std::memcpy(buffer, raw + 24, 2048);\n    else if (!reader->ReadSector(lba, buffer)) return 0;"
+    and reader.count("    if (!read_ok) return 0;\n") == 2
+    and "    if (stood_in > 0) {\n        std::memcpy(buffer, raw + 24, 2048);\n        read_ok = true;\n    } else if (stood_in == 0) {\n"
+    "        read_ok = mod_runtime_read_disc_extent(lba, 0, buffer, size) || reader->ReadSector(lba, buffer);\n    }\n"
     in reader
-    and "    if (stood_in == 0 && !reader->ReadRawSector(lba, buffer)) return 0;" in reader
+    and "    const bool read_ok = stood_in > 0 ||\n        (stood_in == 0 && (mod_runtime_read_disc_extent(lba, 1, buffer, size) || "
+    "reader->ReadRawSector(lba, buffer)));\n" in reader
     and "    return handle && static_cast<PS1::ISOReader*>(handle)->ReadRawSector(lba, buffer) ? 1 : 0;" in reader
     and "    if (handle) g_plain.push_back(handle);" in reader
     and "    g_plain.erase(std::remove(g_plain.begin(), g_plain.end(), handle), g_plain.end());" in reader
@@ -324,7 +326,7 @@ require(
 require(
     "    if (g_states_apart) return;\n" in source
     and "    if (entry == 0u || !folder || folder[0] == '\\0') return;\n"
-    '    savestate_configure((std::string(folder) + "/" + g_disc.language()).c_str(), bios, entry);\n'
+    '    savestate_configure((std::string(folder) + "/" + g_disc.language()).c_str(), bios, entry, nullptr, 0u);\n'
     "    g_states_apart = true;"
     in source
     and "        if (g_state == State::kOn) keep_states_apart();\n        return g_state == State::kOn;" in source
@@ -337,7 +339,8 @@ require(
     "    if (void *game = iso_game_disc(); game && !g_path.empty()) (void)laid_out(game);"
     in source
     and "        savestate_configure(memcard_dir.string().c_str(),\n"
-    "                            memory_get_bios_checksum(), game_entry_pc);\n"
+    "                            memory_get_bios_checksum(), game_entry_pc,\n"
+    "                            bios_token, openbios_ws);\n"
     "#ifdef PSX_HAS_GAME_HOST\n"
     "        /* Before any state can be asked for. */\n"
     "        psx_game_states_configured();\n"
@@ -346,7 +349,7 @@ require(
     and "void psx_game_states_configured(void) { disruptor_language_settle(); }\n" in read("src/game/host.cpp")
     and host.index("    cdrom_init(disc_path_str.empty()")
     < host.index("        psx_game_states_configured();")
-    < host.index('        if (const char *ls = std::getenv("PSX_LOAD_SLOT")) {')
+    < host.index('        if (const char *ls = std::getenv("PSX_LOAD_SLOT"); ls && *ls) {')
     and "    language_ = language->name;\n    tall_hints_ = language->hints == Hints::kTall && hints != 0;\n    return true;"
     in disc
     and '    tall_hints_ = false;\n    language_ = "";' in disc,
@@ -372,7 +375,7 @@ require(
     in read("src/game/host.cpp")
     and "        if (psx_game_settings_loaded(us)) fast_boot = true;\n" in host
     and host.index("if (psx_game_settings_loaded(us)) fast_boot = true;")
-    < host.index("if (us.has_bios_hle)       bios_hle_requested = us.bios_hle;"),
+    < host.index("if (us.has_bios_hle)       bios_hle  = us.bios_hle;"),
     "the saved language disc must be named while the settings are read, before anything boots, unless the environment names one",
 )
 require(

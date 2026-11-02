@@ -24,21 +24,17 @@ mouse = read("src/game/input/mouse_aim.cpp")
 menu = menu_text(ROOT)
 cmake = read("CMakeLists.txt")
 
+offline = host.find("    if (psx_netplay_active()) {\n        psx_netplay_finish_frame();\n    } else {\n")
+before = host.find(
+    "#ifdef PSX_HAS_GAME_HOST\n        psx_host_set_ui_capture(psx_host_ui_game_input_captured());\n"
+    "        psx_game_before_input();\n#endif\n        mod_controller_source_begin_frame();\n"
+)
+after = host.find(
+    "            env_pad_hold_apply();\n        }\n#ifdef PSX_HAS_GAME_HOST\n        psx_game_after_input();\n#endif\n"
+)
 require(
-    "#ifdef PSX_HAS_GAME_HOST\n"
-    "    if (!psx_netplay_active()) psx_game_before_input();\n"
-    "#endif\n"
-    "    if (psx_netplay_active()) {\n"
-    "        psx_netplay_finish_frame();\n"
-    "    } else if (g_headless) {\n"
-    "        sample_headless_pad_into_sio(override);\n"
-    "    } else {\n"
-    "        sample_pad_into_sio(override);\n"
-    "    }\n"
-    "#ifdef PSX_HAS_GAME_HOST\n"
-    "    if (!psx_netplay_active()) psx_game_after_input();\n"
-    "#endif\n"
-    in host
+    0 <= offline < before < after
+    and host.find("\n    }\n", offline + 80) > after
     and host.count("psx_game_before_input();") == host.count("psx_game_after_input();") == 1
     and "void psx_game_before_input(void) { disruptor_capsule_before_input(); }\n" in game_side
     and "void psx_game_after_input(void) {\n    disruptor_capsule_after_input();\n    disruptor_selection_wheel_guard_input();\n"
@@ -49,18 +45,15 @@ require(
     and "disruptor_capsule_" not in host,
     "the capsule is called once on either side of the pad sampling of every VBlank, and never in a network game",
 )
-sampling = host.index("    if (!psx_netplay_active()) psx_game_after_input();")
+sampling = after
 require(
-    sampling < host.index("    if (g_headless || module_fast_forward) {")
-    and sampling < host.index("    mod_call_frame_hooks();"),
+    0 <= sampling < host.index("\n    mod_call_frame_hooks();\n")
+    and sampling < host.index("    if (g_headless || module_fast_forward) {\n#ifndef PSX_NO_DEBUG_TOOLS\n"),
     "a replay must put its frame in before the frame loop's early ways out: module hooks never run without a window",
 )
 require(
-    'extern "C" void psx_frontend_on_savestate_loaded(void) {\n'
-    "#ifdef PSX_HAS_GAME_HOST\n"
-    "    psx_game_state_loaded();\n"
-    "#endif\n"
-    in host
+    "#ifdef PSX_HAS_GAME_HOST\n    psx_game_state_loaded();\n#endif\n"
+    in host[host.index('extern "C" void psx_frontend_on_savestate_loaded(void) {\n') :][:1200].split("\n}\n")[0]
     and "void psx_game_state_loaded(void) {\n    disruptor_capsule_state_loaded();\n" in game_side,
     "the capsule must hear of a loaded state before the game runs on from it",
 )
@@ -69,7 +62,7 @@ require(
     and "    interrupts_advance_cycles(left - static_cast<uint32_t>(first - now));\n" in capsule
     and "    if (left == 0u || first <= now || first - now > kVBlankCycles) {" in capsule
     and "constexpr uint32_t kVBlankCycles = 564480u;" in capsule
-    and "#define VBLANK_CYCLES   564480u" in read("psxrecomp/runtime/src/interrupts.c"),
+    and "#define PSX_VBLANK_CYCLES_NTSC   564480u" in read("psxrecomp/runtime/include/psx_video_timing.h"),
     "a replay must put the first VBlank at the recording's cycle, with the framework's own VBlank period",
 )
 require(
@@ -100,9 +93,9 @@ require(
 )
 replay = capsule[capsule.index("void replay_frame() {") : capsule.index('extern "C" void disruptor_capsule_note_byte(')]
 require(
-    replay.index("capsule.seen.push_back(memory_now());") < replay.index("    sio_set_pad_state_slot(0, frame.pad[0]);")
+    replay.index("capsule.seen.push_back(memory_now());") < replay.index("    psx_game_pad_word(0, frame.pad[0]);")
     and replay.index("if (++capsule.at == capsule.replayed.size()) finish_replay();")
-    < replay.index("    sio_set_pad_state_slot(0, frame.pad[0]);")
+    < replay.index("    psx_game_pad_word(0, frame.pad[0]);")
     and "        psx_host_write_byte(frame.byte_at, frame.byte);\n        disruptor_capsule_note_byte(frame.byte_at, frame.byte);"
     in replay
     and "    disruptor_mouse_set_vertical_pitch(static_cast<double>(frame.pitch));\n" in replay,
@@ -156,7 +149,7 @@ require(
     "        if (key_down(event, static_cast<SDL_Scancode>(key)) && disruptor_capsule_holds_states()) return 1;\n"
     in menu
     and "    capsule.states_turned = true;\n    return true;\n" in capsule
-    and "    savestate_configure(g_capsule.states_before.c_str(), g_capsule.bios, g_capsule.entry);\n    g_capsule.states_turned = false;\n"
+    and "    savestate_configure(g_capsule.states_before.c_str(), g_capsule.bios, g_capsule.entry, nullptr, 0u);\n    g_capsule.states_turned = false;\n"
     in capsule
     and 'extern "C" int disruptor_capsule_holds_states(void) { return g_capsule.states_turned ? 1 : 0; }\n' in capsule
     and "bool key_down(const SDL_Event *event, SDL_Scancode scancode) {\n    if (!event || event->type != SDL_KEYDOWN) return false;\n"
@@ -179,9 +172,10 @@ require(
     in capsule
     and '    case Recording::kOn:\n        if (capsule.end_asked) {\n            finish_recording("the key");\n            break;\n        }\n'
     in capsule
-    and "} else if (!ui_consumed && ev.type == SDL_KEYDOWN) {" in host
-    and host.index("const int ui_consumed = psx_host_ui_handle_event(&ev);")
-    < host.index("if (key >= SDLK_F1 && key <= SDLK_F12) {"),
+    and "static int host_ui_sink(const void *event, void *) {\n    return psx_host_ui_handle_event(static_cast<const SDL_Event *>(event));\n}\n"
+    in host
+    and host.index("        if (psx_host_input_sink_dispatch(&ev)) continue;\n")
+    < host.index("            if (key >= SDLK_F1 && key <= SDLK_F12) {"),
     "every F12 press outside the menu and the repeats of the held key are the capsule's and never reach the save state keys: the frontend "
     "loads a state on a repeat too. Ctrl, read from the event itself, records, a press without it loads unless a recording runs, and "
     "Shift alone does nothing. While the slot folder is a capsule's the save state keys are held back. A press while the recording's "
@@ -377,7 +371,7 @@ require(
     and "    const uint64_t cycle = rth_replaying() ? s_rthx_cycle : psx_get_cycle_count();\n" in renderer
     and renderer.count("        const uint64_t cycle = psx_get_cycle_count();\n") == 2
     and "        if (rth_rec_call(RTH_PRESENT_VRAM, v, 12)) return;\n" in renderer
-    and "        if (rth_rec_call(RTH_PRESENT_WIDE, v, 13)) return;\n" in renderer
+    and "        if (rth_rec_call(RTH_PRESENT_WIDE, v, 14)) return;\n" in renderer
     and "        s_rthx_cycle = (uint64_t)(uint32_t)v[11] | (uint64_t)(uint32_t)v[12] << 32;\n" in temporal_thread
     and "        s_rthx_cycle = (uint64_t)(uint32_t)v[10] | (uint64_t)(uint32_t)v[11] << 32;\n" in temporal_thread
     and "    job.cycle = cycle;\n" in renderer

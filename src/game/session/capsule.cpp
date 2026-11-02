@@ -22,6 +22,7 @@
 
 #ifndef DISRUPTOR_CAPSULE_NO_HOST
 #include "gpu.h"
+#include "gpu_gl_renderer.h"
 #include "gpu_presentation.h"
 #include "interrupts.h"
 #include "overlay_api.h"
@@ -31,7 +32,7 @@
 extern "C" uint8_t *memory_get_ram_ptr(void);
 extern "C" void psx_host_write_byte(uint32_t address, uint8_t value);
 extern "C" uint16_t sio_get_pad_buttons_slot(int slot);
-extern "C" void sio_set_pad_state_slot(int slot, uint16_t buttons);
+extern "C" void psx_game_pad_word(int slot, uint16_t word);
 extern "C" double disruptor_mouse_vertical_pitch(void);
 extern "C" void disruptor_mouse_set_vertical_pitch(double pitch);
 extern "C" const char *psx_host_user_settings_path(void);
@@ -409,7 +410,7 @@ using disruptor::capsule::Mark;
 using disruptor::capsule::Shown;
 
 constexpr size_t kRamBytes = 0x200000;
-constexpr uint32_t kVBlankCycles = 564480u;  /* VBLANK_CYCLES of the framework's interrupts.c */
+constexpr uint32_t kVBlankCycles = 564480u;  /* PSX_VBLANK_CYCLES_NTSC of the framework: the game runs NTSC only */
 constexpr size_t kSettle = 120, kLongest = 60 * 60 * 10;  /* ten minutes at 60 VBlanks a second, then the recording ends itself */
 constexpr uint32_t kCameraZ = 0x800775C8u, kCameraX = 0x800775CCu, kCameraHeight = 0x800775D0u, kYaw = 0x80077624u;
 constexpr int kMarkWidth = 3840;
@@ -498,13 +499,13 @@ bool turn_states_to(const fs::path &folder) {
     capsule.states_before = savestate_dir();
     savestate_get_integrity(&capsule.bios, &capsule.entry);
     if (capsule.states_before.empty() || capsule.entry == 0u) return false;
-    savestate_configure(utf8(folder).c_str(), capsule.bios, capsule.entry);
+    savestate_configure(utf8(folder).c_str(), capsule.bios, capsule.entry, nullptr, 0u);
     capsule.states_turned = true;
     return true;
 }
 
 void turn_states_back() {
-    savestate_configure(g_capsule.states_before.c_str(), g_capsule.bios, g_capsule.entry);
+    savestate_configure(g_capsule.states_before.c_str(), g_capsule.bios, g_capsule.entry, nullptr, 0u);
     g_capsule.states_turned = false;
 }
 
@@ -667,6 +668,34 @@ void write_picture(size_t number) {
     GpuDisplayInfo display{};
     gpu_get_display_info(&display);
     if (display.width == 0 || display.height == 0) return;
+    /* PSX_DISRUPTOR_CAPSULE_FRAMES_HIRES=N: every Nth frame at the internal resolution, from the renderer. */
+    static const long hires_every = [] {
+        const char *every = std::getenv("PSX_DISRUPTOR_CAPSULE_FRAMES_HIRES");
+        return every ? std::strtol(every, nullptr, 10) : 0L;
+    }();
+    if (hires_every > 0) {
+        if (number % static_cast<size_t>(hires_every) != 0) return;
+        static std::vector<uint32_t> argb(static_cast<size_t>(1024) * 512 * 64);
+        int width = 0, height = 0;
+        const int read = gl_renderer_read_display_hires(static_cast<int>(display.display_x), static_cast<int>(display.display_y),
+                                                        static_cast<int>(display.width), static_cast<int>(display.height),
+                                                        argb.data(), static_cast<int>(argb.size()), &width, &height);
+        if (read <= 0 || width <= 0 || height <= 0) return;
+        std::vector<uint8_t> rgb(static_cast<size_t>(width) * height * 3);
+        for (size_t at = 0; at < static_cast<size_t>(width) * height; ++at) {
+            rgb[at * 3] = static_cast<uint8_t>(argb[at] >> 16);
+            rgb[at * 3 + 1] = static_cast<uint8_t>(argb[at] >> 8);
+            rgb[at * 3 + 2] = static_cast<uint8_t>(argb[at]);
+        }
+        char name[32];
+        std::snprintf(name, sizeof(name), "%05zu.bmp", number);
+        if (!write(g_capsule.pictures / name, disruptor::capsule::bitmap(rgb, static_cast<uint32_t>(width), static_cast<uint32_t>(height))))
+            ++g_capsule.unwritten;
+        return;
+    }
+    /* Under GL the picture is in the renderer: bring it down, but never over a 24-bit movie's packed bytes. */
+    if (display.depth24) gl_renderer_flush_cpu_uploads();
+    else gl_renderer_sync_cpu();
     std::vector<uint8_t> rgb(static_cast<size_t>(display.width) * display.height * 3);
     for (uint32_t y = 0; y < display.height; ++y)
         for (uint32_t x = 0; x < display.width; ++x) {
@@ -731,8 +760,8 @@ void replay_frame() {
     }
     if (!capsule.pictures.empty()) write_picture(capsule.at);
     if (++capsule.at == capsule.replayed.size()) finish_replay();
-    sio_set_pad_state_slot(0, frame.pad[0]);
-    sio_set_pad_state_slot(1, frame.pad[1]);
+    psx_game_pad_word(0, frame.pad[0]);
+    psx_game_pad_word(1, frame.pad[1]);
     if (frame.byte_at != 0u) {
         psx_host_write_byte(frame.byte_at, frame.byte);
         disruptor_capsule_note_byte(frame.byte_at, frame.byte);  /* a recording made inside a replay holds the byte too */

@@ -1,19 +1,12 @@
 diff --git a/runtime/include/psx_cyc.h b/runtime/include/psx_cyc.h
-index a7e79f81c443083143768c02fcc5ea201a0fc8c7..5574ead7af98b394e7b4cfcc038559bfc7d4ba59 100644
+index f44380fceb80585f5fa2c2c88099fb15f36ac541..702ccfb33804a747510532504c3748909561ee90 100644
 --- a/runtime/include/psx_cyc.h
 +++ b/runtime/include/psx_cyc.h
-@@ -66,53 +66,55 @@
+@@ -90,7 +90,21 @@
  }
  #endif
  
 -static inline void psx_cyc_charge(uint32_t cycles) {
-+#if !defined(PSX_OVERLAY_DLL_BUILD)
-+/* Enhancement-only guest CPU overclock: instruction cycles are charged at
-+ * 1 / (1 << shift). Zero keeps the faithful cost. */
-+extern uint32_t g_psx_cyc_overclock_shift;
-+extern uint32_t g_psx_cyc_overclock_carry;
-+#endif
-+
 +#if defined(_MSC_VER)
 +#define PSX_CYC_HOT static __forceinline
 +#elif defined(__GNUC__) || defined(__clang__)
@@ -23,7 +16,7 @@ index a7e79f81c443083143768c02fcc5ea201a0fc8c7..5574ead7af98b394e7b4cfcc038559bf
 +#endif
 +
 +#if !defined(PSX_OVERLAY_DLL_BUILD)
-+/* Everything of a charge after the overclock but the common batch add: replay, device service, a new batch, publication. */
++/* Everything of a charge after the scale check but the common batch add: replay, device service, a new batch, publication. */
 +void psx_cyc_charge_slow(uint32_t cycles);
 +#endif
 +
@@ -31,53 +24,8 @@ index a7e79f81c443083143768c02fcc5ea201a0fc8c7..5574ead7af98b394e7b4cfcc038559bf
 +PSX_CYC_HOT void psx_cyc_charge(uint32_t cycles) {
      if (cycles == 0u) return;
  #if defined(PSX_OVERLAY_DLL_BUILD)
-     psx_advance_cycles(cycles);
- #else
--#if defined(__GNUC__) || defined(__clang__)
--    if (__builtin_expect(g_ls_replay_active | g_event_step_conservative, 0)) {
--#else
--    if (g_ls_replay_active || g_event_step_conservative) {
--#endif
--        psx_advance_cycles(cycles);
--        return;
--    }
--    if (psx_in_device_service) {
--        psx_cycle_count += (uint64_t)cycles;
--        return;
-+    if (g_psx_cyc_overclock_shift) {
-+        const uint32_t total = g_psx_cyc_overclock_carry + cycles;
-+        g_psx_cyc_overclock_carry =
-+            total & ((1u << g_psx_cyc_overclock_shift) - 1u);
-+        cycles = total >> g_psx_cyc_overclock_shift;
-+        if (cycles == 0u) return;
-     }
- #if !defined(PSX_COSIM)
--    {
--        uint32_t prior = g_psx_cyc_batch;
--        uint32_t sum = prior + cycles;
--        if (sum >= prior) { /* no uint32 wrap */
--            if (g_psx_cyc_bb_defer > 0) {
--                g_psx_cyc_batch = sum;
--                return;
--            }
--            if (prior == 0u) {
--                uint64_t room = 0u;
--                if (psx_next_service_cycle > psx_cycle_count)
--                    room = psx_next_service_cycle - psx_cycle_count;
--                g_psx_cyc_batch_limit = room == 0u ? 1u :
--                    (room < (uint64_t)PSX_CYC_BATCH_SOFT
--                        ? (uint32_t)room : (uint32_t)PSX_CYC_BATCH_SOFT);
--            }
--            if (sum < g_psx_cyc_batch_limit) {
--                g_psx_cyc_batch = sum;
--                return;
--            }
-+    if (!(g_ls_replay_active | g_event_step_conservative | psx_in_device_service)) {
-+        const uint32_t prior = g_psx_cyc_batch;
-+        const uint32_t sum = prior + cycles;
-+        if (sum >= prior && (g_psx_cyc_bb_defer > 0 || (prior != 0u && sum < g_psx_cyc_batch_limit))) {
-+            g_psx_cyc_batch = sum;
-+            return;
+     psx_cpu_charge(cycles);
+@@ -196,12 +210,12 @@
          }
      }
  #endif
@@ -92,7 +40,7 @@ index a7e79f81c443083143768c02fcc5ea201a0fc8c7..5574ead7af98b394e7b4cfcc038559bf
      uint8_t w = cpu->read_absorb_which;
      if (cpu->read_absorb[w]) cpu->read_absorb[w]--;
      else                     psx_cyc_charge(1u);
-@@ -121,7 +123,7 @@
+@@ -210,7 +224,7 @@
  /* GPR_DEPRES (Beetle cpu.cpp:702-705): zero ReadAbsorb[n] for every source/dest
   * GPR of this instruction, preserving ReadAbsorb[0] (skipping bit 0 == Beetle's
   * save/restore of ReadAbsorb[0]). */
@@ -101,7 +49,7 @@ index a7e79f81c443083143768c02fcc5ea201a0fc8c7..5574ead7af98b394e7b4cfcc038559bf
      reg_mask &= 0xFFFFFFFEu;   /* never touch ReadAbsorb[0] */
      if (reg_mask && (reg_mask & (reg_mask - 1u)) == 0u) {
  #if defined(_MSC_VER)
-@@ -148,7 +150,7 @@
+@@ -237,7 +251,7 @@
  
  /* DO_LDS timing-commit (Beetle cpu.cpp:800). LDWhich==0x20 (no pending) writes the
   * dummy slot read_absorb[32] and sets read_fudge=0x20 (=> next load gets +2 fudge). */
@@ -110,7 +58,7 @@ index a7e79f81c443083143768c02fcc5ea201a0fc8c7..5574ead7af98b394e7b4cfcc038559bf
      uint8_t lw = cpu->ld_which_t;
      cpu->read_absorb[lw]    = (uint8_t)cpu->ld_absorb;
      cpu->read_fudge         = lw;
-@@ -160,11 +162,76 @@
+@@ -249,11 +263,76 @@
   * branch, jump, store, COP control, LWC2/SWC2 pre-step, mult/div, mfhi/mflo, ...).
   * reg_mask from psx_cyc_dep_res_mask(). MUST be emitted BEFORE the instruction
   * body so §1 precedes any muldiv/GTE deadline stall in the body (Beetle order). */
@@ -124,7 +72,7 @@ index a7e79f81c443083143768c02fcc5ea201a0fc8c7..5574ead7af98b394e7b4cfcc038559bf
 +PSX_CYC_HOT void psx_cyc_charge_ones(uint32_t count) {
 +#if !defined(PSX_OVERLAY_DLL_BUILD) && !defined(PSX_COSIM)
 +    if (count == 0u) return;
-+    if (!(g_psx_cyc_overclock_shift | (uint32_t)g_ls_replay_active | (uint32_t)g_event_step_conservative |
++    if (!((uint32_t)PSX_GCS_ACTIVE() | (uint32_t)g_ls_replay_active | (uint32_t)g_event_step_conservative |
 +          (uint32_t)psx_in_device_service)) {
 +        const uint32_t prior = g_psx_cyc_batch;
 +        const uint32_t sum = prior + count;

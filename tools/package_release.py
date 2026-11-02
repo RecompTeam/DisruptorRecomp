@@ -299,6 +299,14 @@ def icon_png(size: int = 256) -> bytes:
     raise SystemExit(f"app.ico has no {size} pixel PNG")
 
 
+def lzma_license(build: Path) -> Path:
+    """The LZMA licence of the libchdr the build fetched, whichever LZMA release that one bundles."""
+    found = sorted((build / "_deps/psx_libchdr-src/deps").glob("lzma-*/LICENSE"))
+    if len(found) != 1:
+        raise SystemExit(f"Expected one LZMA licence in the build's libchdr, found {len(found)}")
+    return found[0]
+
+
 def payload_of(build: Path, version: str, zstd_license: Path, platform: Platform) -> dict[str, bytes]:
     """The program's files by their place in the installed folder."""
     game, launcher = (f"{name}{platform.executable_suffix}" for name in ("DisruptorRecompiled", "DisruptorLauncher"))
@@ -323,7 +331,7 @@ def payload_of(build: Path, version: str, zstd_license: Path, platform: Platform
         "licenses/SDL-hidapi-BSD-LICENSE.txt": build / "_deps/sdl3-src/src/hidapi/LICENSE-bsd.txt",
         "licenses/SDL-yuv2rgb-LICENSE.txt": build / "_deps/sdl3-src/src/video/yuv2rgb/LICENSE",
         "licenses/libchdr-LICENSE.txt": build / "_deps/psx_libchdr-src/LICENSE.txt",
-        "licenses/LZMA-LICENSE.txt": build / "_deps/psx_libchdr-src/deps/lzma-26.02/LICENSE",
+        "licenses/LZMA-LICENSE.txt": lzma_license(build),
         "licenses/Zstd-LICENSE.txt": zstd_license,
     }
     payload = {name: path.read_bytes() for name, path in files.items()}

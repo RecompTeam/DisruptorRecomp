@@ -55,9 +55,20 @@ inline bool same_layout(const KeyLayout& layout, const std::array<const char*, k
     return true;
 }
 
+// Classic, also as the runtime keeps it after a key-by-key write: one key drives one input, the arrows stay on one pair.
+inline bool classic_layout(const KeyLayout& layout) {
+    if (same_layout(layout, classic_keys)) return true;
+    for (const std::size_t first : {std::size_t{0}, std::size_t{16}}) {
+        std::array<const char*, key_count> one_pair = classic_keys;
+        for (std::size_t index = first; index < first + 4; ++index) one_pair[index] = "None";
+        if (same_layout(layout, one_pair)) return true;
+    }
+    return false;
+}
+
 // A layout the player made stays.
 inline KeyLayout layout_for_scheme(const KeyLayout& current, bool modern) {
-    if (modern && same_layout(current, classic_keys)) return layout_of(modern_keys);
+    if (modern && classic_layout(current)) return layout_of(modern_keys);
     if (!modern && same_layout(current, modern_keys)) return layout_of(classic_keys);
     return current;
 }

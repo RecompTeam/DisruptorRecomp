@@ -26,7 +26,7 @@ require(
     and "    if (!ws_engaged()) return 0;\n    if (displayed ? gpu_ws_displayed_menu() : ws_menu_frame()) return 0;\n"
     in gpu
     and gpu.index("    if (displayed ? gpu_ws_displayed_menu() : ws_menu_frame()) return 0;")
-    < gpu.index("    if (!ws_game_mode_of(displayed)) return 1;     /* full-2D screen */"),
+    < gpu.index("    int game_mode = ws_game_mode_of(displayed);\n    if (!game_mode) ws_scene_latch.confirmed = 0;"),
     "a front-end frame is stretched like a world's, in squash mode only, and that is asked before the frame is judged flat",
 )
 require(
@@ -108,8 +108,9 @@ require(
 require(
     "    PstW w; uint32_t n = gpu_snapshot_bytes();\n    ws_menu_give_back();" in gpu
     and "give_back" not in gpu[gpu.index("void gpu_cosim_snapshot_write(uint8_t *p) {") :].split("\n}\n", 1)[0]
-    and state.index("write_module_section(f, BS_SEC_GPU, gpu_snapshot_bytes, gpu_snapshot_write);")
-    < state.index("gr_vram_transfer_out(0, 0, VRAM_W, VRAM_H, vbuf);")
+    and state.index("if (ok) ok = write_module_section(o, BS_SEC_GPU, gpu_snapshot_bytes, gpu_snapshot_write);")
+    < state.index("            ok = sync_vram_mirror_for_save();")
+    < state.rindex("write_vram_section_full(o)")
     and "    if (!gpu_snap_parse(&r)) return 0;\n    ws_menu_lent = ws_menu_rows = ws_menu_logo = ws_menu_fresh = 0;"
     in gpu,
     "a save state reads the renderer's video memory after the logo and the paint are given back, and a loaded one owes nothing",

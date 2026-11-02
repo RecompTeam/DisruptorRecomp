@@ -1,6 +1,7 @@
 #include "../support/disruptor_language_discs.h"
 
 #include "iso_reader.h"
+#include "host_span_ring.h"
 #include "mod_runtime.h"
 
 #include <iostream>
@@ -43,10 +44,22 @@ int ISOReader::TrackCount() const { return 1; }
 uint32_t ISOReader::TrackStartLBA(int) const { return 0; }
 uint32_t ISOReader::TrackPregapLBA(int) const { return 0; }
 bool ISOReader::TrackIsAudio(int) const { return false; }
+bool ISOReader::ReadSubChannelQ(uint32_t, uint8_t *, bool *valid) const {
+    if (valid) *valid = false;
+    return false;
+}
 
 }  // namespace PS1
 
 void mod_runtime_patch_disc_sector(uint32_t, int, uint8_t *, uint32_t) { ++g_patched; }
+int mod_runtime_read_disc_extent(uint32_t, int, uint8_t *, uint32_t) { return 0; }
+uint32_t mod_runtime_disc_extent_start(void) { return 0; }
+uint32_t mod_runtime_disc_sector_count(uint32_t base_count) { return base_count; }
+int mod_runtime_cdda_track_count(void) { return 0; }
+uint32_t mod_runtime_cdda_track_start(int) { return 0; }
+int mod_runtime_read_cdda_sector(uint32_t, uint8_t *, uint32_t, uint32_t *) { return 0; }
+uint64_t host_span_begin(void) { return 0; }
+void host_span_end(HostSpanKind, uint64_t, uint32_t) {}
 
 /* The save states' folder and key, as the runtime keeps them. */
 namespace {
@@ -55,7 +68,7 @@ uint32_t g_states_bios = 7, g_states_entry = 0;
 int g_states_moves = 0;
 }  // namespace
 
-extern "C" void savestate_configure(const char *dir, uint32_t bios_checksum, uint32_t entry_pc) {
+extern "C" void savestate_configure(const char *dir, uint32_t bios_checksum, uint32_t entry_pc, const char *, uint32_t) {
     g_states = dir;
     g_states_bios = bios_checksum;
     g_states_entry = entry_pc;

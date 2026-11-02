@@ -1,18 +1,18 @@
 diff --git a/runtime/include/interrupts.h b/runtime/include/interrupts.h
-index 362664c2f735191220b6da3fe283eca20b94a6c0..c937c8fcbd263bb80dd41a0c51fef07121fdca4d 100644
+index 5c9b151d1ea6a01f25c9017e6bd5418084523262..3358df466574982b652d6632ce43e51b48a502c6 100644
 --- a/runtime/include/interrupts.h
 +++ b/runtime/include/interrupts.h
-@@ -23,6 +23,8 @@
+@@ -31,6 +31,8 @@
  #define IRQ_PIO     10
  
  void interrupts_init(void);
 +/* After a save state put the cycle clock back: the delivery deadline was taken on the old clock and would hold every interrupt until the new one reaches it. */
 +void interrupts_resync_after_restore(void);
  
- /* Central IRQ-raise choke point: sets the I_STAT bit AND records the raise edge
-  * into the always-on device-event ring (device_trace) with the guest cycle.
-@@ -45,7 +47,13 @@
-                                  uint64_t *skip_cooldown, uint64_t *skip_nested);
+ /* Save-state restore: re-anchor host-only IRQ pacing after psx_cycle_count is
+  * overwritten from a snapshot. Clears absolute-cycle cooldowns / deferred
+@@ -73,7 +75,13 @@
+                                    uint64_t *eval, uint64_t *irq_deliv);
  /* Interrupt check with the compiled guest PC to resume if a game-installed
   * handler later RFEs to the sentinel outside the synchronous host window. */
 +#if defined(PSX_OVERLAY_DLL_BUILD)

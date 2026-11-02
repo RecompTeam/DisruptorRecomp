@@ -1,11 +1,11 @@
 diff --git a/runtime/include/dirty_ram_interp.h b/runtime/include/dirty_ram_interp.h
-index 883f3eaf789ceca5ca406ba82b9d2a5c18eb4261..49136cecdbc0d3310ae344ac77eda945081e32a5 100644
+index e9a9620f0d7e21fd53d5e19c57b928f4ac6203a8..b425dd3c428a63a10ef9574d165b97965af4602e 100644
 --- a/runtime/include/dirty_ram_interp.h
 +++ b/runtime/include/dirty_ram_interp.h
-@@ -102,6 +102,15 @@
- int      psx_kernel_bless_dispatchable(uint32_t phys);
- void     psx_kernel_bless_note_range(uint32_t phys, uint32_t len);
- void     psx_kernel_bless_stats(uint64_t out[6]);
+@@ -192,6 +192,15 @@
+ /* Soft-return rematch / BIOS switch: drop latched SCPH↔OpenBIOS window +
+  * CLEAN/MISMATCH so the next kbless_on() re-reads psx_bios_image. */
+ void     psx_kernel_bless_reset_for_boot(void);
 +/* Most recent kernel-body validation failure: `count` failures so far, out[] = entry, body_lo, body_hi, first_mismatch, live_byte, reference_byte. */
 +void     psx_kernel_bless_mismatch_detail(uint64_t *count, uint32_t out[6]);
 +

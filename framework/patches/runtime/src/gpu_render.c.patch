@@ -1,8 +1,8 @@
 diff --git a/runtime/src/gpu_render.c b/runtime/src/gpu_render.c
-index cae379538501938c7236686556174d7d34a4fbe8..763fee4fc404df6ae983e5d5a6d470b5e721e9a4 100644
+index e1fbe0f34a0755a07c6afc740dbae278042a517e..d8ec103a12204349477a11a5d09deb32465ba387 100644
 --- a/runtime/src/gpu_render.c
 +++ b/runtime/src/gpu_render.c
-@@ -25,6 +25,15 @@
+@@ -27,8 +27,15 @@
      .set_mask_bits                 = sw_set_mask_bits,
      .set_texture_window            = sw_set_texture_window,
      .set_color_modulation          = sw_set_color_modulation,
@@ -10,31 +10,18 @@ index cae379538501938c7236686556174d7d34a4fbe8..763fee4fc404df6ae983e5d5a6d470b5
 +    .set_world_triangle            = NULL,
 +    .set_column_band               = NULL,
 +    .set_sky_cells                 = NULL,
-+    .set_precise_triangle          = sw_set_precise_triangle,
-+    .set_perspective_triangle      = NULL,
 +    .set_temporal_depth_triangle   = NULL,
 +    .set_temporal_identity_triangle = NULL,
 +    .set_presentation_yaw          = NULL,
+     .set_precise_triangle          = sw_set_precise_triangle,
+-    .set_perspective_triangle      = sw_set_perspective_triangle,
++    .set_perspective_triangle      = NULL,
      .fill_rect                     = sw_fill_rect,
      .copy_rect                     = sw_copy_rect,
      .draw_flat_triangle            = sw_draw_flat_triangle,
-@@ -91,6 +100,13 @@
- 
- GrBackend gr_backend(void) { return g_effective; }
- 
-+/* The GL backend's table changes while its render thread runs. */
-+void gr_refresh_backend(void) {
-+    if (g_effective != GR_BACKEND_OPENGL) return;
-+    const GpuRenderBackend *gl = gl_backend_get();
-+    if (gl) g_b = gl;
-+}
-+
- /* ---- Dispatch wrappers (one line each; forward to the active backend) ---- */
- void gr_init(uint16_t *vram)                         { g_b->init(vram); }
- void gr_set_scale(int scale)                         { g_b->set_scale(scale); }
-@@ -101,6 +117,71 @@
+@@ -168,6 +175,59 @@
  void gr_set_mask_bits(int s, int c)                  { g_b->set_mask_bits(s, c); }
- void gr_set_texture_window(uint32_t raw)             { g_b->set_texture_window(raw); }
+ void gr_set_texture_window(uint32_t raw)             { g_b->set_texture_window(raw); g_hd_texture_window=raw; }
  void gr_set_color_modulation(int r, int g, int b, int raw) { g_b->set_color_modulation(r, g, b, raw); }
 +void gr_set_geometry_correction(int enabled) {
 +    if (g_b->set_geometry_correction) g_b->set_geometry_correction(enabled);
@@ -49,20 +36,8 @@ index cae379538501938c7236686556174d7d34a4fbe8..763fee4fc404df6ae983e5d5a6d470b5
 +void gr_set_sky_cells(int rows, int columns, int period, int focal, const int32_t *cells) {
 +    if (g_b->set_sky_cells) g_b->set_sky_cells(rows, columns, period, focal, cells);
 +}
-+void gr_set_precise_triangle(int enabled,
-+                             int32_t x0, int32_t y0,
-+                             int32_t x1, int32_t y1,
-+                             int32_t x2, int32_t y2) {
-+    if (g_b->set_precise_triangle)
-+        g_b->set_precise_triangle(enabled, x0, y0, x1, y1, x2, y2);
-+}
 +void gr_set_unpinned_triangle(int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t x2, int32_t y2) {
 +    if (g_b->set_unpinned_triangle) g_b->set_unpinned_triangle(x0, y0, x1, y1, x2, y2);
-+}
-+void gr_set_perspective_triangle(int enabled,
-+                                 float q0, float q1, float q2) {
-+    if (g_b->set_perspective_triangle)
-+        g_b->set_perspective_triangle(enabled, q0, q1, q2);
 +}
 +void gr_set_temporal_depth_triangle(int enabled,
 +                                     float z0, float z1, float z2) {
@@ -101,10 +76,10 @@ index cae379538501938c7236686556174d7d34a4fbe8..763fee4fc404df6ae983e5d5a6d470b5
 +        g_b->set_presentation_yaw(yaw_units, full_turn,
 +                                  center_x, center_y, focal_x);
 +}
- void gr_fill_rect(int x, int y, int w, int h, uint16_t c)  { g_b->fill_rect(x, y, w, h, c); }
- void gr_copy_rect(int sx, int sy, int dx, int dy, int w, int h) { g_b->copy_rect(sx, sy, dx, dy, w, h); }
- void gr_draw_flat_triangle(int x0, int y0, int x1, int y1, int x2, int y2, uint16_t c) {
-@@ -169,6 +250,12 @@
+ void gr_set_precise_triangle(int enabled, int32_t x0, int32_t y0, int32_t x1, int32_t y1,
+                              int32_t x2, int32_t y2) {
+     if (g_b->set_precise_triangle)
+@@ -294,6 +354,12 @@
      if (g_b->wide_clear_margins)
          g_b->wide_clear_margins(base_x, y, h, color, sides);
  }
@@ -114,6 +89,6 @@ index cae379538501938c7236686556174d7d34a4fbe8..763fee4fc404df6ae983e5d5a6d470b5
 +void gr_wide_copy_rows(int base_x, int src_x, int src_y, int dst_x, int dst_y, int w, int h) {
 +    if (g_b->wide_copy_rows) g_b->wide_copy_rows(base_x, src_x, src_y, dst_x, dst_y, w, h);
 +}
- int gr_render_wide_display(uint32_t *out, int pitch, int base_x,
-                            int disp_y, int disp_h) {
-     if (g_b->render_wide_display)
+ void gr_wide_feedback_rect(int src_base, int src_x, int src_y, int dst_x, int dst_y,
+                            int w, int h, int r, int g, int b, int raw, int semi) {
+     if (g_b->wide_feedback_rect)

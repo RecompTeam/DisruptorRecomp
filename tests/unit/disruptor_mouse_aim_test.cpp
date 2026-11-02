@@ -122,8 +122,8 @@ std::uint16_t sio_get_pad_buttons_slot(int slot) {
     return slot == 0 ? g_pad_buttons : 0xFFFFu;
 }
 
-void sio_set_pad_state_slot(int slot, std::uint16_t buttons) {
-    if (slot == 0) g_pad_buttons = buttons;
+void psx_game_pad_press(int slot, std::uint16_t mask) {
+    if (slot == 0) g_pad_buttons = static_cast<std::uint16_t>(g_pad_buttons & ~mask);
 }
 
 std::int32_t psx_mod_widescreen_x_margin() {

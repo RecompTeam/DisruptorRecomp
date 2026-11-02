@@ -39,6 +39,8 @@ struct Hook {
 };
 Hook g_hooks[4];
 int g_hook_count = 0;
+PSXModActivationCallback g_activation = nullptr;
+uint32_t g_asked = 0u;
 uint8_t g_guest[64];
 uint32_t g_allocated = 0u;
 int g_allocations = 0;
@@ -77,8 +79,14 @@ int psx_mod_register_function_entry_plugin(const char *, uint32_t address, PSXMo
     return 1;
 }
 
+int psx_mod_register_activation_plugin(const char *, PSXModActivationCallback callback) {
+    g_activation = callback;
+    return 1;
+}
+
 uint32_t psx_mod_alloc_guest_memory(uint32_t size, uint32_t) {
     ++g_allocations;
+    g_asked = size;
     if (size > sizeof(g_guest)) return 0u;
     std::memset(g_guest, 0xAA, sizeof(g_guest));
     g_allocated = kGuest;
@@ -104,17 +112,26 @@ bool SDL_PushEvent(SDL_Event *event) {
 namespace {
 
 void test_registration() {
-    expect(g_hook_count == 2 && hook_at(kItemDraw) && hook_at(kHandler), "both hooks are registered at load");
+    expect(g_hook_count == 2 && hook_at(kItemDraw) && hook_at(kHandler) && g_activation, "both hooks and the activation are registered at load");
 }
 
 void test_draw() {
     g_language = "French";
     CPUState cpu{};
     cpu.gpr[kReturn] = kItemDrawn;
+    cpu.gpr[kItem] = kExit;
+    cpu.gpr[kString] = kOtherString;
+    hook_at(kItemDraw)(&cpu, kItemDraw);
+    expect(cpu.gpr[kString] == kOtherString && g_allocations == 0, "no word before the activation");
+    g_activation();
+    g_activation();
+    expect(g_allocations == 1 && g_asked == kLongestWord + 1u && kLongestWord == 7u,
+           "the activation takes the longest word's memory once, before the guest runs");
+    cpu.gpr[kReturn] = kItemDrawn;
     cpu.gpr[kItem] = 7u;
     cpu.gpr[kString] = kOtherString;
     hook_at(kItemDraw)(&cpu, kItemDraw);
-    expect(cpu.gpr[kString] == kOtherString && g_allocations == 0, "CREDITS keeps the game's string");
+    expect(cpu.gpr[kString] == kOtherString && g_allocations == 1, "CREDITS keeps the game's string");
     cpu.gpr[kItem] = kExit;
     cpu.gpr[kReturn] = kItemDrawn + 4u;
     hook_at(kItemDraw)(&cpu, kItemDraw);
@@ -126,6 +143,9 @@ void test_draw() {
     cpu.gpr[kString] = kOtherString;
     hook_at(kItemDraw)(&cpu, kItemDraw);
     expect(cpu.gpr[kString] == g_allocated && g_allocations == 1, "the word is allocated once");
+    g_language = "";
+    hook_at(kItemDraw)(&cpu, kItemDraw);
+    expect(guest_string(g_allocated) == "EXIT", "each draw writes the word of the disc laid over now, ended");
 }
 
 void test_menu(bool replaying) {

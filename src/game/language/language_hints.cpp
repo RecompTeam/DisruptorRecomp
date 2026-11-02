@@ -104,6 +104,9 @@ void move_entry(CPUState *cpu, uint32_t) {
     cpu->gpr[kRowRegister] -= kRowsHigher;
 }
 
+/* Taken at activation, so every state of a session holds the same memory with a tall disc or without. */
+void reserve_tall_stage() { (void)tall_stage(); }
+
 /* All three or none: a hint read tall and moved by the US numbers would show its lower half. */
 bool hook_all() {
     return psx_mod_register_function_entry_plugin("disruptor.language.hint.read", kRead, read_entry) &&
@@ -113,6 +116,8 @@ bool hook_all() {
 
 PSX_MOD_CONSTRUCTOR(register_disruptor_language_hints) {
     g_hooked = hook_all();
+    if (!psx_mod_register_activation_plugin("disruptor.language.hint.read", reserve_tall_stage))
+        std::fprintf(stderr, "disruptor: failed to register the tall hint rectangle's activation\n");
     if (!g_hooked) std::fprintf(stderr, "disruptor: failed to register the hooks for tall hints\n");
 }
 

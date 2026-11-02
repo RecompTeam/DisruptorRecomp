@@ -1,9 +1,9 @@
 diff --git a/runtime/src/crash_trace.c b/runtime/src/crash_trace.c
-index 8926cd2df341d8fa3d2eef74655bc11927be9946..2cfd1ceed69ad5d4d6f094975be0805264a08681 100644
+index 96d52cd8e588479230fedf0c4f79fbc08722af2b..7514752a1286d4dc5fc501616c926f3cc7747c6e 100644
 --- a/runtime/src/crash_trace.c
 +++ b/runtime/src/crash_trace.c
-@@ -35,7 +35,21 @@
- #include "crash_trace.h"
+@@ -46,7 +46,21 @@
+                             * (interpreter-only) run into its own report */
  
  /* Output path — overwritten per dump. */
 -static const char *kReportPath = "psx_last_run_report.json";

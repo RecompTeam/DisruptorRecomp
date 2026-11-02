@@ -33,15 +33,11 @@ hashed = read("psxrecomp/runtime/codegen_hash_sources.cmake")
 changed = read("framework/FILES.txt").split()
 
 require(
-    "void interrupts_resync_after_restore(void) {\n    post_exception_cooldown_until = 0;\n}\n" in interrupts
-    and "        psx_mod_gpu_dma_memory_restore(NULL, 0u);\n"
-    "    interrupts_resync_after_restore();\n"
-    "    cpu->muldiv_ts_done = cpu->gte_ts_done = psx_cycle_count; /*"
-    in state
-    and state.count("interrupts_resync_after_restore();") == 1
+    "    post_exception_cooldown_until = 0;\n"
+    in interrupts[interrupts.index("void interrupts_resync_after_restore(void) {") :].split("\n}\n")[0]
+    and read("psxrecomp/runtime/src/savestate.c").count("            interrupts_resync_after_restore();\n") == 1
     and state.index("        psx_cycle_count = cyc;")
-    < state.index("    free(sections);\n    if (!ok) return 0;\n")
-    < state.index("    interrupts_resync_after_restore();\n"),
+    < state.index("        cpu->gte_ts_done = psx_cycle_count + gte_rem;\n        cpu->muldiv_ts_done = psx_cycle_count + md_rem;\n"),
     "a state loaded into a running game puts the clock back: the delivery deadline and the two stall deadlines of the old "
     "clock are dropped, or no interrupt arrives until the clock is there again",
 )
@@ -55,23 +51,18 @@ require(
     "the resets live outside the files that key save states: the scheduler's header is one of those, so its resync keeps its signature",
 )
 require(
-    "static void engage_widescreen_at_game_entry(void) {\n"
-    "    extern int fntrace_is_game_started(void);\n"
-    "    if (!g_ws_engaged && fntrace_is_game_started()) engage_widescreen();\n"
-    "}\n"
+    "    /* Engage widescreen at game entry: BIOS boot stays authentic 4:3. */\n"
+    "    if (!g_ws_engaged) {\n        if (fntrace_is_game_started()) {\n            g_ws_engaged = true;\n"
     in host
-    and host.count("engage_widescreen_at_game_entry();") == 2
-    and "    if (g_headless) engage_widescreen_at_game_entry();" in host
-    and host.index("    if (g_headless) engage_widescreen_at_game_entry();")
-    < host.index("    if (g_headless || module_fast_forward) {")
-    < host.index("    mod_call_frame_hooks();")
-    < host.index("    engage_widescreen_at_game_entry();\n\n    /* ---- Display from our VRAM ---- */"),
+    and host.index("    mod_call_frame_hooks();")
+    < host.index("    /* Engage widescreen at game entry: BIOS boot stays authentic 4:3. */\n")
+    < host.index("    if (g_headless || module_fast_forward) {"),
     "a run without a window leaves the VBlank before a windowed one engages widescreen, so it engages it on its way out",
 )
 require(
-    "  if (g_headless) {\n"
-    '    std::fprintf(stdout, "psxrecomp: headless frontend enabled\\n");\n'
-    "    host_ui_runtime_ready(nullptr, PSX_HOST_UI_BACKEND_NONE);"
+    "    } else {\n"
+    '        std::fprintf(stdout, "psxrecomp: headless frontend enabled\\n");\n'
+    "        host_ui_runtime_ready(nullptr, PSX_HOST_UI_BACKEND_NONE);"
     in host
     and host.count("    host_ui_runtime_ready(") == 2
     and "    load_preferences_for_session();\n    if (backend == PSX_HOST_UI_BACKEND_OPENGL) (void)initialize_imgui();"
@@ -80,67 +71,47 @@ require(
     "a run without a window tells the game module the runtime is ready: its saved settings, frame unlock among them, apply there",
 )
 require(
-    "static void sdl_audio_pump(bool discard_output = false) {\n    if (!sdl_audio_device) discard_output = true;"
+    "static void sdl_audio_pump(bool discard_output = false) {\n"
+    "    /* Guest-cycle SPU advance must not depend on host audio device/backpressure.\n"
     in host
-    and "static void sdl_audio_update(int hard_mute_active, int turbo_sink_active) {\n    {   /* Tag audio events"
-    in host
-    and "            if (sdl_audio_device && audio_legacy_mode()) {" in host
-    and "            } else if (sdl_audio_device && s_drc_ready) {\n                psx_sdl_audio_lock(sdl_audio_device);"
-    in host
+    and "    } else if (sdl_audio_device && legacy) {\n" in host
     and "if (!sdl_audio_device) return;" not in host
-    and host.index("    if (discard_output) {\n        /* Host-only sink")
-    < host.index("    spu_render(sdl_audio_buf, frames);\n    if (discard_output) {"),
+    and host.index("    const int host_frames = (int)spu_output_pop(sdl_audio_buf, (uint32_t)frames);\n")
+    < host.index("    if (!host_queue_ok || !sdl_audio_device)"),
     "the SPU is rendered on the guest's clock with no device to play it: the game reads the SPU back",
 )
 require(
-    "static void take_loaded_state_for_started(void) {\n"
-    "    uint32_t bios = 0, entry = 0;\n"
-    "    savestate_get_integrity(&bios, &entry);\n"
-    "    if (!dirty_ram_text_image_registered() || !psx_game_text_native_ok(entry)) return;\n"
-    "    memory_keep_low_boot_scratch();"
-    in host
-    and "    if (!g_ws_engaged) engage_widescreen();  /* at the next VBlank" in host
-    and "    gl_renderer_invalidate_present();\n    take_loaded_state_for_started();\n}\n" in host
-    and host.count("take_loaded_state_for_started();") == 1
-    and "psx_game_address_in_text(target) && psx_game_text_native_ok(target))) {" in latch,
-    "a loaded state of a started game is taken for one before the game runs on, by the test the entry latch itself goes by",
+    "fntrace_restore_game_started(p[0]);" in state
+    and "void fntrace_restore_game_started(int started) { s_game_started = started != 0; }" in latch
+    and "    if (s_game_started) return;\n    s_game_started = 1;\n" in latch
+    and "psx_game_address_in_text(addr) && psx_game_text_native_ok(addr)))" in latch,
+    "a loaded state of a started game carries the started latch, so the latch never fires again and clears nothing",
 )
 require(
     "static int s_low_scratch_is_the_games;" in memory
     and "void memory_keep_low_boot_scratch(void) { s_low_scratch_is_the_games = 1; }\n" in memory
     and "void memory_clear_low_boot_scratch(void) {\n    if (s_low_scratch_is_the_games) return;\n    memset(ram, 0, 0x10u);\n}\n"
     in memory
-    and "    s_low_scratch_is_the_games = 0;\n    memset(ram, 0, sizeof(ram));\n" in memory
+    and "    s_low_scratch_is_the_games = 0;\n    psx_ram_apply_size_request();\n    memset(ram, 0, sizeof(ram));\n" in memory
     and memory.count("s_low_scratch_is_the_games") == 4
-    and "            memory_clear_low_boot_scratch();\n" in latch,
+    and "    memory_clear_low_boot_scratch();\n" in latch,
     "the entry latch of a fresh process must not clear the first 16 bytes of a loaded game, and a new session clears them again",
 )
 require(
-    "#define BS_SEC_CPU_COST 0x10u\n" in state
-    and "    h.section_count = 16;\n" in state
-    and "        ok = pst_w_u32(&w, g_psx_cyc_overclock_shift) &&\n"
-    "             pst_w_u32(&w, g_psx_cyc_overclock_carry) &&\n"
-    "             write_section(f, BS_SEC_CPU_COST, cost, sizeof cost);\n"
-    in state
-    and "    return pst_r_u32(&r, shift) && pst_r_u32(&r, carry) && *shift <= 31u && (*carry >> 31) == 0u &&\n"
-    "           (*shift == 0u || *carry < (1u << *shift));\n"
-    "}\n"
-    in state
-    and "    case BS_SEC_CPU_COST:       return parse_cpu_cost(p, len, &shift, &carry);\n" in state
-    and "        if (!parse_cpu_cost(p, len, &shift, &carry)) return 0;\n"
-    "        g_psx_cyc_overclock_shift = shift;\n"
-    "        g_psx_cyc_overclock_carry = carry;\n"
-    in state
-    and "BS_SEC_CPU_COST" not in state.split("const uint32_t required =")[1].split(";")[0]
-    and "        const uint32_t total = g_psx_cyc_overclock_carry + cycles;\n" in cycles
-    and "        cycles = total >> g_psx_cyc_overclock_shift;\n" in cycles
+    "        psx_guest_cycle_scale_snapshot(g);\n" in state
+    and "psx_guest_cycle_scale_restore(g);" in state
     and "        if (unlocked || !follows) set_cpu_shift(g_cpu_shift.load(std::memory_order_relaxed));\n" in rate
     and "    if (waits) set_cpu_shift(0u);\n" in rate
-    and rate.count("g_psx_cyc_overclock_carry") == 1
-    and "    if (shift == g_psx_cyc_overclock_shift) return;\n    g_psx_cyc_overclock_shift = shift;\n    g_psx_cyc_overclock_carry = 0u;\n}\n"
-    in rate,
-    "a state holds the instruction cost divider frame unlock sets and its carry, a carry over its divider is refused, frame "
-    "unlock drops the carry only where the divider changes, and a state without the two still loads",
+    and "    if (scale != psx_guest_cycle_scale_config()) psx_guest_cycle_scale_set(scale);\n" in rate,
+    "a state holds the framework's guest cycle scale frame unlock sets, "
+    "and frame unlock sets it only where it changes",
 )
 
+require(
+    "                        uint32_t payload_off = phys_lo >= disc_load\n" in host
+    and "                            memcpy(img, file + 2048 + payload_off, img_len);\n" in host
+    and "            text_guard_text_size = gc.text_size;\n" in host,
+    "the text guard compares the game's code from its configured load address and text size: an image read from the "
+    "EXE's own load address is shifted, so every function fails the compare and runs in the interpreter",
+)
 print("Disruptor loaded state source contract: PASS")

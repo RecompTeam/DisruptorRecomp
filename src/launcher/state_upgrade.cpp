@@ -14,6 +14,7 @@
 #include <format>
 #include <fstream>
 #include <iterator>
+#include <optional>
 #include <set>
 #include <utility>
 
@@ -26,9 +27,62 @@ namespace {
 constexpr std::chrono::milliseconds trial_time{90000};
 constexpr std::size_t asked_frames = 60;
 
+// The game this launcher starts as its file is now, with the player's choice of mods: what is learned or tried for it
+// holds until either changes.
+std::string build_key(const fs::path& program, const fs::path& data) {
+    const std::string mods = fingerprint(read_whole(data / "mods" / "state.toml").value_or("default mods"));
+    const fs::path game = platform::game_executable(program);
+    std::error_code failed;
+    const auto size = fs::file_size(game, failed);
+    if (failed) return std::format("{}-{}", stamp_text(build_stamp()), mods);
+    const auto written = fs::last_write_time(game, failed);
+    if (failed) return std::format("{}-{}", stamp_text(build_stamp()), mods);
+    return std::format("{}-{}-{}-{}", stamp_text(build_stamp()), size, written.time_since_epoch().count(), mods);
+}
+
+// The build a state is tried on and the layout word it is given there, or `unknown` when none was learned.
+std::string target(const std::string& key, const Layouts& layouts, const std::string& language) {
+    const auto layout = layouts.find(language);
+    return layout == layouts.end() ? key + "-unknown" : std::format("{}-{:08x}", key, layout->second);
+}
+
 // A line of tried.txt: the state's path and contents, and the build that refused it.
-std::string tried_line(const fs::path& saves, const SavedState& state, std::string_view bytes) {
-    return state.path.lexically_relative(saves).generic_string() + "|" + fingerprint(bytes) + "|" + stamp_text(build_stamp());
+std::string tried_line(const fs::path& saves, const SavedState& state, std::string_view bytes, const std::string& key) {
+    return state.path.lexically_relative(saves).generic_string() + "|" + fingerprint(bytes) + "|" + key;
+}
+
+// The layout words learned for `key`, from old-states/layouts.txt, a line `<key>|<language>|<word>` each.
+Layouts learned_layouts(const fs::path& saves, const std::string& key) {
+    Layouts layouts;
+    std::ifstream input(saves / "old-states" / "layouts.txt", std::ios::binary);
+    for (std::string line; std::getline(input, line);) {
+        if (!line.empty() && line.back() == '\r') line.pop_back();
+        const auto first = line.find('|'), second = line.rfind('|');
+        if (first == std::string::npos || second == first || line.substr(0, first) != key) continue;
+        const std::string word = line.substr(second + 1);
+        char* end = nullptr;
+        const unsigned long value = std::strtoul(word.c_str(), &end, 16);
+        if (word.size() == 8 && end == word.c_str() + 8) layouts[line.substr(first + 1, second - first - 1)] = static_cast<std::uint32_t>(value);
+    }
+    return layouts;
+}
+
+void note_layout(const fs::path& saves, const std::string& key, const std::string& language, std::uint32_t layout) {
+    std::error_code failed;
+    fs::create_directories(saves / "old-states", failed);
+    std::ofstream(saves / "old-states" / "layouts.txt", std::ios::binary | std::ios::app)
+        << std::format("{}|{}|{:08x}\n", key, language, layout);
+}
+
+// The layout word of the state a trial run recorded its second of play from: one this build wrote.
+std::optional<std::uint32_t> recorded_layout(const fs::path& trial) {
+    std::error_code failed;
+    for (const auto& capsule : fs::directory_iterator(trial / "capsules", failed)) {
+        if (!capsule.is_directory(failed)) continue;
+        for (const auto& file : fs::directory_iterator(capsule.path(), failed))
+            if (const auto state = read_state(file.path())) return state->layout;
+    }
+    return std::nullopt;
 }
 
 std::set<std::string> tried(const fs::path& saves) {
@@ -52,12 +106,12 @@ struct Waiting {
     std::string bytes; // what was read once and is kept, tried and written back
 };
 
-std::vector<Waiting> untried(const fs::path& saves) {
+std::vector<Waiting> untried(const fs::path& saves, const Layouts& layouts, const std::string& key) {
     const std::set<std::string> done = tried(saves);
     std::vector<Waiting> waiting;
-    for (SavedState& state : stale_states(saves)) {
+    for (SavedState& state : stale_states(saves, layouts)) {
         auto bytes = read_whole(state.path);
-        if (!bytes || done.contains(tried_line(saves, state, *bytes))) continue;
+        if (!bytes || done.contains(tried_line(saves, state, *bytes, target(key, layouts, state.language)))) continue;
         waiting.push_back({std::move(state), std::move(*bytes)});
     }
     return waiting;
@@ -70,7 +124,7 @@ std::string slot_name(const SavedState& state) {
 // The original beside the others of its stamp: a different state at the same path gets a name of its own.
 bool keep_original(const fs::path& saves, const Waiting& waiting) {
     const fs::path relative = waiting.state.path.lexically_relative(saves);
-    fs::path kept = saves / "old-states" / stamp_text(waiting.state.stamp) / relative;
+    fs::path kept = saves / "old-states" / std::format("{}-{:08x}", stamp_text(waiting.state.stamp), waiting.state.layout) / relative;
     std::error_code failed;
     if (fs::exists(kept, failed)) {
         if (read_whole(kept) == waiting.bytes) return true;
@@ -171,84 +225,125 @@ StateUpgrade upgrade_states(const fs::path& program, const fs::path& data, const
                             const std::function<void(const std::wstring&, unsigned)>& report) {
     StateUpgrade result;
     const fs::path saves = settings.saves_folder();
-    const std::vector<Waiting> states = untried(saves);
-    if (states.empty()) return result;
-    report(L"Save states of an earlier version were found: trying them on this one...", 0);
+    const std::vector<SavedState> all = saved_states(saves);
+    if (all.empty()) return result;
+    const std::string key = build_key(program, data);
+    Layouts layouts = learned_layouts(saves, key);
+    std::set<std::string> unknown;
+    for (const SavedState& state : all)
+        if (!layouts.contains(state.language) && (state.language.empty() || !disc_of(state.language, regions).empty()))
+            unknown.insert(state.language);
     const fs::path trial = data / "cache" / "state-trial";
     std::error_code failed;
-    fs::remove_all(trial, failed);
-    try {
-        check_package(program, *disc.profile);
-        fs::create_directories(trial);
-        if (fs::exists(data / "settings.toml")) fs::copy_file(data / "settings.toml", trial / "settings.toml");
-        if (fs::exists(data / "keybinds.ini")) fs::copy_file(data / "keybinds.ini", trial / "keybinds.ini");
-    } catch (const std::exception& error) {
-        result.lines.push_back(std::string("Save states of an earlier version were not tried: ") + error.what());
+    std::optional<SettingsFile> trial_settings;
+    const auto prepare = [&]() {
+        if (trial_settings) return true;
         fs::remove_all(trial, failed);
-        return result;
-    }
-    SettingsFile trial_settings(trial / "settings.toml");
-    trial_settings.load();
-    bool stuck = false;
-    std::size_t index = 0;
-    for (const Waiting& waiting : states) {
-        if (cancelled || stuck) break;
-        const SavedState& state = waiting.state;
-        report(wide(std::format("Trying save state {} on this version, {} of {}...", slot_name(state), index + 1,
-                                states.size())),
-               static_cast<unsigned>(index * 100 / states.size()));
-        ++index;
         try {
-            const std::string language_disc = state.language.empty() ? std::string() : disc_of(state.language, regions);
-            if (!state.language.empty() && language_disc.empty()) {
-                ++result.untried;
-                result.lines.push_back(slot_name(state) + " was not tried: the " + state.language +
-                                       " disc is not in the launcher's list");
-                continue;
-            }
-            fs::remove_all(trial / "saves");
-            fs::remove_all(trial / "capsules");
-            const fs::path slots = state.language.empty() ? trial / "saves" : trial / "saves" / state.language;
-            fs::create_directories(slots);
-            const std::string carried = restamped(waiting.bytes, build_stamp());
-            if (carried.empty() || !keep_original(saves, waiting) || !trial_settings.choose_language_disc(language_disc) ||
-                !write_whole(slots / state_name(state.entry, 0), carried)) {
-                ++result.untried;
-                result.lines.push_back(slot_name(state) + " was not tried: its copies could not be written");
-                continue;
-            }
-            const TrialRun run = run_trial(program, trial, disc, cancelled);
-            stuck = run.verdict == Verdict::stuck;
-            if (run.verdict == Verdict::ran) {
-                // Written back only when the file is still the one tried.
-                fs::path written = state.path;
-                written += ".new";
-                if (read_whole(state.path) == waiting.bytes && write_whole(written, carried)) {
-                    fs::rename(written, state.path);
-                    ++result.carried;
-                    result.lines.push_back(slot_name(state) + " now loads on this version");
-                    continue;
-                }
-                fs::remove(written, failed);
-                ++result.untried;
-                result.lines.push_back(slot_name(state) + " changed while it was tried: it is tried again next time");
-                continue;
-            }
-            if (cancelled) break;
-            if (run.verdict == Verdict::refused) {
-                ++result.refused;
-                note_tried(saves, tried_line(saves, state, waiting.bytes));
-                result.lines.push_back(slot_name(state) + " does not run on this version (" + run.why +
-                                       ")\nIt stays as it was, and a copy is in saves\\old-states");
-            } else {
-                ++result.untried;
-                result.lines.push_back(slot_name(state) + " could not be tried (" + run.why + "): it is tried again next time");
+            check_package(program, *disc.profile);
+            fs::create_directories(trial);
+            if (fs::exists(data / "settings.toml")) fs::copy_file(data / "settings.toml", trial / "settings.toml");
+            if (fs::exists(data / "keybinds.ini")) fs::copy_file(data / "keybinds.ini", trial / "keybinds.ini");
+            if (fs::exists(data / "mods" / "state.toml")) {
+                fs::create_directories(trial / "mods");
+                fs::copy_file(data / "mods" / "state.toml", trial / "mods" / "state.toml");
             }
         } catch (const std::exception& error) {
-            ++result.untried;
-            result.lines.push_back(slot_name(state) + " could not be tried: " + error.what());
+            result.lines.push_back(std::string("Save states of an earlier version were not tried: ") + error.what());
+            fs::remove_all(trial, failed);
+            return false;
+        }
+        trial_settings.emplace(trial / "settings.toml");
+        trial_settings->load();
+        return true;
+    };
+    bool stuck = false;
+    // A run without a state: the game refuses the empty slot, starts as usual and records from a state it writes itself.
+    for (const std::string& language : unknown) {
+        if (cancelled || stuck) break;
+        if (!prepare()) return result;
+        report(L"Checking how this version writes save states...", 0);
+        fs::remove_all(trial / "saves", failed);
+        fs::remove_all(trial / "capsules", failed);
+        if (!trial_settings->choose_language_disc(language.empty() ? std::string() : disc_of(language, regions))) continue;
+        stuck = run_trial(program, trial, disc, cancelled).verdict == Verdict::stuck;
+        if (const auto layout = recorded_layout(trial)) {
+            layouts[language] = *layout;
+            note_layout(saves, key, language, *layout);
         }
     }
+    const std::vector<Waiting> states = stuck || cancelled ? std::vector<Waiting>{} : untried(saves, layouts, key);
+    if (!states.empty() && prepare()) {
+        report(L"Save states of an earlier version were found: trying them on this one...", 0);
+        std::size_t index = 0;
+        for (const Waiting& waiting : states) {
+            if (cancelled || stuck) break;
+            const SavedState& state = waiting.state;
+            report(wide(std::format("Trying save state {} on this version, {} of {}...", slot_name(state), index + 1,
+                                    states.size())),
+                   static_cast<unsigned>(index * 100 / states.size()));
+            ++index;
+            try {
+                const std::string language_disc = state.language.empty() ? std::string() : disc_of(state.language, regions);
+                if (!state.language.empty() && language_disc.empty()) {
+                    ++result.untried;
+                    result.lines.push_back(slot_name(state) + " was not tried: the " + state.language +
+                                           " disc is not in the launcher's list");
+                    continue;
+                }
+                fs::remove_all(trial / "saves");
+                fs::remove_all(trial / "capsules");
+                const auto layout = layouts.find(state.language);
+                if (layout == layouts.end()) {
+                    ++result.untried;
+                    result.lines.push_back(slot_name(state) + " could not be tried: how this version writes save states is "
+                                                              "not known yet, it is tried again next time");
+                    continue;
+                }
+                // Where the game looks for it: the BIOS's folder, and a language disc's inside that.
+                const fs::path slots = trial / "saves" / state.path.parent_path().lexically_relative(saves);
+                fs::create_directories(slots);
+                const std::string carried = restamped(waiting.bytes, build_stamp(), layout->second);
+                if (carried.empty() || !keep_original(saves, waiting) || !trial_settings->choose_language_disc(language_disc) ||
+                    !write_whole(slots / state_name(state.entry, 0), carried)) {
+                    ++result.untried;
+                    result.lines.push_back(slot_name(state) + " was not tried: its copies could not be written");
+                    continue;
+                }
+                const TrialRun run = run_trial(program, trial, disc, cancelled);
+                stuck = run.verdict == Verdict::stuck;
+                if (run.verdict == Verdict::ran) {
+                    // Written back only when the file is still the one tried.
+                    fs::path written = state.path;
+                    written += ".new";
+                    if (read_whole(state.path) == waiting.bytes && write_whole(written, carried)) {
+                        fs::rename(written, state.path);
+                        ++result.carried;
+                        result.lines.push_back(slot_name(state) + " now loads on this version");
+                        continue;
+                    }
+                    fs::remove(written, failed);
+                    ++result.untried;
+                    result.lines.push_back(slot_name(state) + " changed while it was tried: it is tried again next time");
+                    continue;
+                }
+                if (cancelled) break;
+                if (run.verdict == Verdict::refused) {
+                    ++result.refused;
+                    note_tried(saves, tried_line(saves, state, waiting.bytes, target(key, layouts, state.language)));
+                    result.lines.push_back(slot_name(state) + " does not run on this version (" + run.why +
+                                           ")\nIt stays as it was, and a copy is in saves\\old-states");
+                } else {
+                    ++result.untried;
+                    result.lines.push_back(slot_name(state) + " could not be tried (" + run.why + "): it is tried again next time");
+                }
+            } catch (const std::exception& error) {
+                ++result.untried;
+                result.lines.push_back(slot_name(state) + " could not be tried: " + error.what());
+            }
+        }
+    }
+    if (!trial_settings) return result;
     if (stuck) result.lines.push_back("A trial run of the game did not stop: " + utf8(trial) + " is left as it is");
     else fs::remove_all(trial, failed);
     return result;

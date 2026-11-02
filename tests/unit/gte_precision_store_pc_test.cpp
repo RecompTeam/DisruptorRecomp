@@ -19,6 +19,18 @@ extern "C" void gte_test_set_precise_perspective_valid(uint32_t index, int valid
 extern "C" void gte_test_get_precise_projection(
     uint32_t index, uint32_t *packed, int32_t *x16, int32_t *y16, uint16_t *z, uint8_t *valid);
 extern "C" void gte_execute(CPUState *cpu, uint32_t cmd);
+/* The framework services gte.cpp and pgxp.cpp call, none of them in play here. */
+extern "C" {
+int psx_netplay_active(void) { return 0; }
+int gpu_ws_precise_nclip_enabled(void) { return 0; }
+void gpu_ws_note_gte_sxy(int32_t, int32_t) {}
+int psx_overlay_shadow_diff_active(void) { return 0; }
+void gpu_pgxp_rederive_enable(void) {}
+int gpu_render_projective_enabled(void) { return 0; }
+uint32_t g_debug_last_store_pc = 0;
+int psx_mod_gpu_dma_memory_contains(uint32_t, uint32_t) { return 0; }
+uint32_t g_psx_ram_mask = 0x1FFFFFu;
+}
 extern "C" void gte_write_data(CPUState *cpu, uint8_t reg, uint32_t val);
 extern "C" void gte_write_ctrl(CPUState *cpu, uint8_t reg, uint32_t val);
 extern "C" void gte_set_display_aspect(int num, int den);
@@ -358,6 +370,15 @@ int test_speculation_and_timeline() {
     commit(addr + 4u);
     store(kStorePc, addr + 4u);
     if (lookup(addr + 4u)) return fail("timeline restore retained stale MFC2 capture");
+
+    gte_precision_speculative_begin();
+    gte_precision_timeline_invalidate();
+    gte_test_seed_precise_projection(2, kPacked, kX16 + 1, kY16 + 1, kZ + 1);
+    gte_precision_speculative_end();
+    capture();
+    commit(addr + 12u);
+    store(kStorePc, addr + 12u);
+    if (lookup(addr + 12u, kPacked, kX16 + 1, kY16 + 1, kZ + 1)) return fail("a projection made after an invalidated speculation outlived it");
     return 0;
 }
 

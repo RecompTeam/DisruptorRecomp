@@ -444,7 +444,9 @@ upload = gpu[gpu.index("static void gp0_commit_cpu_to_vram(void) {") :]
 upload = upload[: upload.index("\n}\n")]
 require(
     "psx_texture_row_fix(vram, (int)vram_write_x, (int)vram_write_y, (int)vram_write_w, (int)vram_write_h)" in upload
-    and "        psx_texture_row_fix(vbuf, 0, 0, VRAM_W, VRAM_H);\n        gr_vram_transfer_in(0, 0, VRAM_W, VRAM_H, vbuf);"
+    and "            psx_texture_row_fix(vbuf, 0, 0, VRAM_W, VRAM_H);\n            gr_vram_transfer_in(0, 0, VRAM_W, VRAM_H, vbuf);"
+    in read("psxrecomp/runtime/src/boot_state.c")
+    and "        psx_texture_row_fix(fixed, 0, 0, VRAM_W, VRAM_H);\n        gr_vram_transfer_in(0, 0, VRAM_W, VRAM_H, fixed);"
     in read("psxrecomp/runtime/src/boot_state.c")
     and "disruptor_unit_test(disruptor_gpu_texture_row tests/unit/gpu_texture_row_test.cpp RUNTIME_HEADERS)"
     in read("CMakeLists.txt"),

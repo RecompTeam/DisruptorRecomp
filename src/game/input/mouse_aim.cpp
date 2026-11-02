@@ -46,7 +46,7 @@ extern "C" uint8_t psx_read_byte(uint32_t address);
 extern "C" uint32_t psx_read_word(uint32_t address);
 extern "C" void psx_host_write_byte(uint32_t address, uint8_t value);
 extern "C" uint16_t sio_get_pad_buttons_slot(int slot);
-extern "C" void sio_set_pad_state_slot(int slot, uint16_t buttons);
+extern "C" void psx_game_pad_press(int slot, uint16_t mask);
 extern "C" int32_t psx_mod_widescreen_x_margin(void);
 extern "C" int gpu_ws_present_native_43(void);
 extern "C" int ws_native_wide_active(void);
@@ -474,7 +474,7 @@ void press_psionic_use() {
         g_mouse.using_power = -1;
         return;
     }
-    if (taken) sio_set_pad_state_slot(0, static_cast<uint16_t>(sio_get_pad_buttons_slot(0) & ~kPadSquare));
+    if (taken) psx_game_pad_press(0, kPadSquare);
 }
 
 /* As the psionics list's own move (0x8003E820), the ID alone: the power update sees it differ from the held one and
@@ -575,8 +575,7 @@ void apply_modern_controls(const Uint8 *keys, uint32_t mouse_buttons, uint16_t s
 
     press = disruptor_selection_wheel_filter_press(press);
     if (press != 0) {
-        const uint16_t sampled = sio_get_pad_buttons_slot(0);
-        sio_set_pad_state_slot(0, static_cast<uint16_t>(sampled & ~press));
+        psx_game_pad_press(0, press);
         g_mouse.interval_modern_press_mask |= press;
     }
 }

@@ -146,19 +146,20 @@ require(
     and "int psx_game_key(int scancode, uint32_t keycode, int down, int plain) {\n"
     "    return disruptor_name_entry_key(scancode, keycode, down, plain);\n}\n"
     in game_side
-    and "#ifdef PSX_HAS_GAME_HOST\n            } else if (ev.type == SDL_KEYUP) {\n#if defined(PSX_SDL3)\n"
-    "                (void)psx_game_key((int)ev.key.scancode, (uint32_t)ev.key.key, 0, 1);\n#else\n"
-    "                (void)psx_game_key((int)ev.key.keysym.scancode, (uint32_t)ev.key.keysym.sym, 0, 1);\n"
-    "#endif\n#endif\n            } else if (!ui_consumed && ev.type == SDL_KEYDOWN) {\n"
+    and "        if (ev.type == SDL_KEYUP) {\n#if defined(PSX_SDL3)\n"
+    "            (void)psx_game_key((int)ev.key.scancode, (uint32_t)ev.key.key, 0, 1);\n#else\n"
+    "            (void)psx_game_key((int)ev.key.keysym.scancode, (uint32_t)ev.key.keysym.sym, 0, 1);\n"
+    "#endif\n        }\n#endif\n        /* In-game overlay provider sees events first (host_overlay.h P3). */\n"
+    "        if (psx_host_input_sink_dispatch(&ev)) continue;\n"
     in host
     and "#ifdef PSX_HAS_GAME_HOST\n"
-    "                if (psx_game_key((int)scancode, (uint32_t)key, 1, !(mod & (KMOD_CTRL | KMOD_ALT | KMOD_GUI))))\n"
-    "                    continue; /* the game took the key */\n"
+    "            if (psx_game_key((int)scancode, (uint32_t)key, 1, !(mod & (KMOD_CTRL | KMOD_ALT | KMOD_GUI))))\n"
+    "                continue; /* the game took the key */\n"
     in host
     and host.count("psx_game_key(") == 3,
     "the host must hand every key it did not use itself to the module, a release whoever used the press, and leave a taken key alone",
 )
-keydown = host.index("            } else if (!ui_consumed && ev.type == SDL_KEYDOWN) {\n")
+keydown = host.index("\n        } else if (ev.type == SDL_KEYDOWN) {\n")
 require(
     keydown
     < host.index("if (psx_game_key((int)scancode")
@@ -175,7 +176,7 @@ require(
     and "    if (g_held.any() && g_entered - g_keyed >= kLetGo * kVBlankCycles) g_held.reset();\n" in module
     and "    g_keyed = psx_get_cycle_count();\n" in module
     and "constexpr uint64_t kVBlankCycles = 564480u;" in module
-    and "#define VBLANK_CYCLES   564480u" in read("psxrecomp/runtime/src/interrupts.c")
+    and "#define PSX_VBLANK_CYCLES_NTSC   564480u" in read("psxrecomp/runtime/include/psx_video_timing.h")
     and "constexpr unsigned kLeftScreen = 8u;" in module
     and "constexpr unsigned kLetGo = 120u;" in module
     and 'extern "C" void disruptor_name_entry_state_loaded(void) {\n'
@@ -188,15 +189,11 @@ require(
     "and a loaded save state, whose clock may lie anywhere, resets it all",
 )
 require(
-    "    for (const ModResolution::Plugin& plugin : s.plan.plugins)\n        mod_invoke_vblank_plugin(plugin.id);\n"
+    "    for (const ModResolution::Plugin& plugin : s.plan.plugins) {\n"
+    "        invoke_plugin_callback(s, &plugin, nullptr, false, [&]() {\n            mod_invoke_vblank_plugin(plugin.id);\n"
     in read("psxrecomp/runtime/src/mod_runtime.cpp")
-    and not [
-        found.name
-        for found in sources
-        if "psx_mod_register_vblank_plugin" in found.read_text(encoding="utf-8")
-        or "psx_mod_register_activation_plugin" in found.read_text(encoding="utf-8")
-    ],
-    "the framework calls a VBlank or an activation plugin for a mod package only, never for the game itself: "
+    and not [found.name for found in sources if "psx_mod_register_vblank_plugin" in found.read_text(encoding="utf-8")],
+    "the framework calls a VBlank plugin for a mod package only, never for the game itself: "
     "no source of the game may count on one",
 )
 controls = read("src/game/input/mouse_aim.cpp")
@@ -210,10 +207,10 @@ require(
     "    psx_game_keys_for_pad(keys, kept, count);\n"
     "    return kept;\n"
     in host
-    and host.count("const Uint8* keys = pad_keys();\n") == 4
+    and host.count("const Uint8* keys = pad_keys();\n") == 5
     and all(
         host.count(f"{reader}(keys, ") == uses
-        for reader, uses in (("psx_keybinds_pad_word", 1), ("psx_keybinds_sticks", 2), ("psx_keybinds_dpad_active", 1))
+        for reader, uses in (("psx_keybinds_pad_word", 1), ("psx_keybinds_sticks", 3), ("psx_keybinds_dpad_active", 1))
     )
     and "void psx_game_keys_for_pad(const uint8_t *keys, uint8_t *kept, int count) {\n"
     "    disruptor_name_entry_keys_for_pad(keys, kept, count);\n}\n"

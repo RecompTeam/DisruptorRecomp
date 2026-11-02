@@ -90,7 +90,7 @@ require(
     "        s_precise_sxy[2].view_z = gte->MAC3;\n"
     "        s_precise_sxy[2].centre_x16 = gte->OFX;\n"
     "        s_precise_sxy[2].centre_y16 = gte->OFY;\n"
-    "        s_precise_sxy[2].focal = gte->H;\n"
+    "        s_precise_sxy[2].focal = gte_h_scaled(gte);\n"
     "        s_precise_sxy[2].squash_num = do_squash ? s_ws_xnum : 1;\n"
     "        s_precise_sxy[2].squash_den = do_squash ? s_ws_xden : 1;\n"
     "        s_precise_sxy[2].viewed = do_squash || xterm == (int64_t)gte->IR1 * h_div_sz;\n"

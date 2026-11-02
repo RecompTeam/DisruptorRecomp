@@ -499,19 +499,20 @@ if image_path.exists():
 
 def hook_at_entry(own: str, routine: int) -> bool:
     """Whether a generated routine runs its entry hook once, before its first block and with nothing between."""
-    hook = f"psx_mod_function_entry(cpu, 0x{routine:08X}u);"
+    hook = f"if (psx_mod_function_entry(cpu, 0x{routine:08X}u)) return;"
+    replacement = f"if (psx_mod_try_function_replacement(cpu, 0x{routine:08X}u)) return;"
     first_block = re.search(r"^block_[0-9A-F]{8}:", own, re.MULTILINE)
     if own.count(hook) != 1 or first_block is None or first_block.group(0) != f"block_{routine:08X}:":
         return False
     between = own[own.index(hook) + len(hook) : first_block.start()] if own.index(hook) < first_block.start() else "x"
-    return re.fullmatch(r"(\s|/\*.*?\*/)*", between, re.DOTALL) is not None
+    return re.fullmatch(r"(\s|/\*.*?\*/)*", between.replace(replacement, "", 1), re.DOTALL) is not None
 
 
 generated = list((ROOT / "generated").glob("SLUS_002.24.code_full_*.c"))
 if generated:
     text = "".join(path.read_text(encoding="utf-8") for path in generated)
     for routine in (*ROUTINES, MENU_DRAW, STRIP_DRAW, *HINT_ROUTINES):
-        hook = f"psx_mod_function_entry(cpu, 0x{routine:08X}u);"
+        hook = f"psx_mod_function_entry(cpu, 0x{routine:08X}u)"
         start = text.find(f"\nvoid func_{routine:08X}(CPUState* cpu)\n{{")
         own = text[start : text.find("\nvoid func_", start + 1)] if start >= 0 else ""
         require(
@@ -519,13 +520,14 @@ if generated:
             f"generated guest code must run exactly one entry hook at 0x{routine:08X}, in that routine, right before its first block",
         )
         label = f"block_{routine:08X}:"
-        late = own.replace(hook, "", 1).replace(label, f"{label}\n    {hook}", 1)
-        busy = own.replace(hook, f"{hook}\n    cpu->gpr[4] = 0;", 1)
+        statement = f"if ({hook}) return;"
+        late = own.replace(statement, "", 1).replace(label, f"{label}\n    {statement}", 1)
+        busy = own.replace(statement, f"{statement}\n    cpu->gpr[4] = 0;", 1)
         require(
-            hook in late
+            statement in late
             and not hook_at_entry(late, routine)
             and not hook_at_entry(busy, routine)
-            and not hook_at_entry(own + hook, routine),
+            and not hook_at_entry(own + statement, routine),
             "the check of a hook's place must refuse a hook inside a block, one with a statement before the first block, and two",
         )
     require(

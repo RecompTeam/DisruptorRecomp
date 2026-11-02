@@ -7,8 +7,14 @@
 #include <vector>
 
 extern "C" {
-uint32_t g_psx_cyc_overclock_shift = 0;
-uint32_t g_psx_cyc_overclock_carry = 0;
+uint64_t psx_cycle_count = 0;
+uint64_t psx_next_service_cycle = 0;
+uint32_t *g_psx_cyc_local_acc = nullptr;
+uint32_t g_psx_gcs_recip_q16 = 65536u;
+uint32_t g_psx_gcs_frac = 0;
+int g_psx_gcs_batch = 0;
+void psx_devices_service_to_now(void) {}
+void psx_advance_cycles_slow(uint32_t cycles) { psx_cycle_count += cycles; }
 int g_ls_replay_active = 0;
 int g_event_step_conservative = 0;
 int psx_in_device_service = 0;
@@ -67,19 +73,17 @@ namespace {
 
 struct Machine {
     CPUState cpu{};
-    uint32_t carry = 0, batch = 0, limit = 0;
+    uint32_t batch = 0, limit = 0;
     Clock clock;
 };
 
 void load(const Machine& machine) {
-    g_psx_cyc_overclock_carry = machine.carry;
     g_psx_cyc_batch = machine.batch;
     g_psx_cyc_batch_limit = machine.limit;
     g_clock = machine.clock;
 }
 
 void save(Machine& machine) {
-    machine.carry = g_psx_cyc_overclock_carry;
     machine.batch = g_psx_cyc_batch;
     machine.limit = g_psx_cyc_batch_limit;
     machine.clock = g_clock;
@@ -104,8 +108,6 @@ int main() {
         start.cpu.read_fudge = static_cast<uint8_t>(pick(2) == 0 ? 0x20 : pick(32));
         start.cpu.ld_which_t = static_cast<uint8_t>(pick(2) == 0 ? 0x20 : pick(32));
         start.cpu.ld_absorb = pick(8);
-        g_psx_cyc_overclock_shift = pick(6) == 0 ? 1u + pick(2) : 0u;
-        start.carry = g_psx_cyc_overclock_shift ? pick(1u << g_psx_cyc_overclock_shift) : 0u;
         g_ls_replay_active = pick(20) == 0;
         g_event_step_conservative = pick(20) == 0;
         psx_in_device_service = pick(20) == 0;
@@ -132,7 +134,7 @@ int main() {
         psx_cyc_run_inline(&fused.cpu, masks, count);
         save(fused);
 
-        if (!same_timing(one_by_one.cpu, fused.cpu) || one_by_one.carry != fused.carry ||
+        if (!same_timing(one_by_one.cpu, fused.cpu) ||
             one_by_one.batch != fused.batch || one_by_one.limit != fused.limit ||
             one_by_one.clock.published != fused.clock.published || one_by_one.clock.log != fused.clock.log) {
             if (++failures <= 5) std::cerr << "FAIL: trial " << trial << " of " << count << " steps differs\n";

@@ -10,10 +10,10 @@ ROOT = Path(__file__).resolve().parent.parent
 GENERATED = ROOT / "generated"
 CODE_START = 0x80011200
 CODE_END = 0x80056938
-EXPECTED_SHARDS = 23
+EXPECTED_SHARDS = 25
 EXPECTED_FUNCTIONS = 579
 EXPECTED_DISPATCH_ENTRIES = 12_797
-EXPECTED_FUSED_STEPS = 17_133
+EXPECTED_FUSED_STEPS = 13_105
 FINITE_SKYLINE_RENDERER = 0x8003A0F0
 
 FUNCTION_DEFINITION = re.compile(r"^void func_([0-9A-F]{8})\(CPUState\* cpu\)$", re.MULTILINE)
@@ -29,12 +29,12 @@ CPS_STATIC_TARGET = re.compile(
 
 UNSIGNED_PORTAL_LEFT = re.compile(
     r"cpu->gpr\[2\] = psx_cyc_load_half\("
-    r"cpu, cpu->gpr\[17\], 2, 0x20000u\);\s+"
+    r"cpu, cpu->gpr\[17\], 2, 0x20000u\);\s+(?:PGXP_LOAD\(0x96220000u, _pgxa, cpu->gpr\[2\]\); \}\s+)?"
     r"/\* 0x80041184: 0x96220000 \*/"
 )
 UNSIGNED_PORTAL_RIGHT = re.compile(
     r"cpu->gpr\[2\] = psx_cyc_load_half\("
-    r"cpu, cpu->gpr\[17\] \+ 2, 2, 0x20000u\);\s+"
+    r"cpu, cpu->gpr\[17\] \+ 2, 2, 0x20000u\);\s+(?:PGXP_LOAD\(0x96220002u, _pgxa, cpu->gpr\[2\]\); \}\s+)?"
     r"/\* 0x80041178: 0x96220002 \*/"
 )
 
@@ -317,6 +317,30 @@ def interpreted_hooks(dispatch_text: str) -> dict[str, dict[int, int]] | None:
     return hooks
 
 
+def emitted_instruction_count(shard_text: str, site: str) -> int:
+    """How often `statement  /* address */` is emitted as one instruction: on one line, or as the PGXP wrapper's
+    `{ uint32_t _pgxN = ...; statement` line followed by its `PGXP_...(...); }  /* address */` line."""
+    cut = site.rindex("  /* 0x")
+    statement, comment = site[:cut], site[cut + 2 :]
+    lines = shard_text.split("\n")
+    count = 0
+    for index, line in enumerate(lines):
+        if not line.endswith(comment):
+            continue
+        before = line[: -len(comment)].strip()
+        if before == statement:
+            count += 1
+        elif (
+            index > 0
+            and before.startswith("PGXP_")
+            and before.endswith("); }")
+            and lines[index - 1].strip().startswith("{ uint32_t _pgx")
+            and lines[index - 1].strip().endswith("; " + statement)
+        ):
+            count += 1
+    return count
+
+
 def format_addresses(addresses: set[int]) -> str:
     values = sorted(addresses)
     shown = ", ".join(f"0x{value:08X}" for value in values[:12])
@@ -348,6 +372,9 @@ REGISTER_ASSIGNMENT = re.compile(
     r"^(?:(?:uint32_t|int) )?(cpu->gpr\[\d+\]|_jt_[0-9A-F]{8}|_bc_[0-9A-F]{8}) = ([^;{}\"']*);$"
 )
 GENERAL_REGISTER = re.compile(r"cpu->gpr\[(\d+)\]")
+# The PGXP shadow wrapper of a register instruction: the operands kept for the host-only shadow, then the instruction.
+PGXP_SHADOW = re.compile(r"^\{ ((?:uint32_t _pgx\d+ = cpu->gpr\[\d+\]; )+)(.+)$")
+PGXP_ALU_LINE = re.compile(r"^PGXP_ALU\((?:0x[0-9A-F]+u|\d+u|cpu->gpr\[\d+\]|cpu->hi|cpu->lo|_pgx\d+)(?:, (?:0x[0-9A-F]+u|\d+u|cpu->gpr\[\d+\]|cpu->hi|cpu->lo|_pgx\d+))*\);(?: \})?$")
 CAST_TYPES = {"uint32_t", "int32_t", "uint16_t", "int16_t", "uint8_t", "int8_t", "uint64_t", "int64_t"}
 REGISTER_MARKS = set(" ()+-<>|^~!=?:&_@")
 
@@ -370,6 +397,13 @@ def register_only(line: str) -> bool:
         return False
     if not text:
         return True
+    if PGXP_ALU_LINE.match(text):
+        return all(plain_register(digits) for digits in GENERAL_REGISTER.findall(text))
+    shadow = PGXP_SHADOW.match(text)
+    if shadow is not None:
+        return all(plain_register(digits) for digits in GENERAL_REGISTER.findall(shadow.group(1))) and register_only(
+            shadow.group(2)
+        )
     match = REGISTER_ASSIGNMENT.match(text)
     if match is None or "@" in match.group(2):
         return False
@@ -710,7 +744,7 @@ def main() -> int:
         "cpu->gpr[12] = -256;  /* 0x800479C4: 0x200CFF00 */",
         "cpu->gpr[12] = 496;  /* 0x800479E0: 0x200C01F0 */",
     ):
-        if shard_text.count(pin) != 1:
+        if emitted_instruction_count(shard_text, pin) != 1:
             failures.append("the guard band before the 0x80047A0C scratch store changed: " + pin)
 
     intro_skip_matches = re.findall(
@@ -831,7 +865,7 @@ def main() -> int:
         )
 
     for site in VANILLA_PORTAL_AND_POINT_SITES:
-        if site not in shard_text:
+        if emitted_instruction_count(shard_text, site) < 1:
             failures.append("retail portal/outcode invariant changed unexpectedly: " + site)
     for tag in (
         "/* ws manual lower",

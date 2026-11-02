@@ -10,7 +10,6 @@
 #include "game/input/weapon_list.h"
 #include "game/render/far_rendering.h"
 #include "game/render/movie_smoothing.h"
-#include "game/render/precision_routes.h"
 #include "game/session/capsule.h"
 #include "game/session/diagnostics.h"
 #include "game/settings/game_mark.h"
@@ -18,6 +17,7 @@
 #include "game/settings/pick_keys.h"
 #include "game/settings/second_keys.h"
 #include "game/settings/user_folder.h"
+#include "game/render/precision_routes.h"
 #include "gpu.h"
 #include "host_ui.h"
 #include "mod_plugins.h"
@@ -195,14 +195,3 @@ int psx_game_smooth_movies(void) { return disruptor_smooth_movies_enabled(); }
 
 }  // extern "C"
 
-#ifdef PSX_HAS_GAME_DISPATCH
-extern "C" unsigned psx_game_dispatch_lookup_mismatches(void);
-
-/* PSX_DISRUPTOR_DISPATCH_CHECK=1 compares the dispatch lookup with a binary search around every key and ends the run. */
-PSX_MOD_CONSTRUCTOR(disruptor_check_dispatch_lookup) {
-    if (!std::getenv("PSX_DISRUPTOR_DISPATCH_CHECK")) return;
-    const unsigned mismatches = psx_game_dispatch_lookup_mismatches();
-    std::fprintf(stderr, "disruptor: dispatch lookup: %u mismatches with the binary search\n", mismatches);
-    std::_Exit(mismatches == 0 ? 0 : 1);
-}
-#endif

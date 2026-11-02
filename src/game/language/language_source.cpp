@@ -52,7 +52,7 @@ void keep_states_apart() {
     savestate_get_integrity(&bios, &entry);
     const char *folder = savestate_dir();
     if (entry == 0u || !folder || folder[0] == '\0') return;
-    savestate_configure((std::string(folder) + "/" + g_disc.language()).c_str(), bios, entry);
+    savestate_configure((std::string(folder) + "/" + g_disc.language()).c_str(), bios, entry, nullptr, 0u);
     g_states_apart = true;
 }
 

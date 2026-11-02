@@ -1,8 +1,8 @@
 diff --git a/runtime/src/text_xlate.cpp b/runtime/src/text_xlate.cpp
-index 562630ee5dcb91f8595e329cf5c3d6ce31314151..534c0c94ac963ec9088079ccd6f0c4d62356f871 100644
+index 653c1a0760393aa9d11fb1c08da257d760dca097..694302052f00e0d933754a2a6f17b09791e29857 100644
 --- a/runtime/src/text_xlate.cpp
 +++ b/runtime/src/text_xlate.cpp
-@@ -918,6 +918,11 @@
+@@ -925,6 +925,11 @@
      load_tables_locked();
  }
  

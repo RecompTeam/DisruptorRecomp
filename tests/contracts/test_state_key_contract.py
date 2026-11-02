@@ -12,8 +12,8 @@ import sys
 from pathlib import Path, PurePosixPath
 
 ROOT = Path(__file__).resolve().parents[2]
-KEY_OF_BYTES = "59d1144c"
-KEY_OF_TEXT = "89b66cf7"
+KEY_OF_BYTES = "6a62ad53"
+KEY_OF_TEXT = "798a66be"
 
 specification = importlib.util.spec_from_file_location("framework_tool", ROOT / "tools" / "framework.py")
 if specification is None or specification.loader is None:
@@ -42,7 +42,7 @@ def key(content: bytes) -> str:
 
 listing = read("psxrecomp/runtime/codegen_hash_sources.cmake")
 sources = re.findall(r"^\s*\$\{PSXRECOMP_CODEGEN_HASH_ROOT\}/(\S+?)\)?$", listing, re.MULTILINE)
-require(len(sources) == 19, f"the key is made of 19 sources, the framework lists {len(sources)}")
+require(len(sources) == 32, f"the key is made of 32 sources, the framework lists {len(sources)}")
 
 project = tool.Project(ROOT)
 checkout = tool.Checkout(ROOT / "psxrecomp", project.pin())
@@ -68,7 +68,7 @@ require(
 hashing = read("psxrecomp/runtime/hash_codegen.cmake")
 require(
     'string(SHA256 _h "${_cat}")\nstring(SUBSTRING "${_h}" 0 8 _h8)\n' in hashing
-    and "        h.codegen_hash  != (uint32_t)PSX_OVERLAY_CODEGEN_HASH ||\n"
+    and "    if (h.codegen_hash != (uint32_t)PSX_OVERLAY_CODEGEN_HASH) {\n"
     in read("psxrecomp/runtime/src/boot_state.c")
     and "getenv" not in read("psxrecomp/runtime/src/boot_state.c"),
     "the key is the first eight digits of the sources' hash, and a state of another key is refused, whatever the environment",

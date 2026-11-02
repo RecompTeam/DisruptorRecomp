@@ -18,6 +18,7 @@
 #include "cpu_state.h"
 #include "interrupts.h"
 #include "mod_plugins.h"
+#include "psx_cycles.h"
 #include "psx_cyc.h"
 
 #include <algorithm>
@@ -118,11 +119,10 @@ bool simulation_follows_elapsed_vblanks() {
            psx_mod_read_byte(kPlayerState) != kSingleStepPlayerState;
 }
 
-/* The carry counts in units of the divisor that left it, so another divisor starts from none. */
+/* The framework's guest cycle scale: an instruction is charged 1/2^shift of its cost while a frame's work runs. */
 void set_cpu_shift(uint32_t shift) {
-    if (shift == g_psx_cyc_overclock_shift) return;
-    g_psx_cyc_overclock_shift = shift;
-    g_psx_cyc_overclock_carry = 0u;
+    const uint32_t scale = 1u << shift;
+    if (scale != psx_guest_cycle_scale_config()) psx_guest_cycle_scale_set(scale);
 }
 
 void vsync_entry(CPUState *cpu, uint32_t address) {

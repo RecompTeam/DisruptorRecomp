@@ -210,40 +210,46 @@ require(
 for path in ("runtime/include/psx_cyc.h", "runtime/src/psx_cycles.c"):
     require(path in manifest.splitlines(), f"overlay manifest must list {path}")
 require(
-    "g_psx_cyc_overclock_shift" in cycle_header and "uint32_t g_psx_cyc_overclock_shift = 0;" in cycle_source,
+    "static uint32_t s_psx_gcs_cfg = 1u;" in cycle_source and "    if (scale < 1u) scale = 1u;\n" in cycle_source,
     "the guest CPU divisor must default to faithful timing",
 )
 require(
-    "    if (g_psx_cyc_overclock_shift) {\n"
-    "        const uint32_t total = g_psx_cyc_overclock_carry + cycles;\n"
-    "        g_psx_cyc_overclock_carry =\n"
-    "            total & ((1u << g_psx_cyc_overclock_shift) - 1u);\n"
-    "        cycles = total >> g_psx_cyc_overclock_shift;\n"
-    "        if (cycles == 0u) return;\n"
-    "    }\n" in cycle_header,
+    "    uint64_t t = (uint64_t)cpu_cycles * g_psx_gcs_recip_q16 + g_psx_gcs_frac;\n"
+    "    g_psx_gcs_frac = (uint32_t)(t & 0xFFFFu);\n"
+    "    return (uint32_t)(t >> 16);\n" in read("psxrecomp/runtime/include/psx_cycles.h"),
     "the divisor must charge whole cycles and carry the remainder",
 )
 waits_header = read("psxrecomp/runtime/include/psx_cyc_overclock.h")
 icache = read("psxrecomp/runtime/src/psx_icache.c")
 memory = read("psxrecomp/runtime/src/memory.c")
-require(
-    "+runtime/include/psx_cyc_overclock.h" in manifest.splitlines()
-    and "runtime/src/psx_icache.c" in manifest.splitlines()
-    and "    disruptor_unit_test(psx_cyc_overclock " in cmake
-    and "    if (!g_psx_cyc_overclock_shift) return cycles;\n" in waits_header
-    and all('#include "psx_cyc_overclock.h"\n' in text for text in (cycle_source, icache, memory))
-    and "    cpu->muldiv_ts_done = psx_cycle_count + (uint64_t)psx_cyc_overclocked_latency(latency);\n" in cycle_source
-    and "    cpu->gte_ts_done = psx_cycle_count + (uint64_t)psx_cyc_overclocked_latency(latency);\n" in cycle_source
-    and "        psx_advance_cycles(psx_cyc_overclocked_wait(4u));\n" in icache
-    and "    psx_advance_cycles(psx_cyc_overclocked_wait(cost));\n" in icache
-    and "    psx_advance_cycles(phys < 0x00800000u ? psx_cyc_overclocked_wait(fudge + cost) : fudge + cost);\n"
-    in memory
-    and "    if (shift == g_psx_cyc_overclock_shift) return;\n    g_psx_cyc_overclock_shift = shift;\n    g_psx_cyc_overclock_carry = 0u;\n}\n"
-    in source,
-    "the overclock divides the GTE and multiplier latencies without the elapsed carry, instruction cache refills and main "
-    "RAM loads off the inline path with it, leaves device waits whole, and another divisor starts from no carry",
-)
 dma = read("psxrecomp/runtime/src/dma.c")
+cycles_header = read("psxrecomp/runtime/include/psx_cycles.h")
+
+
+def c_body(source: str, signature: str) -> str:
+    begin = source.index(signature)
+    return source[begin : source.index("\n}\n", begin)]
+
+
+muldiv = c_body(cycle_source, "void psx_muldiv_set(CPUState* cpu, uint32_t latency) {")
+gte_set = c_body(cycle_source, "void psx_gte_set(")
+charge = c_body(cycles_header, "static inline void psx_cpu_charge(uint32_t cycles) {")
+require(
+    "    return PSX_GCS_ACTIVE() ? psx_gcs_scale(cpu_cycles) : cpu_cycles;" in c_body(
+        cycles_header, "static inline uint32_t psx_cpu_cycles(uint32_t cpu_cycles) {"
+    )
+    and muldiv.index("    latency = psx_cpu_cycles(latency);")
+    < muldiv.index("    cpu->muldiv_ts_done = psx_cycle_count + (uint64_t)latency;")
+    and gte_set.index("    latency = psx_cpu_cycles(latency);")
+    < gte_set.index("    cpu->gte_ts_done = psx_cycle_count + (uint64_t)latency;")
+    and "    if (PSX_GCS_ACTIVE()) {\n        cycles = psx_gcs_scale(cycles);\n" in charge
+    and "psx_cpu_charge(fudge + cost);" in memory
+    and "    advance_mdec_channel(0, cycles);\n    advance_mdec_channel(1, cycles);\n" in dma
+    and dma.count("psx_guest_cycle_scale()") == 2
+    and "    if (scale != psx_guest_cycle_scale_config()) psx_guest_cycle_scale_set(scale);\n" in source,
+    "the overclock divides the GTE and multiplier deadlines and main RAM loads with the CPU's charge, devices other than "
+    "the GPU transfer keep their time, and frame unlock sets the framework's scale only where it changes",
+)
 GPU_TRANSFER = (
     "        case 2: {\n"
     "            /* Overclocked, GPU transfers end as much sooner, or the CPU outruns the GPU into an area both upload to."
@@ -256,12 +262,15 @@ GPU_TRANSFER = (
     "        case 3:\n"
 )
 require(
-    '#include "psx_cyc_overclock.h"\n' in dma
-    and dma.count(GPU_TRANSFER) == 1
-    and dma.count("psx_cyc_overclocked_") == 1
-    and dma.count("delayed_complete[2]") == 1,
+    "                const uint32_t scale = psx_guest_cycle_scale();\n"
+    "                DMADelayedComplete *gpu = &delayed_complete[2];\n"
+    "                if (scale > 1u && gpu->active) gpu->cycles_remaining = (gpu->cycles_remaining + scale / 2u) / scale;\n"
+    in dma
+    and "        const uint32_t gpu_cycles = scale > 1u ? (cycles > UINT32_MAX / scale ? UINT32_MAX : cycles * scale) : cycles;\n"
+    "        dma_gpu_ll_advance(&gpu_linked_list, gpu_cycles, &gpu_ll_ops, NULL);\n" in dma
+    and dma.count("psx_guest_cycle_scale()") == 2,
     "a GPU transfer ends as much sooner as the overclock runs the CPU, the other channels keep their time: "
-    "at 8x the pause menu's pictures went into the sprite chain's area before the chain was done",
+    "at 8x the pause menu's pictures went into the sprite chain's area before it ended",
 )
 
 present_rate = read("src/game/frame/present_rate.h")
@@ -357,9 +366,9 @@ require(
     "            g_frame_interpolation = us.frame_interpolation ? 1 : 0;\n"
     "        if (us.has_frame_interpolation_fps)\n"
     in host
-    and "    if (g_frame_interpolation_blend == PSX_HOST_FRAME_INTERPOLATION_GEOMETRY &&\n"
-    "        !g_geometry_correction)\n"
-    "        g_frame_interpolation = 0;\n"
+    and "        if (g_frame_interpolation_blend == PSX_HOST_FRAME_INTERPOLATION_GEOMETRY &&\n"
+    "            !gpu_geometry_correction_enabled())\n"
+    "            g_frame_interpolation = 0;\n"
     in host,
     "the host must restore the saved switch, and geometry in-between frames not without exact geometry",
 )

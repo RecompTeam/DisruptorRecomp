@@ -108,9 +108,14 @@ def main() -> int:
         "return 0;" in legacy_lookup and "s_geom_cache" not in legacy_lookup,
         "legacy packed-SXY ABI must remain hard-disabled",
     )
+    probe_lookup = function_body(gte_source, "gte_geometry_correction_lookup_probe")
+    note = function_body(gte_source, "geom_note")
     require(
-        "geom_note" not in gte_source and "GEOM_CACHE_SIZE" not in gte_source and "s_geom_cache" not in gte_source,
-        "rounded packed-SXY storage must not exist",
+        "return 0;" in probe_lookup
+        and "s_geom_cache" not in probe_lookup
+        and "gte_geometry_correction_lookup_impl" not in gte_source
+        and "if (!pgxp_position_fallback()) return;" in note,
+        "the framework's rounded packed-SXY store must have no reader and be filled only for its PGXP fallback",
     )
 
     # A RAM-looking SWC2 address does not prove memory.c took the write: only the main-RAM path arms the one-write token.
@@ -124,7 +129,7 @@ def main() -> int:
     )
 
     write_raw = function_body(memory_source, "psx_write_word_raw")
-    suppress_pos = write_raw.index("g_debug_last_store_pc == 0xBFC117E4u")
+    suppress_pos = write_raw.index("scph1001_relocated_store(0x00001CE4u, 0xBFC117E4u)")
     invalidate_pos = write_raw.index("gte_precision_invalidate_word(addr)")
     ram_write_pos = write_raw.index("ram[phys + 3]")
     commit_pos = write_raw.index("gte_precision_main_ram_word_committed(phys)")
@@ -330,7 +335,8 @@ def main() -> int:
         "ordered four main-RAM plus twenty scratchpad pairs",
     )
 
-    translate = function_body(codegen_source, "CodeGenerator::translate_instruction")
+    core_start = codegen_source.index("CodeGenerator::translate_instruction_core(")
+    translate = codegen_source[core_start : codegen_source.index("\n}\n", core_start)]
     require(
         "gte_precision_copy_pc_read(" in translate
         and "gte_precision_copy_pc_word(" in translate
@@ -348,7 +354,7 @@ def main() -> int:
         "resident packet-copy callback must run after the exact SW",
     )
     require(
-        translate.index("translate_sw(instr)") < translate.index('" gte_precision_scratch_store_pc_word("'),
+        translate.index("translate_sw(instr, memory_addr)") < translate.index('" gte_precision_scratch_store_pc_word("'),
         "resident scratch callback must be appended after the exact SW",
     )
     require(
@@ -370,7 +376,7 @@ def main() -> int:
     )
     require(
         dirty_sw_body.index("cpu->write_word(addr, cpu->gpr[rt])")
-        < dirty_sw_body.index("gte_precision_store_pc_word(pc, insn, addr"),
+        < dirty_sw_body.index("gte_precision_store_pc_word(pc, original_instruction, addr"),
         "dirty interpreter must publish a literal-PC callback after SW",
     )
     require("gte_precision_mfc2_pc_read(" in dirty_interp_source, "dirty interpreter must snapshot reviewed MFC2 reads")
@@ -394,7 +400,8 @@ def main() -> int:
         "disruptor_precision_routes_configure",
     )
     require(
-        "#ifdef PSX_HAS_GAME_HOST\n    if (!psx_game_configure(game_id.data(), game_id.size())) return 1;\n#endif\n"
+        "            game_id   = gc.id;\n#ifdef PSX_HAS_GAME_HOST\n"
+        "            if (!psx_game_configure(game_id.data(), game_id.size())) return 1;\n#endif\n"
         in main_source
         and "    return disruptor_precision_routes_configure(game_id, length);\n}\n"
         in function_body((ROOT / "src/game/host.cpp").read_text(encoding="utf-8"), "psx_game_configure") + "}\n"
@@ -528,7 +535,8 @@ def main() -> int:
     require(
         "!native_wide && !visual_only" in sync_target_code
         and "gr_wide_configure" in sync_target_code
-        and re.search(r"native_wide\s*\?\s*ws_nw_offset\(\)\s*:\s*0", sync_target_code) is not None,
+        and re.search(r"if \(!native_wide\) \{\s*gr_wide_configure\(\(int\)ws_disp_w\(\), 0\);", sync_target_code)
+        is not None,
         "visual-only correction must use the same-width, zero-offset mirror",
     )
 
@@ -550,13 +558,13 @@ def main() -> int:
     )
     require("ws_is_fb_base" in fill_rect_code, "mirror clears must remain limited to known display framebuffers")
 
-    gl_fbo_start = main_source.index("if (g_gl_active && g_gl_fbo_present && !di.depth24)")
+    gl_fbo_start = main_source.index("(!local_viewport_crop || local_viewport_wide) && !game_view) {")
     cpu_hires_pos = main_source.index("gl_renderer_sync_cpu", gl_fbo_start)
     gl_fbo = main_source[gl_fbo_start:cpu_hires_pos]
     wide_branch = block_body_after(gl_fbo, "if (wide_present)")
     wide_fbo_pos = wide_branch.index("gl_renderer_present_wide_fbo")
     vram_fallback_pos = wide_branch.find("gl_renderer_present_vram", wide_fbo_pos)
-    fallback_return_pos = wide_branch.find("return;", vram_fallback_pos)
+    fallback_return_pos = wide_branch.find("return ep;", vram_fallback_pos)
     require(
         vram_fallback_pos >= 0 and fallback_return_pos > vram_fallback_pos,
         "a failed GL correction/wide FBO present must fall back directly to the VRAM presenter",

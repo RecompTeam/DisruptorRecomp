@@ -423,12 +423,12 @@ require(
     }
     <= own_members
     and len(framework_members) > 80
-    and {"has_antialiasing", "antialiasing", "parse_error"} <= framework_members
+    and "parse_error" in framework_members
     and not framework_members.intersection(own_members)
     and "struct UserSettings : GameUserSettings {\n#else\nstruct UserSettings {\n"
     in read("psxrecomp/recompiler/src/config_loader.h"),
-    "the framework's settings record derives from the game's and has an antialiasing field of its own, the linear filter of "
-    "the shown picture: a game member of a name the framework declares would be hidden by it, read and written as the framework's",
+    "the framework's settings record derives from the game's: "
+    "a game member of a name the framework declares would be hidden by it, read and written as the framework's",
 )
 require("    disruptor_contract(antialiasing)\n" in cmake, "this contract must remain registered")
 

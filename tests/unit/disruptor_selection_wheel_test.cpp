@@ -34,9 +34,10 @@ uint32_t psx_read_word(uint32_t address) {
 }
 void psx_host_write_byte(uint32_t address, uint8_t value) { g_ram[address & 0x1FFFFFu] = value; ++g_writes; }
 uint16_t sio_get_pad_buttons_slot(int) { return g_pad; }
-void sio_set_pad_state_slot(int, uint16_t buttons) { g_pad = buttons; }
+void psx_game_pad_word(int, uint16_t word) { g_pad = word; }
+void psx_game_pad_release(int, uint16_t mask) { g_pad = static_cast<uint16_t>(g_pad | mask); }
 void sio_get_pad_sticks(int, uint8_t out[4]) { std::memcpy(out, g_sticks.data(), 4); }
-void sio_set_pad_sticks(int, uint8_t lx, uint8_t ly, uint8_t rx, uint8_t ry) { g_sticks = {lx, ly, rx, ry}; }
+void psx_game_pad_sticks(int, uint8_t lx, uint8_t ly, uint8_t rx, uint8_t ry) { g_sticks = {lx, ly, rx, ry}; }
 int disruptor_modern_controls_enabled() { return g_modern; }
 int disruptor_mouse_captured() { return g_captured; }
 int disruptor_vertical_camera_input_allowed() { return g_ready; }

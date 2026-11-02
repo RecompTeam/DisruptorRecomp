@@ -7,6 +7,7 @@
 #include <format>
 #include <fstream>
 #include <system_error>
+#include <utility>
 
 namespace fs = std::filesystem;
 
@@ -14,7 +15,7 @@ namespace disruptor::launcher {
 
 namespace {
 
-constexpr std::size_t hash_at = 16, abi_at = 20, version_at = 24;
+constexpr std::size_t hash_at = 16, abi_at = 20, version_at = 24, layout_at = 32;
 
 std::uint32_t word(const std::string& bytes, std::size_t at) {
     std::uint32_t value = 0;
@@ -40,12 +41,12 @@ std::optional<int> slot_of(const fs::path& file) {
     return slot;
 }
 
-void collect(const fs::path& folder, const std::string& language, const StateStamp& own, std::vector<SavedState>& found) {
+void collect(const fs::path& folder, const std::string& language, std::vector<SavedState>& found) {
     std::error_code failed;
     for (const auto& entry : fs::directory_iterator(folder, failed)) {
         if (!entry.is_regular_file(failed) || entry.path().extension() != ".pst") continue;
         auto state = read_state(entry.path());
-        if (!state || state->stamp == own) continue;
+        if (!state) continue;
         state->language = language;
         found.push_back(*state);
     }
@@ -70,21 +71,39 @@ std::optional<SavedState> read_state(const fs::path& file) {
     std::ifstream input(file, std::ios::binary);
     std::string header(BOOT_STATE_HEADER_WIRE_BYTES, '\0');
     if (!input.read(header.data(), static_cast<std::streamsize>(header.size()))) return std::nullopt;
-    if (word(header, 0) != BOOT_STATE_MAGIC || word(header, 4) != BOOT_STATE_VERSION) return std::nullopt;
+    const std::uint32_t version = word(header, 4);
+    if (word(header, 0) != BOOT_STATE_MAGIC || version < BOOT_STATE_VERSION_MIN_READ || version > BOOT_STATE_VERSION) return std::nullopt;
     SavedState state{file, {}, *slot, word(header, 12)};
     state.stamp = {word(header, hash_at), static_cast<std::int32_t>(word(header, abi_at)), word(header, version_at)};
+    state.layout = word(header, layout_at);
     return state;
 }
 
-std::vector<SavedState> stale_states(const fs::path& saves) {
+std::vector<SavedState> saved_states(const fs::path& saves) {
     std::vector<SavedState> found;
-    const StateStamp own = build_stamp();
-    collect(saves, {}, own, found);
+    collect(saves, {}, found);
     std::error_code failed;
-    for (const auto& entry : fs::directory_iterator(saves, failed))
-        if (entry.is_directory(failed) && entry.path().filename() != "old-states")
-            collect(entry.path(), entry.path().filename().string(), own, found);
+    for (const auto& entry : fs::directory_iterator(saves, failed)) {
+        if (!entry.is_directory(failed) || entry.path().filename() == "old-states") continue;
+        /* The framework keeps a BIOS's states in a folder of its own, and a language disc's inside that. */
+        const std::string name = entry.path().filename().string();
+        const bool bios = name == "openbios" || name == "scph1001";
+        collect(entry.path(), bios ? std::string() : name, found);
+        if (!bios) continue;
+        for (const auto& inner : fs::directory_iterator(entry.path(), failed))
+            if (inner.is_directory(failed)) collect(inner.path(), inner.path().filename().string(), found);
+    }
     return found;
+}
+
+std::vector<SavedState> stale_states(const fs::path& saves, const Layouts& layouts) {
+    std::vector<SavedState> stale;
+    const StateStamp own = build_stamp();
+    for (SavedState& state : saved_states(saves)) {
+        const auto layout = layouts.find(state.language);
+        if (state.stamp != own || (layout != layouts.end() && state.layout != layout->second)) stale.push_back(std::move(state));
+    }
+    return stale;
 }
 
 std::optional<std::string> read_whole(const fs::path& file) {
@@ -105,13 +124,14 @@ bool write_whole(const fs::path& file, std::string_view bytes) {
     return !output.fail();
 }
 
-std::string restamped(std::string bytes, const StateStamp& stamp) {
+std::string restamped(std::string bytes, const StateStamp& stamp, std::optional<std::uint32_t> layout) {
     if (bytes.size() < BOOT_STATE_HEADER_WIRE_BYTES || word(bytes, 0) != BOOT_STATE_MAGIC ||
-        word(bytes, 4) != BOOT_STATE_VERSION)
+        word(bytes, 4) < BOOT_STATE_VERSION_MIN_READ || word(bytes, 4) > BOOT_STATE_VERSION)
         return {};
     put_word(bytes, hash_at, stamp.codegen_hash);
     put_word(bytes, abi_at, static_cast<std::uint32_t>(stamp.abi_tag));
     put_word(bytes, version_at, stamp.codegen_version);
+    if (layout) put_word(bytes, layout_at, *layout);
     return bytes;
 }
 

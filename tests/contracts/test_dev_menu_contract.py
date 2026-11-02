@@ -177,17 +177,20 @@ for token in (
 ):
     require(token in host_ui, f"host UI ABI is missing {token}")
 
-vblank_start = main_cpp.index("static void sdl_vblank_present")
-event_start = main_cpp.index("while (SDL_PollEvent(&ev))", vblank_start)
-event_end = main_cpp.index("SDL_GameControllerUpdate", event_start)
-event_body = main_cpp[event_start:event_end]
-require("psx_host_ui_handle_event(&ev)" in event_body, "SDL events must reach the menu before runtime hotkeys")
+event_body = function_body(main_cpp, "drain_host_events")
 require(
-    event_body.index("psx_host_ui_handle_event(&ev)") < event_body.index("key >= SDLK_F1"),
+    "psx_host_input_sink_dispatch(&ev)" in event_body
+    and "    return psx_host_ui_handle_event(static_cast<const SDL_Event *>(event));" in main_cpp,
+    "SDL events must reach the menu, through the framework's input sink, before runtime hotkeys",
+)
+require(
+    event_body.index("psx_host_input_sink_dispatch(&ev)") < event_body.index("key >= SDLK_F1"),
     "menu event consumption must precede save-state hotkeys",
 )
 require(
-    "psx_host_ui_capture_flags()" in function_body(main_cpp, "sample_pad_into_sio"),
+    main_cpp.index("        psx_host_set_ui_capture(psx_host_ui_game_input_captured());\n")
+    < main_cpp.index("                sample_pad_into_sio(override);\n")
+    and main_cpp.count("if (psx_host_ui_capture_active())") >= 2,
     "polled keyboard/gamepad input must be neutralised while the menu is open",
 )
 require(
@@ -295,42 +298,38 @@ require(
 )
 
 aspect_setter = function_body(main_cpp, "psx_host_video_set_display_aspect")
-for token in (
-    "is_host_fixed_display_aspect",
-    "g_pending_video_aspect.store",
-    "std::memory_order_release",
-):
-    require(token in aspect_setter, f"live aspect setter is missing {token}")
-fixed_aspects = function_body(main_cpp, "is_host_fixed_display_aspect")
-for token in ("numerator == 4", "numerator == 16", "numerator == 21", "numerator == 32"):
-    require(token in fixed_aspects, f"fixed aspect validation is missing {token}")
+aspect_taken = function_body(main_cpp, "take_pending_display_aspect")
+require(
+    "(numerator == 4 && denominator == 3) || (numerator == 16 && denominator == 9) ||" in aspect_setter
+    and "(numerator == 21 && denominator == 9) || (numerator == 32 && denominator == 9);" in aspect_setter
+    and "g_pending_display_aspect.store(" in aspect_setter
+    and "g_video_aspect_num" not in aspect_setter
+    and "gl_renderer_set_display_aspect(num, den);" in aspect_taken
+    and "refresh_widescreen_projection();" in aspect_taken
+    and "    take_pending_display_aspect();\n    update_adaptive_widescreen();\n" in main_cpp,
+    "the menu's aspect is taken at the next frame and sets the renderer's aspect too: the projection refresh alone left "
+    "the picture letterboxed at the old aspect",
+)
 adaptive_setter = function_body(main_cpp, "psx_host_video_set_adaptive_view")
-for token in (
-    "enabled != 0",
-    "enabled != 1",
-    "PENDING_VIDEO_ASPECT_ADAPTIVE_ON",
-    "PENDING_VIDEO_ASPECT_ADAPTIVE_OFF",
-    "g_pending_video_aspect.store",
-    "std::memory_order_release",
-):
-    require(token in adaptive_setter, f"live adaptive-aspect setter is missing {token}")
+require(
+    "if (enabled != 0 && enabled != 1) return 0;" in adaptive_setter
+    and "kPendingAdaptiveOn" in adaptive_setter
+    and "g_ws_adaptive_max_num = 32;" in aspect_taken,
+    "Match window takes every window ratio up to the audited 32:9",
+)
 require(
     "g_ws_adaptive_max_num = ws_adaptive_view_supported" in main_cpp
-    and "? 32 : (ws_ultrawide_offered ? 21 : 16)" in main_cpp,
-    "saved Match window mode must restore with its 32:9 cap",
+    and "? 32 : (ws_ultrawide_offered ? 21 : 16)" in main_cpp
+    and "            ws_offered = gc.ws_offered;\n" in main_cpp
+    and "            frame_interpolation_offered = gc.runtime.video_offer_frame_interpolation;\n" in main_cpp,
+    "the game's widescreen and in-between frames are offered by game.toml, so a saved aspect and interpolation survive a restart",
 )
-
 scale_setter = function_body(main_cpp, "psx_host_video_set_internal_scale")
-for token in (
-    "scale < 1",
-    "scale > SW_MAX_INTERNAL_SCALE",
-    "PSX_HOST_UI_BACKEND_OPENGL",
-    "std::realloc",
-    "gr_set_scale(scale)",
-    "gr_scale()",
-    "g_video_scale = applied",
-):
-    require(token in scale_setter, f"live internal-scale setter is missing {token}")
+require(
+    "if (scale < 1 || scale > PSX_IR_MAX_SCALE) return 0;" in scale_setter
+    and "video_resolution_apply_live(PSX_IR_SCALE(scale), 0, -1)" in scale_setter,
+    "the live internal scale goes through the framework's live resolution path, in range",
+)
 
 sw_header = read("psxrecomp/runtime/include/gpu_sw_renderer.h")
 require(
@@ -338,35 +337,20 @@ require(
     "renderers must share the 8x internal scale limit",
 )
 require(
-    "supersampling out of range (1..8)" in config_cpp and "n >= 1 && n <= 8" in config_cpp,
+    "if (n >= 1 && n <= 8) { s.supersampling = (int)n; s.has_supersampling = true; }" in config_cpp,
     "config and persisted internal scale must support 1x-8x",
 )
 
-fullscreen_apply = function_body(main_cpp, "psx_apply_window_fullscreen_mode")
-for token in (
-    "mode < 0",
-    "mode > 2",
-    "SDL_SetWindowFullscreenMode",
-    "SDL_GetClosestFullscreenDisplayMode",
-    "SDL_SetWindowFullscreen",
-    "SDL_SyncWindow",
-    "psx_window_fullscreen_mode(window) == mode",
-):
-    require(token in fullscreen_apply, f"live fullscreen transition is missing {token}")
 fullscreen_setter = function_body(main_cpp, "psx_host_video_set_fullscreen_mode")
-for token in (
-    "mode < 0",
-    "mode > 2",
-    "psx_apply_window_fullscreen_mode",
-    "g_fullscreen = mode",
-):
-    require(token in fullscreen_setter, f"live fullscreen setter is missing {token}")
 require(
-    "g_fullscreen == 2" in main_cpp and "failed to enter configured exclusive fullscreen" in main_cpp,
-    "SDL3 exclusive fullscreen must be completed after window creation",
+    "if (mode < 0 || mode > 2) return 0;" in fullscreen_setter
+    and "psx_window_fullscreen_set(sdl_window, &s_window_fullscreen, mode)" in fullscreen_setter
+    and "g_fullscreen = mode;" in fullscreen_setter,
+    "the live fullscreen setter takes the three modes, goes through the framework's window transition and keeps the choice",
 )
 require(
-    "Deliberately do not update g_fullscreen here" in main_cpp, "the fullscreen hotkey must remain a transient toggle"
+    "const int target = s_window_fullscreen.mode ? 0 :" in main_cpp,
+    "the fullscreen hotkey must remain a transient toggle",
 )
 
 resize_scale = function_body(gl, "resize_gpu_raster")
@@ -384,28 +368,10 @@ for token in (
     "delete_scale_target",
 ):
     require(token in resize_scale, f"transactional GL internal-scale rebuild is missing {token}")
-aspect_apply = function_body(main_cpp, "apply_live_display_aspect")
-for token in (
-    "gl_renderer_set_display_aspect",
-    "SDL_RenderSetLogicalSize",
-    "reshape_window_for_fixed_aspect",
-    "gte_set_display_aspect",
-    "gpu_ws_configure",
-    "gl_renderer_invalidate_present",
-):
-    require(token in aspect_apply, f"live aspect transition is missing {token}")
-vblank_aspect_start = main_cpp.index("static void sdl_vblank_present")
-vblank_aspect_prefix = main_cpp[vblank_aspect_start : main_cpp.index("#ifndef PSX_NO_DEBUG_TOOLS", vblank_aspect_start)]
 require(
-    "PendingAspectBoundary" in vblank_aspect_prefix
-    and "~PendingAspectBoundary()" in vblank_aspect_prefix
-    and "apply_pending_display_aspect" in vblank_aspect_prefix
-    and "update_adaptive_widescreen" in vblank_aspect_prefix,
-    "aspect requests must apply on vblank-present scope exit",
-)
-require(
-    main_cpp.count("update_adaptive_widescreen();") == 3,
-    "resize-driven aspect must change only at vblank-present scope exit",
+    "gl_renderer_set_display_aspect(num, den);" in main_cpp
+    and main_cpp.count("refresh_widescreen_projection();") >= 2,
+    "aspect requests apply at a VBlank, through the framework's projection refresh",
 )
 for config_name, config in (
     ("game.toml", game_toml),
@@ -670,12 +636,11 @@ require(
     and "return enabled ? 0 : 1;" in interpolation_setter,
     "the live API must reject interpolation activation in disabled builds",
 )
-for name in ("psx_mod_set_frame_interpolation", "psx_mod_set_frame_interpolation_blend"):
-    body = function_body(main_cpp, name)
-    require(
-        body.lstrip().startswith("#ifdef PSX_DISABLE_FRAME_INTERPOLATION") and "return 0;" in body.split("#else", 1)[0],
-        f"mods must not enable compiled-out interpolation: {name}",
-    )
+require(
+    "/* Retain the framework ABI while the experimental presenter is compiled out." in gl
+    and 'fprintf(stdout, "psxrecomp: GL frame interpolation disabled (build; host %.1f Hz)\\n",' in gl,
+    "mods must not enable compiled-out interpolation: the renderer's compiled-out setter only reports it off",
+)
 require(
     '#ifndef PSX_DISABLE_FRAME_INTERPOLATION\n#include "gpu_gl_temporal.c.inc"' in gl
     and "#define interp_capture(...) 0" in gl
@@ -821,74 +786,44 @@ require(
 
 volume_setter = function_body(main_cpp, "psx_host_audio_set_master_volume")
 require(
-    "percent < 0" in volume_setter
-    and "percent > 100" in volume_setter
-    and "g_audio_master_volume_percent.store" in volume_setter,
+    "host_volume_set(percent);" in volume_setter
+    and "s_volume = clamp_pct(percent);" in read("psxrecomp/runtime/src/host_osd.c"),
     "master-volume API must validate and publish 0..100 percent",
 )
-mute_setter = function_body(main_cpp, "psx_host_audio_set_muted")
-require(
-    "muted != 0" in mute_setter and "muted != 1" in mute_setter and "g_audio_master_muted.store" in mute_setter,
-    "mute API must validate and publish a boolean latch",
-)
+require("s_audio_muted = muted != 0;" in function_body(main_cpp, "psx_host_audio_set_muted"), "mute API must publish a boolean latch")
 background_setter = function_body(main_cpp, "psx_host_audio_set_mute_in_background")
-focus = function_body(main_cpp, "sdl_audio_track_window_focus")
+focus = function_body(main_cpp, "audio_track_window_focus")
 require(
-    "enabled != 0" in background_setter
-    and "enabled != 1" in background_setter
+    "if (enabled != 0 && enabled != 1) return 0;" in background_setter
     and "g_audio_mute_in_background.store" in background_setter
     and "SDL_WINDOW_INPUT_FOCUS" in focus
     and "g_audio_window_in_background.store" in focus
-    and main_cpp.index("psx_game_after_input();") < main_cpp.index("    sdl_audio_track_window_focus();\n")
+    and main_cpp.index("        psx_game_after_input();\n") < main_cpp.index("        audio_track_window_focus();\n")
     and "(void)psx_host_audio_set_mute_in_background(settings.has_mute_in_background && settings.mute_in_background);"
     in function_body(read("src/game/host.cpp"), "psx_game_settings_loaded"),
-    "mute in the background is its own latch beside the player's mute, the window's focus is read once a frame "
-    "outside netplay's gate, and the saved choice applies at start in a build without the menu too",
-)
-master_gain = function_body(main_cpp, "sdl_audio_apply_master_gain")
-for token in (
-    "g_audio_master_volume_percent.load",
-    "g_audio_master_muted.load",
-    "g_audio_mute_in_background.load",
-    "g_audio_window_in_background.load",
-    "muted ? 0.0f",
-    "sdl_audio_gain_ramp",
-):
-    require(token in master_gain, f"host-output gain stage is missing {token}")
-drc_callback = function_body(main_cpp, "sdl_drc_callback")
-require(
-    drc_callback.index("rab_pull")
-    < drc_callback.index("sdl_audio_apply_master_gain")
-    < drc_callback.index("audio_trace_pcm"),
-    "bridge audio must apply master gain at the final host-output boundary",
-)
-audio_pump = function_body(main_cpp, "sdl_audio_pump")
-require(
-    audio_pump.index("sdl_audio_fadein_left")
-    < audio_pump.index("sdl_audio_apply_master_gain")
-    < audio_pump.index("psx_sdl_audio_queue("),
-    "legacy audio must apply master gain after transition fade and before queueing",
-)
-audio_update = function_body(main_cpp, "sdl_audio_update")
-require(
-    audio_update.index("sdl_audio_apply_master_gain") < audio_update.index("psx_sdl_audio_queue("),
-    "the legacy turbo-mute tail must retain the selected master gain",
+    "mute in the background is its own latch beside the player's mute, the window's focus is read once a frame, "
+    "and the saved choice applies at start in a build without the menu too",
 )
 require(
-    main_cpp.index("us.has_master_volume") < main_cpp.index("psx_sdl_audio_open")
-    and main_cpp.index("us.has_audio_muted") < main_cpp.index("psx_sdl_audio_open"),
+    "    const int vol = audio_silenced() ? 0 : host_volume_get();\n" in main_cpp
+    and "    const float vol = audio_silenced() ? 0.0f : (float)host_volume_get() / 100.0f;\n" in main_cpp
+    and "g_audio_window_in_background.load" in function_body(main_cpp, "audio_silenced"),
+    "both host outputs take the player's volume, silenced by the mute and by the background mute",
+)
+require(
+    main_cpp.index("if (us.has_master_volume) host_volume_set(us.master_volume);") < main_cpp.index("psx_sdl_audio_open(")
+    and main_cpp.index("if (us.has_audio_muted) s_audio_muted") < main_cpp.index("psx_sdl_audio_open("),
     "persisted host-audio controls must load before the audio device opens",
 )
 host = read("src/game/host.cpp")
 require(
     main_cpp.count("psx_game_audio_output(") == 2
-    and "psx_game_audio_output" not in drc_callback
-    and audio_pump.index("spu_render(sdl_audio_buf, frames);")
-    < audio_pump.index("g_turbo_audio_sink_frames += (uint64_t)frames;")
-    < audio_pump.index("psx_game_audio_output(sdl_audio_buf, frames, 44100);")
+    and (audio_pump := function_body(main_cpp, "sdl_audio_pump")).index(
+        "    frames = host_frames;\n#ifdef PSX_HAS_GAME_HOST\n    psx_game_audio_output(sdl_audio_buf, frames, 44100);\n")
     < audio_pump.index("if (sdl_audio_fadein_left > 0)")
-    < audio_pump.index("sdl_audio_apply_master_gain")
-    and audio_update.index("spu_render(sdl_audio_buf, tail);")
+    < audio_pump.index("const int vol = audio_silenced() ? 0 : host_volume_get();")
+    < audio_pump.index("rab_push(&s_drc, sdl_audio_buf, frames);")
+    and (audio_update := function_body(main_cpp, "sdl_audio_update")).index("tail = (int)spu_output_pop(sdl_audio_buf, (uint32_t)tail);")
     < audio_update.index("psx_game_audio_output(sdl_audio_buf, tail, 44100);")
     < audio_update.index("sdl_audio_gain_ramp(sdl_audio_buf, tail, g0, 0.0f);")
     and "disruptor::audio::shape_output(stereo, frames, rate);" in function_body(host, "psx_game_audio_output")
@@ -923,22 +858,17 @@ require(
 require(
     "        if (us.has_frame_interpolation)\n            g_frame_interpolation = us.frame_interpolation ? 1 : 0;\n"
     in main_cpp
-    and "        !g_geometry_correction)\n        g_frame_interpolation = 0;\n" in main_cpp,
+    and "            !gpu_geometry_correction_enabled())\n            g_frame_interpolation = 0;\n" in main_cpp,
     "a saved in-between frames switch must be restored, and geometry in-between frames never without exact geometry",
 )
 
-main_settings = main_cpp.index("load_user_settings(settings_path)")
-main_env = main_cpp.index('std::getenv("PSX_GEOMETRY_CORRECTION")')
+saved = function_body(menu, "apply_saved_preferences")
 require(
-    main_settings < main_cpp.index("us.has_geometry_correction") < main_env
-    and main_settings < main_cpp.index("us.has_perspective_textures") < main_env,
+    "    if (settings.has_geometry_correction &&\n        !env_override_present(\"PSX_GEOMETRY_CORRECTION\"))\n" in saved
+    and "    if (settings.has_perspective_textures &&\n        !env_override_present(\"PSX_TEXTURE_CORRECTION\")) {\n" in saved
+    and "    pgxp_cfg.video_geometry = g_video_geometry_correction || gpu_geometry_correction_enabled();\n" in main_cpp
+    and 'std::getenv("PSX_TEXTURE_CORRECTION")' in main_cpp,
     "saved enhancements must load before explicit environment overrides",
-)
-aspect_env = main_cpp.index('std::getenv("PSX_VIDEO_ASPECT")')
-require(
-    main_settings < main_cpp.index("us.has_aspect_ratio") < aspect_env
-    and "is_host_fixed_display_aspect" in main_cpp[aspect_env:main_env],
-    "explicit aspect override must be validated after saved settings load",
 )
 require(
     "UserSettings seed =" in main_cpp
@@ -1244,18 +1174,13 @@ require(
 
 runtime = read("psxrecomp/runtime/src/main.cpp")
 require(
-    '[controller]\ndefault_mode = "digital"\n# A connected gamepad plays beside the keyboard and mouse.\n'
+    'deadzone = 12000\ndefault_mode = "digital"\n# A connected gamepad plays beside the keyboard and mouse.\n'
     'p1_device = "keyboard+gamepad"\n'
     in read("game.toml")
-    and "if (gc.runtime.has_default_p1_device) p1_device = gc.runtime.default_p1_device;" in runtime
+    and "if (gc.runtime.has_default_p1_device)\n                player_device[0] = gc.runtime.default_p1_device;" in runtime
     and runtime.index("if (gc.runtime.has_default_p1_device)")
-    < runtime.index("if (us.has_p1_device) p1_device = us.p1_device;")
-    and 'else if (d == "keyboard+gamepad") { p.kind = 2; p.keyboard_too = true; }' in runtime
-    and "    p.keyboard_too = false;\n" in function_body(runtime, "set_player_device")
-    and "        return controller_pad_buttons(p.handle, suppress_stick_axes) & pad_from_keyboard(player);\n"
-    in function_body(runtime, "pad_buttons_for")
-    and "if (keyboard[axis] != 0x80) out[axis] = keyboard[axis];" in function_body(runtime, "pad_sticks_for")
-    and "if (p.kind == 1 || p.keyboard_too || dev_any) {" in function_body(runtime, "hybrid_dpad_active"),
+    < runtime.index("if (us.has_p_device[i]) player_device[i] = us.p_device[i];")
+    and 'd == "auto" || d == "gamepad" || d == "controller" || d == "keyboard+gamepad"' in runtime,
     "Player 1 reads the keyboard and the first gamepad together unless settings.toml names a device",
 )
 require(
@@ -1272,8 +1197,7 @@ require(
     and "    SDL_SetWindowIcon(window, icon);\n" in menu
     and 'set(DISRUPTOR_WINDOW_ICON "${CMAKE_CURRENT_SOURCE_DIR}/src/launcher/assets/app-64.bmp")' in cmake
     and 'list(APPEND DISRUPTOR_EXTRA_SOURCES "${CMAKE_CURRENT_BINARY_DIR}/window_icon.cpp")' in cmake
-    and 'target_sources(psx-runtime PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src/game/icon.rc")' in cmake
-    and read("src/game/icon.rc") == '1 ICON "../launcher/assets/app.ico"\n',
+    and 'APP_ICON "${CMAKE_CURRENT_SOURCE_DIR}/src/launcher/assets/app.ico"' in cmake,
     "the game's window and executable carry the launcher's icon",
 )
 

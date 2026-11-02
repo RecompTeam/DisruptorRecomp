@@ -1,8 +1,8 @@
 diff --git a/runtime/include/overlay_dispatch_preamble.c.inc b/runtime/include/overlay_dispatch_preamble.c.inc
-index 6cd4b10e4d8525813984ce8a136803e71f6ecb5b..ea2e5c7cb9190c84d87f9ac1d984760aab04c015 100644
+index 9b937a0ce5173133ddfc6f7ad30b0f4add436822..abea8bec7d458c6095f9e57c400d044735321448 100644
 --- a/runtime/include/overlay_dispatch_preamble.c.inc
 +++ b/runtime/include/overlay_dispatch_preamble.c.inc
-@@ -202,6 +202,19 @@
+@@ -216,6 +216,19 @@
  int psx_ws_cull_slti(uint32_t sx, uint32_t imm) {
      return ((int32_t)sx < (int32_t)imm + psx_ws_x_margin()) ? 1 : 0;
  }
@@ -19,6 +19,6 @@ index 6cd4b10e4d8525813984ce8a136803e71f6ecb5b..ea2e5c7cb9190c84d87f9ac1d984760a
 +    return ((uint32_t)(uint16_t)(left - margin) << 16) |
 +           (uint32_t)(uint16_t)((int32_t)right + margin);
 +}
- int psx_ws_cull_bltz(uint32_t v) {
-     return ((int32_t)v < -psx_ws_x_margin()) ? 1 : 0;
- }
+ int psx_ws_cull_slti_lower(uint32_t sx, uint32_t imm) {
+     int32_t bound = (int32_t)(int16_t)(uint16_t)imm;
+     return ((int32_t)sx < bound - psx_ws_x_margin()) ? 1 : 0;

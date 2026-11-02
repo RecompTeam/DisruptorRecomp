@@ -180,6 +180,14 @@ void schemes() {
     KeyLayout shifted = classic;
     shifted[15] = "RShift";
     require(layout_for_scheme(shifted, true) == modern, "the runtime's short names count as the full ones");
+    KeyLayout stick_arrows = classic, pad_arrows = classic;
+    for (std::size_t index = 0; index < 4; ++index) stick_arrows[index] = "None";
+    for (std::size_t index = 16; index < 20; ++index) pad_arrows[index] = "None";
+    require(layout_for_scheme(stick_arrows, true) == modern && layout_for_scheme(pad_arrows, true) == modern,
+            "Classic with its arrows on one pair, as the runtime keeps a key-by-key write, still turns Modern");
+    KeyLayout both_gone = stick_arrows;
+    for (std::size_t index = 16; index < 20; ++index) both_gone[index] = "None";
+    require(layout_for_scheme(both_gone, true) == both_gone, "Classic without any arrows is the player's own layout");
 }
 
 void reserved() {

@@ -1,5 +1,5 @@
 diff --git a/runtime/src/dirty_ram_interp.c b/runtime/src/dirty_ram_interp.c
-index 0a324bcd9913b32b2bb2bcd7a673fd4aba39e4c4..e432278dd9a6b774f4b885bbb44b1ce64ac3560d 100644
+index 70044164cb438a7a255ec432012efed43cec6a01..98dc744c1b8c115766da9f15867f20a075b3aacb 100644
 --- a/runtime/src/dirty_ram_interp.c
 +++ b/runtime/src/dirty_ram_interp.c
 @@ -24,6 +24,7 @@
@@ -10,17 +10,17 @@ index 0a324bcd9913b32b2bb2bcd7a673fd4aba39e4c4..e432278dd9a6b774f4b885bbb44b1ce6
  #include "cpu_state.h"
  #include "debug_server.h"
  #include "interrupts.h"
-@@ -34,6 +35,9 @@
+@@ -35,6 +36,9 @@
  #include "ws_backdrop_detect.h"  /* shared backdrop-window detector (auto_backdrop) */
  #include "lockstep.h"
  #include "starvation_ring.h"
 +#ifdef PSX_HAS_GAME_HOST
 +#include "game_host.h"
 +#endif
- 
- #include <stdint.h>
- #include <stdlib.h>
-@@ -45,6 +49,52 @@
+ #include "fntrace.h"  /* fntrace_is_game_started / fntrace_mark_game_started */
+ #include "psx_segment_miss.h"  /* segment misses in static game code (§5.5) */
+ #include "draw_distance.h"    /* [[draw_distance.clamp]] sites */
+@@ -51,6 +55,52 @@
  uint64_t g_dirty_ram_aborts     = 0;
  uint64_t g_dirty_ram_guard_yields = 0;
  uint64_t g_dirty_ram_native_handoffs = 0;
@@ -73,7 +73,7 @@ index 0a324bcd9913b32b2bb2bcd7a673fd4aba39e4c4..e432278dd9a6b774f4b885bbb44b1ce6
  /* Scheduling-contract pump telemetry (see dirty_ram_dispatch). Always-on:
   * g_dirty_pump_max_gap_insns is the largest interpreted-insn gap ever seen
   * between two interrupt pumps — must stay bounded (~4096 + one block) once the
-@@ -1449,6 +1499,7 @@
+@@ -1493,6 +1543,7 @@
      uint32_t dummy_next = 0;
      (void)exec_one_fetched(cpu, pc, insn, &dummy_next);
      g_dirty_ram_insns_run++;
@@ -81,10 +81,10 @@ index 0a324bcd9913b32b2bb2bcd7a673fd4aba39e4c4..e432278dd9a6b774f4b885bbb44b1ce6
      /* CYCLE MODEL: the delay-slot instruction is a real retired R3000A instruction
       * and is charged its own per-instruction interlock INSIDE exec_one (top-of-fn
       * §1+deps+DO_LDS, or psx_cyc_load_* for a load delay slot) — so a branch+slot
-@@ -1516,6 +1567,10 @@
-     const uint32_t ld_before = is_ld ? cpu->gpr[ld_rt] : 0u;
+@@ -1582,6 +1633,10 @@
+ #endif
  
-     const int rv = exec_one_fetched_inner(cpu, pc, insn, next_pc_out);
+     const int rv = exec_one_fetched_inner(cpu, pc, insn, next_pc_out, original_instruction);
 +
 +#ifdef PSX_HAS_GAME_HOST
 +    psx_game_instruction_ran(cpu, pc, insn);
@@ -92,71 +92,39 @@ index 0a324bcd9913b32b2bb2bcd7a673fd4aba39e4c4..e432278dd9a6b774f4b885bbb44b1ce6
  
      if (is_ld) {
          const uint32_t loaded = cpu->gpr[ld_rt];
-@@ -1671,7 +1726,16 @@
-         case 0x09: { /* JALR rd, rs */
-             uint32_t target = cpu->gpr[rs];
-             uint32_t return_pc = pc + 8;
--            cpu->gpr[rd ? rd : 31] = return_pc;
-+            /* JALR writes the encoded rd exactly.  The one-operand assembler
-+             * form encodes rd=$ra; rd=0 is a real discard, not an implicit
-+             * $ra.  More importantly, only rd=$ra gives the call-unit code a
-+             * return contract it can validate.  Games also use other link
-+             * registers for data-bearing transfer stubs (for example
-+             * `jalr $a1,$t0`, where the target consumes $a1 and later returns
-+             * through the pre-existing $ra).  Treating pc+8 as that transfer's
-+             * mandatory return address fabricates a nested continuation and
-+             * leaks psx_dispatch_call frames. */
-+            if (rd != 0) cpu->gpr[rd] = return_pc;
-             cpu->gpr[0] = 0;
-             exec_delay_slot(cpu, pc + 4);
-             cosim_exec_one_transfer_hook(pc + 4);
-@@ -1683,6 +1747,13 @@
-             uint32_t _cr = callret_begin(cpu, pc, target);   /* call-resolution ring */
- #define CRET(code, rv) do { callret_end(_cr, cpu, (code)); return (rv); } while (0)
-             if (g_precise_mode || g_ls_replay_active) { cpu->pc = target; CRET(CRES_PLAIN, 1); }  /* slice / lockstep-replay: plain transfer, never execute the callee */
-+            if (rd != 31) {
-+                /* No architectural $ra contract: preserve the transfer as a
-+                 * pc-chain and let the callee's eventual JR choose the real
-+                 * continuation.  This is both faithful and host-stack-flat. */
-+                cpu->pc = target;
-+                CRET(CRES_PCCHAIN, 1);
-+            }
- #ifdef PSX_HAS_GAME_DISPATCH
-             cpu->pc = 0;
-             if (interp_enter_compiled(cpu, target)) {
-@@ -2114,7 +2185,9 @@
+@@ -2419,7 +2474,9 @@
  #ifdef PSX_ENABLE_BLOCK_CYCLES
              psx_gte_read(cpu, rt);
  #endif
 -            cpu->gpr[rt] = gte_read_data(cpu, (uint8_t)rd);
 +            cpu->gpr[rt] = gte_precision_mfc2_pc_read(
-+                pc, insn, (uint8_t)rd,
++                pc, original_instruction, (uint8_t)rd,
 +                gte_read_data(cpu, (uint8_t)rd));
+             psx_pgxp_cop2(cpu, insn, cpu->gpr[rt], 0);
              cpu->gpr[0] = 0;
              return 0;
-         }
-@@ -2181,6 +2254,8 @@
-             cpu->gpr[rt] = psx_ws_xclip_bound(psx_cyc_load_word(cpu, addr, rt, 1u << rs));
+@@ -2507,6 +2564,8 @@
          else
-             cpu->gpr[rt] = psx_cyc_load_word(cpu, addr, rt, 1u << rs);
+             cpu->gpr[rt] = ws_clip_edge_load(pc,
+                 psx_cyc_load_word(cpu, addr, rt, 1u << rs));
 +        cpu->gpr[rt] = gte_precision_copy_pc_read(
-+            pc, insn, (uint8_t)rt, addr, cpu->gpr[rt]);
++            pc, original_instruction, (uint8_t)rt, addr, cpu->gpr[rt]);
+         psx_pgxp_load(cpu, insn, addr, cpu->gpr[rt]);
          cpu->gpr[0] = 0;
          return 0;
-     }
-@@ -2236,6 +2311,11 @@
+@@ -2584,6 +2643,11 @@
+         if (addr & 3) return interp_exception(cpu, 5, addr, pc);  /* StoreAddressError */
          g_debug_last_store_pc = pc;
-         parappa_rhythm_log_store(cpu, pc, addr, cpu->gpr[rt], 4u);
          cpu->write_word(addr, cpu->gpr[rt]);
 +        gte_precision_scratch_store_pc_word(
-+            pc, insn, addr, cpu->gpr[rt]);
++            pc, original_instruction, addr, cpu->gpr[rt]);
 +        gte_precision_copy_pc_word(
-+            pc, insn, (uint8_t)rt, addr, cpu->gpr[rt]);
-+        gte_precision_store_pc_word(pc, insn, addr, cpu->gpr[rt]);
++            pc, original_instruction, (uint8_t)rt, addr, cpu->gpr[rt]);
++        gte_precision_store_pc_word(pc, original_instruction, addr, cpu->gpr[rt]);
+         psx_pgxp_store(cpu, insn, addr, cpu->gpr[rt]);
          return 0;
      }
-     case 0x2E: { /* SWR */
-@@ -2509,6 +2589,7 @@
+@@ -2956,6 +3020,7 @@
          cosim_exec_one_begin();
          int transferred = exec_one(cpu, pc, &next_pc);  /* charges its own interlock */
          g_dirty_ram_insns_run++;
@@ -164,7 +132,7 @@ index 0a324bcd9913b32b2bb2bcd7a673fd4aba39e4c4..e432278dd9a6b774f4b885bbb44b1ce6
  #ifdef PSX_COSIM
          if (!cosim_exec_one_did_hook()) { extern void cosim_instr(uint32_t); cosim_instr(pc); }
  #endif
-@@ -2981,6 +3062,7 @@
+@@ -3515,6 +3580,7 @@
              OV_FPLOG_RET1();
          }
          g_dirty_ram_insns_run++;
@@ -172,7 +140,7 @@ index 0a324bcd9913b32b2bb2bcd7a673fd4aba39e4c4..e432278dd9a6b774f4b885bbb44b1ce6
          insns_executed++;
          /* COP0 software-interrupt latency: an MTC0 to CAUSE or SR that makes a
           * software interrupt deliverable (CAUSE.IP0/IP1 & SR.IM0/IM1 & IEc)
-@@ -3433,6 +3515,7 @@
+@@ -4037,6 +4103,7 @@
      uint32_t    sav_unsup_pc     = g_unsupported_pc;
      uint32_t    sav_unsup_insn   = g_unsupported_insn;
      const char *sav_unsup_reason = g_unsupported_reason;
@@ -180,7 +148,7 @@ index 0a324bcd9913b32b2bb2bcd7a673fd4aba39e4c4..e432278dd9a6b774f4b885bbb44b1ce6
      g_ls_replay_active = 1;
      g_ls_mode = 2;
      uint32_t pc = rep.pc;
-@@ -3456,6 +3539,7 @@
+@@ -4060,6 +4127,7 @@
      }
      g_ls_mode = 0;
      g_ls_replay_active = 0;
@@ -188,7 +156,7 @@ index 0a324bcd9913b32b2bb2bcd7a673fd4aba39e4c4..e432278dd9a6b774f4b885bbb44b1ce6
      g_unsupported_seen   = sav_unsup_seen;     /* undo any replay-side decode-state leak */
      g_unsupported_pc     = sav_unsup_pc;
      g_unsupported_insn   = sav_unsup_insn;
-@@ -3550,6 +3634,7 @@
+@@ -4154,6 +4222,7 @@
      const char *sav_unsup_reason = g_unsupported_reason;
      uint32_t    sav_store_pc     = g_debug_last_store_pc;
      uint32_t    sav_func_addr    = g_debug_current_func_addr;
@@ -196,7 +164,7 @@ index 0a324bcd9913b32b2bb2bcd7a673fd4aba39e4c4..e432278dd9a6b774f4b885bbb44b1ce6
  
      g_ls_replay_active = 1;
      g_ls_mode = 2;
-@@ -3585,6 +3670,7 @@
+@@ -4189,6 +4258,7 @@
  
      g_ls_mode = 0;
      g_ls_replay_active = 0;

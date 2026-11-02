@@ -250,6 +250,8 @@ texture_filtering = "nearest"
 depth24_trailing_margin = 0
 
 [controller]
+# The stick's dead zone until the player sets one, in raw axis units: 37% of the travel.
+deadzone = 12000
 default_mode = "digital"
 # A connected gamepad plays beside the keyboard and mouse.
 p1_device = "keyboard+gamepad"

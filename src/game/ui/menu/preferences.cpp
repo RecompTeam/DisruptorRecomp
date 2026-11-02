@@ -26,9 +26,26 @@ void follow_scheme(bool modern, bool save) {
     }
     const disruptor::settings::KeyLayout next = disruptor::settings::layout_for_scheme(current, modern);
     if (next == current) return;
-    for (int index = 0; index < PSX_KB_COUNT; ++index) {
-        const std::string &name = next[static_cast<size_t>(index)];
-        psx_keybinds_set_button(1, index, name == "None" ? SDL_SCANCODE_UNKNOWN : SDL_GetScancodeFromName(name.c_str()));
+    if (next == disruptor::settings::layout_of(disruptor::settings::classic_keys)) {
+        /* Classic is the runtime's own default, the arrows on the D-pad and the left stick: a key-by-key write keeps one pair. */
+        std::array<SDL_Scancode, PSX_KB_COUNT> alternates{};
+        for (int index = 0; index < PSX_KB_COUNT; ++index) alternates[static_cast<size_t>(index)] = psx_keybinds_get_button_alt(1, index);
+        psx_keybinds_reset_player(1);
+        /* An alternate on one of Classic's own keys would take it from its button: it is dropped instead. */
+        const auto classic_key = [](SDL_Scancode key) {
+            for (int index = 0; index < PSX_KB_COUNT; ++index)
+                if (psx_keybinds_get_button(1, index) == key) return true;
+            return false;
+        };
+        for (int index = 0; index < PSX_KB_COUNT; ++index) {
+            const SDL_Scancode alternate = alternates[static_cast<size_t>(index)];
+            if (alternate != SDL_SCANCODE_UNKNOWN && !classic_key(alternate)) psx_keybinds_set_button_alt(1, index, alternate);
+        }
+    } else {
+        for (int index = 0; index < PSX_KB_COUNT; ++index) {
+            const std::string &name = next[static_cast<size_t>(index)];
+            psx_keybinds_set_button(1, index, name == "None" ? SDL_SCANCODE_UNKNOWN : SDL_GetScancodeFromName(name.c_str()));
+        }
     }
     if (save) psx_keybinds_save();
 }
@@ -580,6 +597,12 @@ void load_preferences_for_session() {
     std::printf("disruptor: settings at start: %s\n", disruptor::settings::describe(settings).c_str());
     apply_saved_preferences(disruptor::settings::with_defaults(settings));
     apply_pending_preferences();
+#ifndef PSX_DISABLE_FRAME_INTERPOLATION
+    /* The framework turns saved in-between frames off at its start, before exact geometry is switched on above. */
+    const char *asked = std::getenv("PSX_FRAME_INTERPOLATION");
+    if (asked ? std::atoi(asked) != 0 : settings.has_frame_interpolation && settings.frame_interpolation)
+        (void)disruptor_present_rate_enable(1);
+#endif
     /* A capsule recorded later copies the file: a layer left there by the last session must not go into it. */
     if (settings.has_diagnostic_view && settings.diagnostic_view != 0 && !env_override_present("PSX_DISRUPTOR_CAPSULE_REPLAY")) {
         mark_diagnostic_view(0);
