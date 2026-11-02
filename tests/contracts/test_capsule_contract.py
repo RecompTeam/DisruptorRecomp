@@ -130,11 +130,12 @@ require(
     and "    if (psx_netplay_active()) return refuse_recording(" in capsule
     and capsule.index("    if (psx_netplay_active()) return refuse_recording(")
     < capsule.index("turn_states_to(capsule.made)")
-    and "    if (!savestate_request_save(0)) {\n        turn_states_back();\n" in capsule
-    and "        if (const bool saved = savestate_slot_exists(0) != 0; turn_states_back(), !saved) {\n" in capsule
+    and "    if (!capsule.from_boot && !savestate_request_save(0)) {\n        turn_states_back();\n" in capsule
+    and "        if (!capsule.from_boot) {\n            const bool saved = savestate_slot_exists(0) != 0;\n            turn_states_back();\n            if (!saved) {\n" in capsule
     and capsule.count("turn_states_back()") == 6
     and "        made = fs::create_directory(capsule.made, failed);\n" in capsule
-    and "    if (failed || !made || !turn_states_to(capsule.made)) return refuse_recording(" in capsule,
+    and "    if (failed || !made || (!capsule.from_boot && !turn_states_to(capsule.made)))\n        return refuse_recording(" in capsule
+    and "    if (capsule.replay == Replay::kAsked && capsule.from_boot) {\n        if (psx_get_cycle_count() < capsule.played_first_cycle) return;\n" in capsule,
     "the save state folder is the capsule's for one save or load only, and is turned back whatever came of it",
 )
 require(

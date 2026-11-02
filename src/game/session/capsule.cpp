@@ -1,6 +1,7 @@
 /* PSX_DISRUPTOR_CAPSULE_REPLAY=<folder> replays a capsule and ends the run: 0 in step with the recording to the end, 3 not, 2 unplayable. */
 /* PSX_DISRUPTOR_CAPSULE_FRAMES=<folder> writes each replayed frame as a picture, which is whole only without a window. */
 /* PSX_DISRUPTOR_CAPSULE_RECORD=<frames> is the key for a script: two seconds in, it records that many frames and ends the run. */
+/* PSX_DISRUPTOR_CAPSULE_FROM_BOOT=1 records from the first VBlank with no state, and replays such a capsule from power-on. */
 /* Measured: a loaded state takes its interrupts a few instructions apart, so one frame in four differs in a few bytes, nine in a row at most. */
 #include "game/session/capsule.h"
 #include "game/input/baton_choice.h"
@@ -439,6 +440,7 @@ struct Capsule {
     uint64_t first_cycle = 0, played_first_cycle = 0;
     Frame notes;
     size_t scripted = 0, waited = 0;
+    bool from_boot = false;  /* no state: a recording begins at power-on, a replay at its first cycle */
     const char *notice = nullptr;
     std::chrono::steady_clock::time_point notice_until{};
     bool loaded = false;
@@ -463,6 +465,7 @@ struct Capsule {
     std::vector<unsigned char> preview = std::vector<unsigned char>(disruptor::capsule::kPreviewWidth * disruptor::capsule::kPreviewWidth * 3u);
 
     Capsule() {
+        if (const char *boot = std::getenv("PSX_DISRUPTOR_CAPSULE_FROM_BOOT"); boot && boot[0] == '1') from_boot = true;
         if (const char *record = std::getenv("PSX_DISRUPTOR_CAPSULE_RECORD"); record && record[0])
             scripted = static_cast<size_t>(std::strtoull(record, nullptr, 10));
         const char *replay_of = std::getenv("PSX_DISRUPTOR_CAPSULE_REPLAY");
@@ -626,9 +629,9 @@ void store_recording(const char *why) {
         std::fprintf(stderr, "disruptor: capsule: %u shown pictures were lost, a full log could not keep them\n", capsule.shown_lost);
     char about[512];
     std::snprintf(about, sizeof(about),
-                  "frames = %zu\ncodegen_hash = \"0x%08X\"\nentry_pc = \"0x%08X\"\nended = \"%s\"\npresented = %zu\nlost = %u\nmarks = %zu\n",
+                  "frames = %zu\ncodegen_hash = \"0x%08X\"\nentry_pc = \"0x%08X\"\nended = \"%s\"\npresented = %zu\nlost = %u\nmarks = %zu\nfrom_boot = %s\n",
                   capsule.recorded.size(), static_cast<unsigned>(PSX_OVERLAY_CODEGEN_HASH), static_cast<unsigned>(capsule.entry), why,
-                  capsule.shown.size(), capsule.shown_lost, capsule.marks.size());
+                  capsule.shown.size(), capsule.shown_lost, capsule.marks.size(), capsule.from_boot ? "true" : "false");
     std::error_code failed;
     const bool settings = capsule.settings_kept;
     const bool input = write(capsule.made / "input.bin", disruptor::capsule::encode(capsule.recorded, capsule.first_cycle));
@@ -854,8 +857,9 @@ extern "C" void disruptor_capsule_toggle(void) {
         capsule.made = all / (std::to_string(now) + (copy > 1 ? "-" + std::to_string(copy) : ""));
         made = fs::create_directory(capsule.made, failed);
     }
-    if (failed || !made || !turn_states_to(capsule.made)) return refuse_recording("the folder or the save states are not there");
-    if (!savestate_request_save(0)) {
+    if (failed || !made || (!capsule.from_boot && !turn_states_to(capsule.made)))
+        return refuse_recording("the folder or the save states are not there");
+    if (!capsule.from_boot && !savestate_request_save(0)) {
         turn_states_back();
         return refuse_recording("a save state is refused now");
     }
@@ -884,14 +888,18 @@ extern "C" void disruptor_capsule_before_input(void) {
     Capsule &capsule = g_capsule;
     switch (capsule.recording) {
     case Recording::kOff:
-        if (capsule.scripted != 0 && capsule.replay != Replay::kAsked && capsule.replay != Replay::kLoading && ++capsule.waited == kSettle)
+        if (capsule.scripted != 0 && capsule.replay != Replay::kAsked && capsule.replay != Replay::kLoading && ++capsule.waited == (capsule.from_boot ? 1u : kSettle))
             disruptor_capsule_toggle();
         break;
     case Recording::kSaving:
         if (savestate_pending()) break;
-        if (const bool saved = savestate_slot_exists(0) != 0; turn_states_back(), !saved) {
-            refuse_recording("the state was not written");
-            break;
+        if (!capsule.from_boot) {
+            const bool saved = savestate_slot_exists(0) != 0;
+            turn_states_back();
+            if (!saved) {
+                refuse_recording("the state was not written");
+                break;
+            }
         }
         std::fprintf(stderr, "disruptor: capsule: recording into %s\n", utf8(capsule.made).c_str());
         gl_renderer_snap_cancel();
@@ -944,6 +952,12 @@ static void finish_load() {
 extern "C" void disruptor_capsule_after_input(void) {
     Capsule &capsule = g_capsule;
     if (!capsule.loading.empty() && !savestate_pending()) finish_load();
+    if (capsule.replay == Replay::kAsked && capsule.from_boot) {
+        if (psx_get_cycle_count() < capsule.played_first_cycle) return;
+        capsule.replay = Replay::kOn;
+        capsule.as_shown = false;
+        capsule.shown_base = gl_renderer_shown_captures();
+    }
     if (capsule.replay == Replay::kAsked) {
         if (!turn_states_to(capsule.played) || !savestate_request_load(0)) {
             std::fprintf(stderr, "disruptor: capsule: the state of %s cannot be loaded\n", utf8(capsule.played).c_str());
