@@ -2,6 +2,34 @@
 
 What changed in each release. The launcher shows the section of its own version on its home page.
 
+## v0.11.0
+
+### Changes
+
+- Main menu: MEMORY CARD OPTIONS and CONTROLLER OPTIONS are gone, keys and buttons are set in the launcher
+- Audio: Bass starts at Reduced, a Bass you chose stays
+- Save states: those of 0.10.2 and earlier do not load, saved games, settings, keys and memory cards stay
+
+### Enhancements
+
+- Save states: LOAD GAME and the pause menu show the F1 to F11 slots, to load, save and delete
+- Menus: the mouse points and clicks in every menu of the game, the pause menu included
+- Menus: Escape goes back, the strafe keys step left and right
+- Menus: the mouse and keys keep the demo from starting, as pad buttons do
+- Password: the screen shows the key or button of each symbol, Backspace takes one back
+- Main menu: saves on the right card are found too
+- Gamepad: buttons are named after the pad pressed last, Nintendo and GameCube pads included
+- Launcher: moves through its pages with whichever pad you press
+- Linux: the launcher and the game show the game's icon
+- Performance: busy scenes take less processor time with Render thread or In-between frames on, movies and the wait for the next frame too
+
+### Bug fixes
+
+- Keys: those set in the launcher work in an installed or portable copy again, since 0.10.0 the game used the keys it ships with
+- Problem report: holds the player's keys too
+- Movies: a save state made in the middle of a movie loads without the risk of a crash
+- Sound: no short gap after fast-forward or a skipped intro
+
 ## v0.10.2
 
 ### Bug fixes
