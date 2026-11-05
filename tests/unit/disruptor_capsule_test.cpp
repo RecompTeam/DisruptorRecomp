@@ -213,6 +213,45 @@ void test_a_capsules_length_is_read_from_its_note() {
            "a length past 32 bits wraps");
 }
 
+void test_a_capsules_aspect_is_read_from_its_note() {
+    using disruptor::capsule::stored_aspect;
+    uint32_t numerator = 7, denominator = 7;
+    expect(stored_aspect("frames = 952\naspect = \"16:9\"\n", numerator, denominator) && numerator == 16 && denominator == 9,
+           "the aspect is not read");
+    expect(stored_aspect("aspect = \"43:18\"\r\n", numerator, denominator) && numerator == 43 && denominator == 18 &&
+               stored_aspect("aspect = \"99999:1\"", numerator, denominator) && numerator == 99999,
+           "the aspect is not read before a carriage return, at the file's end or at five digits");
+    numerator = denominator = 7;
+    for (const char *broken : {"", "frames = 5\n", "aspect = 16:9\n", "aspect = \"16:9\n", "aspect = \"16\"\n", "aspect = \":9\"\n",
+                               "aspect = \"16:\"\n", "aspect = \"0:9\"\n", "aspect = \"16:0\"\n", "aspect = \"16:9\"x\n",
+                               "aspect = \"100000:9\"\n", "aspect = \"16:x9\"\n", "xaspect = \"16:9\"\n"})
+        expect(!stored_aspect(broken, numerator, denominator), broken);
+    expect(numerator == 7 && denominator == 7, "a note without a whole aspect set one");
+}
+
+void test_the_first_frames_pages_survive_their_file() {
+    using namespace disruptor::capsule;
+    std::vector<uint8_t> ram(3 * kPageBytes + 100, 0x5A);
+    const std::vector<uint64_t> before = page_digests(ram.data(), ram.size());
+    ram[kPageBytes + 17] ^= 1u;
+    ram[ram.size() - 1] ^= 1u;
+    const std::vector<uint64_t> after = page_digests(ram.data(), ram.size());
+    expect(before.size() == 4 && after.size() == 4, "a part page at the end is not a page of its own");
+    expect(pages_apart(before, after) == std::vector<size_t>{1, 3}, "the changed pages are not the ones named");
+    expect(pages_apart(before, before).empty(), "equal pages are named");
+    expect(pages_apart(before, {before[0], before[1]}) == std::vector<size_t>{2, 3}, "a page one side lacks is not named");
+    std::vector<std::vector<uint64_t>> back;
+    expect(pages_decode(pages_encode({before, after}), 4, back) && back.size() == 2 && back[0] == before && back[1] == after,
+           "the pages do not survive their file");
+    const std::string file = pages_encode({before});
+    for (const std::string &broken : {file.substr(0, file.size() - 1), file + "x", "DPAGES02" + file.substr(8), std::string()})
+        expect(!pages_decode(broken, 4, back) && back.empty(), "a broken pages file is taken");
+    expect(!pages_decode(pages_encode({before, before, before, before, before}), 4, back), "more frames than are kept are taken");
+    expect(!pages_decode(file, 3, back) && !pages_decode(file, 5, back) && back.empty(), "a file of another page count is taken");
+    expect(!pages_decode(pages_encode({}), 4, back) && !pages_decode(pages_encode({{}}), 4, back) && back.empty(),
+           "a file of no pages is taken: a report would name every page of the session");
+}
+
 void test_the_capsules_on_disk_are_listed_and_one_is_removed() {
     namespace fs = std::filesystem;
     const fs::path all = fs::temp_directory_path() / ("disruptor-capsule-test-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
@@ -365,6 +404,8 @@ int main() {
     test_a_capsule_begins_only_when_it_is_whole();
     test_a_capsules_folder_is_told_by_its_name();
     test_a_capsules_length_is_read_from_its_note();
+    test_a_capsules_aspect_is_read_from_its_note();
+    test_the_first_frames_pages_survive_their_file();
     test_the_capsules_on_disk_are_listed_and_one_is_removed();
     test_a_recording_keeps_pictures_for_the_list();
     test_a_folder_is_a_url_for_the_host();

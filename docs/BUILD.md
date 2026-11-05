@@ -332,3 +332,9 @@ in the settings menu while it was recorded. It plays in the build that made
 it and with the settings it was made with, and it is not recorded in a network
 game. The pictures are of the software frame, which a wide aspect squashes:
 the stretched and in-between frames need a window.
+
+`capsule.toml` states the aspect the game was shown at when the recording
+began, which with adaptive view is the window's. A replay shows that aspect
+from its first VBlank, whatever its own settings and window say. `pages.bin`
+holds the game's memory of the first four frames by 4 KiB page: a replay whose
+memory is apart at one of them names the pages that differ.

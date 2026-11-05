@@ -62,6 +62,17 @@ require(
     "a run without a window leaves the VBlank before a windowed one engages widescreen, so it engages it on its way out",
 )
 require(
+    'extern "C" void psx_frontend_on_savestate_loaded(void) {\n    ++s_fmv_timeline_epoch;\n'
+    "    engage_widescreen_for_loaded_state();\n"
+    in host
+    and "static void engage_widescreen_for_loaded_state(void) {\n"
+    "    if (g_ws_engaged || !fntrace_is_game_started()) return;\n    g_ws_engaged = true;\n"
+    "    g_ws_projection_mode = -1;\n    refresh_widescreen_projection();\n}\n"
+    in host,
+    "a started game's state engages widescreen at its load: engaged at the next VBlank, the frame an unlocked loop "
+    "draws before it was projected at 4:3 and a replay left its recording at frame 0",
+)
+require(
     "    } else {\n"
     '        std::fprintf(stdout, "psxrecomp: headless frontend enabled\\n");\n'
     "        host_ui_runtime_ready(nullptr, PSX_HOST_UI_BACKEND_NONE);"

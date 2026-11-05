@@ -1,5 +1,5 @@
 diff --git a/runtime/include/cdrom.h b/runtime/include/cdrom.h
-index e814e5cbf7240c453ed48dfec21dd1f995da5429..b6011d6925b989e08f4dbb00cd702882a283492e 100644
+index e814e5cbf7240c453ed48dfec21dd1f995da5429..c94705f258617bee405de936492de824380bcfc1 100644
 --- a/runtime/include/cdrom.h
 +++ b/runtime/include/cdrom.h
 @@ -1,4 +1,4 @@
@@ -24,3 +24,12 @@ index e814e5cbf7240c453ed48dfec21dd1f995da5429..b6011d6925b989e08f4dbb00cd702882
  
  /* Strict, config-driven warm-load route accelerator. Up to 16 routes may be
   * registered after cdrom_init. A route arms only after arm_lba and activates
+@@ -166,6 +175,8 @@
+ int  cdrom_savestate_cd_wait_active(void);
+ /* Remaining boost vblanks (0 when idle). Diagnostics / post-load probe. */
+ int  cdrom_savestate_boost_vblanks_remaining(void);
++/* While held a running boost is over and a load arms none: a save and a load of it then run the same drive timing. */
++void cdrom_savestate_boost_hold(int held);
+ 
+ /* MMIO read/write (0x1F801800-0x1F801803) */
+ uint32_t cdrom_read(uint32_t addr);

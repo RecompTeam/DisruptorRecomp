@@ -21,10 +21,12 @@
 #include <vector>
 
 #ifndef DISRUPTOR_CAPSULE_NO_HOST
+#include "cdrom.h"
 #include "gpu.h"
 #include "gpu_gl_renderer.h"
 #include "gpu_presentation.h"
 #include "interrupts.h"
+#include "mod_plugins.h"
 #include "overlay_api.h"
 #include "psx_cycles.h"
 #include "savestate.h"
@@ -33,6 +35,7 @@ extern "C" uint8_t *memory_get_ram_ptr(void);
 extern "C" void psx_host_write_byte(uint32_t address, uint8_t value);
 extern "C" uint16_t sio_get_pad_buttons_slot(int slot);
 extern "C" void psx_game_pad_word(int slot, uint16_t word);
+extern "C" void psx_host_video_get_applied_display_aspect(int *numerator, int *denominator);
 extern "C" double disruptor_mouse_vertical_pitch(void);
 extern "C" void disruptor_mouse_set_vertical_pitch(double pitch);
 extern "C" const char *psx_host_user_settings_path(void);
@@ -287,6 +290,66 @@ uint32_t stored_frames(std::string_view about) {
     return 0u;
 }
 
+bool stored_aspect(std::string_view about, uint32_t &numerator, uint32_t &denominator) {
+    constexpr std::string_view key = "aspect = \"";
+    for (size_t line = 0; line < about.size(); line = about.find('\n', line) == std::string_view::npos ? about.size() : about.find('\n', line) + 1) {
+        if (about.substr(line, key.size()) != key) continue;
+        size_t at = line + key.size();
+        uint32_t parts[2] = {0u, 0u};
+        for (int part = 0; part < 2; ++part) {
+            const size_t first = at;
+            for (; at < about.size() && about[at] >= '0' && about[at] <= '9'; ++at) {
+                parts[part] = parts[part] * 10u + static_cast<uint32_t>(about[at] - '0');
+                if (parts[part] >= 100000u) return false;
+            }
+            if (at == first || parts[part] == 0u || at == about.size() || about[at] != (part == 0 ? ':' : '"')) return false;
+            ++at;
+        }
+        if (at != about.size() && about[at] != '\n' && about[at] != '\r') return false;
+        numerator = parts[0];
+        denominator = parts[1];
+        return true;
+    }
+    return false;
+}
+
+std::vector<uint64_t> page_digests(const uint8_t *bytes, size_t size) {
+    std::vector<uint64_t> pages;
+    pages.reserve((size + kPageBytes - 1) / kPageBytes);
+    for (size_t at = 0; at < size; at += kPageBytes) pages.push_back(digest(bytes + at, std::min(kPageBytes, size - at)));
+    return pages;
+}
+
+std::string pages_encode(const std::vector<std::vector<uint64_t>> &frames) {
+    const size_t pages = frames.empty() ? 0 : frames[0].size();
+    std::string out = "DPAGES01";
+    put(out, frames.size(), 4);
+    put(out, pages, 4);
+    for (const std::vector<uint64_t> &frame : frames)
+        for (size_t page = 0; page < pages; ++page) put(out, page < frame.size() ? frame[page] : 0u, 8);
+    return out;
+}
+
+bool pages_decode(std::string_view file, size_t pages_per_frame, std::vector<std::vector<uint64_t>> &frames) {
+    frames.clear();
+    if (file.size() < 16 || file.substr(0, 8) != "DPAGES01") return false;
+    const uint64_t count = take(file, 8, 4), pages = take(file, 12, 4);
+    if (count > kPagedFrames || pages != pages_per_frame || file.size() != 16 + count * pages * 8) return false;
+    for (uint64_t frame = 0; frame < count; ++frame) {
+        std::vector<uint64_t> digests(static_cast<size_t>(pages));
+        for (uint64_t page = 0; page < pages; ++page) digests[page] = take(file, static_cast<size_t>(16 + (frame * pages + page) * 8), 8);
+        frames.push_back(std::move(digests));
+    }
+    return true;
+}
+
+std::vector<size_t> pages_apart(const std::vector<uint64_t> &recorded, const std::vector<uint64_t> &seen) {
+    std::vector<size_t> apart;
+    for (size_t page = 0; page < std::max(recorded.size(), seen.size()); ++page)
+        if (page >= recorded.size() || page >= seen.size() || recorded[page] != seen[page]) apart.push_back(page);
+    return apart;
+}
+
 uint32_t stored_seconds(uint32_t frames) { return frames / 60u + (frames % 60u >= 30u ? 1u : 0u); }
 
 std::vector<Stored> stored(const std::filesystem::path &all) {
@@ -435,6 +498,9 @@ struct Capsule {
     uint32_t bios = 0, entry = 0;
     std::vector<Frame> recorded, replayed;
     std::vector<uint64_t> seen;
+    std::vector<std::vector<uint64_t>> pages, played_pages;  /* the first frames' memory by page, recorded and to be replayed */
+    uint32_t aspect[2] = {0u, 0u}, played_aspect[2] = {0u, 0u};  /* the display aspect at the recording's first VBlank */
+    bool aspect_applied = false, pages_told = false;
     uint64_t run = 0xCBF29CE484222325ull;  /* each replayed frame's memory and guest cycle count, folded: builds that run alike print one value */
     Frame open;  /* the VBlank being recorded: its memory is known, its input is not yet */
     size_t at = 0, same = 0, last_same = 0, unwritten = 0;
@@ -478,6 +544,10 @@ struct Capsule {
             std::fprintf(stderr, "disruptor: capsule: %s holds no readable input.bin\n", replay_of);
             std::exit(2);
         }
+        (void)disruptor::capsule::stored_aspect(disruptor::capsule::whole_file(played / "capsule.toml", 4096), played_aspect[0], played_aspect[1]);
+        std::ifstream paged(played / disruptor::capsule::kPagesFile, std::ios::binary);
+        (void)disruptor::capsule::pages_decode(std::string((std::istreambuf_iterator<char>(paged)), {}), kRamBytes / disruptor::capsule::kPageBytes,
+                                               played_pages);
         if (const char *out = std::getenv("PSX_DISRUPTOR_CAPSULE_FRAMES"); out && out[0]) pictures = from_utf8(out);
         if (const char *out = std::getenv("PSX_DISRUPTOR_CAPSULE_POSE"); out && out[0]) pose = from_utf8(out);
         if (const char *asked = std::getenv("PSX_DISRUPTOR_CAPSULE_AS_SHOWN"); asked && asked[0] == '1') {
@@ -555,6 +625,8 @@ void close_frame() {
 void open_frame() {
     g_capsule.open = Frame{};
     g_capsule.open.memory = memory_now();
+    if (g_capsule.recorded.size() < disruptor::capsule::kPagedFrames)
+        g_capsule.pages.push_back(disruptor::capsule::page_digests(memory_get_ram_ptr(), kRamBytes));
     g_capsule.notes = Frame{};
 }
 
@@ -633,17 +705,22 @@ void store_recording(const char *why) {
                   "frames = %zu\ncodegen_hash = \"0x%08X\"\nentry_pc = \"0x%08X\"\nended = \"%s\"\npresented = %zu\nlost = %u\nmarks = %zu\nfrom_boot = %s\n",
                   capsule.recorded.size(), static_cast<unsigned>(PSX_OVERLAY_CODEGEN_HASH), static_cast<unsigned>(capsule.entry), why,
                   capsule.shown.size(), capsule.shown_lost, capsule.marks.size(), capsule.from_boot ? "true" : "false");
+    std::string note = about;
+    if (capsule.aspect[0] != 0u && capsule.aspect[1] != 0u)
+        note += "aspect = \"" + std::to_string(capsule.aspect[0]) + ":" + std::to_string(capsule.aspect[1]) + "\"\n";
     std::error_code failed;
     const bool settings = capsule.settings_kept;
     const bool input = write(capsule.made / "input.bin", disruptor::capsule::encode(capsule.recorded, capsule.first_cycle));
     const bool lists = (capsule.shown.empty() || write(capsule.made / disruptor::capsule::kShownFile, disruptor::capsule::shown_list(capsule.shown))) &&
-                       (capsule.marks.empty() || write(capsule.made / disruptor::capsule::kMarksFile, disruptor::capsule::marks_list(capsule.marks)));
-    const bool stored = write(capsule.made / "capsule.toml", about) && input && settings && lists;
+                       (capsule.marks.empty() || write(capsule.made / disruptor::capsule::kMarksFile, disruptor::capsule::marks_list(capsule.marks))) &&
+                       (capsule.pages.empty() || write(capsule.made / disruptor::capsule::kPagesFile, disruptor::capsule::pages_encode(capsule.pages)));
+    const bool stored = write(capsule.made / "capsule.toml", note) && input && settings && lists;
     if (stored)
         std::fprintf(stderr, "disruptor: capsule: %zu frames in %s (%s)\n", capsule.recorded.size(), utf8(capsule.made).c_str(), why);
     else
         std::fprintf(stderr, "disruptor: capsule: the capsule in %s could NOT be written whole (%s)\n", utf8(capsule.made).c_str(), why);
     capsule.recorded.clear();
+    capsule.pages.clear();
     capsule.shown.clear();
     capsule.marks.clear();
     capsule.recording = Recording::kOff;
@@ -751,12 +828,29 @@ void replay_frame() {
                       static_cast<unsigned>(memory_get_ram_ptr()[kYaw & (kRamBytes - 1u)]), static_cast<long long>(gl_renderer_shown_captures() - capsule.shown_base));
         capsule.poses += line;
     }
+    if (capsule.at == 0 && capsule.played_aspect[0] != 0u) {
+        int numerator = 0, denominator = 0;
+        psx_host_video_get_applied_display_aspect(&numerator, &denominator);
+        std::fprintf(stderr, "disruptor: capsule: the replay shows %d:%d\n", numerator, denominator);
+    }
     capsule.seen.push_back(memory_now());
     capsule.run = (capsule.run ^ capsule.seen.back()) * 0x100000001B3ull;
     capsule.run = (capsule.run ^ psx_cycle_count) * 0x100000001B3ull;
     if (capsule.seen.back() == frame.memory) {
         ++capsule.same;
         capsule.last_same = capsule.at;
+    } else if (frame.memory != 0u && !capsule.pages_told && capsule.at < capsule.played_pages.size()) {
+        capsule.pages_told = true;
+        const std::vector<size_t> apart =
+            disruptor::capsule::pages_apart(capsule.played_pages[capsule.at], disruptor::capsule::page_digests(memory_get_ram_ptr(), kRamBytes));
+        std::string named;
+        for (size_t index = 0; index < apart.size() && index < 16; ++index) {
+            char page[16];
+            std::snprintf(page, sizeof(page), " %08zX", 0x80000000u + apart[index] * disruptor::capsule::kPageBytes);
+            named += page;
+        }
+        std::fprintf(stderr, "disruptor: capsule: frame %zu is apart in %zu pages of 4 KiB:%s%s\n", capsule.at, apart.size(),
+                     named.c_str(), apart.size() > 16 ? " ..." : "");
     }
     if (!capsule.pictures.empty()) write_picture(capsule.at);
     if (++capsule.at == capsule.replayed.size()) finish_replay();
@@ -888,10 +982,13 @@ extern "C" void disruptor_capsule_toggle(void) {
     }
     if (failed || !made || (!capsule.from_boot && !turn_states_to(capsule.made)))
         return refuse_recording("the folder or the save states are not there");
+    if (!capsule.from_boot) cdrom_savestate_boost_hold(1);  /* the replay loads without the drive's post-load speed-up */
     if (!capsule.from_boot && !savestate_request_save(0)) {
+        cdrom_savestate_boost_hold(0);
         turn_states_back();
         return refuse_recording("a save state is refused now");
     }
+    capsule.pages.clear();
     capsule.recorded.clear();
     capsule.end_asked = false;
     capsule.recording = Recording::kSaving;
@@ -926,6 +1023,7 @@ extern "C" void disruptor_capsule_before_input(void) {
         break;
     case Recording::kSaving:
         if (savestate_pending()) break;
+        cdrom_savestate_boost_hold(0);
         if (!capsule.from_boot) {
             const bool saved = savestate_slot_exists(0) != 0;
             turn_states_back();
@@ -942,6 +1040,12 @@ extern "C" void disruptor_capsule_before_input(void) {
         capsule.marks.clear();
         capsule.shown_lost = 0;
         capsule.settings_kept = keep_settings();
+        {
+            int numerator = 0, denominator = 0;
+            psx_host_video_get_applied_display_aspect(&numerator, &denominator);
+            capsule.aspect[0] = static_cast<uint32_t>(std::max(numerator, 0));
+            capsule.aspect[1] = static_cast<uint32_t>(std::max(denominator, 0));
+        }
         capsule.recording = Recording::kOn;
         say("REC");
         capsule.first_cycle = psx_get_cycle_count();
@@ -982,8 +1086,22 @@ static void finish_load() {
     capsule.loading.clear();
 }
 
+/* Adaptive view follows this session's window: a replay shows the recording's aspect from its first VBlank, before its state loads. */
+static void apply_played_aspect() {
+    Capsule &capsule = g_capsule;
+    capsule.aspect_applied = true;
+    const uint32_t numerator = capsule.played_aspect[0], denominator = capsule.played_aspect[1];
+    if (numerator == 0u) return;
+    if (!psx_mod_set_fixed_display_aspect(numerator, denominator)) {
+        std::fprintf(stderr, "disruptor: capsule: the recorded aspect %u:%u is refused, the replay keeps this session's\n", numerator, denominator);
+        return;
+    }
+    gl_renderer_set_display_aspect(static_cast<int>(numerator), static_cast<int>(denominator));
+}
+
 extern "C" void disruptor_capsule_after_input(void) {
     Capsule &capsule = g_capsule;
+    if (capsule.replay != Replay::kOff && !capsule.aspect_applied) apply_played_aspect();
     if (!capsule.loading.empty() && !savestate_pending()) finish_load();
     if (capsule.replay == Replay::kAsked && capsule.from_boot) {
         if (psx_get_cycle_count() < capsule.played_first_cycle) return;
@@ -992,6 +1110,7 @@ extern "C" void disruptor_capsule_after_input(void) {
         capsule.shown_base = gl_renderer_shown_captures();
     }
     if (capsule.replay == Replay::kAsked) {
+        cdrom_savestate_boost_hold(1);
         if (!turn_states_to(capsule.played) || !savestate_request_load(0)) {
             std::fprintf(stderr, "disruptor: capsule: the state of %s cannot be loaded\n", utf8(capsule.played).c_str());
             std::fflush(nullptr);
@@ -1002,6 +1121,7 @@ extern "C" void disruptor_capsule_after_input(void) {
     }
     if (capsule.replay == Replay::kLoading) {
         if (savestate_pending()) return;
+        cdrom_savestate_boost_hold(0);
         turn_states_back();
         if (!capsule.loaded) {
             std::fprintf(stderr, "disruptor: capsule: the state of %s was refused: it is of another build or disc\n", utf8(capsule.played).c_str());

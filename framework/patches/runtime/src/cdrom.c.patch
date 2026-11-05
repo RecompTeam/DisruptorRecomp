@@ -1,8 +1,36 @@
 diff --git a/runtime/src/cdrom.c b/runtime/src/cdrom.c
-index de87a8c0efa1f252a170cdf0f5248af75670b722..b5950a207b957a8846fced361f57533e98c8f501 100644
+index de87a8c0efa1f252a170cdf0f5248af75670b722..d10548676909159f282b43a939bcec6b89b28736 100644
 --- a/runtime/src/cdrom.c
 +++ b/runtime/src/cdrom.c
-@@ -3826,3 +3826,17 @@
+@@ -3429,6 +3429,7 @@
+ #define CDROM_SAVESTATE_BOOST_VBLANKS 180  /* ~3s at 60Hz */
+ 
+ static int s_savestate_cd_boost_vblanks = 0;
++static int s_savestate_cd_boost_held = 0;
+ 
+ static void cdrom_apply_savestate_delay_caps(int log_clamps) {
+     if (pending.pending && psx_cycle_count < pending.due_cyc) {
+@@ -3458,6 +3459,7 @@
+ void cdrom_accelerate_after_savestate(void) {
+     const char *probe = getenv("PSX_POST_LOAD_PROBE");
+     const int log_probe = (probe && probe[0] == '1');
++    if (s_savestate_cd_boost_held) return;
+     s_savestate_cd_boost_vblanks = CDROM_SAVESTATE_BOOST_VBLANKS;
+     cdrom_apply_savestate_delay_caps(/*log_clamps*/log_probe);
+     if (log_probe)
+@@ -3481,6 +3483,11 @@
+ 
+ int cdrom_savestate_boost_vblanks_remaining(void) {
+     return s_savestate_cd_boost_vblanks;
++}
++
++void cdrom_savestate_boost_hold(int held) {
++    s_savestate_cd_boost_held = held != 0;
++    if (held) s_savestate_cd_boost_vblanks = 0;
+ }
+ 
+ /* ---- boot snapshot: complete CD-ROM controller FSM (see boot_state.h) ---- */
+@@ -3826,3 +3833,17 @@
      trace_cdrom('M', (uint32_t)index_1based, 1u, 0);
      return 1;
  }

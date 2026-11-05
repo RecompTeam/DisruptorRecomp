@@ -90,6 +90,8 @@ struct Stored {
 bool stored_name(std::string_view name, int64_t &began);
 /* The length a capsule.toml states, 0 when it states none. */
 uint32_t stored_frames(std::string_view about);
+/* The display aspect a capsule.toml states its recording was shown at: false, and nothing set, when it states none whole. */
+bool stored_aspect(std::string_view about, uint32_t &numerator, uint32_t &denominator);
 /* A length in whole seconds, rounded, at sixty VBlanks a second. */
 uint32_t stored_seconds(uint32_t frames);
 /* The capsules under `all`, the newest first. */
@@ -117,6 +119,15 @@ std::string folder_url(const std::filesystem::path &folder);
 /* Where this session keeps its capsules, and the name of the one it is recording now, or none. */
 std::filesystem::path home();
 std::string recording();
+/* The memory of a recording's first frames by page, so a replay apart at once can say where. */
+inline constexpr size_t kPageBytes = 4096, kPagedFrames = 4;
+inline constexpr const char *kPagesFile = "pages.bin";
+std::vector<uint64_t> page_digests(const uint8_t *bytes, size_t size);
+std::string pages_encode(const std::vector<std::vector<uint64_t>> &frames);
+/* Refused unless each frame holds `pages_per_frame` pages, the session's RAM: no report can name a page it does not have. */
+bool pages_decode(std::string_view file, size_t pages_per_frame, std::vector<std::vector<uint64_t>> &frames);
+/* The pages whose digests differ, a page only one side has included. */
+std::vector<size_t> pages_apart(const std::vector<uint64_t> &recorded, const std::vector<uint64_t> &seen);
 /* Asks for a capsule's state to be loaded into the running game, which then stands where the recording began: false when refused. */
 bool load(std::string_view name);
 

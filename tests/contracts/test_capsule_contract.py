@@ -124,7 +124,8 @@ require(
     and "    if (psx_netplay_active()) return refuse_recording(" in capsule
     and capsule.index("    if (psx_netplay_active()) return refuse_recording(")
     < capsule.index("turn_states_to(capsule.made)")
-    and "    if (!capsule.from_boot && !savestate_request_save(0)) {\n        turn_states_back();\n" in capsule
+    and "    if (!capsule.from_boot && !savestate_request_save(0)) {\n        cdrom_savestate_boost_hold(0);\n        turn_states_back();\n"
+    in capsule
     and "        if (!capsule.from_boot) {\n            const bool saved = savestate_slot_exists(0) != 0;\n            turn_states_back();\n            if (!saved) {\n"
     in capsule
     and capsule.count("turn_states_back()") == 6
@@ -166,7 +167,8 @@ require(
     and "int key_held(const SDL_Event *event) {\n#if defined(PSX_SDL3)\n    return event->key.mod;\n#else\n    return event->key.keysym.mod;\n#endif\n}\n"
     in menu
     and menu.count("KMOD_") == 4
-    and "    case SDL_SCANCODE_KP_ENTER: return (held & KMOD_SHIFT) != 0 ? browser::Key::save : browser::Key::choose;\n" in menu
+    and "    case SDL_SCANCODE_KP_ENTER: return (held & KMOD_SHIFT) != 0 ? browser::Key::save : browser::Key::choose;\n"
+    in menu
     and "    if (!g_menu.open && key_down(event, SDL_SCANCODE_F11) && (key_held(event) & KMOD_CTRL) != 0 &&\n"
     "        disruptor_capsule_mark(event->key.repeat ? 1 : 0))\n        return 1;\n"
     in menu
@@ -198,8 +200,7 @@ require(
 )
 require(
     "    out.close();\n    return !out.fail();\n" in capsule
-    and '    const bool stored = write(capsule.made / "capsule.toml", about) && input && settings && lists;\n'
-    in capsule
+    and '    const bool stored = write(capsule.made / "capsule.toml", note) && input && settings && lists;\n' in capsule
     and "    std::_Exit(stored ? 0 : 2);\n" in capsule
     and "    if (g_capsule.scripted == 0) return;\n    std::fflush(nullptr);\n    std::_Exit(2);" in capsule
     and "    std::_Exit(!in_step ? 3 : capsule.unwritten != 0 ? 2 : !capsule.presented_whole ? 4 : 0);" in capsule
@@ -422,6 +423,55 @@ require(
     and "            s_snap_taken_sequence = s_snap_sequence;\n" in renderer,
     "a recording keeps every picture shown from its first VBlank on, the turn's remainder each frame and a full picture for "
     "each mark with the number of the picture it was read from, and a replay hands the remainder back",
+)
+
+cdrom = read("psxrecomp/runtime/src/cdrom.c")
+require(
+    capsule.index("    if (!capsule.from_boot) cdrom_savestate_boost_hold(1);")
+    < capsule.index(
+        "    if (!capsule.from_boot && !savestate_request_save(0)) {\n        cdrom_savestate_boost_hold(0);\n"
+    )
+    and "    case Recording::kSaving:\n        if (savestate_pending()) break;\n        cdrom_savestate_boost_hold(0);\n"
+    in capsule
+    and "    if (capsule.replay == Replay::kAsked) {\n        cdrom_savestate_boost_hold(1);\n"
+    "        if (!turn_states_to(capsule.played) || !savestate_request_load(0)) {\n"
+    in capsule
+    and "    if (capsule.replay == Replay::kLoading) {\n        if (savestate_pending()) return;\n"
+    "        cdrom_savestate_boost_hold(0);\n"
+    in capsule
+    and "    if (s_savestate_cd_boost_held) return;\n    s_savestate_cd_boost_vblanks = CDROM_SAVESTATE_BOOST_VBLANKS;\n"
+    in cdrom
+    and "    s_savestate_cd_boost_held = held != 0;\n    if (held) s_savestate_cd_boost_vblanks = 0;\n" in cdrom,
+    "a capsule's state is saved with no post-load drive speed-up running and its replay loads it without one, so the "
+    "replay's drive delivers its sectors on the recording's cycles",
+)
+
+require(
+    'extern "C" void disruptor_capsule_after_input(void) {\n    Capsule &capsule = g_capsule;\n'
+    "    if (capsule.replay != Replay::kOff && !capsule.aspect_applied) apply_played_aspect();\n"
+    "    if (!capsule.loading.empty() && !savestate_pending()) finish_load();\n"
+    in capsule
+    and "    if (!psx_mod_set_fixed_display_aspect(numerator, denominator)) {\n" in capsule
+    and "    gl_renderer_set_display_aspect(static_cast<int>(numerator), static_cast<int>(denominator));\n}\n"
+    in capsule
+    and "kRamBytes / disruptor::capsule::kPageBytes,\n" in capsule
+    and "            psx_host_video_get_applied_display_aspect(&numerator, &denominator);\n" in capsule
+    and capsule.index("            psx_host_video_get_applied_display_aspect(&numerator, &denominator);\n")
+    < capsule.index("        open_frame();\n        if (disruptor_baton_held_by_choice())")
+    and '        note += "aspect = \\"" + std::to_string(capsule.aspect[0]) + ":" + std::to_string(capsule.aspect[1]) + "\\"\\n";\n'
+    in capsule
+    and '    const bool stored = write(capsule.made / "capsule.toml", note) && input && settings && lists;\n' in capsule
+    and "(capsule.pages.empty() || write(capsule.made / disruptor::capsule::kPagesFile, "
+    "disruptor::capsule::pages_encode(capsule.pages)));\n"
+    in capsule
+    and "    if (g_capsule.recorded.size() < disruptor::capsule::kPagedFrames)\n"
+    "        g_capsule.pages.push_back(disruptor::capsule::page_digests(memory_get_ram_ptr(), kRamBytes));\n"
+    in capsule
+    and capsule.count("    capsule.pages.clear();\n") == 2
+    and "    } else if (frame.memory != 0u && !capsule.pages_told && capsule.at < capsule.played_pages.size()) {\n"
+    in capsule,
+    "a recording keeps the aspect it was shown at and its first frames' memory by page, and a replay shows that aspect "
+    "before its state loads and names the pages of a compared first frame that is apart",
 )
 
 print("Disruptor replay capsule source contract: PASS")
