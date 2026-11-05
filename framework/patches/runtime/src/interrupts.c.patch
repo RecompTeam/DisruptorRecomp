@@ -1,5 +1,5 @@
 diff --git a/runtime/src/interrupts.c b/runtime/src/interrupts.c
-index fd390f9ae91d7b55e4228c036a984ba518a1772d..d9191c21a6581b845a3973e81612d4272e05e93f 100644
+index fd390f9ae91d7b55e4228c036a984ba518a1772d..c038bad6d98eb3b1e58dfcd0c89abd24808d2fdc 100644
 --- a/runtime/src/interrupts.c
 +++ b/runtime/src/interrupts.c
 @@ -1120,9 +1120,13 @@
@@ -27,6 +27,15 @@ index fd390f9ae91d7b55e4228c036a984ba518a1772d..d9191c21a6581b845a3973e81612d427
      /* Frozen guest time (psx_cycle_freeze.h): no delivery, and no
       * check-boundary bookkeeping that the stock timeline would not do. */
      if (g_psx_guest_time_frozen) return;
+@@ -1197,7 +1203,7 @@
+      * host-only state (not in the snap), so replay delivery timing forked
+      * across peers. Edge PC + I_STAT are guest-deterministic; the wait
+      * ping-pong reaches B a few instructions later, so no starvation. */
+-    if (!in_exception && psx_netplay_active()) {
++    if (!in_exception && np_active && psx_netplay_active()) {  /* nothing in this call starts a network game */
+         const uint32_t wait_a = 0x8006CD54u;
+         const uint32_t wait2_a = 0x800768C8u;
+         uint32_t edge = s_last_interrupt_check_pc;
 @@ -1213,7 +1219,7 @@
       * maintenance counter: short actions/voices can finish before capture.
       * Keep exception, host-adapter and resume-PC gates in savestate_poll, and

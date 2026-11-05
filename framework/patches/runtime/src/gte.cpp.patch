@@ -1,5 +1,5 @@
 diff --git a/runtime/src/gte.cpp b/runtime/src/gte.cpp
-index 06a0b31c3bced061c5862228b266b2f216e2516b..adb84219a50fd580a0cecdcfa50fc6a4a9fb6132 100644
+index 06a0b31c3bced061c5862228b266b2f216e2516b..897e69077d203e5ac335ccd3c90f05fe8f7b63d8 100644
 --- a/runtime/src/gte.cpp
 +++ b/runtime/src/gte.cpp
 @@ -7,6 +7,9 @@
@@ -12,7 +12,7 @@ index 06a0b31c3bced061c5862228b266b2f216e2516b..adb84219a50fd580a0cecdcfa50fc6a4
  #include "gte_nclip_stats.h"
  #include "render_pass_projection.h"
  #include <algorithm>
-@@ -257,6 +260,132 @@
+@@ -257,6 +260,143 @@
  static int s_speculative_timeline_invalidated = 0;
  
  static void gte_nclip_precision_invalidate();
@@ -63,6 +63,8 @@ index 06a0b31c3bced061c5862228b266b2f216e2516b..adb84219a50fd580a0cecdcfa50fc6a4
 +static PreciseProjection s_precision_projection[PRECISION_STORE_SIZE];
 +extern "C" uint32_t g_gte_precision_ram_pages[16] = {};
 +extern "C" uint32_t g_gte_precision_dma_pages[64] = {};
++extern "C" uint32_t g_gte_precision_ram_words[16384] = {};
++extern "C" uint32_t g_gte_precision_dma_words[65536] = {};
 +extern "C" uint32_t g_gte_precision_scratch_live = 0;
 +static_assert(PSX_MOD_GPU_DMA_APERTURE_BASE == 0x00800000u && PSX_MOD_GPU_DMA_APERTURE_SIZE == (2048u << 12),
 +              "gte_precision_dma_live's page arithmetic");
@@ -131,9 +133,18 @@ index 06a0b31c3bced061c5862228b266b2f216e2516b..adb84219a50fd580a0cecdcfa50fc6a4
 +        s_precision_copy_pc_routes[i].capture.valid = 0;
 +}
 +
++/* A page's 1024 word bits are 32 words of the word map. */
++static void precision_live_words_clear(uint32_t *pages, uint32_t page_words, uint32_t *words) {
++    for (uint32_t index = 0; index < page_words; ++index) {
++        for (uint32_t bit = 0, bits = pages[index]; bits != 0u; ++bit, bits >>= 1)
++            if (bits & 1u) std::memset(words + (index * 32u + bit) * 32u, 0, 32u * sizeof(uint32_t));
++        pages[index] = 0u;
++    }
++}
++
 +static void gte_precision_generation_advance(void) {
-+    std::memset(g_gte_precision_ram_pages, 0, sizeof(g_gte_precision_ram_pages));
-+    std::memset(g_gte_precision_dma_pages, 0, sizeof(g_gte_precision_dma_pages));
++    precision_live_words_clear(g_gte_precision_ram_pages, 16u, g_gte_precision_ram_words);
++    precision_live_words_clear(g_gte_precision_dma_pages, 64u, g_gte_precision_dma_words);
 +    g_gte_precision_scratch_live = 0;
 +    if (++s_precision_generation == 0) {
 +        std::memset(s_precision_tag, 0, sizeof(s_precision_tag));
@@ -145,7 +156,7 @@ index 06a0b31c3bced061c5862228b266b2f216e2516b..adb84219a50fd580a0cecdcfa50fc6a4
  static void gte_geom_generation_advance(void) {
      gte_nclip_precision_invalidate();
      if (++s_geom_generation == 0) {
-@@ -267,6 +396,11 @@
+@@ -267,6 +407,11 @@
  }
  
  extern "C" void gte_precision_timeline_invalidate(void) {
@@ -157,7 +168,7 @@ index 06a0b31c3bced061c5862228b266b2f216e2516b..adb84219a50fd580a0cecdcfa50fc6a4
      /* Raw machine-state restore is authoritative even if host polling reached
       * it during a speculative validation pass. Defer the generation advance
       * until the outer transaction ends so old provenance cannot be restored.
-@@ -276,12 +410,17 @@
+@@ -276,12 +421,17 @@
          s_speculative_timeline_invalidated = 1;
          return;
      }
@@ -176,7 +187,7 @@ index 06a0b31c3bced061c5862228b266b2f216e2516b..adb84219a50fd580a0cecdcfa50fc6a4
      /* The speculative pass runs real GTE commands and hooks on state that is
       * rolled back afterwards: suppress all shadow recording so the shadows
       * still describe the restored timeline when the bracket closes. */
-@@ -293,38 +432,716 @@
+@@ -293,38 +443,724 @@
      pgxp_suppress_end();
      if (--s_speculative_depth == 0) {
          if (s_speculative_timeline_invalidated) {
@@ -249,9 +260,11 @@ index 06a0b31c3bced061c5862228b266b2f216e2516b..adb84219a50fd580a0cecdcfa50fc6a4
 +    tag.generation = s_precision_generation;
 +    if (physical < 0x00200000u) {
 +        g_gte_precision_ram_pages[physical >> 17] |= 1u << ((physical >> 12) & 31u);
++        g_gte_precision_ram_words[physical >> 7] |= 1u << ((physical >> 2) & 31u);
 +    } else if (physical - PSX_MOD_GPU_DMA_APERTURE_BASE < PSX_MOD_GPU_DMA_APERTURE_SIZE) {
-+        const uint32_t page = (physical - PSX_MOD_GPU_DMA_APERTURE_BASE) >> 12;
-+        g_gte_precision_dma_pages[page >> 5] |= 1u << (page & 31u);
++        const uint32_t offset = physical - PSX_MOD_GPU_DMA_APERTURE_BASE;
++        g_gte_precision_dma_pages[offset >> 17] |= 1u << ((offset >> 12) & 31u);
++        g_gte_precision_dma_words[offset >> 7] |= 1u << ((offset >> 2) & 31u);
 +    } else {
 +        g_gte_precision_scratch_live = 1;
 +    }
@@ -746,6 +759,12 @@ index 06a0b31c3bced061c5862228b266b2f216e2516b..adb84219a50fd580a0cecdcfa50fc6a4
 +    PrecisionStoreTag &tag = s_precision_tag[precision_hash(physical)];
 +    if (tag.generation == s_precision_generation && tag.addr == physical)
 +        tag.generation = 0;
++    /* No tag holds this word now, so its next store skips the call. */
++    if (physical < 0x00200000u)
++        g_gte_precision_ram_words[physical >> 7] &= ~(1u << ((physical >> 2) & 31u));
++    else if (physical - PSX_MOD_GPU_DMA_APERTURE_BASE < PSX_MOD_GPU_DMA_APERTURE_SIZE)
++        g_gte_precision_dma_words[(physical - PSX_MOD_GPU_DMA_APERTURE_BASE) >> 7] &=
++            ~(1u << (((physical - PSX_MOD_GPU_DMA_APERTURE_BASE) >> 2) & 31u));
 +}
 +
 +static GtePrecisionLookupResult precision_lookup_projection(
@@ -910,7 +929,7 @@ index 06a0b31c3bced061c5862228b266b2f216e2516b..adb84219a50fd580a0cecdcfa50fc6a4
  
  /* Exact slot for a packed SXY pair, or -1 if it is outside the representable
   * screen range. No hashing: distinct positions never share a slot. */
-@@ -373,43 +1190,18 @@
+@@ -373,43 +1209,18 @@
      return s_geom_hits;
  }
  
@@ -961,7 +980,7 @@ index 06a0b31c3bced061c5862228b266b2f216e2516b..adb84219a50fd580a0cecdcfa50fc6a4
  }
  
  /* Frame generation's vertex sources ([video] frame_generation,
-@@ -636,9 +1428,61 @@
+@@ -636,9 +1447,61 @@
  // un-squashed while suppress is active; nearer props keep the squash. Threshold
  // tuned live via the ws_far_threshold TCP cmd; SZ stats below characterize the
  // driver's depth range so the split is set from data, not a guess.
@@ -1025,7 +1044,7 @@ index 06a0b31c3bced061c5862228b266b2f216e2516b..adb84219a50fd580a0cecdcfa50fc6a4
  extern "C" void gte_ws_set_far_threshold(int t) { s_ws_far_threshold = t; }
  extern "C" int  gte_ws_get_far_threshold(void) { return (int)s_ws_far_threshold; }
  /* SZ stats observed while suppress is active (one frame window, reset on read). */
-@@ -1172,13 +2016,13 @@
+@@ -1172,13 +2035,13 @@
      /* Horizontal factor applied to xterm below, for the exact-projection
       * shadow (pgxp_project_precise) to apply the same one. */
      int64_t x_num = 1, x_den = 1;
@@ -1041,7 +1060,7 @@ index 06a0b31c3bced061c5862228b266b2f216e2516b..adb84219a50fd580a0cecdcfa50fc6a4
          /* Depth-gated: un-squash only FAR geometry (the backdrop); keep near
           * props squashed so they stay aligned. Record SZ stats for tuning. */
          int32_t sz = gte->SZ[3];
-@@ -1187,7 +2031,7 @@
+@@ -1187,7 +2050,7 @@
              if (sz > s_ws_sz_max) s_ws_sz_max = sz;
              s_ws_sz_n++;
          }
@@ -1050,7 +1069,7 @@ index 06a0b31c3bced061c5862228b266b2f216e2516b..adb84219a50fd580a0cecdcfa50fc6a4
              do_squash = false;
              if (!s_gte_replay_sandbox) s_ws_sz_far++;
          }
-@@ -1214,6 +2058,7 @@
+@@ -1214,6 +2077,7 @@
          }
      }
      dome_probe_note(gte->SZ[3]);   /* locate the dome draw fn (far-vertex tally) */
@@ -1058,7 +1077,7 @@ index 06a0b31c3bced061c5862228b266b2f216e2516b..adb84219a50fd580a0cecdcfa50fc6a4
      if (!s_gte_replay_sandbox) {   /* projection of the latest 3D draw, for post effects (u_proj) */
          s_postfx_projection.publish(gte->H,gte->OFX,gte->OFY);
      }
-@@ -1260,6 +2105,63 @@
+@@ -1260,6 +2124,63 @@
      int64_t sx = sx16 >> 16;
      int64_t sy = sy16 >> 16;
      gte->push_sxy(sx, sy);
@@ -1122,7 +1141,7 @@ index 06a0b31c3bced061c5862228b266b2f216e2516b..adb84219a50fd580a0cecdcfa50fc6a4
      gpu_ws_note_gte_sxy((int16_t)(gte->SXY[2] & 0xFFFF),
                          (int16_t)((uint32_t)gte->SXY[2] >> 16));
      if (!s_gte_replay_sandbox) {
-@@ -2806,7 +3708,7 @@
+@@ -2806,7 +3727,7 @@
   * these keep the historical test entry points working over it. */
  extern "C" void gte_test_set_precise_valid_mask(uint32_t mask) {
      for (uint32_t i = 0; i < 4; ++i)
@@ -1131,7 +1150,7 @@ index 06a0b31c3bced061c5862228b266b2f216e2516b..adb84219a50fd580a0cecdcfa50fc6a4
  }
  
  extern "C" uint32_t gte_test_get_precise_valid_mask(void) {
-@@ -2821,7 +3723,7 @@
+@@ -2821,7 +3742,7 @@
  
  extern "C" void gte_test_set_timeline_generations(uint32_t precision,
                                                      uint32_t geometry) {
@@ -1140,7 +1159,7 @@ index 06a0b31c3bced061c5862228b266b2f216e2516b..adb84219a50fd580a0cecdcfa50fc6a4
      PSXRecomp::GTE::s_geom_generation = geometry;
  }
  
-@@ -2838,7 +3740,17 @@
+@@ -2838,7 +3759,17 @@
                                                      int32_t x16,
                                                      int32_t y16,
                                                      uint16_t z) {
@@ -1159,7 +1178,7 @@ index 06a0b31c3bced061c5862228b266b2f216e2516b..adb84219a50fd580a0cecdcfa50fc6a4
  }
  
  extern "C" void gte_test_get_precise_projection(uint32_t index,
-@@ -2847,7 +3759,37 @@
+@@ -2847,7 +3778,37 @@
                                                    int32_t* y16,
                                                    uint16_t* z,
                                                    uint8_t* valid) {

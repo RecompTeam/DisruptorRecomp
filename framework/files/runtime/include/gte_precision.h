@@ -86,17 +86,20 @@ void gte_precision_scratch_word_committed(uint32_t physical);
 void gte_precision_gpu_dma_word_committed(uint32_t physical);
 void gte_precision_store_word(uint32_t addr, uint8_t reg);
 void gte_precision_invalidate_word(uint32_t addr);
-/* A bit a 4 KB page that may hold provenance this generation, per domain: a store elsewhere skips the call. */
+/* A bit a 4-byte word that may hold provenance this generation, per domain: a store elsewhere skips the call. The page
+ * bits name the 4 KB pages whose word bits may be set, so a new generation clears only those. */
 extern uint32_t g_gte_precision_ram_pages[16];
 extern uint32_t g_gte_precision_dma_pages[64];
+extern uint32_t g_gte_precision_ram_words[16384];
+extern uint32_t g_gte_precision_dma_words[65536];
 extern uint32_t g_gte_precision_scratch_live;
 static inline int gte_precision_ram_live(uint32_t addr) {
-    const uint32_t page = (addr & 0x1FFFFFu) >> 12;
-    return (int)((g_gte_precision_ram_pages[page >> 5] >> (page & 31u)) & 1u);
+    const uint32_t word = (addr & 0x1FFFFFu) >> 2;
+    return (int)((g_gte_precision_ram_words[word >> 5] >> (word & 31u)) & 1u);
 }
 static inline int gte_precision_dma_live(uint32_t phys) {
-    const uint32_t page = ((phys - 0x00800000u) >> 12) & 2047u;
-    return (int)((g_gte_precision_dma_pages[page >> 5] >> (page & 31u)) & 1u);
+    const uint32_t word = ((phys - 0x00800000u) >> 2) & 0x1FFFFFu;
+    return (int)((g_gte_precision_dma_words[word >> 5] >> (word & 31u)) & 1u);
 }
 
 /* Register reviewed MFC2 and ordinary-SW identities. The MFC2 callback snapshots the projection read, the post-write

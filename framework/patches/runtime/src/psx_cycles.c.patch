@@ -1,8 +1,27 @@
 diff --git a/runtime/src/psx_cycles.c b/runtime/src/psx_cycles.c
-index 86528dbea22ea54bc7d6d63e7ad70de744ed54fe..5887367b9ef6a6380e65677c695d0271da85b31f 100644
+index 86528dbea22ea54bc7d6d63e7ad70de744ed54fe..8261598af02f248ad9b03ade51dee5774d0499a1 100644
 --- a/runtime/src/psx_cycles.c
 +++ b/runtime/src/psx_cycles.c
-@@ -864,7 +864,8 @@
+@@ -776,6 +776,18 @@
+     if (ext && s_idle_pc != 0 && check_pc != s_idle_pc && s_idle_edges < IDLE_EDGES_MAX &&
+         g_mmio_access_count == s_idle_last_mmio) {
+         s_idle_edges++;
++        return;
++    }
++    /* A check at another PC only restarts the detector there, as the last branch below does: its streak is then 0. */
++    if (check_pc != s_idle_pc) {
++        s_idle_pc = check_pc;
++        idle_reset_progress();
++        s_idle_have_snap = 0;
++        s_idle_store_addr = 0xFFFFFFFFu;
++        s_idle_edges = 0;
++        s_idle_last_cycle = psx_cycle_count;
++        s_idle_last_stores = g_guest_store_count;
++        s_idle_last_mmio = g_mmio_access_count;
+         return;
+     }
+ 
+@@ -864,7 +876,8 @@
       * (v_wait). Multi-edge loops with no counter store -- OpenBIOS's
       * 0xBFC057C0 poll, kernel 0x16BC -- moved R4's boot timing when skipped
       * (frame 192, cyc +3857), so they keep running for real. */
@@ -12,7 +31,7 @@ index 86528dbea22ea54bc7d6d63e7ad70de744ed54fe..5887367b9ef6a6380e65677c695d0271
      uint32_t q = s_idle_quantum;
      uint32_t dist = devices_cycles_to_next_idle_event();
      /* The devices report distances from where they were last serviced
-@@ -1161,6 +1162,66 @@
+@@ -1161,6 +1174,66 @@
      }
  }
  
