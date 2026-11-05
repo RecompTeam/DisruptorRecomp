@@ -86,12 +86,14 @@ runtime/src/gte.cpp
 runtime/src/interrupts.c
 runtime/src/iso_reader_c.cpp
 runtime/src/main.cpp
+runtime/src/mdec.c
 runtime/src/memcard.c
 runtime/src/memory.c
 runtime/src/mod_runtime.cpp
 runtime/src/parity_trace.c
 runtime/src/psx_cycles.c
 runtime/src/psx_sdl_audio.cpp
+runtime/src/recomp_audio_drc.h
 runtime/src/savestate.c
 runtime/src/text_xlate.cpp
 runtime/src/traps.c

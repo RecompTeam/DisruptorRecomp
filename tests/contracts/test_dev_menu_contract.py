@@ -840,6 +840,11 @@ require(
     "the bass cut shapes the SPU's output where it is rendered, before every fade, gain and the bridge, so a mute "
     "or a fade to silence ends in silence, and the saved cut applies at start in a build without the menu too",
 )
+require(
+    "bridge_joined = s_drc.primed != 0;" in audio_update
+    and "sdl_audio_fadein_left = bridge_joined ? 0 : sdl_audio_fade_samples;" in audio_update,
+    "after a sink the producer ramp is skipped only when the bridge joined playable PCM, a depleted ring keeps it",
+)
 
 for function_name in ("on_runtime_ready", "on_runtime_shutdown"):
     session_body = function_body(menu, function_name)

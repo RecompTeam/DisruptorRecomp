@@ -1,8 +1,17 @@
 diff --git a/runtime/src/savestate.c b/runtime/src/savestate.c
-index 628270bb5bf83377f85a56dd34d93bc87e80ca8d..5bf9067137095454323b94661b04997ba3dd9576 100644
+index 628270bb5bf83377f85a56dd34d93bc87e80ca8d..1aed2190de123929249f4a9407c3e9fd86a3a6de 100644
 --- a/runtime/src/savestate.c
 +++ b/runtime/src/savestate.c
-@@ -77,6 +77,7 @@
+@@ -14,6 +14,8 @@
+ #include "gpu.h"
+ #include "gpu_hd_textures.h"
+ #include "interrupts.h"
++#include "func_override.h"
++#include "psx_cycle_freeze.h"
+ #include "psx_cycles.h"
+ #include "psx_netplay.h"
+ #include "psx_netplay_rb.h"
+@@ -77,6 +79,7 @@
  static double   s_save_defer_t0 = 0.0;
  static uint8_t *s_load_blob = NULL;   /* optional in-memory .pst for netplay */
  static size_t   s_load_blob_len = 0;
@@ -10,7 +19,7 @@ index 628270bb5bf83377f85a56dd34d93bc87e80ca8d..5bf9067137095454323b94661b04997b
  #if defined(PSX_HAS_RECOMP_NET)
  static uint32_t s_load_trace_generation;
  
-@@ -227,6 +228,31 @@
+@@ -227,6 +230,31 @@
  }
  
  /* Peek .pst header bios_checksum (BOOT_STATE wire: magic, version, checksum). */
@@ -42,7 +51,7 @@ index 628270bb5bf83377f85a56dd34d93bc87e80ca8d..5bf9067137095454323b94661b04997b
  static int pst_peek_bios_checksum(const char* path, uint32_t* out_cksum) {
      FILE* f;
      uint8_t hdr[12];
-@@ -800,6 +826,10 @@
+@@ -800,6 +828,10 @@
  }
  
  static int request_load_inner(int slot) {
@@ -53,18 +62,29 @@ index 628270bb5bf83377f85a56dd34d93bc87e80ca8d..5bf9067137095454323b94661b04997b
      if (title_save_request_blocked(1, slot)) return 0;
      if (!s_configured) {
          fprintf(stderr, "savestate: not configured\n");
-@@ -879,6 +909,10 @@
- 
- int savestate_pending(void) {
+@@ -881,6 +913,10 @@
      return (s_save_pending >= 0 || s_load_pending >= 0) ? 1 : 0;
-+}
-+
-+const char* savestate_active_path(void) {
-+    return s_active_path;
  }
  
++const char* savestate_active_path(void) {
++    return s_active_path;
++}
++
  void savestate_get_status(PSXSavestateStatus* out) {
-@@ -935,6 +969,7 @@
+     if (!out) return;
+     out->generation = s_status_generation;
+@@ -932,9 +968,18 @@
+      * Its C callback cannot be resumed by loading a block-leader PC. Keep
+      * both requests pending until the title restores the canonical context. */
+     if (!psx_mod_snapshot_ready()) { s_status_wait = "mod_snapshot"; return; }
++    /* Both operations must wait for host continuations. Loading here can
++     * longjmp past a caller's register/clock restore, leaking frozen time.
++     * The save-only resume-PC check below does not protect loads. */
++    if (psx_snapshot_host_call_depth() || func_override_active() ||
++        g_psx_guest_time_frozen) {
++        s_status_wait = "host_continuation";
++        return;
++    }
      s_status_wait = "resume_pc";
  
      if (s_save_pending >= 0) {
@@ -72,7 +92,7 @@ index 628270bb5bf83377f85a56dd34d93bc87e80ca8d..5bf9067137095454323b94661b04997b
          int slot = s_save_pending;
          char path[600];
          uint32_t pc = savestate_resolve_resume_pc(cpu, resume_pc);
-@@ -997,9 +1032,13 @@
+@@ -997,9 +1042,13 @@
              if (savestate_slot_path(slot, path, sizeof(path))) {
                  /* Save the exact resume PC (cpu->pc is 0 mid-block; resume_pc is
                   * the block leader the interrupt path would resume at). */
@@ -86,7 +106,7 @@ index 628270bb5bf83377f85a56dd34d93bc87e80ca8d..5bf9067137095454323b94661b04997b
                  if (ok) {
                      s_last_save_pc = pc;
                      s_save_failed = 0;
-@@ -1042,6 +1081,10 @@
+@@ -1042,6 +1091,10 @@
          s_load_pending = -1;
          g_psx_savestate_pending = s_save_pending >= 0;
          char path[600];
@@ -97,7 +117,7 @@ index 628270bb5bf83377f85a56dd34d93bc87e80ca8d..5bf9067137095454323b94661b04997b
          const double t_load0 = savestate_mono_ms();
          double t_after_boot = t_load0;
          double t_after_frontend = t_load0;
-@@ -1052,6 +1095,13 @@
+@@ -1052,6 +1105,13 @@
           * (boot_state_load_* itself refuses before mutating anything.) */
          uint8_t* rollback = NULL;
          size_t rollback_len = 0;
@@ -111,7 +131,7 @@ index 628270bb5bf83377f85a56dd34d93bc87e80ca8d..5bf9067137095454323b94661b04997b
          const int have_rollback = boot_state_save_buffer_raw(
              cpu, s_bios_checksum, s_entry_pc, &rollback, &rollback_len);
          path[0] = '\0';
-@@ -1078,8 +1128,11 @@
+@@ -1078,8 +1138,11 @@
                  psx_frontend_on_savestate_notify(1, slot, 0);
              }
          } else if (savestate_slot_path(slot, path, sizeof(path))) {
@@ -125,7 +145,7 @@ index 628270bb5bf83377f85a56dd34d93bc87e80ca8d..5bf9067137095454323b94661b04997b
              if (!loaded) {
                  fprintf(stderr,
                          "savestate: LOAD FAILED slot %d %s\n",
-@@ -1094,7 +1147,7 @@
+@@ -1094,7 +1157,7 @@
          }
          /* A post-apply resume-PC refusal has not notified observers. Restore
           * the original machine silently, without splitting its input stream. */
@@ -134,7 +154,7 @@ index 628270bb5bf83377f85a56dd34d93bc87e80ca8d..5bf9067137095454323b94661b04997b
              (void)boot_state_load_buffer_quiet(rollback, rollback_len,
                                                s_bios_checksum, s_entry_pc, cpu);
  #if defined(PSX_HAS_RECOMP_NET)
-@@ -1103,6 +1156,7 @@
+@@ -1103,6 +1166,7 @@
                                   load_trace_source, cpu);
  #endif
          free(rollback);
@@ -142,7 +162,7 @@ index 628270bb5bf83377f85a56dd34d93bc87e80ca8d..5bf9067137095454323b94661b04997b
          if (!loaded) {
              g_psx_savestate_pending = 0;
              s_status_last_ok = 0;
-@@ -1126,7 +1180,9 @@
+@@ -1126,7 +1190,9 @@
              s_status_generation++;
              /* Restage FBO/present latch so the restored frame is visible
               * immediately (avoids disabled-display blank latch + stale smooth). */
