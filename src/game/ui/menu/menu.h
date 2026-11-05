@@ -25,13 +25,23 @@
 #if DISRUPTOR_DEV_TOOLS
 #include "game/session/mission_select.h"
 #endif
+#include "game/input/menu_pointer.h"
+#include "game/language/language.h"
+#include "game/settings/second_keys.h"
+#include "game/ui/password_hint.h"
+#include "cpu_state.h"
+#include "mod_plugins.h"
 #include "game/input/mouse_aim.h"
+#include "game/session/menu_mouse.h"
 #include "game/input/selection_wheel.h"
 #include "game/input/sticks.h"
 #include "game/frame/present_rate.h"
 #include "game/session/restart.h"
 #include "game/settings/key_layouts.h"
 #include "game/settings/pad_layout.h"
+#if defined(PSX_SDL3)
+#include "game/settings/pad_family.h"
+#endif
 #include "game/settings/options.h"
 #include "game/ui/hint.h"
 #include "config_loader.h"
@@ -52,6 +62,8 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <atomic>
+#include <vector>
 #include <mutex>
 #include <deque>
 #include <cctype>
@@ -137,6 +149,9 @@ struct DevMenuState {
     std::vector<unsigned> capsule_film;
     int selected_wide_aspect = 0;
     std::string cheat_status;
+#if defined(PSX_SDL3)
+    disruptor::settings::PadInUse pad_in_use;
+#endif
 };
 
 extern DevMenuState g_menu;
@@ -232,6 +247,9 @@ void draw_status_badge(const char *label, const ImVec4 &colour);
 // The achievements overlay: whether it has something up, drawn inside the frame in progress, its pictures freed.
 bool achievements_overlay_shown();
 void draw_achievements_overlay(int width, int height);
+/* The password screen ran a moment ago: its keys are drawn under the field. */
+bool password_hint_shown();
+void draw_password_hint(int width, int height);
 void release_achievement_pictures();
 // A badge's picture for ImGui, 0 until it is fetched or when it cannot be read. The render thread.
 unsigned achievement_picture(const std::string &url);

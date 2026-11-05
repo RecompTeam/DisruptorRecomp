@@ -7,6 +7,7 @@
 #include "session.h"
 #include "updater.h"
 
+#include "game/settings/pad_family.h"
 #include "game/settings/pad_layout.h"
 
 #include <array>
@@ -77,6 +78,9 @@ public:
     // A picture's --virtual-pad: the Gamepad page behaves as with one gamepad connected.
     void pretend_pad() { pretend_pad_ = true; }
     void take_pad_button(int button);
+    // Every event: the pad last pressed or pushed names the buttons and moves through the window.
+    void note_pad(const SDL_Event& event) { pad_in_use_.note(event); }
+    const settings::PadInUse& pad_in_use() const { return pad_in_use_; }
     void take_pad_axis(std::uint32_t pad, int axis, int value);
     void stop_pad_capture();
     // A frame laid something out from the frame before it and must be drawn again at once.
@@ -221,6 +225,7 @@ private:
     bool pad_map_read_ = false;
     std::map<std::uint32_t, std::array<bool, 2>> trigger_armed_;
     settings::PadFamily pad_family_ = settings::PadFamily::xbox;
+    settings::PadInUse pad_in_use_;
     std::vector<SDL_Gamepad*> capture_pads_;
     bool pads_ = false;
     bool pretend_pad_ = false;

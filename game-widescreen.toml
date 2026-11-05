@@ -51,6 +51,14 @@ address = "0x8001C1D0"
 expected = "0x28420008"
 replacement = "0x28420009"
 
+# CONTROLLER OPTIONS is off the main menu (src/game/session/main_menu_exit.cpp) and the launcher binds the keys to the
+# default layout: a loaded save keeps layout 0 instead of the one it was saved with. andi a0,a0,3 becomes andi a0,a0,0.
+[[recompiler.patch]]
+id = "disruptor-controller-layout-load"
+address = "0x8001DBB8"
+expected = "0x30840003"
+replacement = "0x30840000"
+
 # Calls made after an instruction of the game that ran from RAM. A site is an address and the whole
 # instruction word expected there. Native code gets the same calls from the generator's own lists, which
 # a contract keeps equal to these.

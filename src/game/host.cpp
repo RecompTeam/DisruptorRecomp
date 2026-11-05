@@ -97,7 +97,7 @@ void psx_game_settings_defaults(PSXRecompV4::UserSettings &settings) {
 bool psx_game_settings_loaded(const PSXRecompV4::UserSettings &settings) {
     disruptor_diagnostics_configure(settings.has_detailed_logging && settings.detailed_logging);
     (void)psx_host_audio_set_mute_in_background(settings.has_mute_in_background && settings.mute_in_background);
-    disruptor_bass_cut_set(settings.has_bass_cut ? settings.bass_cut : 0);
+    disruptor_bass_cut_set(settings.has_bass_cut ? settings.bass_cut : PSXRecompV4::kDisruptorBassCutDefault);
     disruptor_achievements_configure(!settings.has_achievements || settings.achievements);
     disruptor::achievements::configure(settings);
     apply_pick_keys(settings);

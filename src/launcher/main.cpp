@@ -1,4 +1,5 @@
 #include "activity.h"
+#include "art.h"
 #include "disc_import.h"
 #include "game/settings/user_folder.h"
 #include "game_process.h"
@@ -326,6 +327,8 @@ int run_window(const Arguments& arguments, Updater& updater, Activity& activity,
     g_unattended = arguments.screenshot.has_value();
     // A picture where SDL finds no display to draw on ends with 5, which a test takes for a skip.
     const int no_display = arguments.screenshot ? 5 : 1;
+    if (const std::string_view name = platform::window_class(); !name.empty())
+        SDL_SetHint(SDL_HINT_APP_ID, std::string(name).c_str());
     if (!SDL_Init(SDL_INIT_VIDEO)) {
         fail_window(SDL_GetError());
         return no_display;
@@ -353,6 +356,7 @@ int run_window(const Arguments& arguments, Updater& updater, Activity& activity,
     const bool placed = saved && on_a_display(*saved);
     SDL_Window* window = SDL_CreateWindow("Disruptor Recompiled", placed ? saved->width : width,
                                           placed ? saved->height : height, flags);
+    if (window) set_window_icon(window);
     SDL_Renderer* renderer = window ? make_renderer(window) : nullptr;
     if (!renderer) {
         fail_window(SDL_GetError());
@@ -418,16 +422,12 @@ int run_window(const Arguments& arguments, Updater& updater, Activity& activity,
     bool gamepads = false, gamepads_tried = false;
     const auto choose_nav_pad = [&] {
         const bool focused = arguments.screenshot || (SDL_GetWindowFlags(window) & SDL_WINDOW_INPUT_FOCUS) != 0;
-        if (nav_pad && (!focused || !SDL_GamepadConnected(nav_pad))) {
+        const SDL_JoystickID wanted = focused && gamepads ? disruptor::settings::pad_shown(view.pad_in_use()) : 0;
+        if (nav_pad && (!SDL_GamepadConnected(nav_pad) || SDL_GetGamepadID(nav_pad) != wanted)) {
             SDL_CloseGamepad(nav_pad);
             nav_pad = nullptr;
         }
-        if (!nav_pad && focused && gamepads) {
-            int count = 0;
-            SDL_JoystickID* found = SDL_GetGamepads(&count);
-            if (found && count > 0) nav_pad = SDL_OpenGamepad(found[0]);
-            SDL_free(found);
-        }
+        if (!nav_pad && wanted != 0) nav_pad = SDL_OpenGamepad(wanted);
         ImGui_ImplSDL3_SetGamepadMode(ImGui_ImplSDL3_GamepadMode_Manual, nav_pad ? &nav_pad : nullptr, nav_pad ? 1 : 0);
     };
     ImGui_ImplSDL3_SetGamepadMode(ImGui_ImplSDL3_GamepadMode_Manual, nullptr, 0);
@@ -622,6 +622,9 @@ int run_window(const Arguments& arguments, Updater& updater, Activity& activity,
             const bool working = session.busy() || session.achievements().busy() || updater.busy() || view.redraw();
             if (SDL_WaitEventTimeout(&event, working || SDL_GetTicks() < lively_until ? 16 : 250)) {
                 do {
+                    const SDL_JoystickID used = view.pad_in_use().id();
+                    view.note_pad(event);
+                    if (view.pad_in_use().id() != used) choose_nav_pad();
                     // Releases still reach ImGui, which saw the presses made before the key button listened.
                     if (view.listening_pad()) {
                         if (event.type == SDL_EVENT_GAMEPAD_BUTTON_DOWN) {

@@ -151,12 +151,17 @@ void draw_controls_tab() {
     if (option_slider("controller.deadzone", &deadzone)) set_deadzone_live(deadzone);
     draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
     if (ImGui::TreeNode("Buttons")) {
-        if (ImGui::BeginTable("pad buttons", 3, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_RowBg)) {
-            for (const char* title : {"Xbox", "PlayStation", "In the game"}) ImGui::TableSetupColumn(title);
+#if defined(PSX_SDL3)
+        const disruptor::settings::PadFamily family = disruptor::settings::family_shown(g_menu.pad_in_use);
+#else
+        const disruptor::settings::PadFamily family = disruptor::settings::PadFamily::xbox;
+#endif
+        if (ImGui::BeginTable("pad buttons", 2, ImGuiTableFlags_SizingFixedFit | ImGuiTableFlags_RowBg)) {
+            for (const char* title : {disruptor::settings::family_name(family), "In the game"}) ImGui::TableSetupColumn(title);
             ImGui::TableHeadersRow();
             for (const disruptor::settings::StickUse& stick : disruptor::settings::stick_uses(layout)) {
                 ImGui::TableNextRow();
-                for (const char* text : {stick.where, stick.where, stick.use}) {
+                for (const char* text : {stick.where, stick.use}) {
                     ImGui::TableNextColumn();
                     ImGui::TextUnformatted(text);
                 }
@@ -166,7 +171,7 @@ void draw_controls_tab() {
                 const disruptor::settings::PadSource* known = source ? disruptor::settings::pad_source(source) : nullptr;
                 const char* shown = source ? source : "-";
                 ImGui::TableNextRow();
-                for (const char* text : {known ? known->xbox : shown, known ? known->playstation : shown, action.action}) {
+                for (const char* text : {known ? disruptor::settings::printed(*known, family) : shown, action.action}) {
                     ImGui::TableNextColumn();
                     ImGui::TextUnformatted(text);
                 }

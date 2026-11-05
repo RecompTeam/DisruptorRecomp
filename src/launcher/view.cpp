@@ -2329,16 +2329,8 @@ void View::pad_buttons() {
     int count = 0;
     pad_family_ = settings::PadFamily::xbox;
     if (pads_) {
-        SDL_JoystickID* pads = SDL_GetGamepads(&count);
-        if (pads && count > 0) {
-            switch (SDL_GetGamepadTypeForID(pads[0])) {
-            case SDL_GAMEPAD_TYPE_PS3: pad_family_ = settings::PadFamily::playstation3; break;
-            case SDL_GAMEPAD_TYPE_PS4: pad_family_ = settings::PadFamily::playstation4; break;
-            case SDL_GAMEPAD_TYPE_PS5: pad_family_ = settings::PadFamily::playstation5; break;
-            default: break;
-            }
-        }
-        SDL_free(pads);
+        SDL_free(SDL_GetGamepads(&count));
+        pad_family_ = settings::family_shown(pad_in_use_);
     }
     if (pretend_pad_ && count == 0) count = 1;
     if (count == 0) stop_pad_capture();

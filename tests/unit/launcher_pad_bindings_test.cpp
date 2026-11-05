@@ -1,5 +1,6 @@
 #include "pad_bindings.h"
 
+#include "game/settings/pad_family.h"
 #include "game/settings/pad_layout.h"
 
 #include <filesystem>
@@ -119,6 +120,83 @@ void printed_names() {
                 std::string(printed(back, PadFamily::playstation5)) == "Create" &&
                 std::string(printed(start, PadFamily::playstation4)) == "Options",
             "a button is named as the pad in hand prints it");
+    const auto& south = *disruptor::settings::pad_source("a");
+    const auto& east = *disruptor::settings::pad_source("b");
+    require(std::string(printed(south, PadFamily::nintendo)) == "B" && std::string(printed(east, PadFamily::nintendo)) == "A" &&
+                std::string(printed(*disruptor::settings::pad_source("x"), PadFamily::nintendo)) == "Y" &&
+                std::string(printed(*disruptor::settings::pad_source("y"), PadFamily::nintendo)) == "X",
+            "a Nintendo pad prints its face buttons the other way round, the bottom one B");
+    require(std::string(printed(*disruptor::settings::pad_source("lefttrigger"), PadFamily::nintendo)) == "ZL" &&
+                std::string(printed(back, PadFamily::nintendo)) == "Minus" && std::string(printed(start, PadFamily::nintendo)) == "Plus",
+            "a Nintendo pad has ZL, Minus and Plus");
+    for (const auto& source : disruptor::settings::pad_sources)
+        require(source.nintendo && *source.nintendo && source.gamecube && *source.gamecube, "every source has a Nintendo and a GameCube name");
+    require(std::string(family_name(PadFamily::xbox)) == "Xbox" && std::string(family_name(PadFamily::playstation4)) == "PlayStation" &&
+                std::string(family_name(PadFamily::nintendo)) == "Nintendo" && std::string(family_name(PadFamily::gamecube)) == "GameCube",
+            "a family has the name its column carries");
+}
+
+void families() {
+    using disruptor::settings::family_of;
+    using disruptor::settings::PadFamily;
+    require(family_of(SDL_GAMEPAD_TYPE_PS5) == PadFamily::playstation5 && family_of(SDL_GAMEPAD_TYPE_PS3) == PadFamily::playstation3,
+            "a PlayStation pad is named by its generation");
+    for (const SDL_GamepadType type : {SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_PRO, SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_PAIR,
+                                       SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_LEFT, SDL_GAMEPAD_TYPE_NINTENDO_SWITCH_JOYCON_RIGHT})
+        require(family_of(type) == PadFamily::nintendo, "every Nintendo pad has Nintendo names");
+    for (const SDL_GamepadType type : {SDL_GAMEPAD_TYPE_XBOX360, SDL_GAMEPAD_TYPE_XBOXONE, SDL_GAMEPAD_TYPE_STANDARD, SDL_GAMEPAD_TYPE_UNKNOWN})
+        require(family_of(type) == PadFamily::xbox, "an Xbox or unknown pad has Xbox names");
+    require(family_of(SDL_GAMEPAD_TYPE_GAMECUBE) == PadFamily::gamecube, "a GameCube pad has its own names");
+    const auto label = [](SDL_GamepadButtonLabel shown) -> std::string {
+        switch (shown) {
+        case SDL_GAMEPAD_BUTTON_LABEL_A: return "A";
+        case SDL_GAMEPAD_BUTTON_LABEL_B: return "B";
+        case SDL_GAMEPAD_BUTTON_LABEL_X: return "X";
+        case SDL_GAMEPAD_BUTTON_LABEL_Y: return "Y";
+        case SDL_GAMEPAD_BUTTON_LABEL_CROSS: return "Cross";
+        case SDL_GAMEPAD_BUTTON_LABEL_CIRCLE: return "Circle";
+        case SDL_GAMEPAD_BUTTON_LABEL_SQUARE: return "Square";
+        case SDL_GAMEPAD_BUTTON_LABEL_TRIANGLE: return "Triangle";
+        default: return "?";
+        }
+    };
+    for (int kind = SDL_GAMEPAD_TYPE_UNKNOWN; kind < SDL_GAMEPAD_TYPE_COUNT; ++kind) {
+        const auto type = static_cast<SDL_GamepadType>(kind);
+        for (const char* face : {"a", "b", "x", "y"}) {
+            const std::string ours = printed(*disruptor::settings::pad_source(face), family_of(type));
+            const std::string sdl = label(SDL_GetGamepadButtonLabelForType(type, SDL_GetGamepadButtonFromString(face)));
+            require(ours == sdl, "every pad type names its face buttons as SDL labels them");
+        }
+    }
+
+    disruptor::settings::PadInUse used;
+    SDL_Event event{};
+    event.type = SDL_EVENT_GAMEPAD_BUTTON_DOWN;
+    event.gbutton.which = 7;
+    used.note(event);
+    require(used.id() == 7, "a press makes its pad the one in use");
+    event = {};
+    event.type = SDL_EVENT_GAMEPAD_AXIS_MOTION;
+    event.gaxis.which = 9;
+    event.gaxis.value = 8000;
+    used.note(event);
+    require(used.id() == 7, "a stick resting off centre leaves the pad in use");
+    event.gaxis.value = -20000;
+    used.note(event);
+    require(used.id() == 9, "a stick pushed far makes its pad the one in use");
+    event = {};
+    event.type = SDL_EVENT_GAMEPAD_REMOVED;
+    event.gdevice.which = 7;
+    used.note(event);
+    require(used.id() == 9, "another pad going leaves the one in use");
+    event.gdevice.which = 9;
+    used.note(event);
+    require(used.id() == 0, "the pad in use going leaves none");
+    event = {};
+    event.type = SDL_EVENT_GAMEPAD_BUTTON_UP;
+    event.gbutton.which = 4;
+    used.note(event);
+    require(used.id() == 0, "a release alone does not change the pad in use");
 }
 
 void writing(const fs::path& folder) {
@@ -177,6 +255,7 @@ int main() {
         assigning();
         hand_edits(folder);
         printed_names();
+        families();
         writing(folder);
         fs::remove_all(folder);
     } catch (const std::exception& error) {

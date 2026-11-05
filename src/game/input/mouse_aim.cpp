@@ -19,6 +19,7 @@
 
 #include "psx_sdl.h"
 #include "game/input/mouse_aim.h"
+#include "game/session/menu_mouse.h"
 #include "game/session/capsule.h"
 #include "game/input/vertical_camera.h"
 #include "game/settings/user_folder.h"
@@ -30,6 +31,7 @@
 #include "game/settings/second_keys.h"
 #include "../../../psxrecomp/runtime/include/gpu.h"
 
+#include <atomic>
 #include <algorithm>
 #include <array>
 #include <cmath>
@@ -47,6 +49,7 @@ extern "C" uint32_t psx_read_word(uint32_t address);
 extern "C" void psx_host_write_byte(uint32_t address, uint8_t value);
 extern "C" uint16_t sio_get_pad_buttons_slot(int slot);
 extern "C" void psx_game_pad_press(int slot, uint16_t mask);
+extern "C" void psx_game_pad_release(int slot, uint16_t mask);
 extern "C" int32_t psx_mod_widescreen_x_margin(void);
 extern "C" int gpu_ws_present_native_43(void);
 extern "C" int ws_native_wide_active(void);
@@ -184,6 +187,9 @@ struct MouseAimState {
 };
 
 MouseAimState g_mouse;
+/* Read by the frame's drawing on another thread: whether the main menu's arrow shows and the pixels of a point. */
+std::atomic<bool> g_menu_pointer_shown{false};
+std::atomic<float> g_pixel_scale_x{1.0f}, g_pixel_scale_y{1.0f};
 
 std::string trim_copy(const std::string& value) {
     size_t first = 0;
@@ -406,6 +412,8 @@ void set_capture(bool captured, const char *reason) {
         set_title(g_mouse.modern_controls_enabled
             ? "CAPTURED - middle-click or Esc releases"
             : "CAPTURED - move to aim; middle-click or Esc releases");
+    } else if (std::string_view(reason) == "menu-pointer") {
+        set_title("pointer in the menu");
     } else {
         set_title("released - left-click in the window to capture");
     }
@@ -747,6 +755,26 @@ void log_geometry_diagnostics_scope(
     std::fputc('\n', g_mouse.log);
 }
 
+/* A menu of the front end takes the pointer: the mouse is let go and shown, and a press over a row holds its buttons. */
+bool menu_pointer_frame() {
+    const bool pointing = sdl_window && disruptor_menu_pointing() != 0 && !psx_host_ui_game_input_captured();
+    const uint32_t buttons = get_mouse_buttons();
+    if (pointing && g_mouse.captured) set_capture(false, "menu-pointer");
+#if defined(PSX_SDL3)
+    /* The game's own arrow stands in for the system's: one pointer, drawn as the menu's letters are. */
+    if (pointing && !g_menu_pointer_shown.load(std::memory_order_relaxed)) SDL_HideCursor();
+#endif
+    g_menu_pointer_shown.store(pointing, std::memory_order_relaxed);
+    const uint16_t held = disruptor_menu_buttons(pointing && (buttons & SDL_BUTTON_LMASK) != 0,
+                                                 pointing && (buttons & SDL_BUTTON_RMASK) != 0);
+    if (held != 0u) {
+        /* A press chooses the row it was made on: a direction down with it would move the cursor first. */
+        psx_game_pad_press(0, held);
+        psx_game_pad_release(0, static_cast<uint16_t>((kPadUp | kPadRight | kPadDown | kPadLeft) & ~held));
+    }
+    return pointing;
+}
+
 void mouse_aim_frame() {
     if (disruptor_selection_wheel_frame()) {
         const Uint8 *keys = SDL_GetKeyboardState(nullptr);
@@ -760,6 +788,7 @@ void mouse_aim_frame() {
         set_residual(0.0);
         return;
     }
+    const bool pointing = menu_pointer_frame();
     // A network game's pads are the runtime's alone: there the map's stick sources press, as in Classic.
     const bool netplay = psx_netplay_active() != 0;
     int16_t axes[4] = {};
@@ -817,7 +846,9 @@ void mouse_aim_frame() {
     const bool was_captured = g_mouse.captured;
     /* The mouse is held whenever the window has focus, with no click asked for. The player's key and clicks come before the
      * focus branches: on the frame focus goes or comes back those would take them. */
-    if (escape_down && !g_mouse.escape_was_down && (g_mouse.captured || !g_mouse.given_up)) {
+    if (pointing) {
+        /* the pointer chooses on a menu: the mouse waits there, free */
+    } else if (escape_down && !g_mouse.escape_was_down && (g_mouse.captured || !g_mouse.given_up)) {
         g_mouse.given_up = true;
         set_capture(false, "escape-release");
     } else if (middle_down && !g_mouse.middle_was_down) {
@@ -998,6 +1029,47 @@ void refresh_live_control_state(const char *event) {
 }
 
 }  // namespace
+
+extern "C" int disruptor_mouse_menu_pointer(double *x, double *y, int *width, int *height) {
+#if defined(PSX_SDL3)
+    if (!sdl_window || g_mouse.captured || (SDL_GetWindowFlags(sdl_window) & SDL_WINDOW_INPUT_FOCUS) == 0) return 0;
+    int window_w = 0, window_h = 0, pixels_w = 0, pixels_h = 0;
+    SDL_GetWindowSize(sdl_window, &window_w, &window_h);
+    SDL_GetWindowSizeInPixels(sdl_window, &pixels_w, &pixels_h);
+    if (window_w <= 0 || window_h <= 0 || pixels_w <= 0 || pixels_h <= 0) return 0;
+    float at_x = 0.0f, at_y = 0.0f;
+    SDL_GetMouseState(&at_x, &at_y);
+    if (at_x < 0.0f || at_y < 0.0f || at_x >= static_cast<float>(window_w) || at_y >= static_cast<float>(window_h)) return 0;
+    g_pixel_scale_x.store(static_cast<float>(pixels_w) / window_w, std::memory_order_relaxed);
+    g_pixel_scale_y.store(static_cast<float>(pixels_h) / window_h, std::memory_order_relaxed);
+    *x = static_cast<double>(at_x) * pixels_w / window_w;
+    *y = static_cast<double>(at_y) * pixels_h / window_h;
+    *width = pixels_w;
+    *height = pixels_h;
+    return 1;
+#else
+    (void)x;
+    (void)y;
+    (void)width;
+    (void)height;
+    return 0;
+#endif
+}
+
+extern "C" int disruptor_mouse_menu_pointer_drawn(float *x, float *y) {
+#if defined(PSX_SDL3)
+    if (!g_menu_pointer_shown.load(std::memory_order_relaxed)) return 0;
+    float at_x = 0.0f, at_y = 0.0f;
+    SDL_GetMouseState(&at_x, &at_y);
+    *x = at_x * g_pixel_scale_x.load(std::memory_order_relaxed);
+    *y = at_y * g_pixel_scale_y.load(std::memory_order_relaxed);
+    return 1;
+#else
+    (void)x;
+    (void)y;
+    return 0;
+#endif
+}
 
 extern "C" int disruptor_mouse_aim_enabled(void) {
     return g_mouse.mouse_aim_enabled ? 1 : 0;

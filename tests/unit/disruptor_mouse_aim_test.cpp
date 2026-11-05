@@ -126,6 +126,10 @@ void psx_game_pad_press(int slot, std::uint16_t mask) {
     if (slot == 0) g_pad_buttons = static_cast<std::uint16_t>(g_pad_buttons & ~mask);
 }
 
+void psx_game_pad_release(int slot, std::uint16_t mask) {
+    if (slot == 0) g_pad_buttons = static_cast<std::uint16_t>(g_pad_buttons | mask);
+}
+
 std::int32_t psx_mod_widescreen_x_margin() {
     return g_ws_margin;
 }
@@ -174,6 +178,15 @@ void psx_input_set_game_sticks(int owned) { g_game_sticks = owned; }
 int psx_input_deadzone(void) { return g_deadzone; }
 
 int disruptor_selection_wheel_frame() { return g_wheel_consuming ? 1 : 0; }
+int g_menu_pointing = 0;
+std::uint16_t g_menu_held = 0;
+int g_menu_left = 0, g_menu_right = 0;
+int disruptor_menu_pointing(void) { return g_menu_pointing; }
+std::uint16_t disruptor_menu_buttons(int left, int right) {
+    g_menu_left = left;
+    g_menu_right = right;
+    return left || right ? g_menu_held : std::uint16_t{0};
+}
 std::uint16_t disruptor_selection_wheel_filter_press(std::uint16_t press) { return press; }
 
 void gpu_geometry_correction_stats(std::uint64_t *world_triangles,
@@ -223,6 +236,24 @@ std::uint32_t SDL_GetRelativeMouseState(float *x, float *y) {
 const Uint8 *SDL_GetKeyboardState(int *count) {
     if (count) *count = static_cast<int>(g_keys.size());
     return g_keys.data();
+}
+
+int g_cursor_hidden = 0;
+bool SDL_HideCursor() {
+    ++g_cursor_hidden;
+    return true;
+}
+
+bool SDL_GetWindowSize(SDL_Window *, int *w, int *h) {
+    *w = 1280;
+    *h = 720;
+    return true;
+}
+
+bool SDL_GetWindowSizeInPixels(SDL_Window *, int *w, int *h) {
+    *w = 2560;
+    *h = 1440;
+    return true;
 }
 
 SDL_WindowFlags SDL_GetWindowFlags(SDL_Window *) {
@@ -494,6 +525,65 @@ void test_pause_holds_the_camera() {
     g_relative_x = 25.0f;
     mouse_aim_frame();
     expect(psx_read_byte(kTestYawAddress) == 98, "and turns again in play");
+}
+
+void test_menu_pointer() {
+    reset_state();
+    g_mouse.enabled = g_mouse.mouse_aim_enabled = g_mouse.configured = true;
+    g_mouse.log = std::tmpfile();
+    g_window_flags = SDL_WINDOW_INPUT_FOCUS;
+    mouse_aim_frame();
+    expect(g_mouse.captured, "in play the focused window holds the mouse");
+    g_menu_pointing = 1;
+    mouse_aim_frame();
+    expect(!g_mouse.captured && !g_relative_mode && g_title.find("pointer in the menu") != std::string::npos,
+           "the main menu lets the mouse go and says so");
+    expect(g_cursor_hidden == 1, "and hides the system's pointer once, the game draws its own");
+    float drawn_x = 0.0f, drawn_y = 0.0f;
+    expect(disruptor_mouse_menu_pointer_drawn(&drawn_x, &drawn_y) == 1, "the arrow is drawn while the menu points");
+    double x = 0.0, y = 0.0;
+    int width = 0, height = 0;
+    expect(disruptor_mouse_menu_pointer(&x, &y, &width, &height) == 1 && width == 2560 && height == 1440,
+           "the free pointer is given in the drawable's pixels");
+    mouse_aim_frame();
+    expect(!g_mouse.captured, "and does not take it back while the menu runs");
+    g_pad_buttons = 0xFFFFu;
+    g_buttons = SDL_BUTTON_LMASK;
+    g_menu_held = 0u;
+    mouse_aim_frame();
+    expect(g_pad_buttons == 0xFFFFu && g_menu_left == 1 && g_menu_right == 0, "a left click the menu gives nothing for presses nothing");
+    g_menu_held = kPadCross;
+    g_pad_buttons = static_cast<std::uint16_t>(0xFFFFu & ~(kPadUp | kPadTriangle));
+    mouse_aim_frame();
+    expect((g_pad_buttons & kPadCross) == 0u, "what the menu gives for the buttons down is held");
+    expect((g_pad_buttons & kPadUp) != 0u && (g_pad_buttons & kPadTriangle) == 0u,
+           "a direction held with it is let go, so the game chooses the row the press was made on");
+    g_menu_held = kPadRight;
+    g_pad_buttons = static_cast<std::uint16_t>(0xFFFFu & ~kPadDown);
+    mouse_aim_frame();
+    expect((g_pad_buttons & kPadRight) == 0u && (g_pad_buttons & kPadDown) != 0u, "a value's step keeps its own direction");
+    g_menu_held = kPadCross;
+    g_buttons = SDL_BUTTON_RMASK;
+    g_menu_held = kPadLeft;
+    g_pad_buttons = 0xFFFFu;
+    mouse_aim_frame();
+    expect(g_pad_buttons == static_cast<std::uint16_t>(~kPadLeft) && g_menu_left == 0 && g_menu_right == 1,
+           "the right button is the menu's too");
+    g_buttons = 0u;
+    g_pad_buttons = 0xFFFFu;
+    mouse_aim_frame();
+    expect(g_pad_buttons == 0xFFFFu && g_menu_left == 0 && g_menu_right == 0, "with the buttons up nothing is held");
+    g_menu_pointing = 0;
+    g_buttons = SDL_BUTTON_LMASK;
+    g_menu_held = kPadCross;
+    g_pad_buttons = 0xFFFFu;
+    mouse_aim_frame();
+    expect(g_menu_left == 0 && (g_pad_buttons & kPadCross) != 0u, "off the menus a button down is no menu's");
+    g_buttons = 0u;
+    g_menu_held = 0u;
+    mouse_aim_frame();
+    expect(g_mouse.captured && g_relative_mode, "leaving the main menu the mouse is held again");
+    expect(disruptor_mouse_menu_pointer_drawn(&drawn_x, &drawn_y) == 0, "and its arrow goes");
 }
 
 void test_simultaneous_relative_axes_sample() {
@@ -1749,6 +1839,7 @@ int main(int argc, char **argv) {
         expect(disruptor_mouse_vertical_pitch() == -12.5, "a replay puts the pitch back");
         g_mouse.vertical_pitch = 0.0;
         test_parsing();
+        test_menu_pointer();
         test_ini_configuration();
         test_direction_fraction_and_wrap();
         test_nearest_step_diffusion_and_conservation();

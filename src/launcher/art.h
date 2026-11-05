@@ -7,6 +7,7 @@
 
 struct SDL_Renderer;
 struct SDL_Texture;
+struct SDL_Window;
 
 namespace disruptor::launcher {
 
@@ -16,6 +17,8 @@ SDL_Texture* picture_texture(SDL_Renderer* renderer, const Picture& picture);
 SDL_Texture* first_run_texture(SDL_Renderer* renderer);
 // The program's icon, 64 pixels a side, smoothed when it is drawn smaller.
 SDL_Texture* app_icon_texture(SDL_Renderer* renderer);
+// The program's icon on its window, where the system does not take it from the program file.
+void set_window_icon(SDL_Window* window);
 // The bytes of one of the launcher's own resources, held for as long as the program runs. Empty when absent.
 std::span<const std::byte> resource_bytes(int id);
 

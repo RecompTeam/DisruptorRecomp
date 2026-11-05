@@ -63,12 +63,15 @@ set(DISRUPTOR_EXTRA_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/intro_skip.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/streamed_reads.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/main_menu_exit.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/menu_mouse.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/card_choice.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/language.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/language_briefing.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/language_disc.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/language_hints.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/language_movie_sound.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/language_source.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/save_words.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/restart.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/baton_choice.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/mouse_aim.cpp"
@@ -154,6 +157,7 @@ if(DISRUPTOR_DEV_MENU)
         "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/tab_cheats.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/tab_achievements.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/achievements_overlay.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/password_hint.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/tab_system.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/tab_language.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/menu.cpp"
@@ -197,6 +201,7 @@ endif()
 # The framework runs a statically linked plugin only when a package declares it: the game's own, one hidden feature on by default.
 set(DISRUPTOR_PLUGINS
     disruptor.baton_choice
+    disruptor.card_choice.menu
     disruptor.ddgi.vsync
     disruptor.ddgi.world
     disruptor.far_rendering.renderer
@@ -218,14 +223,19 @@ set(DISRUPTOR_PLUGINS
     disruptor.list_message.tick
     disruptor.main_menu_exit.draw
     disruptor.main_menu_exit.menu
+    disruptor.menu_mouse.draw
+    disruptor.menu_mouse.pause
+    disruptor.menu_mouse.tick
     disruptor.mover_motion.draw
     disruptor.mover_motion.drawn
     disruptor.mover_motion.tick
     disruptor.mover_motion.vsync
     disruptor.mover_motion.world
     disruptor.name_entry
+    disruptor.password_hint.draw
     disruptor.psionic_change.tick
     disruptor.render_arena
+    disruptor.save_words.text
     disruptor.stock_frames.effects
     disruptor.stock_frames.message
     disruptor.stock_frames.sounds
@@ -442,6 +452,11 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
     disruptor_unit_test(disruptor_game_mark tests/unit/game_mark_test.cpp
         SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings/game_mark.cpp")
     disruptor_unit_test(disruptor_game_package tests/unit/disruptor_game_package_test.cpp)
+    disruptor_unit_test(disruptor_card_choice tests/unit/disruptor_card_choice_test.cpp)
+    disruptor_unit_test(disruptor_save_words tests/unit/disruptor_save_words_test.cpp)
+    disruptor_unit_test(disruptor_save_words_hooks tests/unit/disruptor_save_words_hooks_test.cpp
+        SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/save_words.cpp"
+        INCLUDES src "${PSXRECOMP_ROOT}/runtime/include")
 
     disruptor_unit_test(disruptor_mouse_aim tests/unit/disruptor_mouse_aim_test.cpp
         SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/game/settings/user_folder.cpp"
@@ -508,6 +523,18 @@ disruptor_unit_test(disruptor_marked_corners tests/unit/disruptor_marked_corners
     add_test(NAME disruptor_main_menu_exit_hooks_replay
         COMMAND disruptor-main-menu-exit-hooks-test --replay)
     set_tests_properties(disruptor_main_menu_exit_hooks_replay PROPERTIES
+        ENVIRONMENT "PSX_DISRUPTOR_CAPSULE_REPLAY=capsule")
+    disruptor_unit_test(disruptor_menu_rows tests/unit/disruptor_menu_rows_test.cpp INCLUDES src)
+    disruptor_unit_test(disruptor_password_hint tests/unit/disruptor_password_hint_test.cpp INCLUDES src)
+    disruptor_unit_test(disruptor_menu_mouse_hooks tests/unit/disruptor_menu_mouse_hooks_test.cpp
+        SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/menu_mouse.cpp"
+        INCLUDES tests/support/stubs src "${PSXRECOMP_ROOT}/runtime/include"
+        DEFINITIONS PSX_SDL3=1)
+    set_tests_properties(disruptor_menu_mouse_hooks PROPERTIES
+        ENVIRONMENT_MODIFICATION "PSX_DISRUPTOR_CAPSULE_REPLAY=unset:")
+    add_test(NAME disruptor_menu_mouse_hooks_replay
+        COMMAND disruptor-menu-mouse-hooks-test --replay)
+    set_tests_properties(disruptor_menu_mouse_hooks_replay PROPERTIES
         ENVIRONMENT "PSX_DISRUPTOR_CAPSULE_REPLAY=capsule")
     disruptor_unit_test(disruptor_render_arena tests/unit/disruptor_render_arena_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_name_entry tests/unit/disruptor_name_entry_test.cpp RUNTIME_HEADERS)

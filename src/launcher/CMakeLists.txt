@@ -318,7 +318,7 @@ if(BUILD_TESTING)
     add_test(NAME disruptor_launcher_key_bindings COMMAND disruptor-launcher-key-bindings-test)
 
     add_executable(disruptor-launcher-pad-bindings-test "${PROJECT_SOURCE_DIR}/tests/unit/launcher_pad_bindings_test.cpp")
-    target_link_libraries(disruptor-launcher-pad-bindings-test PRIVATE disruptor-launcher-model)
+    target_link_libraries(disruptor-launcher-pad-bindings-test PRIVATE disruptor-launcher-model ${DISRUPTOR_LAUNCHER_SDL_LIBRARY})
     add_test(NAME disruptor_launcher_pad_bindings COMMAND disruptor-launcher-pad-bindings-test)
 
     add_executable(disruptor-launcher-platform-test "${PROJECT_SOURCE_DIR}/tests/unit/launcher_platform_test.cpp")

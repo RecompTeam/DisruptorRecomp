@@ -109,6 +109,7 @@ require(
         "tab_cheats.cpp",
         "tab_achievements.cpp",
         "achievements_overlay.cpp",
+        "password_hint.cpp",
         "tab_system.cpp",
         "tab_language.cpp",
         "menu.cpp",
@@ -833,7 +834,7 @@ require(
     < audio_update.index("psx_game_audio_output(sdl_audio_buf, tail, 44100);")
     < audio_update.index("sdl_audio_gain_ramp(sdl_audio_buf, tail, g0, 0.0f);")
     and "disruptor::audio::shape_output(stereo, frames, rate);" in function_body(host, "psx_game_audio_output")
-    and "disruptor_bass_cut_set(settings.has_bass_cut ? settings.bass_cut : 0);"
+    and "disruptor_bass_cut_set(settings.has_bass_cut ? settings.bass_cut : PSXRecompV4::kDisruptorBassCutDefault);"
     in function_body(host, "psx_game_settings_loaded"),
     "the bass cut shapes the SPU's output where it is rendered, before every fade, gain and the bridge, so a mute "
     "or a fade to silence ends in silence, and the saved cut applies at start in a build without the menu too",

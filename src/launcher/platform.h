@@ -88,4 +88,8 @@ std::vector<std::string> system_lines();
 // False when the player switched the system's animation effects off: the window then moves nothing.
 bool animations_enabled();
 
+// The name a desktop finds a window's entry and icon by, the AppImage entry's StartupWMClass. Empty where the
+// system takes them from the program file.
+std::string_view window_class();
+
 } // namespace disruptor::launcher::platform

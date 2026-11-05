@@ -300,6 +300,9 @@ void on_runtime_shutdown(void *) {
 }
 
 int on_sdl_event(void *, const SDL_Event *event) {
+#if defined(PSX_SDL3)
+    if (event) g_menu.pad_in_use.note(*event);
+#endif
     if (event && event->type == SDL_CONTROLLERAXISMOTION) {
 #if defined(PSX_SDL3)
         disruptor_selection_wheel_controller_axis(event->gaxis.axis, event->gaxis.value);
@@ -346,12 +349,38 @@ uint32_t current_flags(void *) {
         return PSX_HOST_UI_VISIBLE;
     if (!g_menu.open || !g_menu.imgui_ready) {
         const bool achievements = achievements_overlay_shown();
-        return disruptor_capsule_notice() || achievements ? PSX_HOST_UI_VISIBLE | PSX_HOST_UI_LAYER : 0u;
+        const bool pointing = disruptor_menu_pointing() != 0 || password_hint_shown();
+        return disruptor_capsule_notice() || achievements || pointing ? PSX_HOST_UI_VISIBLE | PSX_HOST_UI_LAYER : 0u;
     }
     return PSX_HOST_UI_CAPTURE_KEYBOARD |
            PSX_HOST_UI_CAPTURE_MOUSE |
            PSX_HOST_UI_CAPTURE_GAMEPAD |
            PSX_HOST_UI_VISIBLE;
+}
+
+/* A menu's arrow at the pointer, in whole pixels, in the menu letters' colours. */
+void draw_menu_pointer(int width, int height) {
+    namespace pointer = disruptor::menu_pointer;
+    float x = 0.0f, y = 0.0f;
+    if (!disruptor_mouse_menu_pointer_drawn(&x, &y)) return;
+    int numerator = 4, denominator = 3;
+    psx_host_video_get_display_aspect(&numerator, &denominator);
+    const int texel = pointer::arrow_texel(width, height, numerator, denominator);
+    if (texel <= 0) return;
+    const float left_edge = std::round(x), top_edge = std::round(y);
+    ImDrawList *draw = ImGui::GetForegroundDrawList();
+    for (size_t row = 0; row < pointer::kArrow.size(); ++row) {
+        const std::string_view line = pointer::kArrow[row];
+        for (size_t column = 0; column < line.size(); ++column) {
+            const std::optional<pointer::Rgb> colour = pointer::arrow_colour(line[column]);
+            if (!colour) continue;
+            const float left = left_edge + static_cast<float>(column * texel);
+            const float top = top_edge + static_cast<float>(row * texel);
+            const float right = left + static_cast<float>(texel);
+            const float bottom = top + static_cast<float>(texel);
+            draw->AddRectFilled(ImVec2(left, top), ImVec2(right, bottom), IM_COL32(colour->r, colour->g, colour->b, 255));
+        }
+    }
 }
 
 /* Drawn without the SDL backend's frame: that one reads and captures the mouse, which is the game's while the menu is closed. */
@@ -372,6 +401,8 @@ void render_notices(const char *word, int width, int height) {
         ImGui::End();
     }
     draw_achievements_overlay(width, height);
+    draw_password_hint(width, height);
+    draw_menu_pointer(width, height);
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }

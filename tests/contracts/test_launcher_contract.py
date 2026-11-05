@@ -90,6 +90,11 @@ rows = re.findall(ROW, options)
 keys = [key for _, key, _, _ in rows]
 initial = {key: int(value) for _, key, _, value in rows}
 require(len(rows) == 69 and len(set(keys)) == 69, "the shared table must hold its 69 options, each key once")
+bass_default = re.search(r"kDisruptorBassCutDefault = (\d+);", read("src/game/settings/game_user_settings.h"))
+require(
+    bass_default is not None and initial["disruptor.bass_cut"] == int(bass_default.group(1)) == 1,
+    "Bass starts at Reduced in the table the launcher and the menu show and in the cut a build applies at start",
+)
 placed = re.findall(r'^    \{"([\w.]+)", Page::\w+(?:, (?:"[\w -]+"|nullptr)(?:, true)?)?\},$', table, re.MULTILINE)
 require(
     sorted(placed) == sorted(keys)
@@ -466,13 +471,27 @@ require(
     and 'case Copy::portable: return (folder_of(program).parent_path() / "data").lexically_normal();' in folder
     and 'kind(root / ".portable") == fs::file_type::not_found ? Copy::installed : Copy::portable' in folder
     and "const fs::path data = disruptor::user_folder::prepare(program);" in window
-    and 'launch.environment = platform::with(platform::environment(), {{"PSX_USER_DIR", utf8(data)}});' in window
+    and '    platform::Variables given{{"PSX_USER_DIR", utf8(data)}};\n' in window
+    and '    launch.environment = platform::with(platform::environment(), given);\n' in window
     and '{{"PSX_USER_DIR", utf8(trial)},' in upgrade
     and 'const fs::path trial = data / "cache" / "state-trial";' in upgrade
     and "carry" not in launcher_cmake
     and not (ROOT / "src/launcher/carry.cpp").exists(),
     "an installed copy keeps the player's files in local application data, a portable one beside its program folder, "
     "the launcher and the game find the same folder and the trial run gets one of its own",
+)
+
+package = read("tools/package_release.py")
+window_class = re.search(r'std::string_view window_class\(\) \{ return "([^"]+)"; \}', read("src/launcher/platform_posix.cpp"))
+require(
+    window_class is not None
+    and f'PACKAGE_ID = "{window_class.group(1)}"' in package
+    and "std::string_view window_class() { return {}; }" in read("src/launcher/platform_windows.cpp")
+    and window.index("SDL_SetHint(SDL_HINT_APP_ID, std::string(name).c_str());") < window.index("if (!SDL_Init(SDL_INIT_VIDEO)) {")
+    and "    if (window) set_window_icon(window);\n" in window
+    and 'given.emplace_back("SDL_APP_ID", std::string(name));' in window,
+    "on Linux the launcher's and the game's windows carry the AppImage entry's StartupWMClass, Velopack's package id, "
+    "and the launcher's window its icon: a desktop shows the entry's icon for both",
 )
 
 print("Disruptor launcher source contract: PASS")

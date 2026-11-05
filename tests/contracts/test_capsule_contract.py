@@ -81,7 +81,8 @@ require(
     in capsule
     and '    say(stored ? "REC saved" : "REC NOT saved");\n' in capsule
     and '    g_capsule.recording = Recording::kOff;\n    say("REC refused");\n' in capsule
-    and "        return disruptor_capsule_notice() || achievements ? PSX_HOST_UI_VISIBLE | PSX_HOST_UI_LAYER : 0u;\n"
+    and "        const bool pointing = disruptor_menu_pointing() != 0 || password_hint_shown();\n"
+    "        return disruptor_capsule_notice() || achievements || pointing ? PSX_HOST_UI_VISIBLE | PSX_HOST_UI_LAYER : 0u;\n"
     in menu
     and "    if (!g_menu.open) {\n"
     "        if (initialize_imgui()) render_notices(disruptor_capsule_notice(), width, height);\n        return;\n    }\n"

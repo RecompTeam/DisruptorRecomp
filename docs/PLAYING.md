@@ -97,6 +97,8 @@ Delete it once the repaired copy works.
 | Turn | Mouse. The Left and Right arrows too |
 | Free / hold the mouse | The game holds it while its window has focus. Escape or a middle-click frees it, a left click holds it again |
 | Fire / menu confirm | Left mouse / Enter |
+| Menus | Point with the mouse and click, the pause menu too. On a value a left click steps it on, a right click back |
+| Password | The face buttons type its symbols, the screen shows their keys. Left takes one back |
 | Psionic attack | Right mouse / F |
 | Jump / menu cancel | Space |
 | Use | E |
@@ -225,7 +227,9 @@ only while the keys are a scheme's own: keys you set yourself stay.
 ### Gamepad
 
 A connected gamepad plays beside the keyboard and mouse. The launcher's
-Controls page and the game's Controls tab name the one connected.
+Controls page and the game's Controls tab name the one connected. They name
+its buttons as the pad you pressed last prints them: Xbox, PlayStation,
+Nintendo or GameCube.
 
 **Stick layout** sets what the sticks do in play:
 
@@ -382,11 +386,11 @@ The page is in five groups, in the launcher and in the game alike.
 
 - **Master volume** sets the loudness of everything the game plays.
 - **Bass** sets how much deep bass all of the game's sound keeps: effects,
-  music, voices and movies. Original plays it as the game does. Reduced
-  softens the deepest rumble, under 80 Hz. TV speaker plays it as a
-  television's own speakers did, with little under 160 Hz. The psionics and
-  explosions carry most of their sound down there, and headphones and
-  subwoofers play it in full.
+  music, voices and movies. Original plays it as the game does. Reduced,
+  the setting at first, softens the deepest rumble, under 80 Hz. TV speaker
+  plays it as a television's own speakers did, with little under 160 Hz. The
+  psionics and explosions carry most of their sound down there, and headphones
+  and subwoofers play it in full.
 - **Mute in the background** silences the game while its window is not in
   front. It is off at first.
 - **Mute all audio** silences the game and keeps the volume.

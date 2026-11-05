@@ -15,6 +15,7 @@ PATCHES = {
     "disruptor-main-menu-items": (0x8001C178, 0x2A020008, 0x2A020009),
     "disruptor-main-menu-up-wrap": (0x8001C1A4, 0x34020007, 0x34020008),
     "disruptor-main-menu-down-wrap": (0x8001C1D0, 0x28420008, 0x28420009),
+    "disruptor-controller-layout-load": (0x8001DBB8, 0x30840003, 0x30840000),
 }
 RETAIL_INSTRUCTIONS = {
     0x8001C044: 0x27BDFFD8,
@@ -101,7 +102,7 @@ choice = module.index("    cpu->gpr[menu_exit::kButtons] = menu_exit::kept(press
 require(
     choice
     < module.index(
-        "    if (g_replaying || psx_netplay_active() || g_ls_mode != 0 || g_ls_replay_active != 0) return;\n"
+        "    if (pointing::replaying() || psx_netplay_active() || g_ls_mode != 0 || g_ls_replay_active != 0) return;\n"
     )
     < module.index("    SDL_PushEvent(&quit);\n"),
     "the choice is taken from the game in every run, a replay and netplay included: only the quit is held back",

@@ -89,6 +89,7 @@ inline constexpr const char* kDisruptorFogShapes[] = {"even", "soft", "late"};
 inline constexpr int kDisruptorFogShapeCount = 3;
 inline constexpr const char* kDisruptorBassCuts[] = {"original", "reduced", "tv_speaker"};
 inline constexpr int kDisruptorBassCutCount = 3;
+inline constexpr int kDisruptorBassCutDefault = 1;  // reduced: the owner's choice of 2026-11-03
 inline constexpr int kDisruptorPopupTimes[] = {3, 5, 8, 12, 15, 30};  // seconds
 inline constexpr int kDisruptorPopupTimeCount = 6;
 inline constexpr const char* kDisruptorPopupCorners[] = {"top_right", "top_left", "bottom_right", "bottom_left"};

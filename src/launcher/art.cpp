@@ -44,6 +44,17 @@ SDL_Texture* app_icon_texture(SDL_Renderer* renderer) {
     return pixel_texture(renderer, bitmap(app_icon_resource), SDL_SCALEMODE_LINEAR);
 }
 
+void set_window_icon(SDL_Window* window) {
+#ifdef _WIN32
+    (void)window;  // the window class has the program file's icons, every size
+#else
+    if (SDL_Surface* icon = bitmap(app_icon_resource)) {
+        SDL_SetWindowIcon(window, icon);
+        SDL_DestroySurface(icon);
+    }
+#endif
+}
+
 #ifdef _WIN32
 std::span<const std::byte> resource_bytes(int id) {
     HRSRC found = FindResourceW(nullptr, MAKEINTRESOURCEW(id), RT_RCDATA);

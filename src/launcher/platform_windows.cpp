@@ -182,6 +182,8 @@ void write_standard(std::string_view text, bool error) {
 
 void unset(const std::string& name) { SetEnvironmentVariableW(wide(name).c_str(), nullptr); }
 
+std::string_view window_class() { return {}; }
+
 bool animations_enabled() {
     BOOL enabled = TRUE;
     return !SystemParametersInfoW(SPI_GETCLIENTAREAANIMATION, 0, &enabled, 0) || enabled;

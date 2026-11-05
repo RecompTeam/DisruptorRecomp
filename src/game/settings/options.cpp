@@ -360,7 +360,7 @@ constexpr Option option_list[] = {
            "", 0, 100, Unit::percent,
            saved<&Settings::has_master_volume>, read<&Settings::master_volume>,
            write<&Settings::has_master_volume, &Settings::master_volume>),
-    choice("disruptor.bass_cut", "Bass", 0,
+    choice("disruptor.bass_cut", "Bass", 1,
            "How much deep bass the game's sound keeps, music and movies too\n"
            "Reduced: the deepest rumble is softer\n"
            "TV speaker: as a television's own speakers played it",

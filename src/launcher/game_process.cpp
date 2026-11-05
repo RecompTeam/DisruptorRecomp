@@ -25,7 +25,9 @@ std::unique_ptr<platform::Process> start_game(const fs::path& program, const fs:
     launch.executable = platform::game_executable(program);
     launch.arguments = game_arguments(program, disc);
     launch.folder = program;
-    launch.environment = platform::with(platform::environment(), {{"PSX_USER_DIR", utf8(data)}});
+    platform::Variables given{{"PSX_USER_DIR", utf8(data)}};
+    if (const std::string_view name = platform::window_class(); !name.empty()) given.emplace_back("SDL_APP_ID", std::string(name));
+    launch.environment = platform::with(platform::environment(), given);
     launch.output = data / "startup.log";
     launch.heading = started_line();
     for (const auto line : std::views::split(system_note(), std::string_view("\r\n")))

@@ -14,6 +14,11 @@ extern "C" {
 #endif
 
 int  disruptor_mouse_aim_enabled(void);
+/* The pointer while the mouse is free over the focused window: in the drawable's pixels, with its size. */
+int  disruptor_mouse_menu_pointer(double *x, double *y, int *width, int *height);
+/* The same from any thread, as the drawing of a frame asks it: the pixels a window point covers, as the emulation's
+ * last ask found them. 0 while no menu points. */
+int  disruptor_mouse_menu_pointer_drawn(float *x, float *y);
 void disruptor_mouse_aim_set_enabled(int enabled);
 
 int  disruptor_modern_controls_enabled(void);
