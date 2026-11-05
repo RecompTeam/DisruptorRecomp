@@ -94,4 +94,6 @@ int disruptor_main_menu_pointing(void);
 /* A left press: the shown item under the pointer now, chosen at the menu's next entry, -1 for none, which presses
  * nothing. */
 int disruptor_main_menu_click(void);
+/* The main menu ran a moment ago, whether the pointer may choose on it or not. */
+int disruptor_main_menu_shown(void);
 }

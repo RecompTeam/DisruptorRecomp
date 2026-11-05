@@ -38,6 +38,13 @@ inline constexpr uint32_t kPauseState = 0x8007145Cu;  /* gp+784, a byte, 4 while
 inline constexpr uint32_t kPauseCursor = 0x800716C0u; /* gp+1396 */
 inline constexpr uint32_t kPauseAsks = 0x800712F4u;   /* gp+424: nonzero while ABORT asks YES or NO */
 inline constexpr uint8_t kPaused = 4u;
+/* The pause's SAVE STATES, the line the game does not have: a word of the host's, 1 while it is chosen, not the guest's
+ * memory. The host draws it, and its row is recorded with RESUME MISSION's draw under a return the function never has. */
+inline constexpr uint32_t kStates = 0xFFFF0010u;
+inline constexpr uint32_t kResumeDrawn = 0x80042DE0u, kMusicDrawn = 0x80042F48u, kPauseStatesDrawn = 0x80042F4Cu;
+inline constexpr int32_t kPauseStatesRow = 7;
+/* LOAD GAME's calls of the item draw: the title, RETURN TO MAIN MENU, a saved game's name and its mission or EMPTY. */
+inline constexpr uint32_t kTitleDrawn = 0x8001D6B4u, kReturnDrawn = 0x8001D6F8u, kNameDrawn = 0x8001D7C8u, kSecondDrawn = 0x8001D818u;
 
 struct Write {
     uint32_t address = 0;
@@ -89,10 +96,10 @@ inline constexpr std::array kRows = {
     Row{.returns = 0x8001C2D8u, .screen = kPractice, .row = 0, .looped = true, .left = kCross, .writes = {{{kCursor, kCounter}}}},
     Row{.returns = 0x8001C37Cu, .screen = kPractice, .row = 5, .left = kCross, .writes = {{{kCursor, 5}}}},
     /* LOAD GAME: a saved game's name, then its mission, which Left raises */
-    Row{.returns = 0x8001D6F8u, .screen = kLoadGame, .row = 4, .left = kCross, .writes = {{{kCursor, 4}}}},
-    Row{.returns = 0x8001D7C8u, .screen = kLoadGame, .row = 0, .looped = true, .left = kCross,
+    Row{.returns = kReturnDrawn, .screen = kLoadGame, .row = 4, .left = kCross, .writes = {{{kCursor, 4}}}},
+    Row{.returns = kNameDrawn, .screen = kLoadGame, .row = 0, .looped = true, .left = kCross,
         .writes = {{{kCursor, kCounter}}}, .when = {{{kLoadMessage, 0, 0}}}},
-    Row{.returns = 0x8001D818u, .screen = kLoadGame, .row = 0, .looped = true, .left = kLeft, .right = kRight,
+    Row{.returns = kSecondDrawn, .screen = kLoadGame, .row = 0, .looped = true, .left = kLeft, .right = kRight,
         .writes = {{{kCursor, kCounter}}}, .when = {{{kLoadMessage, 0, 0}, {kSlots, 1, 1, true, true}}}},
     /* NEW GAME: RETURN TO MAIN MENU by its phase, the difficulty, the slots, overwrite or not, the name */
     Row{.returns = 0x8001CA50u, .screen = kNewGame, .row = 10, .left = kCross, .writes = {{{kSlotSide, 1}}},
@@ -128,12 +135,16 @@ inline constexpr std::array kRows = {
     Row{.returns = 0x8001E830u, .screen = kPassword, .row = 1, .left = kCross, .writes = {{{kCursor, 1}}}},
     Row{.returns = 0x8001E94Cu, .screen = kPassword, .row = 1, .left = kCross, .writes = {{{kCursor, 1}}}},
     /* The pause menu: RESUME MISSION, ABORT MISSION, the two volumes, which Left and Right step; ABORT's YES and NO */
-    Row{.returns = 0x80042DE0u, .screen = kPause, .row = 0, .left = kCross, .writes = {{{kPauseCursor, 0}}}, .when = {{{kPauseAsks, 0, 0}}}},
-    Row{.returns = 0x80042E1Cu, .screen = kPause, .row = 1, .left = kCross, .writes = {{{kPauseCursor, 1}}}, .when = {{{kPauseAsks, 0, 0}}}},
-    Row{.returns = 0x80042EB0u, .screen = kPause, .row = 2, .left = kRight, .right = kLeft, .writes = {{{kPauseCursor, 2}}},
+    Row{.returns = kResumeDrawn, .screen = kPause, .row = 0, .left = kCross, .writes = {{{kPauseCursor, 0}, {kStates, 0}}},
         .when = {{{kPauseAsks, 0, 0}}}},
-    Row{.returns = 0x80042F48u, .screen = kPause, .row = 3, .left = kRight, .right = kLeft, .writes = {{{kPauseCursor, 3}}},
+    Row{.returns = 0x80042E1Cu, .screen = kPause, .row = 1, .left = kCross, .writes = {{{kPauseCursor, 1}, {kStates, 0}}},
         .when = {{{kPauseAsks, 0, 0}}}},
+    Row{.returns = 0x80042EB0u, .screen = kPause, .row = 2, .left = kRight, .right = kLeft, .writes = {{{kPauseCursor, 2}, {kStates, 0}}},
+        .when = {{{kPauseAsks, 0, 0}}}},
+    Row{.returns = kMusicDrawn, .screen = kPause, .row = 3, .left = kRight, .right = kLeft, .writes = {{{kPauseCursor, 3}, {kStates, 0}}},
+        .when = {{{kPauseAsks, 0, 0}}}},
+    Row{.returns = kPauseStatesDrawn, .screen = kPause, .row = kPauseStatesRow, .left = kCross,
+        .writes = {{{kPauseCursor, 0}, {kStates, 1}}}, .when = {{{kPauseAsks, 0, 0}}}},
     Row{.returns = 0x80042C70u, .screen = kPause, .row = 5, .left = kCross, .writes = {{{kPauseCursor, 0}}},
         .when = {{{kPauseAsks, 1, 0xFFFFFFFFu}}}},
     Row{.returns = 0x80042CA0u, .screen = kPause, .row = 6, .left = kCross, .writes = {{{kPauseCursor, 1}}},
@@ -246,6 +257,26 @@ const Drawn *live_draw(std::span<const Drawn> drawn, int32_t row, const Guest &g
 template <class Guest>
 bool still_drawn(std::span<const Drawn> drawn, int32_t row, const Guest &guest) {
     return live_draw(drawn, row, guest) != nullptr;
+}
+
+/* The row Esc chooses: a screen's RETURN TO MAIN MENU, the pause's RESUME MISSION, or NO while ABORT asks. A question
+ * of NEW GAME or MISSION COMPLETED is drawn without RETURN, so Esc leaves it to its answer. */
+struct Back {
+    uint32_t screen = 0;
+    int32_t row = 0;
+};
+inline constexpr std::array kBacks = {Back{kNewGame, 10}, Back{kLoadGame, 4}, Back{kPractice, 5}, Back{kPassword, 1},
+                                      Back{kOptions, 3},  Back{kDeath, 3},    Back{kMissionDone, 2}, Back{kPause, 0},
+                                      Back{kPause, 6}};
+
+template <class Guest>
+const Drawn *back_draw(uint32_t screen, std::span<const Drawn> drawn, const Guest &guest) {
+    for (const Back &back : kBacks)
+        for (const Drawn &draw : drawn)
+            if (back.screen == screen && draw.row == back.row && draw.source && draw.source->screen == screen &&
+                live_draw(std::span<const Drawn>(&draw, 1), back.row, guest))
+                return &draw;
+    return nullptr;
 }
 
 }  // namespace disruptor::menu_rows

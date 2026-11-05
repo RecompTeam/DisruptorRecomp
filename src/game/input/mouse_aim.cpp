@@ -18,6 +18,7 @@
  */
 
 #include "psx_sdl.h"
+#include "psx_keybinds.h"
 #include "game/input/mouse_aim.h"
 #include "game/session/menu_mouse.h"
 #include "game/session/capsule.h"
@@ -66,6 +67,8 @@ extern "C" SDL_Window *sdl_window;
 extern "C" int psx_host_ui_game_input_captured(void);
 extern "C" int psx_netplay_active(void);
 extern "C" void disruptor_name_entry_keys_for_pad(const uint8_t *keys, uint8_t *kept, int count);
+extern "C" int disruptor_name_entry_taking_text(void);
+extern "C" int disruptor_name_entry_withholds(int scancode);
 extern "C" int disruptor_key_bound(int scancode);
 extern "C" int psx_input_pad_sticks(int slot, int16_t out[4]);
 extern "C" void psx_input_set_game_sticks(int owned);
@@ -755,6 +758,14 @@ void log_geometry_diagnostics_scope(
     std::fputc('\n', g_mouse.log);
 }
 
+/* A key of the player's for a strafe is down, a first or second key, never a mouse button. */
+bool strafe_down(const Uint8 *keys, int key_total, int field) {
+    for (const SDL_Scancode code : {psx_keybinds_get_button(1, field), psx_keybinds_get_button_alt(1, field)})
+        if (code != SDL_SCANCODE_UNKNOWN && code < key_total && key_down(keys, code) && disruptor_name_entry_withholds(code) == 0) return true;
+    const int second = second_keys()[static_cast<size_t>(field)];
+    return second > 0 && second < key_total && key_down(keys, second) && disruptor_name_entry_withholds(second) == 0;
+}
+
 /* A menu of the front end takes the pointer: the mouse is let go and shown, and a press over a row holds its buttons. */
 bool menu_pointer_frame() {
     const bool pointing = sdl_window && disruptor_menu_pointing() != 0 && !psx_host_ui_game_input_captured();
@@ -765,12 +776,20 @@ bool menu_pointer_frame() {
     if (pointing && !g_menu_pointer_shown.load(std::memory_order_relaxed)) SDL_HideCursor();
 #endif
     g_menu_pointer_shown.store(pointing, std::memory_order_relaxed);
-    const uint16_t held = disruptor_menu_buttons(pointing && (buttons & SDL_BUTTON_LMASK) != 0,
-                                                 pointing && (buttons & SDL_BUTTON_RMASK) != 0);
+    int key_total = 0;
+    const Uint8 *keys = SDL_GetKeyboardState(&key_total);
+    const uint16_t held = static_cast<uint16_t>(disruptor_menu_buttons(pointing && (buttons & SDL_BUTTON_LMASK) != 0,
+                                                                       pointing && (buttons & SDL_BUTTON_RMASK) != 0) |
+                                                disruptor_menu_back(pointing, key_down(keys, SDL_SCANCODE_ESCAPE)));
     if (held != 0u) {
         /* A press chooses the row it was made on: a direction down with it would move the cursor first. */
         psx_game_pad_press(0, held);
         psx_game_pad_release(0, static_cast<uint16_t>((kPadUp | kPadRight | kPadDown | kPadLeft) & ~held));
+    }
+    /* Esc's or a click's press has the directions let go: a strafe key's side would move the cursor first. */
+    if (held == 0u && pointing && disruptor_name_entry_taking_text() == 0) {
+        const uint16_t sides = disruptor_menu_sides(strafe_down(keys, key_total, PSX_KB_L2), strafe_down(keys, key_total, PSX_KB_R2));
+        if (sides != 0u) psx_game_pad_press(0, sides);
     }
     return pointing;
 }
@@ -789,6 +808,8 @@ void mouse_aim_frame() {
         return;
     }
     const bool pointing = menu_pointer_frame();
+    /* Between two screens of the menus none points for a few frames: the mouse stays free there, or the next screen's pointer would jump. */
+    const bool in_menus = pointing || disruptor_front_end_shown() != 0 || psx_read_byte(kMenuStateAddress) == kMainMenu;
     // A network game's pads are the runtime's alone: there the map's stick sources press, as in Classic.
     const bool netplay = psx_netplay_active() != 0;
     int16_t axes[4] = {};
@@ -859,7 +880,7 @@ void mouse_aim_frame() {
         set_capture(true, "click-capture");
     } else if (g_mouse.captured && !focused) {
         set_capture(false, "focus-lost-release");
-    } else if (!g_mouse.captured && !g_mouse.given_up && focused && usable) {
+    } else if (!g_mouse.captured && !g_mouse.given_up && focused && usable && !in_menus) {
         set_capture(true, "focus-capture");
         /* Relative mode refused: asking again every frame would fill the log. A click asks again. */
         if (!g_mouse.captured) g_mouse.given_up = true;
@@ -1125,6 +1146,15 @@ extern "C" int disruptor_second_key_held(int field, const uint8_t *keys, int key
 
 extern "C" int disruptor_second_key_bound(int scancode) {
     return scancode > 0 && std::find(second_keys().begin(), second_keys().end(), scancode) != second_keys().end() ? 1 : 0;
+}
+
+extern "C" int disruptor_strafe_side(int scancode) {
+    if (scancode <= 0) return 0;
+    for (const auto [field, side] : {std::pair{PSX_KB_L2, -1}, std::pair{PSX_KB_R2, 1}})
+        if (scancode == psx_keybinds_get_button(1, field) || scancode == psx_keybinds_get_button_alt(1, field) ||
+            scancode == second_keys()[static_cast<size_t>(field)])
+            return side;
+    return 0;
 }
 
 extern "C" int disruptor_number_keys_enabled(void) {

@@ -182,11 +182,31 @@ int g_menu_pointing = 0;
 std::uint16_t g_menu_held = 0;
 int g_menu_left = 0, g_menu_right = 0;
 int disruptor_menu_pointing(void) { return g_menu_pointing; }
+int g_front_end = 0;
+int disruptor_front_end_shown(void) { return g_front_end; }
 std::uint16_t disruptor_menu_buttons(int left, int right) {
     g_menu_left = left;
     g_menu_right = right;
     return left || right ? g_menu_held : std::uint16_t{0};
 }
+int g_back_allowed = 0, g_back_escape = 0, g_sides_calls = 0, g_side_left = 0, g_side_right = 0, g_taking_text = 0;
+SDL_Scancode g_withheld = SDL_SCANCODE_UNKNOWN;
+std::array<SDL_Scancode, 24> g_binds{};
+std::uint16_t disruptor_menu_back(int allowed, int escape) {
+    g_back_allowed = allowed;
+    g_back_escape = escape;
+    return allowed && escape ? std::uint16_t{1u << 14} : std::uint16_t{0};
+}
+std::uint16_t disruptor_menu_sides(int left, int right) {
+    ++g_sides_calls;
+    g_side_left = left;
+    g_side_right = right;
+    return static_cast<std::uint16_t>((left ? 1u << 7 : 0u) | (right ? 1u << 5 : 0u));
+}
+int disruptor_name_entry_taking_text(void) { return g_taking_text; }
+int disruptor_name_entry_withholds(int scancode) { return scancode == g_withheld ? 1 : 0; }
+SDL_Scancode psx_keybinds_get_button(int, int button) { return g_binds[static_cast<std::size_t>(button)]; }
+SDL_Scancode psx_keybinds_get_button_alt(int, int) { return SDL_SCANCODE_UNKNOWN; }
 std::uint16_t disruptor_selection_wheel_filter_press(std::uint16_t press) { return press; }
 
 void gpu_geometry_correction_stats(std::uint64_t *world_triangles,
@@ -583,7 +603,80 @@ void test_menu_pointer() {
     g_menu_held = 0u;
     mouse_aim_frame();
     expect(g_mouse.captured && g_relative_mode, "leaving the main menu the mouse is held again");
+    g_menu_pointing = 1;
+    mouse_aim_frame();
+    g_menu_pointing = 0;
+    g_front_end = 1;
+    mouse_aim_frame();
+    expect(!g_mouse.captured, "between two screens of the menus, none pointing, the mouse stays free");
+    g_front_end = 0;
+    mouse_aim_frame();
+    expect(g_mouse.captured, "and in play it is held");
     expect(disruptor_mouse_menu_pointer_drawn(&drawn_x, &drawn_y) == 0, "and its arrow goes");
+}
+
+void test_menu_keys() {
+    reset_state();
+    g_mouse.enabled = g_mouse.mouse_aim_enabled = g_mouse.configured = true;
+    g_mouse.log = std::tmpfile();
+    g_window_flags = SDL_WINDOW_INPUT_FOCUS;
+    g_menu_pointing = 1;
+    g_binds[PSX_KB_L2] = SDL_SCANCODE_A;
+    g_binds[PSX_KB_R2] = SDL_SCANCODE_D;
+    g_keys[SDL_SCANCODE_ESCAPE] = 1;
+    g_pad_buttons = static_cast<std::uint16_t>(0xFFFFu & ~kPadUp);
+    mouse_aim_frame();
+    expect(g_back_allowed == 1 && g_back_escape == 1 && (g_pad_buttons & kPadCross) == 0u && (g_pad_buttons & kPadUp) != 0u,
+           "Esc on a menu holds what the menu gives, a direction held with it let go");
+    expect(!g_mouse.given_up || !g_mouse.captured, "and is no release of the mouse there");
+    g_host_ui_captured = 1;
+    mouse_aim_frame();
+    expect(g_back_allowed == 0 && g_back_escape == 1, "while the host's menu has the keys Esc is told but allowed nothing");
+    g_host_ui_captured = 0;
+    g_keys[SDL_SCANCODE_A] = 1;
+    g_pad_buttons = 0xFFFFu;
+    mouse_aim_frame();
+    expect((g_pad_buttons & kPadCross) == 0u && (g_pad_buttons & kPadLeft) != 0u, "a strafe key held with Esc's press steps nothing");
+    g_keys[SDL_SCANCODE_ESCAPE] = 0;
+    g_pad_buttons = 0xFFFFu;
+    mouse_aim_frame();
+    expect(g_side_left == 1 && g_side_right == 0 && (g_pad_buttons & kPadLeft) == 0u, "the key strafing left presses Left on a menu");
+    g_keys[SDL_SCANCODE_A] = 0;
+    g_keys[SDL_SCANCODE_D] = 1;
+    g_pad_buttons = 0xFFFFu;
+    mouse_aim_frame();
+    expect(g_side_right == 1 && (g_pad_buttons & kPadRight) == 0u, "the one strafing right presses Right");
+    g_withheld = SDL_SCANCODE_D;
+    mouse_aim_frame();
+    expect(g_side_right == 0, "a key the name still holds is no strafe");
+    g_withheld = SDL_SCANCODE_UNKNOWN;
+    const int calls = g_sides_calls;
+    g_taking_text = 1;
+    mouse_aim_frame();
+    expect(g_sides_calls == calls, "while the name takes letters the strafe keys are letters");
+    g_taking_text = 0;
+    g_menu_pointing = 0;
+    mouse_aim_frame();
+    expect(g_sides_calls == calls, "off the menus they are the game's alone");
+    g_keys[SDL_SCANCODE_D] = 0;
+    expect(disruptor_strafe_side(SDL_SCANCODE_A) == -1 && disruptor_strafe_side(SDL_SCANCODE_D) == 1 &&
+               disruptor_strafe_side(SDL_SCANCODE_ESCAPE) == 0 && disruptor_strafe_side(0) == 0,
+           "a key is a strafe's side by the player's keys");
+    std::array<int, 24> modern{}, classic{};
+    modern[PSX_KB_R2] = classic[PSX_KB_R2] = SDL_SCANCODE_KP_6;
+    disruptor_second_keys_set(modern.data(), classic.data(), static_cast<int>(modern.size()));
+    g_menu_pointing = 1;
+    g_keys[SDL_SCANCODE_KP_6] = 1;
+    mouse_aim_frame();
+    expect(g_side_right == 1 && disruptor_strafe_side(SDL_SCANCODE_KP_6) == 1, "a second key for a strafe is one too");
+    g_withheld = SDL_SCANCODE_KP_6;
+    mouse_aim_frame();
+    expect(g_side_right == 0, "unless the name still holds it");
+    g_withheld = SDL_SCANCODE_UNKNOWN;
+    g_keys[SDL_SCANCODE_KP_6] = 0;
+    g_menu_pointing = 0;
+    disruptor_second_keys_set(nullptr, nullptr, 0);
+    g_binds.fill(SDL_SCANCODE_UNKNOWN);
 }
 
 void test_simultaneous_relative_axes_sample() {
@@ -1840,6 +1933,7 @@ int main(int argc, char **argv) {
         g_mouse.vertical_pitch = 0.0;
         test_parsing();
         test_menu_pointer();
+        test_menu_keys();
         test_ini_configuration();
         test_direction_fraction_and_wrap();
         test_nearest_step_diffusion_and_conservation();

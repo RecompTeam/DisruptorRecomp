@@ -38,7 +38,7 @@ require(
     and host.count("psx_game_before_input();") == host.count("psx_game_after_input();") == 1
     and "void psx_game_before_input(void) { disruptor_capsule_before_input(); }\n" in game_side
     and "void psx_game_after_input(void) {\n    disruptor_capsule_after_input();\n    disruptor_selection_wheel_guard_input();\n"
-    "    disruptor_achievements_frame();\n}\n"
+    "    disruptor_achievements_frame();\n    disruptor_state_screen_frame();\n}\n"
     in game_side
     and game_side.count("disruptor_capsule_before_input();") == game_side.count("disruptor_capsule_after_input();") == 1
     and game_side.count("disruptor_capsule_state_loaded();") == 1
@@ -81,7 +81,7 @@ require(
     in capsule
     and '    say(stored ? "REC saved" : "REC NOT saved");\n' in capsule
     and '    g_capsule.recording = Recording::kOff;\n    say("REC refused");\n' in capsule
-    and "        const bool pointing = disruptor_menu_pointing() != 0 || password_hint_shown();\n"
+    and "        const bool pointing = disruptor_menu_pointing() != 0 || password_hint_shown() || state_browser_shown();\n"
     "        return disruptor_capsule_notice() || achievements || pointing ? PSX_HOST_UI_VISIBLE | PSX_HOST_UI_LAYER : 0u;\n"
     in menu
     and "    if (!g_menu.open) {\n"
@@ -165,7 +165,8 @@ require(
     and "    return ctrl || recording ? Press::kRecord : Press::kLoad;\n" in capsule
     and "int key_held(const SDL_Event *event) {\n#if defined(PSX_SDL3)\n    return event->key.mod;\n#else\n    return event->key.keysym.mod;\n#endif\n}\n"
     in menu
-    and menu.count("KMOD_") == 3
+    and menu.count("KMOD_") == 4
+    and "    case SDL_SCANCODE_KP_ENTER: return (held & KMOD_SHIFT) != 0 ? browser::Key::save : browser::Key::choose;\n" in menu
     and "    if (!g_menu.open && key_down(event, SDL_SCANCODE_F11) && (key_held(event) & KMOD_CTRL) != 0 &&\n"
     "        disruptor_capsule_mark(event->key.repeat ? 1 : 0))\n        return 1;\n"
     in menu

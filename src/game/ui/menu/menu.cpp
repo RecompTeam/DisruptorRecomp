@@ -301,8 +301,15 @@ void on_runtime_shutdown(void *) {
 
 int on_sdl_event(void *, const SDL_Event *event) {
 #if defined(PSX_SDL3)
-    if (event) g_menu.pad_in_use.note(*event);
+    if (event) {
+        g_menu.pad_in_use.note(*event);
+        const Uint32 type = event->type;
+        if (type == SDL_EVENT_MOUSE_MOTION || type == SDL_EVENT_MOUSE_BUTTON_DOWN || type == SDL_EVENT_MOUSE_WHEEL || type == SDL_EVENT_KEY_DOWN ||
+            type == SDL_EVENT_GAMEPAD_BUTTON_DOWN)
+            disruptor_menu_activity();
+    }
 #endif
+    if (!g_menu.open && state_browser_event(event)) return 1;
     if (event && event->type == SDL_CONTROLLERAXISMOTION) {
 #if defined(PSX_SDL3)
         disruptor_selection_wheel_controller_axis(event->gaxis.axis, event->gaxis.value);
@@ -319,11 +326,15 @@ int on_sdl_event(void *, const SDL_Event *event) {
     const bool close =
         g_menu.open && scancode_event(event, SDL_SCANCODE_ESCAPE);
     if (toggle || close) {
+        if (close) disruptor_menu_back_taken();
         set_menu_open(toggle ? !g_menu.open : false);
         return 1;
     }
     if (disruptor_selection_wheel_open()) {
-        if (scancode_event(event, SDL_SCANCODE_ESCAPE)) disruptor_selection_wheel_cancel();
+        if (scancode_event(event, SDL_SCANCODE_ESCAPE)) {
+            disruptor_menu_back_taken();
+            disruptor_selection_wheel_cancel();
+        }
         return 1;
     }
     if (!g_menu.open && scancode_event(event, SDL_SCANCODE_ESCAPE))
@@ -348,8 +359,10 @@ uint32_t current_flags(void *) {
     if (disruptor_selection_wheel_open())
         return PSX_HOST_UI_VISIBLE;
     if (!g_menu.open || !g_menu.imgui_ready) {
+        if (state_browser_captures())
+            return PSX_HOST_UI_CAPTURE_KEYBOARD | PSX_HOST_UI_CAPTURE_MOUSE | PSX_HOST_UI_CAPTURE_GAMEPAD | PSX_HOST_UI_VISIBLE | PSX_HOST_UI_LAYER;
         const bool achievements = achievements_overlay_shown();
-        const bool pointing = disruptor_menu_pointing() != 0 || password_hint_shown();
+        const bool pointing = disruptor_menu_pointing() != 0 || password_hint_shown() || state_browser_shown();
         return disruptor_capsule_notice() || achievements || pointing ? PSX_HOST_UI_VISIBLE | PSX_HOST_UI_LAYER : 0u;
     }
     return PSX_HOST_UI_CAPTURE_KEYBOARD |
@@ -358,11 +371,10 @@ uint32_t current_flags(void *) {
            PSX_HOST_UI_VISIBLE;
 }
 
-/* A menu's arrow at the pointer, in whole pixels, in the menu letters' colours. */
-void draw_menu_pointer(int width, int height) {
+}  // namespace
+
+void draw_arrow_at(float x, float y, int width, int height) {
     namespace pointer = disruptor::menu_pointer;
-    float x = 0.0f, y = 0.0f;
-    if (!disruptor_mouse_menu_pointer_drawn(&x, &y)) return;
     int numerator = 4, denominator = 3;
     psx_host_video_get_display_aspect(&numerator, &denominator);
     const int texel = pointer::arrow_texel(width, height, numerator, denominator);
@@ -383,6 +395,14 @@ void draw_menu_pointer(int width, int height) {
     }
 }
 
+namespace {
+
+/* A menu's arrow at the pointer. */
+void draw_menu_pointer(int width, int height) {
+    float x = 0.0f, y = 0.0f;
+    if (disruptor_mouse_menu_pointer_drawn(&x, &y)) draw_arrow_at(x, y, width, height);
+}
+
 /* Drawn without the SDL backend's frame: that one reads and captures the mouse, which is the game's while the menu is closed. */
 void render_notices(const char *word, int width, int height) {
     ImGui_ImplOpenGL3_NewFrame();
@@ -391,7 +411,9 @@ void render_notices(const char *word, int width, int height) {
     io.DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
     io.DeltaTime = 1.0f / 60.0f;
     ImGui::NewFrame();
-    if (word) {
+    /* While a save state's picture is taken nothing of the host's lies over the game. */
+    const bool hiding = disruptor_state_screen_hiding() != 0;
+    if (word && !hiding) {
         ImGui::SetNextWindowPos(ImVec2(16.0f, 16.0f));
         ImGui::Begin("##capsule", nullptr,
                      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings |
@@ -400,9 +422,12 @@ void render_notices(const char *word, int width, int height) {
         ImGui::TextColored(ImVec4(1.0f, 0.25f, 0.2f, 1.0f), "%s", word);
         ImGui::End();
     }
-    draw_achievements_overlay(width, height);
-    draw_password_hint(width, height);
-    draw_menu_pointer(width, height);
+    if (!hiding) {
+        draw_achievements_overlay(width, height);
+        draw_password_hint(width, height);
+        draw_state_browser(width, height);
+        if (!state_browser_captures()) draw_menu_pointer(width, height);
+    }
     ImGui::Render();
     ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
 }

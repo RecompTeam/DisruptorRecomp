@@ -129,6 +129,7 @@ bool g_pointer = false;
 double g_pointer_x = 0.0, g_pointer_y = 0.0;
 int g_notes = 0;
 extern "C" {
+int psx_host_ui_game_input_captured(void) { return 0; }
 int disruptor_mouse_menu_pointer(double *x, double *y, int *width, int *height) {
     if (!g_pointer) return 0;
     *x = g_pointer_x;

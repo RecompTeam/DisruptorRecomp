@@ -73,7 +73,8 @@ void test_table() {
         for (const rows::Write &write : row.writes)
             writes_known = writes_known && (write.address == 0u || write.address == rows::kCursor ||
                                             write.address == rows::kSlotSide || write.address == rows::kLetter ||
-                                            (row.screen == rows::kPause && write.address == rows::kPauseCursor));
+                                            (row.screen == rows::kPause && write.address == rows::kPauseCursor) ||
+                                            (row.screen == rows::kPause && write.address == rows::kStates));
         for (size_t other = index + 1; other < rows::kRows.size(); ++other) {
             const rows::Row &next = rows::kRows[other];
             if (next.returns != row.returns || next.screen != row.screen) continue;
@@ -84,6 +85,22 @@ void test_table() {
     expect(inside_screens, "every row is drawn from its own screen's function");
     expect(writes_known, "pointing writes only the cursors the screens move");
     expect(told_apart, "two rows of one call differ by the string drawn or a condition");
+    bool states_left = true;
+    for (const rows::Row &row : rows::kRows) {
+        if (row.screen != rows::kPause) continue;
+        const bool ours = row.returns == rows::kPauseStatesDrawn;
+        bool on = false, off = false;
+        for (const rows::Write &write : row.writes)
+            if (write.address == rows::kStates) (write.value != 0 ? on : off) = true;
+        const bool asks = row.when[0].address == rows::kPauseAsks && row.when[0].low != 0u;
+        const bool steps = (row.left != 0u || row.right != 0u) && !asks;
+        if (steps) states_left = states_left && (ours ? on && !off : off && !on);
+    }
+    expect(states_left, "SAVE STATES is chosen by its own row alone, and every other line of the pause leaves it");
+    const rows::Row *pause_states = rows::match(rows::kPauseStatesDrawn, rows::kPause, 0u, 0u, Guest{});
+    expect(pause_states && pause_states->row == rows::kPauseStatesRow && pause_states->writes[0].address == rows::kPauseCursor &&
+               pause_states->writes[0].value == 0 && pause_states->left == rows::kCross,
+           "the pause's SAVE STATES keeps the game's cursor on RESUME and a press there holds Cross");
     expect(!rows::draws_for(rows::kOptions, 0x8001C170u) && !rows::draws_for(rows::kDeath, 0x8001F394u),
            "the main menu's draw and another screen's are not this screen's");
 }
@@ -179,6 +196,49 @@ void test_hits() {
            "RETURN TO MAIN MENU is chosen with the left button only");
 }
 
+void test_backs() {
+    bool chosen = true;
+    for (const rows::Back &back : rows::kBacks) {
+        bool found = false;
+        for (const rows::Row &row : rows::kRows) found = found || (row.screen == back.screen && row.row == back.row && row.left == rows::kCross);
+        chosen = chosen && found;
+    }
+    expect(chosen, "every back row is a row of its screen chosen with Cross");
+    Guest guest;
+    const rows::Row *sound = rows::match(0x8001F248u, rows::kOptions, 0u, 0u, guest);
+    const rows::Row *back = rows::match(0x8001F394u, rows::kOptions, 0u, 0u, guest);
+    const std::vector<rows::Drawn> options = {{0x8001F248u, 0, pointer::placed(-208, 80, 100), 0, 0, sound},
+                                              {0x8001F394u, 3, pointer::placed(0, 204, 120), rows::kCross, 0, back}};
+    const rows::Drawn *options_back = rows::back_draw(rows::kOptions, options, guest);
+    expect(options_back && options_back->row == 3 && options_back->left == rows::kCross, "Esc on GENERAL OPTIONS is its RETURN TO MAIN MENU");
+    expect(!rows::back_draw(rows::kDeath, options, guest) && !rows::back_draw(rows::kFormat, options, guest),
+           "another screen's rows are no back of this one, and the format screen has none");
+    expect(!rows::back_draw(rows::kOptions, std::span(options).first(1), guest), "a pass without RETURN has no back");
+
+    Guest paused;
+    const rows::Row *resume = rows::match(rows::kResumeDrawn, rows::kPause, 0u, 0u, paused);
+    paused.words[rows::kPauseAsks] = 1u;
+    const rows::Row *no = rows::match(0x80042CA0u, rows::kPause, 0u, 0u, paused);
+    const std::vector<rows::Drawn> pause = {{rows::kResumeDrawn, 0, pointer::placed(0, 100, 80), rows::kCross, 0, resume},
+                                            {0x80042CA0u, 6, pointer::placed(169, 126, 20), rows::kCross, 0, no}};
+    const rows::Drawn *answer = rows::back_draw(rows::kPause, pause, paused);
+    expect(answer && answer->row == 6, "while ABORT asks Esc is its NO");
+    paused.words[rows::kPauseAsks] = 0u;
+    const rows::Drawn *resumed = rows::back_draw(rows::kPause, pause, paused);
+    expect(resumed && resumed->row == 0, "else the pause's RESUME MISSION");
+
+    Guest asking;
+    asking.words[rows::kCursor] = 2u;
+    asking.words[rows::kOverwrite] = 1u;
+    const rows::Row *question = rows::match(0x8001CE14u, rows::kNewGame, 0u, 0u, asking);
+    asking.words[rows::kOverwrite] = 0u;
+    const rows::Row *slots_back = rows::match(0x8001CA50u, rows::kNewGame, 0u, 0u, asking);
+    asking.words[rows::kOverwrite] = 1u;
+    const std::vector<rows::Drawn> overwrite = {{0x8001CA50u, 10, pointer::placed(0, 204, 120), rows::kCross, 0, slots_back},
+                                                {0x8001CE14u, 12, pointer::placed(28, 124, 200), rows::kCross, rows::kLeft, question}};
+    expect(!rows::back_draw(rows::kNewGame, overwrite, asking), "while NEW GAME asks to overwrite, its RETURN drawn a pass before is no back");
+}
+
 }  // namespace
 
 int main() {
@@ -186,6 +246,7 @@ int main() {
     test_table();
     test_match();
     test_hits();
+    test_backs();
     if (g_failures != 0) return 1;
     std::cout << "disruptor menu rows: PASS\n";
     return 0;

@@ -76,6 +76,29 @@ PSX_MOD_CONSTRUCTOR(register_disruptor_password_hint) {
 
 }  // namespace
 
+std::array<std::string, 4> face_names(std::string_view language) {
+    std::array<std::string, 4> faces;
+#if defined(PSX_SDL3)
+    if (g_menu.pad_in_use.pad_last()) {
+        const disruptor::settings::PadFamily family = disruptor::settings::family_shown(g_menu.pad_in_use);
+        if (std::string_view(disruptor::settings::family_name(family)) == "PlayStation") {
+            constexpr std::array<disruptor::state_browser::Word, 4> words = {disruptor::state_browser::Word::cross, disruptor::state_browser::Word::circle,
+                                                                             disruptor::state_browser::Word::square, disruptor::state_browser::Word::triangle};
+            for (size_t index = 0; index < faces.size(); ++index) faces[index] = disruptor::state_browser::word(words[index], language);
+            return faces;
+        }
+        for (size_t index = 0; index < kFaces.size(); ++index) {
+            const char *source = psx_input_pad_source(kFaces[index]);
+            const disruptor::settings::PadSource *known = source ? disruptor::settings::pad_source(source) : nullptr;
+            if (known) faces[index] = hint::key_word(disruptor::settings::printed(*known, family));
+        }
+        return faces;
+    }
+#endif
+    for (size_t index = 0; index < kFaces.size(); ++index) faces[index] = key_of(kFaces[index], language);
+    return faces;
+}
+
 bool password_hint_shown() {
     const std::chrono::steady_clock::duration built{g_built.load(std::memory_order_relaxed)};
     return std::chrono::steady_clock::now().time_since_epoch() - built < kStillShown;

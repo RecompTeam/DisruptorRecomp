@@ -109,8 +109,11 @@ Delete it once the repaired copy works.
 | Settings | Backquote (`` ` ``). Escape closes |
 | Fullscreen | Alt+Enter |
 | Skip a logo or movie | Escape |
+| Back in a menu | Escape: RETURN TO MAIN MENU on a screen of the main menu, RESUME MISSION in the pause, NO while ABORT asks |
+| Left / right in a menu | The arrows, or the strafe keys (A / D) on the main menu and its screens |
 | Fast-forward | Hold B |
 | Save / load state | Shift+F1–F11 / F1–F11 |
+| See save states | LOAD GAME, under the saved games. In play, SAVE STATES under RESUME MISSION in the pause menu |
 | Name a save | Type it: letters, digits, Space, Backspace and Delete. Enter moves to DONE |
 | Start / end a replay capsule | Ctrl+F12 |
 | Load the newest replay capsule | F12 |
@@ -205,6 +208,11 @@ stay out of a profile. The profiles are `keys-1.ini` and `keys-2.ini` beside
 These keys do the same in both schemes and cannot be changed:
 
 - **Escape** frees the mouse, closes the settings, skips logos and movies.
+  In a menu it goes back: RETURN TO MAIN MENU on the main menu's screens,
+  RESUME MISSION in the pause, NO while ABORT asks. On the main menu itself
+  and while a screen asks a question it does nothing.
+- The strafe keys step left and right on the main menu and its screens, as
+  the arrows do. In play and in the pause they strafe.
 - **Backquote** (`` ` ``) opens the settings.
 - **B** fast-forwards while held, except on the save-name screen.
 - **F1 to F11** load a save state. With Shift they save one.
@@ -555,6 +563,13 @@ Before the updater installs a new version, the launcher copies `saves/` to
   depend on the build. The game's password system works too.
 - Memory cards and save states are stored in `saves/` in the folder of your
   files.
+- LOAD GAME shows the game's saved games and, under them, SAVE STATES: the
+  eleven slots with a picture, the mission, the difficulty and when each was
+  saved. A saved game starts the mission its card shows: the arrows on the
+  card, the strafe keys or the pad's shoulder buttons step through the
+  reached missions. A state loads at once. In the pause menu SAVE STATES shows the slots alone: a state
+  can be saved there too, and a load asks first. A state can be deleted in
+  both, after a question.
 - **Save states from v0.1.0-alpha.1 and alpha.2 are incompatible with
   v0.1.0-alpha.3.** Load a memory card save or start a new game, then make
   new save states.

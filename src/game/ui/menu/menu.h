@@ -33,6 +33,8 @@
 #include "mod_plugins.h"
 #include "game/input/mouse_aim.h"
 #include "game/session/menu_mouse.h"
+#include "game/session/state_screen.h"
+#include "game/ui/state_browser.h"
 #include "game/input/selection_wheel.h"
 #include "game/input/sticks.h"
 #include "game/frame/present_rate.h"
@@ -78,6 +80,8 @@
 #include <iterator>
 #include <map>
 #include <set>
+#include <optional>
+#include <utility>
 #include <string>
 #include <string_view>
 
@@ -250,6 +254,17 @@ void draw_achievements_overlay(int width, int height);
 /* The password screen ran a moment ago: its keys are drawn under the field. */
 bool password_hint_shown();
 void draw_password_hint(int width, int height);
+/* What presses Cross, Circle, Square and Triangle now: the pad's buttons after a pad press, the player's keys else, empty
+ * for one no key presses. A PlayStation pad's are named by words. */
+std::array<std::string, 4> face_names(std::string_view language);
+/* The menus' arrow at a point of the window, in whole pixels, in the menu letters' colours. */
+void draw_arrow_at(float x, float y, int width, int height);
+/* The save state screen over LOAD GAME or the pause: whether it holds the input, whether the host draws it or the pause's
+ * row, a key, button or click it takes, and its drawing inside the frame in progress. */
+bool state_browser_captures();
+bool state_browser_shown();
+bool state_browser_event(const SDL_Event *event);
+void draw_state_browser(int width, int height);
 void release_achievement_pictures();
 // A badge's picture for ImGui, 0 until it is fetched or when it cannot be read. The render thread.
 unsigned achievement_picture(const std::string &url);

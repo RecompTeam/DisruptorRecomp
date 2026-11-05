@@ -64,6 +64,7 @@ set(DISRUPTOR_EXTRA_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/streamed_reads.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/main_menu_exit.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/menu_mouse.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/state_screen.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/card_choice.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/language.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/language_briefing.cpp"
@@ -158,6 +159,7 @@ if(DISRUPTOR_DEV_MENU)
         "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/tab_achievements.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/achievements_overlay.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/password_hint.cpp"
+        "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/state_browser.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/tab_system.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/tab_language.cpp"
         "${CMAKE_CURRENT_SOURCE_DIR}/src/game/ui/menu/menu.cpp"
@@ -224,6 +226,8 @@ set(DISRUPTOR_PLUGINS
     disruptor.main_menu_exit.draw
     disruptor.main_menu_exit.menu
     disruptor.menu_mouse.draw
+    disruptor.menu_mouse.icon
+    disruptor.menu_mouse.load
     disruptor.menu_mouse.pause
     disruptor.menu_mouse.tick
     disruptor.mover_motion.draw
@@ -236,6 +240,7 @@ set(DISRUPTOR_PLUGINS
     disruptor.psionic_change.tick
     disruptor.render_arena
     disruptor.save_words.text
+    disruptor.state_screen.pause
     disruptor.stock_frames.effects
     disruptor.stock_frames.message
     disruptor.stock_frames.sounds
@@ -342,6 +347,7 @@ if(BUILD_TESTING)
 
     disruptor_contract(backdrop_tiles RETAIL)
     disruptor_contract(sky_pass)
+    disruptor_contract(entry_hooks)
     disruptor_contract(host_present)
     disruptor_contract(depth24_sync)
     disruptor_contract(geometry_provenance)
@@ -526,6 +532,10 @@ disruptor_unit_test(disruptor_marked_corners tests/unit/disruptor_marked_corners
         ENVIRONMENT "PSX_DISRUPTOR_CAPSULE_REPLAY=capsule")
     disruptor_unit_test(disruptor_menu_rows tests/unit/disruptor_menu_rows_test.cpp INCLUDES src)
     disruptor_unit_test(disruptor_password_hint tests/unit/disruptor_password_hint_test.cpp INCLUDES src)
+    disruptor_unit_test(disruptor_states_row tests/unit/disruptor_states_row_test.cpp INCLUDES src)
+    disruptor_unit_test(disruptor_state_browser tests/unit/disruptor_state_browser_test.cpp INCLUDES src)
+    disruptor_unit_test(disruptor_state_files tests/unit/disruptor_state_files_test.cpp INCLUDES src)
+    target_link_libraries(disruptor-state-files-test PRIVATE ZLIB::ZLIB)
     disruptor_unit_test(disruptor_menu_mouse_hooks tests/unit/disruptor_menu_mouse_hooks_test.cpp
         SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/menu_mouse.cpp"
         INCLUDES tests/support/stubs src "${PSXRECOMP_ROOT}/runtime/include"
@@ -536,6 +546,10 @@ disruptor_unit_test(disruptor_marked_corners tests/unit/disruptor_marked_corners
         COMMAND disruptor-menu-mouse-hooks-test --replay)
     set_tests_properties(disruptor_menu_mouse_hooks_replay PROPERTIES
         ENVIRONMENT "PSX_DISRUPTOR_CAPSULE_REPLAY=capsule")
+    add_test(NAME disruptor_menu_mouse_hooks_refused
+        COMMAND disruptor-menu-mouse-hooks-test --refused)
+    set_tests_properties(disruptor_menu_mouse_hooks_refused PROPERTIES
+        ENVIRONMENT_MODIFICATION "PSX_DISRUPTOR_CAPSULE_REPLAY=unset:;DISRUPTOR_HOOK_REFUSED=set:8001D3D8")
     disruptor_unit_test(disruptor_render_arena tests/unit/disruptor_render_arena_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_name_entry tests/unit/disruptor_name_entry_test.cpp RUNTIME_HEADERS)
 disruptor_unit_test(disruptor_baton_choice tests/unit/disruptor_baton_choice_test.cpp RUNTIME_HEADERS)

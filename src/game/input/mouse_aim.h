@@ -36,6 +36,8 @@ void disruptor_second_keys_set(const int *modern, const int *classic, int count)
 /* Whether a field's second key is held: `keys` SDL's key state, `mouse` its buttons while the game holds the mouse. */
 int  disruptor_second_key_held(int field, const uint8_t *keys, int key_total, uint32_t mouse);
 int  disruptor_second_key_bound(int scancode);
+/* -1 for a key the player strafes left with, 1 right, 0 else: a first, other or second key, never a mouse button. */
+int  disruptor_strafe_side(int scancode);
 
 int  disruptor_high_precision_camera_enabled(void);
 void disruptor_high_precision_camera_set_enabled(int enabled);

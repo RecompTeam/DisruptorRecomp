@@ -146,6 +146,8 @@ void disruptor_capsule_toggle(void);
 void disruptor_capsule_key(int repeat, int ctrl, int shift);
 /* Nonzero while the frontend's save state folder is a capsule's: its own keys would save and load there. */
 int disruptor_capsule_holds_states(void);
+/* Nonzero while a recording runs or starts, or a replay plays: the screen's picture is the recording's then. */
+int disruptor_capsule_recording(void);
 
 #ifdef __cplusplus
 }  /* extern "C" */

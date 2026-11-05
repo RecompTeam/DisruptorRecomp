@@ -12,6 +12,7 @@
 #include "game/render/movie_smoothing.h"
 #include "game/session/capsule.h"
 #include "game/session/diagnostics.h"
+#include "game/session/state_screen.h"
 #include "game/settings/game_mark.h"
 #include "game/settings/game_package.h"
 #include "game/settings/options.h"
@@ -136,6 +137,7 @@ void psx_game_state_loaded(void) {
     disruptor_list_message_state_loaded();
     disruptor_language_movie_sound_state_loaded();
     disruptor_achievements_state_loaded(savestate_active_path());
+    disruptor_state_screen_loaded();
     disruptor_far_rendering_abandon_metrics();
 }
 
@@ -144,9 +146,13 @@ void psx_game_state_saving(void) {
     disruptor_stock_frames_state_saving();
     disruptor_far_rendering_state_saving();
     disruptor_achievements_state_saving(savestate_active_path());
+    disruptor_state_screen_saving(savestate_active_path());
 }
 
-void psx_game_state_saved(int written) { disruptor_achievements_state_saved(savestate_active_path(), written); }
+void psx_game_state_saved(int written) {
+    disruptor_achievements_state_saved(savestate_active_path(), written);
+    disruptor_state_screen_saved(savestate_active_path(), written);
+}
 
 int psx_game_state_load_allowed(void) { return disruptor_achievements_allows(DISRUPTOR_ACHIEVEMENTS_LOAD_STATE); }
 
@@ -190,6 +196,7 @@ void psx_game_after_input(void) {
     disruptor_capsule_after_input();
     disruptor_selection_wheel_guard_input();
     disruptor_achievements_frame();
+    disruptor_state_screen_frame();
 }
 
 void psx_game_audio_output(int16_t *stereo, int frames, int rate) {

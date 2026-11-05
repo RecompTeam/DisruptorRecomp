@@ -110,6 +110,7 @@ require(
         "tab_achievements.cpp",
         "achievements_overlay.cpp",
         "password_hint.cpp",
+        "state_browser.cpp",
         "tab_system.cpp",
         "tab_language.cpp",
         "menu.cpp",

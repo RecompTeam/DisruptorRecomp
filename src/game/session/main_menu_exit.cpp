@@ -139,6 +139,11 @@ extern "C" int disruptor_main_menu_pointing(void) {
     return std::chrono::steady_clock::now().time_since_epoch() - shown < kStillShown ? 1 : 0;
 }
 
+extern "C" int disruptor_main_menu_shown(void) {
+    const std::chrono::steady_clock::duration shown{g_shown.load(std::memory_order_relaxed)};
+    return psx_mod_read_word(kScreen) == 0u && std::chrono::steady_clock::now().time_since_epoch() - shown < kStillShown ? 1 : 0;
+}
+
 extern "C" int disruptor_main_menu_click(void) {
     const std::optional<pointer::Point> at = disruptor_main_menu_pointing() ? pointing::now() : std::nullopt;
     g_clicked = at ? item_under(*at) : -1;

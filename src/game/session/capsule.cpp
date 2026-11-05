@@ -899,6 +899,10 @@ extern "C" void disruptor_capsule_toggle(void) {
 
 extern "C" int disruptor_capsule_holds_states(void) { return g_capsule.states_turned ? 1 : 0; }
 
+extern "C" int disruptor_capsule_recording(void) {
+    return g_capsule.recording != Recording::kOff || g_capsule.replay != Replay::kOff ? 1 : 0;
+}
+
 extern "C" void disruptor_capsule_key(int repeat, int ctrl, int shift) {
     switch (disruptor::capsule::press(repeat != 0, ctrl != 0, shift != 0, g_capsule.recording != Recording::kOff)) {
     case disruptor::capsule::Press::kNothing:
