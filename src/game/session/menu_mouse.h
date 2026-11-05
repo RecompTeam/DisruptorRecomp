@@ -21,6 +21,8 @@ void disruptor_menu_back_taken(void);
 void disruptor_menu_activity(void);
 /* The strafe keys down: Left and Right to hold on the main menu and the front end's screens, nothing in play or the pause. */
 uint16_t disruptor_menu_sides(int left, int right);
+/* Backspace down on PASSWORD: Left, the game's way to take a symbol back there. */
+uint16_t disruptor_menu_delete(int backspace);
 /* A screen of the front end or the main menu ran a moment ago, whoever points. */
 int disruptor_front_end_shown(void);
 /* SAVE STATES is no longer chosen on LOAD GAME or in the pause: a state loaded puts the game elsewhere. */

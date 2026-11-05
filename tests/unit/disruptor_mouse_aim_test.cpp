@@ -197,6 +197,11 @@ std::uint16_t disruptor_menu_back(int allowed, int escape) {
     g_back_escape = escape;
     return allowed && escape ? std::uint16_t{1u << 14} : std::uint16_t{0};
 }
+int g_delete_backspace = -1;
+std::uint16_t disruptor_menu_delete(int backspace) {
+    g_delete_backspace = backspace;
+    return backspace ? std::uint16_t{1u << 7} : std::uint16_t{0};
+}
 std::uint16_t disruptor_menu_sides(int left, int right) {
     ++g_sides_calls;
     g_side_left = left;
@@ -646,6 +651,16 @@ void test_menu_keys() {
     g_pad_buttons = 0xFFFFu;
     mouse_aim_frame();
     expect(g_side_right == 1 && (g_pad_buttons & kPadRight) == 0u, "the one strafing right presses Right");
+    g_keys[SDL_SCANCODE_D] = 0;
+    g_keys[SDL_SCANCODE_BACKSPACE] = 1;
+    g_pad_buttons = 0xFFFFu;
+    mouse_aim_frame();
+    expect(g_delete_backspace == 1 && (g_pad_buttons & kPadLeft) == 0u, "Backspace on a menu is asked about and its Left pressed");
+    g_keys[SDL_SCANCODE_BACKSPACE] = 0;
+    g_pad_buttons = 0xFFFFu;
+    mouse_aim_frame();
+    expect(g_delete_backspace == 0 && (g_pad_buttons & kPadLeft) != 0u, "with Backspace up nothing is pressed");
+    g_keys[SDL_SCANCODE_D] = 1;
     g_withheld = SDL_SCANCODE_D;
     mouse_aim_frame();
     expect(g_side_right == 0, "a key the name still holds is no strafe");

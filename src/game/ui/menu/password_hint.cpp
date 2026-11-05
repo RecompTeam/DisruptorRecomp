@@ -41,7 +41,7 @@ std::vector<hint::Line> lines_now() {
     }
 #endif
     for (size_t index = 0; index < kFaces.size(); ++index) faces[index] = key_of(kFaces[index], language);
-    return hint::lines(faces, key_of("left", language), language);
+    return hint::lines(faces, std::string(hint::in_language("BACKSPACE", language)), language);
 }
 
 void draw_entry(CPUState *cpu, uint32_t) {

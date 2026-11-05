@@ -98,7 +98,7 @@ Delete it once the repaired copy works.
 | Free / hold the mouse | The game holds it while its window has focus. Escape or a middle-click frees it, a left click holds it again |
 | Fire / menu confirm | Left mouse / Enter |
 | Menus | Point with the mouse and click, the pause menu too. On a value a left click steps it on, a right click back |
-| Password | The face buttons type its symbols, the screen shows their keys. Left takes one back |
+| Password | The face buttons type its symbols, the screen shows their keys. Backspace takes one back, Left on a pad |
 | Psionic attack | Right mouse / F |
 | Jump / menu cancel | Space |
 | Use | E |

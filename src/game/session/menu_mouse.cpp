@@ -590,6 +590,10 @@ extern "C" uint16_t disruptor_menu_sides(int left, int right) {
     return static_cast<uint16_t>((left != 0 ? rows::kLeft : 0u) | (right != 0 ? rows::kRight : 0u));
 }
 
+extern "C" uint16_t disruptor_menu_delete(int backspace) {
+    return backspace != 0 && !paused() && rows_pointing() && psx_mod_read_word(rows::kScreen) == rows::kPassword ? rows::kLeft : 0u;
+}
+
 extern "C" int disruptor_front_end_shown(void) { return g_screens.any_recent() || disruptor_main_menu_shown() ? 1 : 0; }
 
 extern "C" void disruptor_states_row_reset(void) {

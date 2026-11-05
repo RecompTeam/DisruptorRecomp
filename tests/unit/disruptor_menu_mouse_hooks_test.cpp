@@ -650,6 +650,14 @@ void test_escape(bool replaying) {
     expect(disruptor_menu_sides(1, 1) == (rows::kLeft | rows::kRight), "and on the main menu");
     g_main_pointing = 0;
     expect(disruptor_menu_sides(1, 0) == 0u, "elsewhere they are nothing");
+    g_words[rows::kScreen] = rows::kPassword;
+    draw(0x8001E830u, 0, 204, put(0, "RETURN"));
+    draw(0x8001E830u, 0, 204, put(0, "RETURN"));
+    expect(disruptor_menu_delete(1) == (replaying ? 0u : rows::kLeft) && disruptor_menu_delete(0) == 0u,
+           "on PASSWORD Backspace is Left, which takes a symbol back");
+    g_words[rows::kScreen] = rows::kOptions;
+    expect(disruptor_menu_delete(1) == 0u, "on another screen Backspace is nothing");
+    g_words[rows::kScreen] = 0u;
 
     g_bytes[rows::kPauseState] = rows::kPaused;
     g_words[rows::kPauseAsks] = 0u;

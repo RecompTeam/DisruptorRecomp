@@ -788,7 +788,8 @@ bool menu_pointer_frame() {
     }
     /* Esc's or a click's press has the directions let go: a strafe key's side would move the cursor first. */
     if (held == 0u && pointing && disruptor_name_entry_taking_text() == 0) {
-        const uint16_t sides = disruptor_menu_sides(strafe_down(keys, key_total, PSX_KB_L2), strafe_down(keys, key_total, PSX_KB_R2));
+        const uint16_t sides = disruptor_menu_sides(strafe_down(keys, key_total, PSX_KB_L2), strafe_down(keys, key_total, PSX_KB_R2)) |
+                               disruptor_menu_delete(key_down(keys, SDL_SCANCODE_BACKSPACE));
         if (sides != 0u) psx_game_pad_press(0, sides);
     }
     return pointing;
