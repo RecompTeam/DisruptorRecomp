@@ -577,7 +577,7 @@ Press **Report a problem** on the launcher's **Troubleshooting** page. It
 gathers into one ZIP:
 
 - the game's log of the last two runs and the mouse log,
-- your settings,
+- your settings and keys,
 - the notes the game leaves of how its last run ended and of a freeze,
 - a note of the system.
 

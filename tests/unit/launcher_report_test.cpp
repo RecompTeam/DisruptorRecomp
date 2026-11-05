@@ -105,6 +105,7 @@ void test_a_report_takes_logs_and_settings_only() {
     put(root / "startup.previous.log", "the run before\n");
     put(root / "disruptor-mouse-aim.log", "event=ready\n");
     put(root / "settings.toml", R"(language_disc = "C:\\Users\\Alice\\d.cue")" "\n");
+    put(root / "keybinds.ini", "[player1]\nstart = Return\n");
     put(root / "bios" / "openbios.bin", "bios");
     put(root / "saves" / "card.mcd", "save");
     put(root / "disc" / "Disruptor.bin", "disc");
@@ -144,9 +145,10 @@ void test_a_report_takes_logs_and_settings_only() {
            "of the freeze dumps made since the run began the newest two");
     expect(read(plain.path / "startup.previous.log") == "the run before\n" && read(plain.path / "disruptor-mouse-aim.log") == "event=ready\n",
            "the run before and the mouse log are taken");
+    expect(read(plain.path / "keybinds.ini") == "[player1]\nstart = Return\n", "and the keys the game reads");
     size_t files = 0;
     for (const auto& entry : fs::recursive_directory_iterator(plain.path)) files += entry.is_regular_file();
-    expect(files == 9, "nothing else is taken: no BIOS, no save, no disc image, no executable, no file or folder or link that only looks like a dump");
+    expect(files == 10, "nothing else is taken: no BIOS, no save, no disc image, no executable, no file or folder or link that only looks like a dump");
     bool token_seen = false;
     for (const auto& entry : fs::recursive_directory_iterator(plain.path))
         token_seen = token_seen || (entry.is_regular_file() && read(entry.path()).find("DistinctiveToken0123") != std::string::npos);

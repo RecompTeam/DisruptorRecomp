@@ -309,8 +309,9 @@ require(
 report = read("src/launcher/report.cpp")
 playing = " ".join(read("docs/PLAYING.md").split())  # the guide is wrapped where it reads best
 require(
-    'constexpr std::array<const char*, 6> gathered = {"startup.log", "startup.previous.log", "disruptor-mouse-aim.log", "settings.toml",\n'
+    'constexpr std::array<const char*, 7> gathered = {"startup.log", "startup.previous.log", "disruptor-mouse-aim.log", "settings.toml",\n'
     in report
+    and '"keybinds.ini", "psx_last_run_report.json", "psx_freeze_heartbeat.json"};' in report
     and "        if (present) write(folder / name, without_user_names(end_of(root / name)));\n" in report
     and '    write(folder / "system.txt", without_user_names(note));\n' in report
     and "    if (!archive || !write_zip(folder, zip)) {\n        fs::remove(zip, failed);\n        return {folder, false};\n    }\n"
@@ -446,6 +447,11 @@ require(
     < runtime_main.index("static std::filesystem::path under_user_dir(")
     and runtime_main.count('user_dir_from_argv(argv[0]) / "settings.toml"') == 6
     and '    fs::path config_path = user_dir_from_argv(argv0) / "input.ini";\n' in runtime_main
+    and runtime_main.count("psx_keybinds_init(") == runtime_main.count("psx_keybinds_init(keybinds_folder(") == 5
+    and '        return (user_dir_from_argv(argv0) / "").string();\n' in runtime_main
+    and 'g_ovl_keybinds = keybinds_folder(argv0) + "keybinds.ini";' in runtime_main
+    and 'g_rui_keybinds_path = keybinds_folder(argv0) + "keybinds.ini";' in runtime_main
+    and '        return program.substr(0, program.find_last_of("/\\\\") + 1);\n' in runtime_main
     and "    return user_dir_from_argv(argv0) / filename;\n" in runtime_main
     and 'user_dir_from_argv(argv[0]) / "mods", game_id,' in runtime_main
     and 'std::string cache_dir = (user_dir_from_argv(argv[0]) / "cache").string();' in runtime_main
@@ -460,7 +466,7 @@ require(
     and 'in_user_folder("disruptor-mouse-aim.log")' in read("src/game/input/mouse_aim.cpp")
     and 'in_user_folder("disruptor-control-probe.log")' in read("src/game/input/control_probe.cpp")
     and "std::filesystem::path folder = disruptor::user_folder::prepare(program);" in read("src/game/host.cpp"),
-    "in the source, each writable path of the game, from settings to the notes of a crash, is named in the user folder "
+    "in the source, each writable path of the game, from settings and keys to the notes of a crash, is named in the user folder "
     "the game host gives before anything else runs, a configured memory card folder is moved there by the rule the "
     "user folder test checks, also from the binary's own folder (an AppImage's read-only mount), and exe_dir_from_argv "
     "is left only at its 25 program-file sites, each a read, the 25th the build's mod packages",

@@ -24,8 +24,8 @@ namespace fs = std::filesystem;
 namespace disruptor::launcher {
 namespace {
 
-constexpr std::array<const char*, 6> gathered = {"startup.log", "startup.previous.log", "disruptor-mouse-aim.log", "settings.toml",
-                                                 "psx_last_run_report.json", "psx_freeze_heartbeat.json"};
+constexpr std::array<const char*, 7> gathered = {"startup.log", "startup.previous.log", "disruptor-mouse-aim.log", "settings.toml",
+                                                 "keybinds.ini", "psx_last_run_report.json", "psx_freeze_heartbeat.json"};
 constexpr std::string_view freeze_dump = "psx_freeze_dump_";
 constexpr size_t most_freeze_dumps = 2;
 constexpr std::string_view started = "launcher: started ";

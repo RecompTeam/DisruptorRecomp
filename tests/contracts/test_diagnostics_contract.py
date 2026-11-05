@@ -158,8 +158,8 @@ require(
     "one times its lines, says each setting the menu saved and takes no more driver messages a frame than the queue holds",
 )
 require(
-    'constexpr std::array<const char*, 6> gathered = {"startup.log", "startup.previous.log", "disruptor-mouse-aim.log", "settings.toml",\n'
-    '                                                 "psx_last_run_report.json", "psx_freeze_heartbeat.json"};\n'
+    'constexpr std::array<const char*, 7> gathered = {"startup.log", "startup.previous.log", "disruptor-mouse-aim.log", "settings.toml",\n'
+    '                                                 "keybinds.ini", "psx_last_run_report.json", "psx_freeze_heartbeat.json"};\n'
     in report
     and "        if (made && *made >= began && plain_file(entry->path())) found.emplace_back(*made, name);\n" in report
     and "    return fs::is_regular_file(fs::symlink_status(file, missing));\n" in report
