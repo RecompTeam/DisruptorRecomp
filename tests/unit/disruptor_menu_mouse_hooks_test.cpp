@@ -46,7 +46,11 @@ constexpr uint32_t kTick = 0x80039450u;
 constexpr uint32_t kStrings = 0x80120000u;
 constexpr uint32_t kText = 0x80100000u, kOffsets = 0x80110000u;
 
-std::map<uint32_t, PSXModFunctionEntryCallback> g_hooks;
+/* Built on first use: the module registers its hooks from a constructor, which GCC may run before this file's globals. */
+std::map<uint32_t, PSXModFunctionEntryCallback> &hooks() {
+    static std::map<uint32_t, PSXModFunctionEntryCallback> registered;
+    return registered;
+}
 std::map<uint32_t, uint32_t> g_words;
 std::map<uint32_t, uint8_t> g_bytes;
 std::map<uint32_t, int> g_notes;
@@ -76,7 +80,7 @@ void draw(uint32_t returns, int32_t x, int32_t y, uint32_t string, uint32_t coun
     cpu.gpr[5] = static_cast<uint32_t>(x);
     cpu.gpr[6] = static_cast<uint32_t>(y);
     cpu.gpr[16] = counter;
-    g_hooks[kItemDraw](&cpu, kItemDraw);
+    hooks()[kItemDraw](&cpu, kItemDraw);
 }
 
 /* A pause line as the pause menu's function calls 0x800429DC: (list, string, x, y). */
@@ -86,12 +90,12 @@ void pause_line(uint32_t returns, int32_t x, int32_t y, uint32_t string) {
     cpu.gpr[5] = string;
     cpu.gpr[6] = static_cast<uint32_t>(x);
     cpu.gpr[7] = static_cast<uint32_t>(y);
-    g_hooks[rows::kPauseDraw](&cpu, rows::kPauseDraw);
+    hooks()[rows::kPauseDraw](&cpu, rows::kPauseDraw);
 }
 
 void tick() {
     CPUState cpu{};
-    g_hooks[kTick](&cpu, kTick);
+    hooks()[kTick](&cpu, kTick);
 }
 
 /* GENERAL OPTIONS as the game draws it: a title right of 208, its value from 220, RETURN TO MAIN MENU at 204. */
@@ -119,7 +123,7 @@ uint32_t cursor() { return g_words[rows::kCursor]; }
 /* DISRUPTOR_HOOK_REFUSED names, in hex, an address whose hook the runtime refuses. */
 int psx_mod_register_function_entry_plugin(const char *, uint32_t address, PSXModFunctionEntryCallback callback) {
     if (const char *refused = std::getenv("DISRUPTOR_HOOK_REFUSED"); refused && std::strtoul(refused, nullptr, 16) == address) return 0;
-    g_hooks[address] = callback;
+    hooks()[address] = callback;
     return 1;
 }
 
@@ -182,8 +186,8 @@ int psx_host_ui_game_input_captured(void) { return 0; }
 namespace {
 
 void test_registration() {
-    expect(g_hooks.size() == 5 && g_hooks.count(kItemDraw) && g_hooks.count(rows::kPauseDraw) && g_hooks.count(kTick) &&
-               g_hooks.count(0x8001D3D8u) && g_hooks.count(0x8001A794u),
+    expect(hooks().size() == 5 && hooks().count(kItemDraw) && hooks().count(rows::kPauseDraw) && hooks().count(kTick) &&
+               hooks().count(0x8001D3D8u) && hooks().count(0x8001A794u),
            "hooks on the item draw, the pause line draw, the tick, LOAD GAME's handler and the mission icons' draw");
     expect(disruptor_menu_pointing() == 0, "no screen has drawn: nothing points");
 }
@@ -422,7 +426,7 @@ constexpr uint32_t kDown = 0x4000u, kUp = 0x1000u, kChoice = 0x0040u, kTriangle 
 uint32_t load_frame(uint32_t pressed) {
     CPUState handler{};
     handler.gpr[4] = pressed;
-    g_hooks[kLoadHandler](&handler, kLoadHandler);
+    hooks()[kLoadHandler](&handler, kLoadHandler);
     draw(rows::kTitleDrawn, 0, 74, put(0, "SELECT SAVED GAME"));
     draw(rows::kReturnDrawn, 0, 204, put(1, "RETURN TO MAIN MENU"));
     CPUState name{};
@@ -430,10 +434,10 @@ uint32_t load_frame(uint32_t pressed) {
     name.gpr[4] = put(2, "HELLO");
     name.gpr[7] = 6u;
     name.gpr[16] = 1u;
-    g_hooks[kItemDraw](&name, kItemDraw);
+    hooks()[kItemDraw](&name, kItemDraw);
     draw(rows::kSecondDrawn, 138, 124, put(3, "TRITON"), 1u);
     CPUState icon{};
-    g_hooks[kIconDraw](&icon, kIconDraw);
+    hooks()[kIconDraw](&icon, kIconDraw);
     return handler.gpr[4];
 }
 
@@ -444,7 +448,7 @@ CPUState pause_line_at(uint32_t returns, uint32_t y, const char *text, uint32_t 
     cpu.gpr[7] = y;
     cpu.gpr[29] = 0x801FFF00u;
     g_words[cpu.gpr[29] + 16u] = 1u;
-    g_hooks[rows::kPauseDraw](&cpu, rows::kPauseDraw);
+    hooks()[rows::kPauseDraw](&cpu, rows::kPauseDraw);
     return cpu;
 }
 
@@ -704,7 +708,7 @@ void test_main_menu() {
 
 /* With LOAD GAME's handler hook refused the screen cannot open there: the game draws its own LOAD GAME. */
 int refused_handler() {
-    expect(!g_hooks.count(0x8001D3D8u) && g_hooks.count(kItemDraw), "the handler's hook was refused, the item draw's not");
+    expect(!hooks().count(0x8001D3D8u) && hooks().count(kItemDraw), "the handler's hook was refused, the item draw's not");
     g_words[rows::kScreen] = rows::kLoadGame;
     g_screen_ready = true;
     g_finished = 0;

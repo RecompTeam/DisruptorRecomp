@@ -478,7 +478,7 @@ require(
     and 'kind(root / ".portable") == fs::file_type::not_found ? Copy::installed : Copy::portable' in folder
     and "const fs::path data = disruptor::user_folder::prepare(program);" in window
     and '    platform::Variables given{{"PSX_USER_DIR", utf8(data)}};\n' in window
-    and '    launch.environment = platform::with(platform::environment(), given);\n' in window
+    and "    launch.environment = platform::with(platform::environment(), given);\n" in window
     and '{{"PSX_USER_DIR", utf8(trial)},' in upgrade
     and 'const fs::path trial = data / "cache" / "state-trial";' in upgrade
     and "carry" not in launcher_cmake
@@ -488,12 +488,15 @@ require(
 )
 
 package = read("tools/package_release.py")
-window_class = re.search(r'std::string_view window_class\(\) \{ return "([^"]+)"; \}', read("src/launcher/platform_posix.cpp"))
+window_class = re.search(
+    r'std::string_view window_class\(\) \{ return "([^"]+)"; \}', read("src/launcher/platform_posix.cpp")
+)
 require(
     window_class is not None
     and f'PACKAGE_ID = "{window_class.group(1)}"' in package
     and "std::string_view window_class() { return {}; }" in read("src/launcher/platform_windows.cpp")
-    and window.index("SDL_SetHint(SDL_HINT_APP_ID, std::string(name).c_str());") < window.index("if (!SDL_Init(SDL_INIT_VIDEO)) {")
+    and window.index("SDL_SetHint(SDL_HINT_APP_ID, std::string(name).c_str());")
+    < window.index("if (!SDL_Init(SDL_INIT_VIDEO)) {")
     and "    if (window) set_window_icon(window);\n" in window
     and 'given.emplace_back("SDL_APP_ID", std::string(name));' in window,
     "on Linux the launcher's and the game's windows carry the AppImage entry's StartupWMClass, Velopack's package id, "

@@ -9,7 +9,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-REGISTER = re.compile(r"psx_mod_register_function_entry_plugin\(\s*\"[^\"]+\"\s*,\s*([A-Za-z_:][A-Za-z0-9_:]*|0x[0-9A-Fa-f]+[uU]?)\s*,")
+REGISTER = re.compile(
+    r"psx_mod_register_function_entry_plugin\(\s*\"[^\"]+\"\s*,\s*([A-Za-z_:][A-Za-z0-9_:]*|0x[0-9A-Fa-f]+[uU]?)\s*,"
+)
 CALL = re.compile(r"\bpsx_mod_register_function_entry_plugin\s*\(")
 CONSTANT = r"\b{}\s*=\s*(0x[0-9A-Fa-f]+)u?\b"
 TABLE = r"\b{}\s*=\s*\{{([^}}]*)\}}"
@@ -58,7 +60,11 @@ class Sources:
             items = table.group(1)
         out = []
         for item in (part.strip() for part in items.strip("{}").split(",")):
-            out.append(int(item.rstrip("uU"), 16) if item.lower().startswith("0x") else self.constant(item.split("::")[-1], source))
+            out.append(
+                int(item.rstrip("uU"), 16)
+                if item.lower().startswith("0x")
+                else self.constant(item.split("::")[-1], source)
+            )
         return out
 
 
@@ -69,14 +75,20 @@ def main() -> int:
     registered: dict[int, set[str]] = {}
     for source in sources.paths:
         calls, read = len(CALL.findall(sources.text[source])), REGISTER.findall(sources.text[source])
-        require(calls == len(read), f"every hook registration in {source.relative_to(ROOT)} names its address so it can be read")
+        require(
+            calls == len(read),
+            f"every hook registration in {source.relative_to(ROOT)} names its address so it can be read",
+        )
         for token in read:
             for address in sources.values(token, source):
                 registered.setdefault(address, set()).add(str(source.relative_to(ROOT)))
     require(len(registered) >= 10, "the registrations are found")
     missing = sorted(address for address in registered if address not in game)
-    require(not missing, "hooks registered where the generator calls none: " +
-            ", ".join(f"0x{address:08X} ({', '.join(sorted(registered[address]))})" for address in missing))
+    require(
+        not missing,
+        "hooks registered where the generator calls none: "
+        + ", ".join(f"0x{address:08X} ({', '.join(sorted(registered[address]))})" for address in missing),
+    )
     print(f"entry hooks contract: {len(registered)} hooked functions, all called by the generated code")
     return 0
 
