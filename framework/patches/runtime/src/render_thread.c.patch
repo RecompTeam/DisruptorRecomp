@@ -1,0 +1,184 @@
+diff --git a/runtime/src/render_thread.c b/runtime/src/render_thread.c
+index 0cd14fdeb626cf748bfa89a86129b1160c7bb132..1414270eaa9e923dd13749176a6969406e6c6eee 100644
+--- a/runtime/src/render_thread.c
++++ b/runtime/src/render_thread.c
+@@ -6,8 +6,9 @@
+  * The consumer frees a record only after exec() returns, so a payload stays
+  * valid for the whole replay. Locks only guard sleeping: the sleeper raises
+  * its *_sleeping flag under the lock BEFORE re-checking its condition, and the
+- * waker publishes its position (seq_cst) BEFORE reading that flag, so a wake
+- * can never fall between a check and a wait. */
++ * waker publishes its position BEFORE reading that flag (seq_cst, or a release
++ * store and a seq_cst fence), so a wake can never fall between a check and a
++ * wait. The producer publishes its records in batches and before every wait. */
+ 
+ #include "render_thread.h"
+ 
+@@ -86,6 +87,9 @@
+  * much unread work is queued (frame ends, drains and acquires always wake). */
+ #define WAKE_BYTES   (128u * 1024u)
+ #define WAKE_RECORDS 256u
++/* Committed records reach the consumer this often; frame ends, drains and waits publish at once. */
++#define PUBLISH_BYTES   (16u * 1024u)
++#define PUBLISH_RECORDS 32u
+ #define SPIN_LOOPS   4096   /* consumer polls this long before sleeping */
+ 
+ #define ACQ_RING 64
+@@ -101,10 +105,13 @@
+     RtTickFn tick;
+     uint64_t tick_at;          /* consumer: next tick deadline (0 = none) */
+ 
+-    /* shared positions / counters */
+-    _Atomic uint64_t wpos, rpos;
+-    _Atomic uint64_t frames_produced, frames_consumed;
+-    _Atomic int      render_sleeping, emu_sleeping;
++    /* shared positions / counters, each writer's on lines of its own */
++    _Alignas(128) _Atomic uint64_t wpos;
++    _Atomic uint64_t frames_produced;
++    _Alignas(128) _Atomic uint64_t rpos;
++    _Atomic uint64_t frames_consumed;
++    _Atomic uint64_t busy_ns, idle_ns;   /* consumer */
++    _Alignas(128) _Atomic int render_sleeping, emu_sleeping;
+     _Atomic int      running;
+ 
+     /* hand-off + lifecycle, guarded by mtx */
+@@ -114,6 +121,9 @@
+     _Atomic int released;      /* read unlocked by emu_wait's first check */
+ 
+     /* producer-only */
++    _Alignas(128) uint64_t wend;       /* end of the committed records, published or not */
++    uint64_t rpos_seen;                /* the consumer's position when last read: it only grows */
++    uint64_t unpublished_bytes, unpublished_records;
+     uint64_t pend_start, pend_size, pend_payload_off;
+     uint16_t pend_op, pend_flags;
+     uint32_t pend_payload;
+@@ -125,7 +135,6 @@
+     /* stats (producer unless noted) */
+     uint64_t records, bytes, acquires, releases, oversize;
+     uint64_t bp_waits, full_waits, bp_ns, full_ns, acq_ns, high_water;
+-    _Atomic uint64_t busy_ns, idle_ns;   /* consumer */
+     _Atomic uint64_t bp_events;          /* producer writes, any thread reads */
+     RtAcquireEvent acq_ring[ACQ_RING];
+     uint64_t acq_n;
+@@ -265,10 +274,18 @@
+ 
+ /* ---- producer ------------------------------------------------------------ */
+ 
+-static void wake_render(int force) {
++/* Hands the committed records to the consumer; with `force`, or past the wake batch, also wakes it. */
++static void publish(int force) {
++    if (R.unpublished_records || R.unpublished_bytes) {
++        atomic_store_explicit(&R.wpos, R.wend, memory_order_release);
++        R.rpos_seen = atomic_load_explicit(&R.rpos, memory_order_acquire);   /* room_for trusts it: the replay's reads before reuse */
++        if (R.wend - R.rpos_seen > R.high_water) R.high_water = R.wend - R.rpos_seen;
++        R.unpublished_bytes = R.unpublished_records = 0;
++    }
+     if (!force && R.unwoken_bytes < WAKE_BYTES && R.unwoken_records < WAKE_RECORDS)
+         return;
+     R.unwoken_bytes = R.unwoken_records = 0;
++    atomic_thread_fence(memory_order_seq_cst);   /* the position's store before the flag's read */
+     if (atomic_load(&R.render_sleeping)) {
+         mtx_lock(&R.mtx);
+         cnd_bcast(&R.cv_work);
+@@ -280,7 +297,7 @@
+ typedef int (*Pred)(uint64_t arg);
+ static void emu_wait(Pred pred, uint64_t arg) {
+     if (pred(arg)) return;
+-    wake_render(1);
++    publish(1);
+     mtx_lock(&R.mtx);
+     atomic_store(&R.emu_sleeping, 1);
+     while (!pred(arg)) cnd_wait(&R.cv_emu, &R.mtx);
+@@ -291,6 +308,11 @@
+ static int pred_space(uint64_t need_end) {   /* need_end: wpos after the write */
+     return need_end - atomic_load(&R.rpos) <= R.cap;
+ }
++static int room_for(uint64_t need_end) {     /* the cached position first: it only falls short */
++    if (need_end - R.rpos_seen <= R.cap) return 1;
++    R.rpos_seen = atomic_load(&R.rpos);
++    return need_end - R.rpos_seen <= R.cap;
++}
+ static int pred_drained(uint64_t w) { return atomic_load(&R.rpos) == w; }
+ static int pred_frames(uint64_t limit) {
+     return atomic_load(&R.frames_produced) - atomic_load(&R.frames_consumed) <= limit;
+@@ -301,10 +323,10 @@
+     if (!rt_running() || R.pending || op == OP_PAD) return NULL;
+     uint64_t size = align_up(sizeof(RtCmd) + (uint64_t)payload_bytes);
+     if (size > R.cap / 2) { R.oversize++; return NULL; }
+-    uint64_t w = atomic_load_explicit(&R.wpos, memory_order_relaxed);
++    uint64_t w = R.wend;
+     uint64_t off = w & R.mask;
+     uint64_t pad = (off + size > R.cap) ? R.cap - off : 0;
+-    if (!pred_space(w + pad + size)) {
++    if (!room_for(w + pad + size)) {
+         uint64_t t0 = now_ns();
+         R.full_waits++;
+         emu_wait(pred_space, w + pad + size);
+@@ -332,25 +354,39 @@
+ void rt_cmd_commit(void) {
+     if (!R.pending) return;
+     R.pending = 0;
+-    uint64_t end = R.pend_start + R.pend_size;
+-    atomic_store(&R.wpos, end);
++    R.wend = R.pend_start + R.pend_size;
+     R.records++;
+     R.bytes += R.pend_size;
+-    uint64_t depth = end - atomic_load(&R.rpos);
+-    if (depth > R.high_water) R.high_water = depth;
+     R.unwoken_bytes += R.pend_size;
+     R.unwoken_records++;
+-    wake_render(0);
++    R.unpublished_bytes += R.pend_size;
++    R.unpublished_records++;
++    if (R.unpublished_records >= PUBLISH_RECORDS || R.unpublished_bytes >= PUBLISH_BYTES ||
++        R.unwoken_records >= WAKE_RECORDS || R.unwoken_bytes >= WAKE_BYTES)
++        publish(0);
++}
++
++void rt_cmd_commit_bytes(uint32_t payload_bytes) {
++    if (!R.pending) return;
++    const uint64_t size = align_up(sizeof(RtCmd) + (uint64_t)payload_bytes);
++    if (size <= R.pend_size) {
++        RtCmd *c = (RtCmd *)(R.ring + (R.pend_start & R.mask));
++        c->size = (uint32_t)size;
++        c->payload = payload_bytes;
++        R.pend_size = size;
++    }
++    rt_cmd_commit();
+ }
+ 
+ static void commit_marker(uint16_t flags) {
+-    uint64_t w = atomic_load_explicit(&R.wpos, memory_order_relaxed);
++    uint64_t w = R.wend;
+     uint64_t off = w & R.mask;
+     uint64_t size = sizeof(RtCmd);
+-    if (!pred_space(w + size)) emu_wait(pred_space, w + size);
++    if (!room_for(w + size)) emu_wait(pred_space, w + size);
+     RtCmd *c = (RtCmd *)(R.ring + off);   /* 16 bytes always fit before the end */
+     c->size = (uint32_t)size; c->op = OP_PAD; c->flags = flags; c->payload = 0; c->seq = R.seq++;
+-    atomic_store(&R.wpos, w + size);
++    R.wend = w + size;
++    R.unpublished_records++;
+ }
+ 
+ void rt_frame_end(void) {
+@@ -364,7 +400,7 @@
+     }
+     atomic_fetch_add(&R.frames_produced, 1);
+     commit_marker(F_FRAME);
+-    wake_render(1);
++    publish(1);
+     if (!pred_frames((uint64_t)R.max_frames)) {
+         uint64_t t0 = now_ns();
+         R.bp_waits++;
+@@ -382,8 +418,8 @@
+ 
+ void rt_drain(void) {
+     if (!rt_running() || R.held) return;
+-    uint64_t w = atomic_load(&R.wpos);
+-    emu_wait(pred_drained, w);
++    publish(1);
++    emu_wait(pred_drained, R.wend);
+ }
+ 
+ void rt_acquire(const char *reason) {

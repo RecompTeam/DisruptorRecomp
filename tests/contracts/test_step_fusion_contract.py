@@ -7,6 +7,7 @@ real output between a run's steps, and the check must name it.
 """
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
@@ -28,6 +29,45 @@ codegen = read("psxrecomp/recompiler/src/code_generator.cpp")
 cyc = read("psxrecomp/runtime/include/psx_cyc.h")
 cycles = read("psxrecomp/runtime/src/psx_cycles.c")
 cmake = read("CMakeLists.txt")
+span = read("psxrecomp/runtime/include/psx_native_span.h")
+
+
+def span_noops_missing(header: str, fused: int) -> list[str]:
+    """The cycle steps the native-span branch of the header does not make a no-op at its top level."""
+    opening = "#if defined(PSX_NATIVE_CPU_SPANS) && PSX_NATIVE_CPU_SPANS\n"
+    closing = "\n#else\nstatic inline void psx_native_span_charge(uint32_t cycles) { (void)cycles; }"
+    if header.count(opening) != 1 or header.count(closing) != 1:
+        return ["the native-span branch"]
+    active = header.split(opening, 1)[1].rsplit(closing, 1)[0]
+    missing = []
+    for name in ["psx_cyc_step", *(f"psx_cyc_step{arity}" for arity in range(2, fused + 1))]:
+        found = re.search(rf"^#define {name}\(([^)]*)\) (.*)$", active, re.MULTILINE)
+        if found is None:
+            missing.append(name)
+            continue
+        before = active[: found.start()].splitlines()
+        depth = sum(line.startswith("#if") for line in before) - sum(line.startswith("#endif") for line in before)
+        parameters = [parameter.strip() for parameter in found.group(1).split(",")]
+        if depth != 0 or found.group(2).strip() != "(" + ", ".join(f"(void)({p})" for p in parameters) + ")":
+            missing.append(name)
+    return missing
+
+
+fused_most = re.search(r"kFusedStepsMax = (\d+);", codegen)
+require(fused_most is not None, "the generator names the most steps it fuses")
+fused = int(fused_most.group(1))
+require(
+    not span_noops_missing(span, fused),
+    "under native spans every fused step is a no-op as the single step is: the span already charged its instructions",
+)
+step2 = "#define psx_cyc_step2(cpu, a, b) ((void)(cpu), (void)(a), (void)(b))\n"
+require(step2 in span, "the two-step no-op is where the check expects it")
+for broken, what in (
+    (span.replace(step2, "#define psx_cyc_step2(cpu, a, b) psx_cyc_charge_ones(2u)\n"), "a fused step that charges"),
+    (span.replace(step2, "#if 0\n" + step2 + "#endif\n"), "a fused no-op in a branch that is not taken"),
+    (span.replace(step2, "") + "\n" + step2, "a fused no-op outside the native-span branch"),
+):
+    require(span_noops_missing(broken, fused) == ["psx_cyc_step2"], f"the no-op check refuses {what}")
 
 require(
     "    if (!cycle_per_insn) return ss.str();\n    const std::string block_text = ss.str();\n"

@@ -3,6 +3,12 @@
 
 #include "gpu_temporal_match.h"
 #include <string.h>
+#if !defined(GPU_TEMPORAL_CAMERA_SCALAR) && (defined(__SSE2__) || defined(_M_X64) || defined(_M_AMD64))
+#define GPU_TEMPORAL_CAMERA_SSE2 1
+#include <emmintrin.h>
+#else
+#define GPU_TEMPORAL_CAMERA_SSE2 0
+#endif
 
 /* Welds need exact current XY and GTE depth, or a complete oppositely traversed shared edge. Texture q is never a key. */
 typedef struct GpuTemporalMeshStats {
@@ -144,9 +150,10 @@ static inline int gpu_temporal_camera_solve(double (*normal)[GPU_TEMPORAL_CAMERA
 
 static inline int gpu_temporal_mesh_known_depth(float depth);
 
-typedef struct GpuTemporalCameraSample {
-    double u, v, w, tx, ty;
-} GpuTemporalCameraSample;
+/* One array a field, so two samples take the same arithmetic at once. */
+typedef struct GpuTemporalCameraSamples {
+    double *u, *v, *w, *tx, *ty;
+} GpuTemporalCameraSamples;
 
 static inline int gpu_temporal_camera_pair_valid(const GpuTemporalTriangle *before,
                                                  const GpuTemporalTriangle *now) {
@@ -159,58 +166,233 @@ static inline int gpu_temporal_camera_pair_valid(const GpuTemporalTriangle *befo
     return ratio >= 0.25 && ratio <= 4.0;
 }
 
-static inline int gpu_temporal_camera_agrees(const double *m, const GpuTemporalCameraSample *sample,
+static inline int gpu_temporal_camera_agrees(const double *m, const GpuTemporalCameraSamples *samples, int index,
                                              double limit) {
-    const double denominator = m[8] * sample->u + m[9] * sample->v + 1.0 + m[10] * sample->w;
+    const double u = samples->u[index], v = samples->v[index], w = samples->w[index];
+    const double denominator = m[8] * u + m[9] * v + 1.0 + m[10] * w;
     double dx, dy;
     if (!(denominator > 0.25 && denominator < 4.0)) return 0;
-    dx = (m[0] * sample->u + m[1] * sample->v + m[2] + m[3] * sample->w) / denominator - sample->tx;
-    dy = (m[4] * sample->u + m[5] * sample->v + m[6] + m[7] * sample->w) / denominator - sample->ty;
+    dx = (m[0] * u + m[1] * v + m[2] + m[3] * w) / denominator - samples->tx[index];
+    dy = (m[4] * u + m[5] * v + m[6] + m[7] * w) / denominator - samples->ty[index];
     return dx * dx + dy * dy <= limit * limit;
 }
 
-static inline int gpu_temporal_camera_count(const double *m, const GpuTemporalCameraSample *samples,
-                                            int count, double limit) {
-    int agreeing = 0;
-    for (int index = 0; index < count; ++index)
-        agreeing += gpu_temporal_camera_agrees(m, &samples[index], limit);
+#if GPU_TEMPORAL_CAMERA_SSE2
+/* Bits 0 and 1 for samples `index` and `index + 1`: the scalar test's operations in its order, so the same answer. */
+static inline int gpu_temporal_camera_agrees2(const __m128d *m, const GpuTemporalCameraSamples *samples, int index,
+                                              __m128d limit2) {
+    const __m128d u = _mm_loadu_pd(samples->u + index), v = _mm_loadu_pd(samples->v + index);
+    const __m128d w = _mm_loadu_pd(samples->w + index);
+    const __m128d denominator = _mm_add_pd(
+        _mm_add_pd(_mm_add_pd(_mm_mul_pd(m[8], u), _mm_mul_pd(m[9], v)), _mm_set1_pd(1.0)), _mm_mul_pd(m[10], w));
+    const __m128d valid = _mm_and_pd(_mm_cmpgt_pd(denominator, _mm_set1_pd(0.25)),
+                                     _mm_cmplt_pd(denominator, _mm_set1_pd(4.0)));
+    const __m128d dx = _mm_sub_pd(
+        _mm_div_pd(_mm_add_pd(_mm_add_pd(_mm_add_pd(_mm_mul_pd(m[0], u), _mm_mul_pd(m[1], v)), m[2]),
+                              _mm_mul_pd(m[3], w)), denominator),
+        _mm_loadu_pd(samples->tx + index));
+    const __m128d dy = _mm_sub_pd(
+        _mm_div_pd(_mm_add_pd(_mm_add_pd(_mm_add_pd(_mm_mul_pd(m[4], u), _mm_mul_pd(m[5], v)), m[6]),
+                              _mm_mul_pd(m[7], w)), denominator),
+        _mm_loadu_pd(samples->ty + index));
+    const __m128d within = _mm_cmple_pd(_mm_add_pd(_mm_mul_pd(dx, dx), _mm_mul_pd(dy, dy)), limit2);
+    return _mm_movemask_pd(_mm_and_pd(valid, within));
+}
+#endif
+
+/* Samples within `limit`, or any number not above `floor` once the rest could no longer lift the count above it. */
+static inline int gpu_temporal_camera_count(const double *m, const GpuTemporalCameraSamples *samples, int count,
+                                            double limit, int floor) {
+    int agreeing = 0, index = 0;
+#if GPU_TEMPORAL_CAMERA_SSE2
+    __m128d terms[GPU_TEMPORAL_CAMERA_TERMS];
+    const __m128d limit2 = _mm_set1_pd(limit * limit);
+    for (int term = 0; term < GPU_TEMPORAL_CAMERA_TERMS; ++term) terms[term] = _mm_set1_pd(m[term]);
+    for (; index + 2 <= count; index += 2) {
+        int mask;
+        if (!(index & 63) && agreeing + (count - index) <= floor) return agreeing;
+        mask = gpu_temporal_camera_agrees2(terms, samples, index, limit2);
+        agreeing += (mask & 1) + (mask >> 1);
+    }
+#endif
+    for (; index < count; ++index) {
+        if (!(index & 63) && agreeing + (count - index) <= floor) return agreeing;
+        agreeing += gpu_temporal_camera_agrees(m, samples, index, limit);
+    }
     return agreeing;
 }
 
-static inline void gpu_temporal_camera_accumulate(
-        double (*normal)[GPU_TEMPORAL_CAMERA_TERMS + 1], const GpuTemporalCameraSample *sample) {
-    enum { N = GPU_TEMPORAL_CAMERA_TERMS };
-    double rows[2][GPU_TEMPORAL_CAMERA_TERMS + 1];
-    memset(rows, 0, sizeof(rows));
-    rows[0][0] = sample->u; rows[0][1] = sample->v; rows[0][2] = 1.0; rows[0][3] = sample->w;
-    rows[0][8] = -sample->tx * sample->u; rows[0][9] = -sample->tx * sample->v;
-    rows[0][10] = -sample->tx * sample->w; rows[0][N] = sample->tx;
-    rows[1][4] = sample->u; rows[1][5] = sample->v; rows[1][6] = 1.0; rows[1][7] = sample->w;
-    rows[1][8] = -sample->ty * sample->u; rows[1][9] = -sample->ty * sample->v;
-    rows[1][10] = -sample->ty * sample->w; rows[1][N] = sample->ty;
-    for (int r = 0; r < 2; ++r)
-        for (int i = 0; i < N; ++i) {
-            if (rows[r][i] == 0.0) continue;
-            for (int k = 0; k <= N; ++k) normal[i][k] += rows[r][i] * rows[r][k];
+/* The normal equations' distinct sums, each lane summed in sample order, so every entry is the full sum's bits:
+ * 0..9 the (u, v, 1, w) products, 10..25 and 26..41 those times the x and y row ends, 42..50 the two rows' shared terms. */
+#define GPU_TEMPORAL_CAMERA_SUMS 52
+typedef struct GpuTemporalCameraSums {
+    double sum[GPU_TEMPORAL_CAMERA_SUMS];
+} GpuTemporalCameraSums;
+
+static const unsigned char gpu_temporal_camera_plain_left[10] = {0, 0, 0, 0, 1, 1, 1, 2, 2, 3};
+static const unsigned char gpu_temporal_camera_plain_right[10] = {0, 1, 2, 3, 1, 2, 3, 2, 3, 3};
+static const unsigned char gpu_temporal_camera_shared_left[9] = {0, 0, 0, 1, 1, 2, 0, 1, 2};
+static const unsigned char gpu_temporal_camera_shared_right[9] = {0, 1, 2, 1, 2, 2, 3, 3, 3};
+
+static inline void gpu_temporal_camera_sums_add(GpuTemporalCameraSums *sums, const GpuTemporalCameraSamples *samples,
+                                                int index) {
+    const double u = samples->u[index], v = samples->v[index], w = samples->w[index];
+    const double tx = samples->tx[index], ty = samples->ty[index];
+    const double a[4] = {u, v, 1.0, w};
+    const double c[4] = {-tx * u, -tx * v, -tx * w, tx}, d[4] = {-ty * u, -ty * v, -ty * w, ty};
+    double *s = sums->sum;
+#if GPU_TEMPORAL_CAMERA_SSE2
+#define GPU_TEMPORAL_CAMERA_LANES(at, x, y) \
+    _mm_storeu_pd(s + (at), _mm_add_pd(_mm_loadu_pd(s + (at)), _mm_mul_pd((x), (y))))
+#define GPU_TEMPORAL_CAMERA_SHARED(at, cx, cy, dx, dy) \
+    _mm_storeu_pd(s + (at), _mm_add_pd(_mm_add_pd(_mm_loadu_pd(s + (at)), _mm_mul_pd((cx), (cy))), _mm_mul_pd((dx), (dy))))
+    const __m128d c01 = _mm_set_pd(c[1], c[0]), c2x = _mm_set_pd(tx, c[2]);
+    const __m128d d01 = _mm_set_pd(d[1], d[0]), d2y = _mm_set_pd(ty, d[2]);
+    GPU_TEMPORAL_CAMERA_LANES(0, _mm_set1_pd(u), _mm_set_pd(v, u));
+    GPU_TEMPORAL_CAMERA_LANES(2, _mm_set1_pd(u), _mm_set_pd(w, 1.0));
+    GPU_TEMPORAL_CAMERA_LANES(4, _mm_set1_pd(v), _mm_set_pd(1.0, v));
+    GPU_TEMPORAL_CAMERA_LANES(6, _mm_set_pd(1.0, v), _mm_set_pd(1.0, w));
+    GPU_TEMPORAL_CAMERA_LANES(8, _mm_set_pd(w, 1.0), _mm_set1_pd(w));
+    for (int i = 0; i < 4; ++i) {
+        const __m128d ai = _mm_set1_pd(a[i]);
+        GPU_TEMPORAL_CAMERA_LANES(10 + 4 * i, ai, c01);
+        GPU_TEMPORAL_CAMERA_LANES(12 + 4 * i, ai, c2x);
+        GPU_TEMPORAL_CAMERA_LANES(26 + 4 * i, ai, d01);
+        GPU_TEMPORAL_CAMERA_LANES(28 + 4 * i, ai, d2y);
+    }
+    GPU_TEMPORAL_CAMERA_SHARED(42, _mm_set1_pd(c[0]), c01, _mm_set1_pd(d[0]), d01);
+    GPU_TEMPORAL_CAMERA_SHARED(44, c01, _mm_set_pd(c[1], c[2]), d01, _mm_set_pd(d[1], d[2]));
+    GPU_TEMPORAL_CAMERA_SHARED(46, _mm_set_pd(c[2], c[1]), _mm_set1_pd(c[2]), _mm_set_pd(d[2], d[1]),
+                               _mm_set1_pd(d[2]));
+    GPU_TEMPORAL_CAMERA_SHARED(48, c01, _mm_set1_pd(tx), d01, _mm_set1_pd(ty));
+    s[50] = s[50] + c[2] * tx + d[2] * ty;
+#undef GPU_TEMPORAL_CAMERA_LANES
+#undef GPU_TEMPORAL_CAMERA_SHARED
+#else
+    for (int lane = 0; lane < 10; ++lane)
+        s[lane] += a[gpu_temporal_camera_plain_left[lane]] * a[gpu_temporal_camera_plain_right[lane]];
+    for (int i = 0; i < 4; ++i)
+        for (int k = 0; k < 4; ++k) {
+            s[10 + 4 * i + k] += a[i] * c[k];
+            s[26 + 4 * i + k] += a[i] * d[k];
         }
+    for (int lane = 0; lane < 9; ++lane) {
+        const int i = gpu_temporal_camera_shared_left[lane], k = gpu_temporal_camera_shared_right[lane];
+        s[42 + lane] = s[42 + lane] + c[i] * c[k] + d[i] * d[k];
+    }
+#endif
 }
 
-static inline int gpu_temporal_camera_refit(const double *reference, double limit,
-                                            const GpuTemporalCameraSample *samples, int count,
-                                            double *out) {
-    double normal[GPU_TEMPORAL_CAMERA_TERMS][GPU_TEMPORAL_CAMERA_TERMS + 1];
-    int used = 0;
-    memset(normal, 0, sizeof(normal));
-    for (int index = 0; index < count; ++index) {
-        if (reference && !gpu_temporal_camera_agrees(reference, &samples[index], limit)) continue;
-        gpu_temporal_camera_accumulate(normal, &samples[index]);
-        ++used;
+/* Rows (u, v, 1, w, 0, 0, 0, 0, -tx u, -tx v, -tx w | tx) and (0, 0, 0, 0, u, v, 1, w, -ty u, -ty v, -ty w | ty). */
+static inline void gpu_temporal_camera_normal(const GpuTemporalCameraSums *sums,
+                                              double (*normal)[GPU_TEMPORAL_CAMERA_TERMS + 1]) {
+    const double *s = sums->sum;
+    memset(normal, 0, sizeof(double) * GPU_TEMPORAL_CAMERA_TERMS * (GPU_TEMPORAL_CAMERA_TERMS + 1));
+    for (int lane = 0; lane < 10; ++lane) {
+        const int i = gpu_temporal_camera_plain_left[lane], k = gpu_temporal_camera_plain_right[lane];
+        normal[i][k] = s[lane];
+        normal[k][i] = s[lane];
+        normal[4 + i][4 + k] = s[lane];
+        normal[4 + k][4 + i] = s[lane];
     }
-    return used >= GPU_TEMPORAL_CAMERA_MIN_INLIERS && gpu_temporal_camera_solve(normal, out);
+    for (int i = 0; i < 4; ++i)
+        for (int k = 0; k < 4; ++k) {
+            normal[i][8 + k] = s[10 + 4 * i + k];
+            normal[4 + i][8 + k] = s[26 + 4 * i + k];
+            if (k < 3) {
+                normal[8 + k][i] = s[10 + 4 * i + k];
+                normal[8 + k][4 + i] = s[26 + 4 * i + k];
+            }
+        }
+    for (int lane = 0; lane < 9; ++lane) {
+        const int i = 8 + gpu_temporal_camera_shared_left[lane], k = 8 + gpu_temporal_camera_shared_right[lane];
+        normal[i][k] = s[42 + lane];
+        if (k < GPU_TEMPORAL_CAMERA_TERMS) normal[k][i] = s[42 + lane];
+    }
+}
+
+/* `agreeing`, when given, gets how many samples `reference` puts within `limit`. */
+static inline int gpu_temporal_camera_refit(const double *reference, double limit,
+                                            const GpuTemporalCameraSamples *samples, int count, double *out,
+                                            int *agreeing) {
+    GpuTemporalCameraSums sums;
+    double normal[GPU_TEMPORAL_CAMERA_TERMS][GPU_TEMPORAL_CAMERA_TERMS + 1];
+    int used = 0, index = 0;
+    memset(&sums, 0, sizeof(sums));
+    if (!reference) {
+        for (; index < count; ++index) gpu_temporal_camera_sums_add(&sums, samples, index);
+        used = count;
+    } else {
+#if GPU_TEMPORAL_CAMERA_SSE2
+        __m128d terms[GPU_TEMPORAL_CAMERA_TERMS];
+        const __m128d limit2 = _mm_set1_pd(limit * limit);
+        for (int term = 0; term < GPU_TEMPORAL_CAMERA_TERMS; ++term) terms[term] = _mm_set1_pd(reference[term]);
+        for (; index + 2 <= count; index += 2) {
+            const int mask = gpu_temporal_camera_agrees2(terms, samples, index, limit2);
+            if (mask & 1) { gpu_temporal_camera_sums_add(&sums, samples, index); ++used; }
+            if (mask & 2) { gpu_temporal_camera_sums_add(&sums, samples, index + 1); ++used; }
+        }
+#endif
+        for (; index < count; ++index)
+            if (gpu_temporal_camera_agrees(reference, samples, index, limit)) {
+                gpu_temporal_camera_sums_add(&sums, samples, index);
+                ++used;
+            }
+    }
+    if (agreeing) *agreeing = used;
+    if (used < GPU_TEMPORAL_CAMERA_MIN_INLIERS) return 0;
+    gpu_temporal_camera_normal(&sums, normal);
+    return gpu_temporal_camera_solve(normal, out);
 }
 
 #define GPU_TEMPORAL_CAMERA_DRAWS 64
 #define GPU_TEMPORAL_CAMERA_TRUSTED_CORNERS 36
+
+/* RANSAC over the first `voters` samples, then refits over all `count`. */
+static inline int gpu_temporal_camera_search(const GpuTemporalCameraSamples *samples, int count, int voters,
+                                             const GpuTemporalCamera *prior, GpuTemporalCamera *camera) {
+    static const double limits[4] = {2.0, 1.0, GPU_TEMPORAL_CAMERA_TOLERANCE,
+                                     GPU_TEMPORAL_CAMERA_TOLERANCE};
+    double best[GPU_TEMPORAL_CAMERA_TERMS], trial[GPU_TEMPORAL_CAMERA_TERMS];
+    int faces = voters / 3, best_count = -1, agreeing;
+    unsigned random = 0x9E3779B9u;
+    if (prior && prior->inliers > 0) {
+        memcpy(best, prior->m, sizeof(best));
+        best_count = gpu_temporal_camera_count(best, samples, voters, 1.0, -1);
+    }
+    if (gpu_temporal_camera_refit(NULL, 0.0, samples, voters, trial, NULL)) {
+        agreeing = gpu_temporal_camera_count(trial, samples, voters, 1.0, best_count);
+        if (agreeing > best_count) { best_count = agreeing; memcpy(best, trial, sizeof(best)); }
+    }
+    for (int draw = 0; draw < GPU_TEMPORAL_CAMERA_DRAWS && faces >= 3; ++draw) {
+        GpuTemporalCameraSums sums;
+        double normal[GPU_TEMPORAL_CAMERA_TERMS][GPU_TEMPORAL_CAMERA_TERMS + 1];
+        int picked[3];
+        for (int slot = 0; slot < 3; ++slot) {
+            random = random * 1664525u + 1013904223u;
+            picked[slot] = (int)((random >> 8) % (unsigned)faces);
+        }
+        if (picked[0] == picked[1] || picked[0] == picked[2] || picked[1] == picked[2]) continue;
+        memset(&sums, 0, sizeof(sums));
+        for (int slot = 0; slot < 3; ++slot)
+            for (int vertex = 0; vertex < 3; ++vertex)
+                gpu_temporal_camera_sums_add(&sums, samples, picked[slot] * 3 + vertex);
+        gpu_temporal_camera_normal(&sums, normal);
+        if (!gpu_temporal_camera_solve(normal, trial)) continue;
+        agreeing = gpu_temporal_camera_count(trial, samples, voters, 1.0, best_count);
+        if (agreeing > best_count) { best_count = agreeing; memcpy(best, trial, sizeof(best)); }
+    }
+    if (best_count < GPU_TEMPORAL_CAMERA_MIN_INLIERS || best_count * 3 < voters) return 0;
+    for (int pass = 0; pass < 4; ++pass) {
+        int held;
+        if (gpu_temporal_camera_refit(best, limits[pass], samples, count, trial, &held) &&
+            gpu_temporal_camera_count(trial, samples, count, limits[pass], held - 1) >= held)
+            memcpy(best, trial, sizeof(best));
+    }
+    memcpy(camera->m, best, sizeof(best));
+    camera->inliers = gpu_temporal_camera_count(best, samples, count, GPU_TEMPORAL_CAMERA_TOLERANCE, -1);
+    return camera->inliers >= GPU_TEMPORAL_CAMERA_MIN_INLIERS;
+}
 
 /* Repeated textures on a fast turn make a wall of wrong picks agree with itself, so `trusted` pairs vote when there are enough. */
 static inline int gpu_temporal_camera_fit(
@@ -218,18 +400,20 @@ static inline int gpu_temporal_camera_fit(
         const GpuTemporalTriangle *curr, int curr_n, const int *pairs,
         const int *trusted, const GpuTemporalCamera *prior,
         GpuTemporalCamera *camera) {
-    static const double limits[4] = {2.0, 1.0, GPU_TEMPORAL_CAMERA_TOLERANCE,
-                                     GPU_TEMPORAL_CAMERA_TOLERANCE};
-    GpuTemporalCameraSample *samples;
-    double best[GPU_TEMPORAL_CAMERA_TERMS], trial[GPU_TEMPORAL_CAMERA_TERMS];
-    int count = 0, faces, best_count = -1, agreeing, voters;
-    unsigned random = 0x9E3779B9u;
+    GpuTemporalCameraSamples samples;
+    double *store;
+    const size_t room = (size_t)(curr_n > 0 ? curr_n : 0) * 3;
+    int count = 0, voters = 0, found;
     memset(camera, 0, sizeof(*camera));
     camera->scale = 1.0;
     if (curr_n <= 0) return 0;
-    samples = (GpuTemporalCameraSample *)malloc((size_t)curr_n * 3 * sizeof(*samples));
-    if (!samples) return 0;
-    voters = 0;
+    store = (double *)malloc(room * 5 * sizeof(*store));
+    if (!store) return 0;
+    samples.u = store;
+    samples.v = store + room;
+    samples.w = store + room * 2;
+    samples.tx = store + room * 3;
+    samples.ty = store + room * 4;
     for (int pass = 0; pass < 2; ++pass)
     for (int triangle = 0; triangle < curr_n; ++triangle) {
         const int previous = pairs[triangle];
@@ -240,61 +424,45 @@ static inline int gpu_temporal_camera_fit(
             !gpu_temporal_mesh_known_depth(curr[triangle].depth[0]) ||
             !gpu_temporal_mesh_known_depth(curr[triangle].depth[1]) ||
             !gpu_temporal_mesh_known_depth(curr[triangle].depth[2])) continue;
-        for (int vertex = 0; vertex < 3; ++vertex) {
-            GpuTemporalCameraSample *sample = &samples[count++];
-            sample->u = gpu_temporal_camera_u(curr[triangle].x[vertex]);
-            sample->v = gpu_temporal_camera_v(curr[triangle].y[vertex]);
-            sample->w = 256.0 / (double)curr[triangle].depth[vertex];
-            sample->tx = prev[previous].x[vertex];
-            sample->ty = prev[previous].y[vertex];
+        for (int vertex = 0; vertex < 3; ++vertex, ++count) {
+            samples.u[count] = gpu_temporal_camera_u(curr[triangle].x[vertex]);
+            samples.v[count] = gpu_temporal_camera_v(curr[triangle].y[vertex]);
+            samples.w[count] = 256.0 / (double)curr[triangle].depth[vertex];
+            samples.tx[count] = prev[previous].x[vertex];
+            samples.ty[count] = prev[previous].y[vertex];
         }
         if (pass == 0) voters = count;
     }
     camera->samples = count;
-    if (count < GPU_TEMPORAL_CAMERA_MIN_INLIERS) { free(samples); return 0; }
+    if (count < GPU_TEMPORAL_CAMERA_MIN_INLIERS) { free(store); return 0; }
     if (voters < GPU_TEMPORAL_CAMERA_TRUSTED_CORNERS) voters = count;
-    faces = voters / 3;
-    if (prior && prior->inliers > 0) {
-        memcpy(best, prior->m, sizeof(best));
-        best_count = gpu_temporal_camera_count(best, samples, voters, 1.0);
-    }
-    if (gpu_temporal_camera_refit(NULL, 0.0, samples, voters, trial)) {
-        agreeing = gpu_temporal_camera_count(trial, samples, voters, 1.0);
-        if (agreeing > best_count) { best_count = agreeing; memcpy(best, trial, sizeof(best)); }
-    }
-    for (int draw = 0; draw < GPU_TEMPORAL_CAMERA_DRAWS && faces >= 3; ++draw) {
-        double normal[GPU_TEMPORAL_CAMERA_TERMS][GPU_TEMPORAL_CAMERA_TERMS + 1];
-        int picked[3];
-        memset(normal, 0, sizeof(normal));
-        for (int slot = 0; slot < 3; ++slot) {
-            random = random * 1664525u + 1013904223u;
-            picked[slot] = (int)((random >> 8) % (unsigned)faces);
-        }
-        if (picked[0] == picked[1] || picked[0] == picked[2] || picked[1] == picked[2]) continue;
-        for (int slot = 0; slot < 3; ++slot)
-            for (int vertex = 0; vertex < 3; ++vertex)
-                gpu_temporal_camera_accumulate(normal, &samples[picked[slot] * 3 + vertex]);
-        if (!gpu_temporal_camera_solve(normal, trial)) continue;
-        agreeing = gpu_temporal_camera_count(trial, samples, voters, 1.0);
-        if (agreeing > best_count) { best_count = agreeing; memcpy(best, trial, sizeof(best)); }
-    }
-    if (best_count < GPU_TEMPORAL_CAMERA_MIN_INLIERS || best_count * 3 < voters) { free(samples); return 0; }
-    for (int pass = 0; pass < 4; ++pass)
-        if (gpu_temporal_camera_refit(best, limits[pass], samples, count, trial) &&
-            gpu_temporal_camera_count(trial, samples, count, limits[pass]) >=
-                gpu_temporal_camera_count(best, samples, count, limits[pass]))
-            memcpy(best, trial, sizeof(best));
-    memcpy(camera->m, best, sizeof(best));
-    camera->inliers = gpu_temporal_camera_count(best, samples, count, GPU_TEMPORAL_CAMERA_TOLERANCE);
-    free(samples);
-    return camera->inliers >= GPU_TEMPORAL_CAMERA_MIN_INLIERS;
+    found = gpu_temporal_camera_search(&samples, count, voters, prior, camera);
+    free(store);
+    return found;
 }
 
 #define GPU_TEMPORAL_CAMERA_SCALE_CORNERS 12
 
-static inline int gpu_temporal_compare_double(const void *left, const void *right) {
-    const double a = *(const double *)left, b = *(const double *)right;
-    return (a > b) - (a < b);
+/* The value a sort would leave at `rank`; the rest end in no particular order. */
+static inline double gpu_temporal_select_double(double *values, int count, int rank) {
+    int low = 0, high = count - 1;
+    while (low < high) {
+        const double pivot = values[low + (high - low) / 2];
+        int i = low, j = high;
+        while (i <= j) {
+            while (values[i] < pivot) ++i;
+            while (values[j] > pivot) --j;
+            if (i <= j) {
+                const double swap = values[i];
+                values[i++] = values[j];
+                values[j--] = swap;
+            }
+        }
+        if (rank <= j) high = j;
+        else if (rank >= i) low = i;
+        else break;
+    }
+    return values[rank];
 }
 
 /* Median of the depth ratios identical faces give, 0 when too few. */
@@ -319,8 +487,7 @@ static inline double gpu_temporal_camera_depth_scale(
         }
     }
     if (count >= GPU_TEMPORAL_CAMERA_SCALE_CORNERS) {
-        qsort(ratios, (size_t)count, sizeof(*ratios), gpu_temporal_compare_double);
-        scale = ratios[count / 2];
+        scale = gpu_temporal_select_double(ratios, count, count / 2);
     }
     free(ratios);
     return gpu_temporal_finite((float)scale) && scale > 0.0 ? scale : 0.0;

@@ -188,13 +188,13 @@ def main() -> int:
         if path.is_file()
     }
     require(
-        len(entries) == 99
+        len(entries) == 102
         and patches == {f"{line}.patch" for line in entries if not line.startswith("+")}
         and files == {line[1:] for line in entries if line.startswith("+")}
-        and len(patches) == 58
+        and len(patches) == 61
         and len(files) == 41
         and "framework/patches/** -text\n" in (ROOT / ".gitattributes").read_text(encoding="utf-8"),
-        "the project lists 99 changed files, with a patch for each of 58 and 41 added whole, and stores patches byte for byte",
+        "the project lists 102 changed files, with a patch for each of 61 and 41 added whole, and stores patches byte for byte",
     )
     for script, call in (
         ("build.ps1", "python (Join-Path $Root 'tools/framework.py') apply --framework $Framework"),
@@ -206,6 +206,12 @@ def main() -> int:
         require(
             call in (ROOT / script).read_text(encoding="utf-8"),
             f"{script} applies the framework changes with a Python the tool runs on",
+        )
+    for script in ("build.ps1", "build.sh"):
+        text = (ROOT / script).read_text(encoding="utf-8")
+        require(
+            "OpenBIOS.toml" not in text and "regen_bios" not in text,
+            f"{script} links the framework's committed OpenBIOS: regenerating it leaves the checkout out of step",
         )
     source = TOOL.read_text(encoding="utf-8")
     require(

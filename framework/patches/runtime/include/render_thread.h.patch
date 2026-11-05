@@ -1,0 +1,13 @@
+diff --git a/runtime/include/render_thread.h b/runtime/include/render_thread.h
+index cf6a9978d719c93f86a0038e4b5084a9dbb12eaa..c1999e47b43abadd8db4a2541465693458a0ca04 100644
+--- a/runtime/include/render_thread.h
++++ b/runtime/include/render_thread.h
+@@ -85,6 +85,8 @@
+  * rt_* call. op 0 is reserved. */
+ void *rt_cmd_begin(uint16_t op, uint16_t flags, uint32_t payload_bytes);
+ void  rt_cmd_commit(void);
++/* rt_cmd_commit() for a record that used only payload_bytes of what rt_cmd_begin() reserved: the rest is given back. */
++void  rt_cmd_commit_bytes(uint32_t payload_bytes);
+ 
+ /* Close a guest frame: enqueue a frame marker, then block while more than
+  * max_frames closed frames are unconsumed. */

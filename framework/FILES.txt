@@ -58,7 +58,9 @@ runtime/include/mod_runtime.h
 runtime/include/overlay_dispatch_preamble.c.inc
 runtime/include/psx_cyc.h
 +runtime/include/psx_cyc_overclock.h
+runtime/include/psx_native_span.h
 runtime/include/psx_sdl_audio.h
+runtime/include/render_thread.h
 runtime/include/savestate.h
 runtime/include/text_xlate.h
 +runtime/include/user_dir.h
@@ -94,6 +96,7 @@ runtime/src/parity_trace.c
 runtime/src/psx_cycles.c
 runtime/src/psx_sdl_audio.cpp
 runtime/src/recomp_audio_drc.h
+runtime/src/render_thread.c
 runtime/src/savestate.c
 runtime/src/text_xlate.cpp
 runtime/src/traps.c

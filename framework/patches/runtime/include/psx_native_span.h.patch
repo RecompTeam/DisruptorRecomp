@@ -1,0 +1,15 @@
+diff --git a/runtime/include/psx_native_span.h b/runtime/include/psx_native_span.h
+index c3e54247860cff2028edd4ab8c74ba09e5570fbd..af9997fcd40d0b15ac94905ec6d05ccb4c0f3aec 100644
+--- a/runtime/include/psx_native_span.h
++++ b/runtime/include/psx_native_span.h
+@@ -70,6 +70,10 @@
+  * reference/interpreter ABI untouched. This header never enters runtime TUs.
+  */
+ #define psx_cyc_step(cpu, deps) ((void)(cpu), (void)(deps))
++/* The generator's fused steps of 2 to 4 instructions: the span already charged them. */
++#define psx_cyc_step2(cpu, a, b) ((void)(cpu), (void)(a), (void)(b))
++#define psx_cyc_step3(cpu, a, b, c) ((void)(cpu), (void)(a), (void)(b), (void)(c))
++#define psx_cyc_step4(cpu, a, b, c, d) ((void)(cpu), (void)(a), (void)(b), (void)(c), (void)(d))
+ #define psx_icache_fetch(cpu, pc) ((void)(cpu), (void)(pc))
+ #define psx_cyc_load_word psx_native_span_word
+ #define psx_cyc_load_half psx_native_span_half

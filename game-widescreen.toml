@@ -236,6 +236,11 @@ disc_speed = "1x"
 bios_hle = false
 overlay_cache = true
 overlay_backend = "auto"
+# PsyQ v_wait 0x8004B51C, audited as R4's in config_schema.md: only the -1 timeout test at 0x8004B544 reads the 16(sp) counter, 0x8004B590 loops on the VSync count 0x8005B920
+idle_skip = true
+idle_skip_store_counters = true
+# PsyQ libds StGetNext's wait at 0x80048AD8 (movies): s0 counts 0x800000 down, its one exit is s0 == 0 at 0x80048AE8, the other a ready frame (v0 == 0 at 0x80048AE0)
+idle_skip_store_counter_sites = ["0x8004B544", "0x8004B590", "0x80048AD8", "0x80048AE8"]
 
 # 180 ms put the sound 0.2 s behind the movies. 45 ms held through the two heaviest capsules with the queue never under 34 ms.
 [audio]

@@ -14,12 +14,24 @@ static int s_rthm_area[4] = {0, 0, VRAM_W - 1, VRAM_H - 1};
 static uint64_t s_rth_syncs = 0, s_rth_frames = 0;
 static int s_rth_primsync_due = 0;
 static const char *s_rth_last_sync = "";
-static uint64_t s_rth_emu_thread = 0;
-#if defined(PSX_SDL3)
-static uint64_t rth_thread_id(void) { return (uint64_t)SDL_GetCurrentThreadID(); }
+/* The thread that started the render thread records: its start number in a thread-local, read on every record. */
+static unsigned s_rth_start = 0;
+#if defined(_MSC_VER)
+static __declspec(thread) unsigned t_rth_start;
 #else
-static uint64_t rth_thread_id(void) { return (uint64_t)SDL_ThreadID(); }
+static __thread unsigned t_rth_start;
 #endif
+static int rth_on_emu_thread(void) { return t_rth_start == s_rth_start; }
+
+/* Backend calls are appended into one ring record (a group) until it is full or something else needs the ring. */
+#define RTH_GROUP_BYTES 4096u
+static uint8_t *s_rth_group = NULL;
+static uint32_t s_rth_group_used = 0;
+static void rth_group_close(void) {
+    if (!s_rth_group) return;
+    s_rth_group = NULL;
+    rt_cmd_commit_bytes(s_rth_group_used);
+}
 
 static int ctx_prim_tagged(void) { return rth_replaying() ? s_rthx_tagged : psx_ws_prim_is_tagged(); }
 static int ctx_prim_in_backdrop(void) { return rth_replaying() ? s_rthx_backdrop : psx_ws_prim_in_backdrop(); }
@@ -40,7 +52,8 @@ static int gl_rth_eligible(void) {
 }
 
 static void gl_rth_acquire(const char *reason) {
-    if (!s_rth_on || rt_on_render_thread() || rt_held() || rth_thread_id() != s_rth_emu_thread) return;
+    if (!s_rth_on || !rth_on_emu_thread() || rt_held()) return;
+    rth_group_close();
     rt_acquire(reason);
     /* The replayed uploads, a save state's whole VRAM among them, reached only the render thread's copy. */
     memcpy(s_rth_vram_pub, s_rth_vram_priv, (size_t)VRAM_W * VRAM_H * sizeof(uint16_t));
@@ -61,16 +74,35 @@ static void gl_rth_release(void) {
 
 /* Record (1) or run directly (0): directly with no render thread, on it, or while the emulation thread holds the context. */
 static int rth_record_mode(void) {
-    if (!s_rth_on || rt_on_render_thread() || rt_held() || rth_thread_id() != s_rth_emu_thread) return 0;
+    if (!s_rth_on || !rth_on_emu_thread() || rt_held()) return 0;
     if (gpu_display_is_depth24()) { gl_rth_acquire("depth24"); return 0; }
     return 1;
 }
 
 static int rth_put(uint16_t op, uint16_t flags, const void *payload, uint32_t bytes) {
-    void *p = rt_cmd_begin(op, flags, bytes);
-    if (!p) { gl_rth_acquire("oversize"); return 0; }
-    if (bytes) memcpy(p, payload, bytes);
-    rt_cmd_commit();
+    const uint32_t need = (uint32_t)sizeof(RtCmd) + ((bytes + (RT_ALIGN - 1u)) & ~(RT_ALIGN - 1u));
+    if (need > RTH_GROUP_BYTES / 2u) {
+        rth_group_close();
+        void *p = rt_cmd_begin(op, flags, bytes);
+        if (!p) { gl_rth_acquire("oversize"); return 0; }
+        if (bytes) memcpy(p, payload, bytes);
+        rt_cmd_commit();
+        return 1;
+    }
+    if (s_rth_group && s_rth_group_used + need > RTH_GROUP_BYTES) rth_group_close();
+    if (!s_rth_group) {
+        s_rth_group = (uint8_t *)rt_cmd_begin(RTH_GROUP, 0, RTH_GROUP_BYTES);
+        if (!s_rth_group) { gl_rth_acquire("oversize"); return 0; }
+        s_rth_group_used = 0;
+    }
+    RtCmd *sub = (RtCmd *)(s_rth_group + s_rth_group_used);
+    sub->size = need;
+    sub->op = op;
+    sub->flags = flags;
+    sub->payload = bytes;
+    sub->seq = 0;
+    if (bytes) memcpy(sub + 1, payload, bytes);
+    s_rth_group_used += need;
     return 1;
 }
 #define RTH_REC(op, flags, ...) do { const int32_t rth_v_[] = { __VA_ARGS__ }; \
@@ -285,6 +317,7 @@ static uint16_t rtb_vram_read(int x, int y) { GL_RT_SYNC("vram_read"); return gl
 static void rtb_vram_transfer_in(int x, int y, int w, int h, const uint16_t *d) {
     if (rth_record_mode()) {
         const size_t n = w > 0 && h > 0 ? (size_t)w * (size_t)h : 0;
+        rth_group_close();
         int32_t *p = (int32_t *)rt_cmd_begin(RTH_XFER_IN, 0, (uint32_t)(16u + n * 2u));
         if (p) {
             p[0] = x; p[1] = y; p[2] = w; p[3] = h;
@@ -521,6 +554,13 @@ static void gl_rth_exec(void *user, const RtCmd *c, const void *payload) {
     case RTH_UI_SUSPENDED: gl_renderer_set_host_ui_suspended(v[0]); break;
     case RTH_DDGI_MISSION: gl_renderer_set_ddgi_mission(v[0]); break;
     case RTH_INVALIDATE_PRESENT: gl_renderer_invalidate_present(); break;
+    case RTH_GROUP:
+        for (uint32_t at = 0; at + sizeof(RtCmd) <= c->payload;) {
+            const RtCmd *sub = (const RtCmd *)((const uint8_t *)payload + at);
+            gl_rth_exec(user, sub, sub + 1);
+            at += sub->size;
+        }
+        break;
     default: break;
     }
     if (c->flags & RTHF_PRIM) rth_prim_begin(0, -1, 0);
@@ -565,7 +605,7 @@ int gl_renderer_render_thread_start(int max_frames) {
         s_rth_vram_priv = NULL;
         return 0;
     }
-    s_rth_emu_thread = rth_thread_id();
+    t_rth_start = ++s_rth_start;
     s_rth_on = 1;
     gr_refresh_backend();
     fprintf(stdout, "psxrecomp: render thread on, %d frames in flight at most\n", config.max_frames);
@@ -606,6 +646,7 @@ void gl_renderer_render_thread_frame_boundary(void) {
     if (!s_rth_on) return;
     if (gl_rth_eligible()) gl_rth_release();
     else gl_rth_acquire("ineligible");
+    rth_group_close();
     if (!rt_held()) rt_frame_end();
     s_rth_frames++;
 }

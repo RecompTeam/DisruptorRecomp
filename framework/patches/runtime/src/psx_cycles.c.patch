@@ -1,8 +1,18 @@
 diff --git a/runtime/src/psx_cycles.c b/runtime/src/psx_cycles.c
-index 86528dbea22ea54bc7d6d63e7ad70de744ed54fe..b49bfcffb0147112ae448f7955ba53bf683de989 100644
+index 86528dbea22ea54bc7d6d63e7ad70de744ed54fe..5887367b9ef6a6380e65677c695d0271da85b31f 100644
 --- a/runtime/src/psx_cycles.c
 +++ b/runtime/src/psx_cycles.c
-@@ -1161,6 +1161,66 @@
+@@ -864,7 +864,8 @@
+      * (v_wait). Multi-edge loops with no counter store -- OpenBIOS's
+      * 0xBFC057C0 poll, kernel 0x16BC -- moved R4's boot timing when skipped
+      * (frame 192, cyc +3857), so they keep running for real. */
+-    if (s_idle_iter_edges && !s_idle_mem_progress) return;
++    if (s_idle_iter_edges && !s_idle_mem_progress &&
++        !(s_idle_progress_reg > 0 && idle_site_listed(s_idle_pc))) return;   /* an audited register countdown lands as v_wait */
+     uint32_t q = s_idle_quantum;
+     uint32_t dist = devices_cycles_to_next_idle_event();
+     /* The devices report distances from where they were last serviced
+@@ -1161,6 +1162,66 @@
      }
  }
  

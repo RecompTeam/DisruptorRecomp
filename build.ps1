@@ -153,17 +153,6 @@ finally {
     Pop-Location
 }
 
-Push-Location $Framework
-try {
-    New-Item -ItemType Directory -Force `
-        (Join-Path $Framework 'generated') | Out-Null
-    $BiosTool = Resolve-BuiltTool $RecompilerBuild 'psxrecomp-bios'
-    Invoke-Checked { & $BiosTool --config bios/OpenBIOS.toml }
-}
-finally {
-    Pop-Location
-}
-
 $BuildName = if ($env:DISRUPTOR_BUILD_DIRECTORY) {
     $env:DISRUPTOR_BUILD_DIRECTORY
 } else {
