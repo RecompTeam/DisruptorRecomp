@@ -2,6 +2,27 @@
 
 What changed in each release. The launcher shows the section of its own version on its home page.
 
+## v0.13.0
+
+### Changes
+
+- Mouse look: Mouse aim is called Mouse turning, Smooth mouse turning Smooth turning, both with Vertical mouse look in one Mouse look group
+- Mouse look: Vertical mouse look and tilting the view with the turning stick need Mouse turning
+- Mouse look: the crosshair is on by default, a crosshair you turned off stays off
+- Launcher: the Controls tabs go Mouse, Gamepad, Weapons, Keybindings, Keys is called Keybindings
+
+### Enhancements
+
+- Sky: with Vertical mouse look the sky moves with the world, more sky is grown above the game's sky picture
+- Sky: the first mission's city is drawn a little smaller and smooth, it no longer runs ahead of the roof as you turn
+- Mouse look: looking up and down answers sooner
+- Launcher: a setting that needs another keeps its value while that one is off
+- Replay capsules: two looks a frame are kept, older capsules replay as before
+
+### Bug fixes
+
+- Continue from mid mission: Vertical mouse look, the crosshair and the Draw distance you chose work to the end of the mission
+
 ## v0.12.0
 
 ### Changes

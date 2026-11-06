@@ -9,7 +9,7 @@ The whole campaign can be played through.
 | Platform and disc | Windows x64 and Linux x64, an AppImage for glibc 2.35 and newer. Disruptor USA, SLUS-00224 only. Before each release the AppImage starts its launcher, and the game from power-on through the intro, under WSLg on Ubuntu 22.04. A level has not been played on Linux yet. |
 | Gameplay | The whole campaign can be played through on Windows. 60 FPS gameplay is on at first. Doors, a ridden lift, enemies and shots move on every frame under it. |
 | Rendering | OpenGL supports 1x–8x resolution and widescreen up to 32:9 or the window's shape, with 4x and 4:3 at first. Exact geometry, perspective textures, gap filling, a depth-sorted world and a smooth distance fade are on at first. Ambient occlusion, anti-aliasing (MSAA / SSAA) and sprites that face the camera are optional. Movies show all 320 columns, cleaned of their blocks and scaled smoothly under Movie filter. Minor edge gaps and localized texture wobble can remain. |
-| Motion | 60 FPS gameplay, the render thread and smooth mouse turning are on at first. In-between frames start off and add frames up to 320 FPS. |
+| Motion | 60 FPS gameplay, the render thread and smooth turning are on at first. In-between frames start off and add frames up to 320 FPS. |
 | Controls | Modern or Classic controls, a gamepad beside the keyboard with dual analog sticks, keys and gamepad buttons rebound in the launcher, and keyboard save naming. Vertical mouse look, with an Auto-aim option and a crosshair. Weapon and psionic wheels remain experimental. |
 | Settings | One settings table for the launcher and the in-game menu. The lighting options stay closed in releases while they are tested. |
 | Achievements | RetroAchievements sign-in in the launcher, with a choice of how unlocks show. |
@@ -47,6 +47,8 @@ What changed in each release is in the [changelog](../CHANGELOG.md).
 - The widescreen sky and skyline are checked at 16:9, 21:9 and 32:9 in the
   first mission only.
 - Vertical mouse look moves the horizon instead of turning the camera, about 31 degrees each way.
+- The sky grown above the game's sky picture for vertical look was seen in play on most of the game's
+  skies, the space sky of mission 10 and the dusk of mission 12 only in pictures of the growing tool.
 - 5x–7x resolution settings have automated coverage but have not been
   individually exercised live.
 - Live volume adjustment and its relaunch persistence need user validation.
