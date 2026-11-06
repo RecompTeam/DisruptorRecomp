@@ -565,6 +565,49 @@ void names_wait_for_the_panel() {
     entries()[kTestTick](&cpu, kTestTick);
 }
 
+/* A pass with no list: the name the list left at `x`, `time` frames of it left, the draw printing it. */
+uint32_t closed_tag(uint32_t x, uint32_t time = 1u) {
+    disruptor_list_message_builder_begins();
+    g_ram[kMode] = 0u;
+    psx_mod_write_word(kMessageTime, time);
+    psx_mod_write_word(kMessageX, x);
+    disruptor_list_message_builder_ends(0u);
+    CPUState cpu{};
+    entries()[kTestDraw](&cpu, kTestDraw);
+    game_draws();
+    psx_mod_write_word(kSprite, kLineTag);
+    sent_by_draw();
+    entries()[kTestTick](&cpu, kTestTick);
+    return psx_mod_read_word(kSprite);
+}
+
+void names_go_with_the_panel() {
+    disruptor_list_message_state_loaded();
+    g_ram.clear();
+    psx_mod_write_word(kNextSprite, kSprite);
+    played();
+    opening_tag(3u, 3u, 0u);
+    opening_tag(3u, 3u, 0u);
+    expect(closed_tag(240u) == kLineTag, "the pass that closes a list draws its name: the panel of the pass before is drawn with it");
+    expect(closed_tag(240u, 0u) == (kLineTag & 0x00FFFFFFu), "the next prints it again, its time run out, with no panel drawn: not drawn");
+    expect(closed_tag(240u) == kLineTag, "a message after that is the game's");
+    opening_tag(3u, 2u, 0u);
+    opening_tag(3u, 2u, 0u);
+    closed_tag(0u);
+    expect(closed_tag(0u, 0u) == kLineTag, "a centred message after a list closes is drawn");
+    opening_tag(3u, 3u, 0u);
+    opening_tag(3u, 3u, 0u);
+    closed_tag(240u);
+    expect(closed_tag(240u, 90u) == kLineTag, "and so is one written anew at a list's place, which has its time");
+    opening_tag(3u, 0u, 3u);
+    opening_tag(3u, 0u, 3u);
+    closed_tag(240u);
+    expect(closed_tag(240u, 0u) == (kLineTag & 0x00FFFFFFu), "and a list a key showed closes the same way");
+    disruptor_list_message_state_loaded();
+    closed_tag(240u);
+    expect(closed_tag(240u, 0u) == kLineTag, "after a load nothing is known to have closed");
+}
+
 void hooks_registered() {
     expect(entries().count(kTestDraw) && entries().count(kTestSent) && entries().count(kTestTick) && entries().count(kTestLoad) &&
                !g_off,
@@ -575,6 +618,7 @@ void hooks_registered() {
 
 int main() {
     hooks_registered();
+    names_go_with_the_panel();
     keeps_the_countdown();
     colours_the_line_as_in_play();
     leaves_the_game_alone();

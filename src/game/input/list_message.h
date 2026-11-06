@@ -10,7 +10,9 @@
  * or psionics list writes the chosen one's name over them in every drawn frame (0x8003DFD8, 0x8003E774), so in the stock
  * game the seconds are gone while a list is open. Here the countdown keeps the line, and the name is printed after it in
  * the line's picture and drawn where the list put it by a second sprite. The draw sends its sprite at once while the
- * builder's panel waits in the table drawn next frame, so a list's name came a frame before its panel: not drawn then. */
+ * builder's panel waits in the table drawn next frame, so a list's name came a frame before its panel: not drawn then.
+ * The draw prints the name once more in the pass after the one that closes a list, whose table holds no panel: not drawn
+ * then either. */
 namespace disruptor::list_message {
 
 inline constexpr uint32_t kLevel = 0x80071518u;     /* gp+972 */
@@ -51,6 +53,8 @@ struct Kept {
     uint32_t name_at = 0, name_wide = 0; /* where it was printed in the picture, 0 wide when it was not */
     uint32_t list = 0;   /* the list the builder's last pass drew, 0 for none */
     bool opening = false; /* that pass opened it, its panel not yet drawn */
+    uint32_t before = 0;  /* the list of the pass before the last */
+    bool closing = false; /* the list closed the pass before: the name printed again with no panel drawn */
 };
 
 /* The glyph the printer takes for a letter that is not a space. */
@@ -80,6 +84,8 @@ void builder_ends(Memory &memory, Kept &kept, uint32_t forced) {
     const uint32_t mode = memory.byte(kMode);
     const uint32_t list = mode == 2u || mode == 3u ? mode : forced == 2u || forced == 3u ? forced : 0u;
     kept.opening = list != 0u && list != kept.list && kept.list != kListUnknown;
+    kept.closing = list == 0u && kept.list == 0u && (kept.before == 2u || kept.before == 3u) && memory.word(kMessageX) != 0u;
+    kept.before = kept.list;
     kept.list = list;
     if (!kept.held) return;
     kept.held = false;
@@ -96,10 +102,12 @@ void builder_ends(Memory &memory, Kept &kept, uint32_t forced) {
     memory.write(kMessageY, kept.y);
 }
 
-/* The message draw's entry (0x800427D0): it draws only a message with time left, and sends it only then. */
+/* The message draw's entry (0x800427D0): it draws a message with time left, and once more the pass after it ran out:
+ * a closed list's name, then, and not a message written anew, which has its time. */
 template <class Memory>
 void draw_begins(const Memory &memory, Kept &kept) {
-    const bool drawn = (kept.opening || kept.shown) && memory.word(stock_frames::kMessageTime) != 0u;
+    const uint32_t time = memory.word(stock_frames::kMessageTime);
+    const bool drawn = ((kept.opening || kept.shown) && time != 0u) || (kept.closing && time == 0u);
     kept.sprite = drawn ? memory.word(kNextSprite) : 0u;
 }
 
@@ -158,13 +166,13 @@ void add_name(Memory &memory, const Kept &kept, uint32_t wide, uint32_t sprite, 
 template <class Memory>
 void draw_ends(Memory &memory, Kept &kept) {
     const uint32_t sprite = kept.sprite, wide = kept.name_wide;
-    const bool line = kept.shown, opening = kept.opening;
+    const bool line = kept.shown, alone = kept.opening || kept.closing;
     kept.sprite = 0u;
-    kept.shown = kept.opening = false;
+    kept.shown = kept.opening = kept.closing = false;
     kept.name[0] = 0u;
     kept.name_wide = 0u;
     if (sprite == 0u) return;
-    if (opening && !line) {
+    if (alone && !line) {
         memory.write(sprite, memory.word(sprite) & 0x00FFFFFFu);
         return;
     }
@@ -188,14 +196,14 @@ void draw_ends(Memory &memory, Kept &kept) {
 
 /* A tick's entry: the frame's draw is over, whatever it left is the game's. */
 inline void frame_over(Kept &kept) {
-    kept.held = kept.shown = kept.opening = false;
+    kept.held = kept.shown = kept.opening = kept.closing = false;
     kept.sprite = 0u;
     kept.name[0] = 0u;
     kept.name_wide = 0u;
 }
 
 /* No state may be written while the line is the hooks' and not yet the game's. */
-inline bool saving_deferred(const Kept &kept) { return kept.held || kept.shown || kept.opening || kept.sprite != 0u; }
+inline bool saving_deferred(const Kept &kept) { return kept.held || kept.shown || kept.opening || kept.closing || kept.sprite != 0u; }
 
 inline void forget(Kept &kept) {
     kept = Kept{};
