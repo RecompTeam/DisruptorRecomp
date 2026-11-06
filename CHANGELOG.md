@@ -2,6 +2,25 @@
 
 What changed in each release. The launcher shows the section of its own version on its home page.
 
+## v0.12.0
+
+### Changes
+
+- Vertical mouse look: shots go where you look, Auto-aim brings back the game's aim at the enemy it picks
+
+### Enhancements
+
+- Vertical mouse look: no longer experimental
+- Vertical mouse look: looking up and down is smooth, 0.11.0 moved the view in steps
+- Vertical mouse look: Auto-aim, off by default
+- Vertical mouse look: a crosshair in the middle of the screen, a dot, a plus or a ring, its size, colour and opacity, with a preview on the launcher's Controls page
+
+### Bug fixes
+
+- Vertical mouse look: items, bodies and enemies no longer shake while you look up or down and move
+- Vertical mouse look: a shadow on the floor keeps its shape when you look up or down
+- Weapon and psionics lists: a name no longer shows alone at the side of the screen for a frame after its list closes
+
 ## v0.11.0
 
 ### Changes
