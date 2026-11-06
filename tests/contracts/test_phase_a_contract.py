@@ -118,12 +118,12 @@ def main() -> int:
         "isfinite(center_y)" in horizon_set
         and "center_y >= 24.0" in horizon_set
         and "center_y <= 216.0" in horizon_set
-        and "next = 120" in horizon_set,
+        and "next = 120.0" in horizon_set,
         "the projection horizon must fail closed to the 240-line default",
     )
     require(
-        "floor(center_y + 0.5)" in horizon_set and "geometry_camera_presentation_update()" in horizon_set,
-        "horizon changes must be integer-exact and flush through yaw state",
+        "next = center_y;" in horizon_set and "geometry_camera_presentation_update()" in horizon_set,
+        "horizon changes must keep the tilt's fraction and flush through yaw state",
     )
     presentation_update = function_body(gpu, "geometry_camera_presentation_update")
     require(

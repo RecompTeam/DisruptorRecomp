@@ -366,6 +366,9 @@ void apply_saved_preferences(const PSXRecompV4::UserSettings &settings) {
         !env_override_present("PSX_DISRUPTOR_MOUSE_INVERT_Y"))
         disruptor_mouse_set_invert_vertical(
             settings.invert_vertical ? 1 : 0);
+    if (settings.has_auto_aim) disruptor_mouse_set_auto_aim(settings.auto_aim ? 1 : 0);
+    if (settings.has_crosshair) disruptor_mouse_set_crosshair(settings.crosshair ? 1 : 0);
+    set_crosshair_style(settings.crosshair_shape, settings.crosshair_size, settings.crosshair_colour, settings.crosshair_opacity);
 
     /* A scheme set by the environment alone takes its layout for this run and leaves keybinds.ini as it is. */
     follow_scheme(disruptor_modern_controls_enabled() != 0, !env_override_present("PSX_DISRUPTOR_MODERN_CONTROLS"));
@@ -473,6 +476,11 @@ void apply_pending_preferences() {
     if (changed("disruptor.invert_vertical"))
         disruptor_mouse_set_invert_vertical(
             pending.invert_vertical ? 1 : 0);
+    if (changed("disruptor.auto_aim")) disruptor_mouse_set_auto_aim(pending.auto_aim ? 1 : 0);
+    if (changed("disruptor.crosshair")) disruptor_mouse_set_crosshair(pending.crosshair ? 1 : 0);
+    if (changed("disruptor.crosshair_shape") || changed("disruptor.crosshair_size") || changed("disruptor.crosshair_colour") ||
+        changed("disruptor.crosshair_opacity"))
+        set_crosshair_style(pending.crosshair_shape, pending.crosshair_size, pending.crosshair_colour, pending.crosshair_opacity);
     if (changed("disruptor.separate_vertical_speed"))
         disruptor_mouse_set_vertical_follows_horizontal(
             pending.separate_vertical_speed ? 0 : 1);

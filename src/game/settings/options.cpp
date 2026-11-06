@@ -143,6 +143,10 @@ constexpr const char* needs_frames[] = {frames_key};
 constexpr const char* needs_occlusion[] = {occlusion_key};
 constexpr const char* needs_aim_and_geometry[] = {aim_key, geometry_key};
 constexpr const char* needs_vertical[] = {vertical_key};
+constexpr const char* crosshair_key = "disruptor.crosshair";
+constexpr const char* needs_crosshair[] = {vertical_key, crosshair_key};
+constexpr const char* crosshair_shapes[] = {"Dot", "Plus", "Ring"};
+constexpr const char* crosshair_colours[] = {"White", "Green", "Red", "Yellow", "Cyan"};
 constexpr const char* needs_separate[] = {separate_key};
 constexpr const char* needs_smooth_fade[] = {smooth_fade_key};
 constexpr const char* needs_number_keys[] = {number_keys_key};
@@ -331,6 +335,26 @@ constexpr Option option_list[] = {
     toggle<&Settings::has_invert_vertical, &Settings::invert_vertical>(
         "disruptor.invert_vertical", "Invert vertical mouse", 0,
         "Looks down when the mouse moves forward", needs_vertical),
+    toggle<&Settings::has_auto_aim, &Settings::auto_aim>(
+        "disruptor.auto_aim", "Auto-aim", 0,
+        "On: shots rise or fall to the enemy the game picks, as in the original\n"
+        "Off: shots go where you look\n"
+        "Homing shots follow their target either way", needs_vertical),
+    toggle<&Settings::has_crosshair, &Settings::crosshair>(
+        "disruptor.crosshair", "Crosshair", 0,
+        "A small dot in the middle of the screen while you play", needs_vertical),
+    choice("disruptor.crosshair_shape", "Crosshair shape", 0, "", crosshair_shapes,
+           saved<&Settings::has_crosshair_shape>, read<&Settings::crosshair_shape>,
+           write<&Settings::has_crosshair_shape, &Settings::crosshair_shape>, needs_crosshair),
+    slider("disruptor.crosshair_size", "Crosshair size", 100, "", 50, 300, Unit::percent,
+           saved<&Settings::has_crosshair_size>, read<&Settings::crosshair_size>,
+           write<&Settings::has_crosshair_size, &Settings::crosshair_size>, needs_crosshair),
+    choice("disruptor.crosshair_colour", "Crosshair colour", 0, "", crosshair_colours,
+           saved<&Settings::has_crosshair_colour>, read<&Settings::crosshair_colour>,
+           write<&Settings::has_crosshair_colour, &Settings::crosshair_colour>, needs_crosshair),
+    slider("disruptor.crosshair_opacity", "Crosshair opacity", 90, "", 20, 100, Unit::percent,
+           saved<&Settings::has_crosshair_opacity>, read<&Settings::crosshair_opacity>,
+           write<&Settings::has_crosshair_opacity, &Settings::crosshair_opacity>, needs_crosshair),
     slider("controller.deadzone", "Stick dead zone", 37,
            "How far the moving stick goes before it counts\nRaise it if you walk or turn without touching the stick", 0, 90,
            Unit::percent, saved<&Settings::has_deadzone>, deadzone_percent, set_deadzone_percent),

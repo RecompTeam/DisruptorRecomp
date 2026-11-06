@@ -184,7 +184,9 @@ std::uint32_t psx_mod_gpu_dma_resolve_address(std::uint32_t address) {
 }
 
 int g_horizon = 120;
+std::int32_t g_horizon_fraction16 = 0;
 int disruptor_vertical_camera_projection_row(void) { return g_horizon; }
+std::int32_t disruptor_vertical_camera_projection_row16(void) { return g_horizon * 65536 + g_horizon_fraction16; }
 }
 
 #include "../../src/game/render/sprite_depth.cpp"
@@ -1529,6 +1531,9 @@ void test_a_tilted_horizon_moves_rows_with_it() {
         put(kActor + 8u, 52u, 4);
         run(cpu, kTestFunnels[0], kTestFunnels[0].packets[0]);
         expect(sized_once(kRow + 30 * 65536, 9 * 65536, 13 * 65536, 0, 0), "a sprite's row stands under the tilted horizon");
+        g_horizon_fraction16 = 0x4000;
+        run(cpu, kTestFunnels[0], kTestFunnels[0].packets[0]);
+        expect(sized_once(kRow + 30 * 65536 + 0x4000, 9 * 65536, 13 * 65536, 0, 0), "and takes the horizon's fraction along");
     }
     const TestFunnel &fourth = kTestFunnels[3];
     for (const std::uint32_t top : {66u, 36u}) {
@@ -1544,7 +1549,8 @@ void test_a_tilted_horizon_moves_rows_with_it() {
         put(kPacket + 24u, 200u | (top + 7u) << 16, 4);
         run(cpu, fourth, fourth.packets[0]);
         if (top == 66u)
-            expect(sized_once(70 * 65536, 15 * 65536, 8 * 65536, 1, 0), "a shadow hangs from the tilted horizon");
+            expect(sized_once(70 * 65536 + 0x4000, 15 * 65536, 8 * 65536, 1, 0),
+                   "a shadow hangs from the tilted horizon, its fraction too, checked against the game's whole row");
         else
             expect(unsized(), "and one laid out from the level horizon is not the game's");
     }
@@ -1562,9 +1568,19 @@ void test_a_tilted_horizon_moves_rows_with_it() {
     add_face(70u, kPackets + 192u, lifted({{{100.0, 137.78, 2700u}, {260.0, 137.78, 2700u}, {100.0, 134.55, 3300u}, {260.0, 134.55, 3300u}}}));
     record(cpu);
     expect(read_half(key_at(5u)) == 600u, "and a level face above its foot stays level");
+    /* At the steepest tilt a slope falling away at 45 degrees, nearer than the body and over its box's lower half only:
+     * row 120 would shear its normal under the upright share and stop the body as a wall. */
+    g_horizon = 216;
+    cpu = body_before_its_record(5u, 600u);
+    g_projected.clear();
+    add_face(70u, kPackets + 192u, {{{100.0, 216.0, 2000u}, {260.0, 216.0, 2000u}, {100.0, 216.0 + 160.0 / 3.0, 3000u},
+                                     {260.0, 216.0 + 160.0 / 3.0, 3000u}}});
+    record(cpu);
+    expect(read_half(key_at(5u)) == 536u, "a slope tilted 31 degrees down stays a slope, not a wall before the body");
     forget();
     g_memory.clear();
     g_horizon = 120;
+    g_horizon_fraction16 = 0;
 }
 
 void test_the_nearest_depth_over_a_box() {

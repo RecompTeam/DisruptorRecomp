@@ -1,5 +1,5 @@
 diff --git a/runtime/src/gpu.c b/runtime/src/gpu.c
-index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c6c4b6410 100644
+index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..f56c180230e5a6d3a9cca97c7062291eebeefa5f 100644
 --- a/runtime/src/gpu.c
 +++ b/runtime/src/gpu.c
 @@ -11,6 +11,7 @@
@@ -44,7 +44,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
 +static int      s_facing_sprites = 0;
 +static uint32_t s_texture_correction_triangles = 0;
 +static double   s_geometry_camera_yaw_residual = 0.0;
-+static int      s_geometry_camera_projection_center_y = 120;
++static double   s_geometry_camera_projection_center_y = 120.0;
 +static uint64_t ws_geometry_world_triangles = 0;
 +static uint64_t ws_geometry_precise_triangles = 0;
 +static GpuGeometryCorrectionCounters s_geometry_diag_cumulative;
@@ -919,7 +919,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
  static uint32_t semi_transparency; /* bits 5-6 */
  static uint32_t texpage_colors;    /* bits 7-8: 4bit/8bit/15bit */
  static uint32_t dither_enabled;    /* bit 9 */
-@@ -4000,25 +4574,188 @@
+@@ -4000,25 +4574,189 @@
   * when native-wide is active and that buffer is a known display buffer; else
   * disable mirroring for this draw. Called when the draw env changes. */
  static void ws_nw_sync_target(void) {
@@ -1105,9 +1105,10 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
 +}
 +
 +void gpu_geometry_camera_projection_center_y_set(double center_y) {
-+    int next = 120;
++    double next = 120.0;
++    /* The fraction stays: a tilt moves the world by fractions of a row, as GTE OFY does. */
 +    if (isfinite(center_y) && center_y >= 24.0 && center_y <= 216.0)
-+        next = (int)floor(center_y + 0.5);
++        next = center_y;
 +    if (next == s_geometry_camera_projection_center_y) return;
 +
 +    s_geometry_camera_projection_center_y = next;
@@ -1115,12 +1116,12 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
 +    geometry_camera_presentation_update();
 +}
 +
-+int gpu_geometry_camera_projection_center_y_get(void) {
++double gpu_geometry_camera_projection_center_y_get(void) {
 +    return s_geometry_camera_projection_center_y;
  }
  
  static void ws_clear_all_reveal_margins(void) {
-@@ -4054,18 +4791,24 @@
+@@ -4054,18 +4792,24 @@
   * stage art. A stale reveal tile is safer than deleting submitted content. */
  void gpu_ws_begin_linked_list(void) {
      gp0_ot_rank = 0xFFFFu;
@@ -1145,7 +1146,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
  }
  
  void gpu_ws_restore_linked_list_rank(uint32_t rank) {
-@@ -4131,6 +4874,10 @@
+@@ -4131,6 +4875,10 @@
          gpu_vram_dirty_mark_all();
      }
      gr_init(vram);
@@ -1156,7 +1157,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
  
      /* Reset GP0 state machine (+ leftover cmd/xfer crumbs that survive in
       * gpu_snapshot and fork av digests on rematch). */
-@@ -4220,6 +4967,14 @@
+@@ -4220,6 +4968,14 @@
      s_d24_present_hold = 0;
      s_d24_present_skip = 0;
      s_d24_prev_disp_h = 0;
@@ -1166,12 +1167,12 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
 +                     (int)draw_area_right, (int)draw_area_bottom);
 +    gr_set_draw_offset(draw_offset_x, draw_offset_y);
 +    s_geometry_camera_yaw_residual = 0.0;
-+    s_geometry_camera_projection_center_y = 120;
++    s_geometry_camera_projection_center_y = 120.0;
 +    geometry_camera_presentation_update();
  }
  
  void gpu_init(void) {
-@@ -4515,6 +5270,8 @@
+@@ -4515,6 +5271,8 @@
      }
      split_trace_reset(&split_trace_this);
      gpustat_poll_count = 0;
@@ -1180,7 +1181,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
      /* Trusted package-selected plugins run on guest VBlank, independent of
       * host presentation, pacing, turbo, or skipped frames. */
      mod_runtime_on_vblank();
-@@ -4885,8 +5642,8 @@
+@@ -4885,8 +5643,8 @@
      *y = sign_extend((word >> 16) & 0x7FFu, 11);
  }
  
@@ -1190,7 +1191,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
  static int s_native_wide_projection_correction = 0;
  static PGXPProjectiveScope s_render_pgxp_scope;
  static int s_render_projective, s_render_scope;
-@@ -5006,6 +5763,10 @@
+@@ -5006,6 +5764,10 @@
  
  void gpu_texture_correction_set(int enabled) {
      s_texture_correction_enabled = enabled ? 1 : 0;
@@ -1201,7 +1202,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
      gpu_pgxp_rederive_enable();
  }
  
-@@ -5013,229 +5774,548 @@
+@@ -5013,229 +5775,548 @@
      return s_texture_correction_enabled;
  }
  
@@ -1956,7 +1957,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
  }
  
  /* Write a single pixel to VRAM with draw area clipping and mask bit handling */
-@@ -5273,13 +6353,18 @@
+@@ -5273,13 +6354,18 @@
   * and contributed the original generalized fix in psxrecomp PR #73:
   * https://github.com/mstan/psxrecomp/pull/73
   * Keep that credit with this guarded framebuffer-target variant. */
@@ -1979,7 +1980,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
  }
  
  static inline void draw_area_host_x_bounds(int32_t *left, int32_t *right) {
-@@ -5429,8 +6514,7 @@
+@@ -5429,8 +6515,7 @@
      }
      if (draw_area_out_bbox(vx, vy, 3)) return;
      gr_set_semi_transparency(semi_trans, (int)semi_transparency);
@@ -1989,7 +1990,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
      gr_draw_flat_triangle(vx[0], vy[0], vx[1], vy[1], vx[2], vy[2], color);
  }
  
-@@ -5511,6 +6595,7 @@
+@@ -5511,6 +6596,7 @@
          gr_draw_flat_rect(x, y, w, h, color);
          return;
      }
@@ -1997,7 +1998,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
      if (!radial_mask && !screen_mask) {
          ws_nw_backdrop_stretch_quad(vx, vy);
          ws_nw_hud_shift_vertices(vx, 4);
-@@ -5539,16 +6624,17 @@
+@@ -5539,16 +6625,17 @@
              return;
          }
      }
@@ -2021,7 +2022,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
          gr_draw_flat_triangle(vx[2], vy[2], vx[1], vy[1], vx[3], vy[3], color);
      }
  }
-@@ -5572,8 +6658,7 @@
+@@ -5572,8 +6659,7 @@
      }
      if (draw_area_out_bbox(vx, vy, 3)) return;
      gr_set_semi_transparency(semi_trans, (int)semi_transparency);
@@ -2031,7 +2032,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
      gr_draw_gouraud_triangle(vx[0], vy[0], c[0],
                               vx[1], vy[1], c[1],
                               vx[2], vy[2], c[2]);
-@@ -5620,18 +6705,19 @@
+@@ -5620,18 +6706,19 @@
          }
      }
      gr_set_semi_transparency(semi_trans, (int)semi_transparency);
@@ -2057,7 +2058,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
          gr_draw_gouraud_triangle(vx[2], vy[2], c[2],
                                   vx[1], vy[1], c[1],
                                   vx[3], vy[3], c[3]);
-@@ -5717,7 +6803,31 @@
+@@ -5717,7 +6804,31 @@
      return 1;
  }
  
@@ -2089,7 +2090,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
  static void gp0_exec_textured_tri(void) {
      if (native_wide_projective_draw()) return;
      uint32_t color24 = gp0_cmd_buf[0] & 0xFFFFFFu;
-@@ -5750,13 +6860,18 @@
+@@ -5750,13 +6861,18 @@
      if (draw_area_out_bbox(vx, vy, 3)) return;
  
      setup_textured_draw(color24, semi_trans, raw_texture);
@@ -2115,7 +2116,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
  }
  
  /* Execute textured quad (GP0 0x2C-0x2F) */
-@@ -5788,11 +6903,16 @@
+@@ -5788,11 +6904,16 @@
  
      /* Widescreen: tagged billboard quads carry CPU-computed pixel offsets the
       * GTE squash never saw — re-squash every X around the prim's anchor. */
@@ -2134,7 +2135,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
      ws_auto_ui_transform_quad(vx, vy);
      ws_nw_backdrop_stretch_quad(vx, vy);   /* full-frame 2D backdrop image stretch (no-op else) */
      ws_nw_hud_shift_vertices(vx, 4);
-@@ -5829,6 +6949,25 @@
+@@ -5829,6 +6950,25 @@
          int top_v   = vy[0] < vy[2] ? v[0] : v[2];
          int bot_v   = vy[0] < vy[2] ? v[2] : v[0];
          if (w > 0 && h > 0) {
@@ -2160,7 +2161,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
              if (right_u - left_u == w && bot_v - top_v == h) {
                  gr_draw_textured_rect(x, y, w, h, left_u, top_v,
                                        clut_x, clut_y, tpage);
-@@ -5841,25 +6980,44 @@
+@@ -5841,25 +6981,44 @@
          }
      }
  
@@ -2221,7 +2222,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
      }
  }
  
-@@ -5902,31 +7060,18 @@
+@@ -5902,31 +7061,18 @@
                        !gl_renderer_select_texture_bank(host_bank))) return;
  
      gr_set_semi_transparency(semi_trans, (int)semi_transparency);
@@ -2265,7 +2266,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
  }
  
  /* Execute shaded textured quad (GP0 0x3C-0x3F) */
-@@ -5970,25 +7115,44 @@
+@@ -5970,25 +7116,44 @@
      if (draw_area_out_bbox(vx, vy, 4)) return;
  
      gr_set_semi_transparency(semi_trans, (int)semi_transparency);
@@ -2326,7 +2327,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
      }
  }
  
-@@ -6062,22 +7226,7 @@
+@@ -6062,22 +7227,7 @@
          return;
      }
      ws_expand_fullscreen_rect(&x0, y0, &w, h);
@@ -2350,7 +2351,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
      x0 += ws_nw_hud_shift(x0, w);   /* native-wide HUD corner re-anchor (no-op else) */
      x0 += draw_offset_x; y0 += draw_offset_y;
      if (draw_area_out_rect(x0, y0, w, h)) return;
-@@ -6210,35 +7359,136 @@
+@@ -6210,35 +7360,136 @@
      /* Widescreen: tagged sprite parts squash around their projected anchor;
       * untagged SPRTs are screen-space 2D (HUD/menus) and squash around the
       * display centre. Texels keep full coverage via the scaled-rect path. */
@@ -2499,7 +2500,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
  }
  
  /* Execute 1x1 dot (GP0 0x68-0x6B) */
-@@ -6247,7 +7497,7 @@
+@@ -6247,7 +7498,7 @@
      uint16_t color = rgb888_to_rgb555(gp0_cmd_buf[0] & 0xFFFFFFu);
      int32_t x, y;
      parse_vertex(gp0_cmd_buf[1], &x, &y);
@@ -2508,7 +2509,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
      x += ws_nw_hud_shift(x, 1);
      x += draw_offset_x; y += draw_offset_y;
      if (draw_area_out_point(x, y)) return;
-@@ -6281,12 +7531,12 @@
+@@ -6281,12 +7532,12 @@
      int raw_texture = (gp0_cmd_buf[0] >> 24) & 1;
      int32_t x0, y0;
      parse_vertex(gp0_cmd_buf[1], &x0, &y0);
@@ -2524,7 +2525,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
      int u0 = gp0_cmd_buf[2] & 0xFF;
      int v0 = (gp0_cmd_buf[2] >> 8) & 0xFF;
      uint16_t clut = (uint16_t)(gp0_cmd_buf[2] >> 16);
-@@ -6294,8 +7544,9 @@
+@@ -6294,8 +7545,9 @@
      uint16_t clut_y = (clut >> 6) & 0x1FF;
  
      setup_textured_draw(color24, semi_trans, raw_texture);
@@ -2536,7 +2537,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
                                       clut_x, clut_y, current_texpage());
      else
          gr_draw_textured_rect(x0, y0, 8, 8, u0, v0, clut_x, clut_y, current_texpage());
-@@ -6307,16 +7558,12 @@
+@@ -6307,16 +7559,12 @@
      uint16_t color = rgb888_to_rgb555(gp0_cmd_buf[0] & 0xFFFFFFu);
      int32_t x0, y0;
      parse_vertex(gp0_cmd_buf[1], &x0, &y0);
@@ -2557,7 +2558,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
  }
  
  /* Execute 16x16 textured sprite (GP0 0x7C-0x7F) */
-@@ -6329,14 +7576,9 @@
+@@ -6329,14 +7577,9 @@
      /* Never suppress MMX6 BG packets at a guessed finite-map boundary. The
       * classifier cannot distinguish an authored layer entering the reveal from
       * a stale ring slot; suppressing here caused the stage-start black flicker. */
@@ -2575,7 +2576,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
      x0 += draw_offset_x; y0 += draw_offset_y;
      int u0 = gp0_cmd_buf[2] & 0xFF;
      int v0 = (gp0_cmd_buf[2] >> 8) & 0xFF;
-@@ -6344,23 +7586,15 @@
+@@ -6344,23 +7587,15 @@
      uint16_t clut_x = (clut & 0x3F) * 16;
      uint16_t clut_y = (clut >> 6) & 0x1FF;
  
@@ -2604,7 +2605,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
  }
  
  /* ---- GP0 command execution ---- */
-@@ -6385,16 +7619,16 @@
+@@ -6385,16 +7620,16 @@
      /* Fill ignores draw area, mask bits, and draw offset — writes directly to
       * VRAM. Routed through the renderer so it also fills the hi-res
       * supersampling mirror (no-op cost when supersampling is off). */
@@ -2626,7 +2627,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
            dst_x == (uint32_t)local_base))) {
          gr_wide_clear((int)dst_x, (int)dst_y, (int)height, color16);
      }
-@@ -6431,6 +7665,11 @@
+@@ -6431,6 +7666,11 @@
      gr_set_texture_window(texture_window_value);
  }
  
@@ -2638,7 +2639,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
  static void gp0_exec_draw_area_tl(void) {
      /* 0xE3 — Set Drawing Area Top-Left
       * Bits 0-9: X
-@@ -6441,7 +7680,12 @@
+@@ -6441,7 +7681,12 @@
      split_trace_note_draw_area();
      gr_set_draw_area((int)draw_area_left, (int)draw_area_top,
                       (int)draw_area_right, (int)draw_area_bottom);
@@ -2651,7 +2652,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
      gpu_timeline_note(GTL_DRAW_AREA, draw_area_left, draw_area_top);
  }
  
-@@ -6455,6 +7699,7 @@
+@@ -6455,6 +7700,7 @@
      split_trace_note_draw_area();
      gr_set_draw_area((int)draw_area_left, (int)draw_area_top,
                       (int)draw_area_right, (int)draw_area_bottom);
@@ -2659,7 +2660,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
      ws_nw_sync_target();  /* back buffer (draw_area_left) → wide mirror surface */
  }
  
-@@ -6463,8 +7708,10 @@
+@@ -6463,8 +7709,10 @@
       * Bits 0-10: X (signed 11-bit)
       * Bits 11-21: Y (signed 11-bit) */
      uint32_t param = gp0_cmd_buf[0] & 0x00FFFFFFu;
@@ -2670,7 +2671,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
      if (draw_offset_y < g_doff_min_this) g_doff_min_this = draw_offset_y;
      if (draw_offset_y > g_doff_max_this) g_doff_max_this = draw_offset_y;
      g_doff_cnt_this++;
-@@ -6551,8 +7798,11 @@
+@@ -6551,8 +7799,11 @@
      /* 0 means max dimension */
      vram_write_w = (w == 0) ? 0x400 : (uint16_t)w;
      vram_write_h = (h == 0) ? 0x200 : (uint16_t)h;
@@ -2682,7 +2683,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
      /* A full history retains old uploads; later transfers must not append
       * to the last slot and overflow its diagnostic word counter. */
      a0_capture_slot = -1;
-@@ -6647,6 +7897,7 @@
+@@ -6647,6 +7898,7 @@
      uint32_t h = (gp0_cmd_buf[2] >> 16) & 0x1FFu;
      vram_read_w = (w == 0) ? 0x400 : (uint16_t)w;
      vram_read_h = (h == 0) ? 0x200 : (uint16_t)h;
@@ -2690,7 +2691,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
  
      /* Record for debug */
      {
-@@ -7614,8 +8865,13 @@
+@@ -7614,8 +8866,13 @@
          gr_wide_set_view(ws_view_enabled(), v.shift, v.pad_left, v.pad_right);
      }
  
@@ -2704,7 +2705,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
          int32_t cvx, cvy;
          parse_vertex(gp0_cmd_buf[1], &cvx, &cvy);
          ws_census_record(opcode, cvx, cvy);
-@@ -7715,7 +8971,7 @@
+@@ -7715,7 +8972,7 @@
              gp0_exec_mono_rect();
              break;
          case 0x64: case 0x65: case 0x66: case 0x67:
@@ -2713,7 +2714,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
              break;
          case 0x68: case 0x69: case 0x6A: case 0x6B:
              gp0_exec_mono_dot();
-@@ -7735,13 +8991,10 @@
+@@ -7735,13 +8992,10 @@
              uint16_t color = rgb888_to_rgb555(gp0_cmd_buf[0] & 0xFFFFFFu);
              int32_t x0, y0;
              parse_vertex(gp0_cmd_buf[1], &x0, &y0);
@@ -2729,7 +2730,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
              break;
          }
          case 0x7C: case 0x7D: case 0x7E: case 0x7F:
-@@ -7766,7 +9019,17 @@
+@@ -7766,7 +9020,17 @@
              int h = (gp0_cmd_buf[3] >> 16) & 0x1FF;
              if (w == 0) w = 0x400;
              if (h == 0) h = 0x200;
@@ -2747,7 +2748,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
              break;
          }
  
-@@ -8010,6 +9273,7 @@
+@@ -8010,6 +9274,7 @@
          polyline_has_prev = 0;
          gr_set_semi_transparency(polyline_semi_trans, (int)semi_transparency);
          gp0_state = shaded ? GP0_POLYLINE_SHADED : GP0_POLYLINE_MONO;
@@ -2755,7 +2756,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
          gp0_draw_count++;
          /* Record polyline header (variable-length body not captured;
           * just enough so per-frame stream shows the polyline existed). */
-@@ -8142,6 +9406,8 @@
+@@ -8142,6 +9407,8 @@
      (void)psx_video_timing_set_pal((int)video_mode);
      if (new_depth != display_depth)
          s_d24_upload_x1 = 0; /* rising/falling: drop stale coverage */
@@ -2764,7 +2765,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
      display_depth = new_depth;
      vertical_interlace = (val >> 5) & 1;
      /* GPUSTAT.13 holds the legacy constant 0 in progressive (see the vblank
-@@ -8341,11 +9607,16 @@
+@@ -8341,11 +9608,16 @@
  }
  void gpu_snapshot_write(uint8_t *p) {
      PstW w; uint32_t n = gpu_snapshot_bytes();
@@ -2782,7 +2783,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
  void gpu_cosim_dump(char *out, int cap) {
      if (!out || cap <= 0) return;
      char *p = out;
-@@ -8390,6 +9661,10 @@
+@@ -8390,6 +9662,10 @@
      if (len != gpu_snapshot_bytes()) return 0;
      pst_r_init(&r, p, len);
      if (!gpu_snap_parse(&r)) return 0;
@@ -2793,7 +2794,7 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..a90f89f4c2477f2a3a7fabb904fe0f3c
      (void)psx_video_timing_set_pal((int)video_mode);
      ws_reset_scene_history();
      ws_scene_hold_reset(&s_ws_scene_hold);
-@@ -8406,6 +9681,8 @@
+@@ -8406,6 +9682,8 @@
       * on a stale draw area after savestate load. */
      gr_set_draw_area((int)draw_area_left, (int)draw_area_top,
                       (int)draw_area_right, (int)draw_area_bottom);

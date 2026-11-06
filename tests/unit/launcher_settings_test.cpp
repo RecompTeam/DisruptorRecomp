@@ -290,9 +290,9 @@ void described() {
     require(use.kind == Kind::toggle && use.initial == 0 && stored(settings, use) == 0 && use.needs.size() == 1 &&
                 std::string_view(use.needs[0]) == "disruptor.number_keys" && !experimental(use),
             "a power's key only picks the power at first, and uses it only under the weapon and psionic keys");
-    require(experimental(wheels) && !experimental(numbers) && experimental(*find_option("disruptor.vertical_look")) &&
+    require(experimental(wheels) && !experimental(numbers) && !experimental(*find_option("disruptor.vertical_look")) &&
                 !experimental(*find_option("disruptor.modern_controls")),
-            "the wheels and the vertical look carry the experimental tag, the number keys and the scheme do not");
+            "the wheels carry the experimental tag, the vertical look, the number keys and the scheme do not");
     require(logging.kind == Kind::toggle && logging.initial == 0 && stored(settings, logging) == 0 && stored(settings, volume) == 100,
             "an option the file does not name has a fresh installation's value, and the detailed log starts off");
     logging.set(settings, 1);

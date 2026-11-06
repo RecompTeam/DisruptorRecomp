@@ -172,6 +172,9 @@ struct MouseAimState {
     bool replaying = false;  // a capsule's replay turns and moves as its recording did: the sticks leave it alone
     bool invert_horizontal = false;
     bool invert_vertical = false;
+    bool auto_aim = false;
+    uint32_t last_live_frames = 0;
+    int frames_since_live = 1 << 20;
     double horizontal_sensitivity = kDefaultHorizontalSensitivity;
     double vertical_sensitivity = kDefaultVerticalSensitivity;
     bool vertical_follows_horizontal = true;
@@ -795,8 +798,17 @@ bool menu_pointer_frame() {
     return pointing;
 }
 
+constexpr int kCrosshairDrawnWithin = 4;  /* VBlanks: the renderer draws every one or every other one in play */
+std::atomic<bool> g_crosshair{false};
+std::atomic<bool> g_crosshair_shown{false};
+
+void tell_free_aim() {
+    disruptor_vertical_camera_set_free_aim(g_mouse.vertical_look_enabled && !g_mouse.auto_aim ? 1 : 0);
+}
+
 void mouse_aim_frame() {
     if (disruptor_selection_wheel_frame()) {
+        g_crosshair_shown.store(false, std::memory_order_relaxed);
         const Uint8 *keys = SDL_GetKeyboardState(nullptr);
         sample_weapon_keys(keys, nullptr);
         forget_picks();
@@ -835,6 +847,7 @@ void mouse_aim_frame() {
      * edge detectors current so a button held while closing cannot toggle
      * capture or inject a guest action on the following frame. */
     if (psx_host_ui_game_input_captured()) {
+        g_crosshair_shown.store(false, std::memory_order_relaxed);
         const Uint8 *keys = SDL_GetKeyboardState(nullptr);
         sample_weapon_keys(keys, nullptr);
         forget_picks();
@@ -899,6 +912,12 @@ void mouse_aim_frame() {
     const bool live = disruptor_vertical_camera_input_allowed() != 0;
     const bool tilting = g_mouse.vertical_look_enabled && !vertical_netplay_blocked && live;
     const bool steering = playing && live && psx_read_byte(kMenuStateAddress) != kMainMenu;
+    const uint32_t live_frames = disruptor_vertical_camera_live_frames();
+    g_mouse.frames_since_live = live_frames != g_mouse.last_live_frames ? 0 : std::min(g_mouse.frames_since_live + 1, 1 << 20);
+    g_mouse.last_live_frames = live_frames;
+    const bool drawn = g_mouse.frames_since_live < kCrosshairDrawnWithin;
+    g_crosshair_shown.store(steering && drawn && g_mouse.vertical_look_enabled && g_crosshair.load(std::memory_order_relaxed),
+                            std::memory_order_relaxed);
     const disruptor::sticks::Reading stick =
         pad ? disruptor::sticks::read(g_mouse.sticks, {axes[0], axes[1], axes[2], axes[3]}, psx_input_deadzone(), steering, tilting)
             : disruptor::sticks::Reading{};
@@ -992,6 +1011,7 @@ struct MouseAimRegistration {
             env_enabled("PSX_DISRUPTOR_MOUSE_AIM");
         g_mouse.vertical_look_enabled =
             env_enabled("PSX_DISRUPTOR_VERTICAL_LOOK");
+        tell_free_aim();
         g_mouse.modern_controls_enabled =
             env_enabled("PSX_DISRUPTOR_MODERN_CONTROLS");
         g_mouse.high_precision_camera =
@@ -1233,6 +1253,8 @@ extern "C" void disruptor_mouse_set_vertical_look_enabled(int enabled) {
     const bool next = enabled != 0;
     if (g_mouse.vertical_look_enabled == next) return;
     g_mouse.vertical_look_enabled = next;
+    tell_free_aim();
+    if (!next) g_crosshair_shown.store(false, std::memory_order_relaxed);
     if (next) {
         if (!psx_netplay_active())
             disruptor_vertical_camera_set_requested_pitch(
@@ -1282,6 +1304,30 @@ extern "C" void disruptor_mouse_set_invert_vertical(int inverted) {
     if (g_mouse.invert_vertical == next) return;
     g_mouse.invert_vertical = next;
     log_event(next ? "settings-invert-y-on" : "settings-invert-y-off");
+}
+
+extern "C" int disruptor_mouse_auto_aim(void) {
+    load_configuration();
+    return g_mouse.auto_aim ? 1 : 0;
+}
+
+extern "C" void disruptor_mouse_set_auto_aim(int enabled) {
+    load_configuration();
+    g_mouse.auto_aim = enabled != 0;
+    tell_free_aim();
+}
+
+extern "C" int disruptor_mouse_crosshair(void) {
+    return g_crosshair.load(std::memory_order_relaxed) ? 1 : 0;
+}
+
+extern "C" void disruptor_mouse_set_crosshair(int shown) {
+    g_crosshair.store(shown != 0, std::memory_order_relaxed);
+    if (shown == 0) g_crosshair_shown.store(false, std::memory_order_relaxed);
+}
+
+extern "C" int disruptor_mouse_crosshair_shown(void) {
+    return g_crosshair_shown.load(std::memory_order_relaxed) ? 1 : 0;
 }
 
 extern "C" double disruptor_mouse_vertical_pitch(void) {

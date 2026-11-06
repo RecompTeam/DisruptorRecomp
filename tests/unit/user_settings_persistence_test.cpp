@@ -86,6 +86,18 @@ int main() {
         written.vertical_sensitivity = 0.2;
         written.has_invert_vertical = true;
         written.invert_vertical = true;
+        written.has_auto_aim = true;
+        written.auto_aim = true;
+        written.has_crosshair = true;
+        written.crosshair = true;
+        written.has_crosshair_shape = true;
+        written.crosshair_shape = 2;
+        written.has_crosshair_size = true;
+        written.crosshair_size = 175;
+        written.has_crosshair_colour = true;
+        written.crosshair_colour = 4;
+        written.has_crosshair_opacity = true;
+        written.crosshair_opacity = 35;
         written.has_high_precision_camera = true;
         written.high_precision_camera = true;
         written.has_geometry_correction = true;
@@ -221,7 +233,10 @@ int main() {
                     loaded.has_vertical_look && loaded.vertical_look &&
                     loaded.has_vertical_sensitivity &&
                     loaded.vertical_sensitivity == 0.2 &&
-                    loaded.has_invert_vertical && loaded.invert_vertical &&
+                    loaded.has_invert_vertical && loaded.invert_vertical && loaded.has_auto_aim && loaded.auto_aim &&
+                    loaded.has_crosshair && loaded.crosshair && loaded.has_crosshair_shape && loaded.crosshair_shape == 2 &&
+                    loaded.has_crosshair_size && loaded.crosshair_size == 175 && loaded.has_crosshair_colour &&
+                    loaded.crosshair_colour == 4 && loaded.has_crosshair_opacity && loaded.crosshair_opacity == 35 &&
                     loaded.has_high_precision_camera &&
                     loaded.high_precision_camera &&
                     loaded.has_geometry_correction &&

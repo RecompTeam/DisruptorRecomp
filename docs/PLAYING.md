@@ -225,9 +225,14 @@ only while the keys are a scheme's own: keys you set yourself stay.
 
 ### Mouse
 
-- **Vertical mouse look** is experimental and starts off. Switch it on on the
-  Controls page. It tilts at the horizontal speed unless **Separate vertical
-  speed** is on.
+- **Vertical mouse look** starts off. Switch it on on the Controls page. It
+  tilts at the horizontal speed unless **Separate vertical speed** is on.
+- **Auto-aim** is under Vertical mouse look and starts off. Off, a shot goes
+  where you look. On, it rises or falls to the enemy the game picks, as in the
+  original. Homing shots follow their target either way.
+- **Crosshair** puts a small dot in the middle of the screen while you play.
+  It is under Vertical mouse look and starts off. Its shape (a dot, a plus or
+  a ring), size, colour and opacity are set under it.
 - Speeds are shown as a multiple of the default speed, 1.0x.
 - **Smooth mouse turning** is on at first. It turns the picture between the
   game's 256 heading steps and needs captured mouse aim and exact geometry.

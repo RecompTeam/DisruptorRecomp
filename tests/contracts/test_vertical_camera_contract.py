@@ -87,11 +87,12 @@ require(
 )
 projectile = camera[camera.index("void adjust_projectile") : camera.index("PSX_MOD_CONSTRUCTOR")]
 require(
-    projectile.index("if (projectile_slope == 0.0) return") < projectile.index("plausible_live_gameplay()"),
-    "zero pitch must not add diagnostic guest-memory reads",
+    "if ((projectile_slope == 0.0 && !free_aim) || !plausible_live_gameplay()) return;" in projectile,
+    "zero pitch without free aim must not add guest-memory reads",
 )
 require(
-    "psx_mod_read_word(kAimTargetPointer) != 0u" in projectile, "native target-assisted aim must remain authoritative"
+    "psx_mod_read_word(kAimTargetPointer) != 0u" in projectile and "if (aimed && !free_aim) return;" in projectile,
+    "native target-assisted aim stays authoritative unless the player turned Auto-aim off",
 )
 
 require(

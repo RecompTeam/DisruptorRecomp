@@ -1,5 +1,5 @@
 diff --git a/runtime/include/gpu.h b/runtime/include/gpu.h
-index 12e9533d7a880b9de3d42a11187216f44b8d217c..25dbd902052279882d3ebd2ad68957a2158f8fda 100644
+index 12e9533d7a880b9de3d42a11187216f44b8d217c..b8e7b8f1d729e22bc2f6f27c2e59ca76b1104a1c 100644
 --- a/runtime/include/gpu.h
 +++ b/runtime/include/gpu.h
 @@ -1,4 +1,4 @@
@@ -18,7 +18,7 @@ index 12e9533d7a880b9de3d42a11187216f44b8d217c..25dbd902052279882d3ebd2ad68957a2
 +void gpu_geometry_camera_yaw_residual_set(double yaw_units);
 +/* Display-relative projection horizon shared with the yaw homography, rounded to a pixel. Invalid values reset to 120. */
 +void gpu_geometry_camera_projection_center_y_set(double center_y);
-+int  gpu_geometry_camera_projection_center_y_get(void);
++double gpu_geometry_camera_projection_center_y_get(void);
 +void gpu_geometry_correction_stats(uint64_t *world_triangles,
 +                                   uint64_t *precise_triangles);
 +

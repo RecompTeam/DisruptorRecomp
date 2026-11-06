@@ -11,6 +11,7 @@
 
 #include "game/settings/hint_text.h"
 #include "game/settings/pad_layout.h"
+#include "game/ui/crosshair_draw.h"
 
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -1663,6 +1664,30 @@ void View::achievements_account() {
     ImGui::Dummy(ImVec2(0.0f, 6.0f * scale_));
 }
 // The unlock sound's file, a child row of Unlock sound: a WAV of the player's own, kept with their files, or the chime.
+/* The crosshair over a stand-in of the game's picture, as the game draws it on this screen. */
+void View::crosshair_preview() {
+    const SettingsFile& file = session_.settings();
+    const auto value = [&file](const char* key) { return file.shown(*find_option(key)); };
+    const bool on = session_.editable() && file.applies(*find_option("disruptor.crosshair_shape"));
+    const disruptor::crosshair::Style style{value("disruptor.crosshair_shape"), value("disruptor.crosshair_size"),
+                                            value("disruptor.crosshair_colour"), value("disruptor.crosshair_opacity")};
+    int height = 1080;
+    if (const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay())) height = mode->h;
+    ImGui::Dummy(ImVec2(0.0f, 4.0f * scale_));
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 26.0f * scale_);
+    const ImVec2 at = ImGui::GetCursorScreenPos(), size(192.0f * scale_, 108.0f * scale_);
+    const float horizon = at.y + size.y * 0.55f, fade = on ? 1.0f : 0.35f;
+    const auto shade = [fade](int r, int g, int b) { return IM_COL32(r, g, b, static_cast<int>(255 * fade)); };
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    draw->AddRectFilledMultiColor(at, ImVec2(at.x + size.x, horizon), shade(34, 42, 36), shade(34, 42, 36), shade(56, 66, 56),
+                                  shade(56, 66, 56));
+    draw->AddRectFilledMultiColor(ImVec2(at.x, horizon), ImVec2(at.x + size.x, at.y + size.y), shade(84, 86, 96), shade(84, 86, 96),
+                                  shade(126, 128, 138), shade(126, 128, 138));
+    draw->AddRect(at, ImVec2(at.x + size.x, at.y + size.y), colour(kBorder));
+    disruptor::crosshair::draw(draw, ImVec2(at.x + size.x * 0.5f, at.y + size.y * 0.5f), height, style, fade);
+    ImGui::Dummy(size);
+}
+
 void View::unlock_sound_row() {
     const SettingsFile& file = session_.settings();
     const bool on = session_.editable() && file.shown(*find_option("disruptor.achievements_sound")) == 1;
@@ -2741,6 +2766,7 @@ void View::rows() {
         if (std::string_view(option.key) == "disruptor.psionic_keys_use" && file.shown(*find_option("disruptor.number_keys")) == 1)
             pick_section();
         if (std::string_view(option.key) == "disruptor.achievements_sound") unlock_sound_row();
+        if (std::string_view(option.key) == "disruptor.crosshair_opacity") crosshair_preview();
         ImRect row(start.x, start.y - 4.0f * scale_, start.x + width, ImGui::GetCursorScreenPos().y);
         if (row.Overlaps(card)) {
             const bool whole = card.Contains(row);

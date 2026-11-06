@@ -54,6 +54,12 @@ constexpr Placement placed[] = {
     {"disruptor.invert_horizontal", Page::controls},
     {"disruptor.vertical_look", Page::controls, "Vertical look"},
     {"disruptor.invert_vertical", Page::controls, nullptr, true},
+    {"disruptor.auto_aim", Page::controls, nullptr, true},
+    {"disruptor.crosshair", Page::controls, nullptr, true},
+    {"disruptor.crosshair_shape", Page::controls, nullptr, true},
+    {"disruptor.crosshair_size", Page::controls, nullptr, true},
+    {"disruptor.crosshair_colour", Page::controls, nullptr, true},
+    {"disruptor.crosshair_opacity", Page::controls, nullptr, true},
     {"disruptor.separate_vertical_speed", Page::controls, nullptr, true},
     {"disruptor.vertical_sensitivity", Page::controls, nullptr, true},
     {"disruptor.stick_layout", Page::controls, "Gamepad"},
@@ -261,7 +267,7 @@ bool SettingsFile::reset(Page page) {
 
 bool experimental(const Option& option) {
     const std::string_view key = option.key;
-    return key == "disruptor.vertical_look" || key == "disruptor.selection_wheels";
+    return key == "disruptor.selection_wheels";
 }
 
 std::vector<std::string> SettingsFile::language_discs() const {

@@ -73,7 +73,6 @@ void draw_controls_tab() {
         disruptor_mouse_set_vertical_look_enabled(vertical_look ? 1 : 0);
         mark_vertical_look(vertical_look);
     }
-    draw_status_badge("EXPERIMENTAL", ImVec4(1.0f, 0.73f, 0.25f, 1.0f));
 
     ImGui::Indent();
     const bool looking = applies("disruptor.invert_vertical");
@@ -84,6 +83,45 @@ void draw_controls_tab() {
         mark_invert_y(invert_y);
     }
     if (!looking) ImGui::EndDisabled();
+
+    const bool aiming = applies("disruptor.auto_aim");
+    if (!aiming) ImGui::BeginDisabled();
+    bool auto_aim = disruptor_mouse_auto_aim() != 0;
+    if (option_toggle("disruptor.auto_aim", &auto_aim)) {
+        disruptor_mouse_set_auto_aim(auto_aim ? 1 : 0);
+        mark("disruptor.auto_aim", auto_aim);
+    }
+    if (!aiming) ImGui::EndDisabled();
+
+    const bool dotted = applies("disruptor.crosshair");
+    if (!dotted) ImGui::BeginDisabled();
+    bool crosshair = disruptor_mouse_crosshair() != 0;
+    if (option_toggle("disruptor.crosshair", &crosshair)) {
+        disruptor_mouse_set_crosshair(crosshair ? 1 : 0);
+        mark("disruptor.crosshair", crosshair);
+    }
+    if (!dotted) ImGui::EndDisabled();
+
+    const bool styled = applies("disruptor.crosshair_shape") && applies("disruptor.crosshair_size") &&
+                        applies("disruptor.crosshair_colour") && applies("disruptor.crosshair_opacity");
+    if (!styled) ImGui::BeginDisabled();
+    ImGui::Indent();
+    int shape = crosshair_shape(), size = crosshair_size(), colour = crosshair_colour(), opacity = crosshair_opacity();
+    ImGui::SetNextItemWidth(220.0f);
+    const bool shaped = option_list("disruptor.crosshair_shape", &shape);
+    if (shaped) mark("disruptor.crosshair_shape", shape);
+    ImGui::SetNextItemWidth(260.0f);
+    const bool sized = option_slider("disruptor.crosshair_size", &size);
+    if (sized) mark("disruptor.crosshair_size", size);
+    ImGui::SetNextItemWidth(220.0f);
+    const bool coloured = option_list("disruptor.crosshair_colour", &colour);
+    if (coloured) mark("disruptor.crosshair_colour", colour);
+    ImGui::SetNextItemWidth(260.0f);
+    const bool faded = option_slider("disruptor.crosshair_opacity", &opacity);
+    if (faded) mark("disruptor.crosshair_opacity", opacity);
+    if (shaped || sized || coloured || faded) set_crosshair_style(shape, size, colour, opacity);
+    ImGui::Unindent();
+    if (!styled) ImGui::EndDisabled();
 
     const bool separable = applies("disruptor.separate_vertical_speed");
     if (!separable) ImGui::BeginDisabled();

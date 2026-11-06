@@ -280,7 +280,7 @@ struct Effect {
         top != horizon - fall - (height >> 1)) {
         return std::nullopt;
     }
-    return Shape{.row = static_cast<int32_t>(horizon * kOne) - scaled(drop, depth),
+    return Shape{.row = disruptor_vertical_camera_projection_row16() - scaled(drop, depth),
                  .width = scaled(extent.wide, depth),
                  .height = scaled(extent.tall, depth),
                  .shadow = true};
@@ -304,7 +304,7 @@ struct Effect {
     const Place place{.x = psx_ws_project_x16(column, fraction),
                       .dy = static_cast<int32_t>(-(down % sprite.depth) * kOne / sprite.depth)};
     sprite.place = place;
-    const int32_t row = static_cast<int32_t>((disruptor_vertical_camera_projection_row() - down / sprite.depth) * kOne) + place.dy;
+    const int32_t row = disruptor_vertical_camera_projection_row16() - static_cast<int32_t>(down / sprite.depth * kOne) + place.dy;
     if (funnel.size == Size::Effect) {
         if (const std::optional<Effect> effect = readable(cpu) ? effect_size(cpu, sprite.depth) : std::nullopt) {
             sprite.shape = Shape{.row = row, .width = effect->wide.exact, .height = effect->tall.exact, .shadow = false};
@@ -483,7 +483,7 @@ enum class Cover { none, front, past, over };
     gte_ws_x_squash(&num, &den);
     const double unsquash = num > 0 && den > 0 ? static_cast<double>(den) / num : 1.0;
     std::array<std::array<double, 3>, 4> place{}, camera{};
-    const double horizon = disruptor_vertical_camera_projection_row();
+    const double horizon = static_cast<double>(disruptor_vertical_camera_projection_row16()) / kOne;
     for (uint32_t corner = 0; corner < corners; ++corner) {
         const uint32_t word = at + 8u + corner * stride;
         int32_t x16 = 0, y16 = 0;

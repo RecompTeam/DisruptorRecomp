@@ -90,6 +90,46 @@ void read_game_user_settings(const toml::value& doc, UserSettings& s) {
             s.invert_vertical = toml::find<bool>(d, "invert_vertical");
             s.has_invert_vertical = true;
         });
+        if (d.contains("auto_aim")) try_get([&]{
+            s.auto_aim = toml::find<bool>(d, "auto_aim");
+            s.has_auto_aim = true;
+        });
+        if (d.contains("crosshair")) try_get([&]{
+            s.crosshair = toml::find<bool>(d, "crosshair");
+            s.has_crosshair = true;
+        });
+        if (d.contains("crosshair_shape")) try_get([&]{
+            const std::string shape = toml::find<std::string>(d, "crosshair_shape");
+            for (int index = 0; index < kDisruptorCrosshairShapeCount; ++index) {
+                if (shape == kDisruptorCrosshairShapes[index]) {
+                    s.crosshair_shape = index;
+                    s.has_crosshair_shape = true;
+                }
+            }
+        });
+        if (d.contains("crosshair_size")) try_get([&]{
+            const int size = toml::find<int>(d, "crosshair_size");
+            if (size >= 50 && size <= 300) {
+                s.crosshair_size = size;
+                s.has_crosshair_size = true;
+            }
+        });
+        if (d.contains("crosshair_colour")) try_get([&]{
+            const std::string colour = toml::find<std::string>(d, "crosshair_colour");
+            for (int index = 0; index < kDisruptorCrosshairColourCount; ++index) {
+                if (colour == kDisruptorCrosshairColours[index]) {
+                    s.crosshair_colour = index;
+                    s.has_crosshair_colour = true;
+                }
+            }
+        });
+        if (d.contains("crosshair_opacity")) try_get([&]{
+            const int opacity = toml::find<int>(d, "crosshair_opacity");
+            if (opacity >= 20 && opacity <= 100) {
+                s.crosshair_opacity = opacity;
+                s.has_crosshair_opacity = true;
+            }
+        });
         if (d.contains("separate_vertical_speed")) try_get([&]{
             s.separate_vertical_speed = toml::find<bool>(d, "separate_vertical_speed");
             s.has_separate_vertical_speed = true;
@@ -439,7 +479,8 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
         s.has_key_second || s.has_psionic_keys_use ||
         s.has_horizontal_sensitivity || s.has_invert_horizontal ||
         s.has_vertical_look || s.has_vertical_sensitivity ||
-        s.has_invert_vertical || s.has_separate_vertical_speed ||
+        s.has_invert_vertical || s.has_auto_aim || s.has_crosshair || s.has_crosshair_shape || s.has_crosshair_size ||
+        s.has_crosshair_colour || s.has_crosshair_opacity || s.has_separate_vertical_speed ||
         s.has_stick_layout || s.has_look_speed || s.has_look_deadzone || s.has_invert_look ||
         s.has_probe_lighting || s.has_probe_strength || s.has_probe_bounce || s.has_probe_glow ||
         s.has_dynamic_shadows || s.has_shadow_strength || s.has_shadow_underneath ||
@@ -500,6 +541,16 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
         }
         if (s.has_invert_vertical)
             f << "invert_vertical = " << (s.invert_vertical ? "true" : "false") << "\n";
+        if (s.has_auto_aim) f << "auto_aim = " << (s.auto_aim ? "true" : "false") << "\n";
+        if (s.has_crosshair) f << "crosshair = " << (s.crosshair ? "true" : "false") << "\n";
+        if (s.has_crosshair_shape && s.crosshair_shape >= 0 && s.crosshair_shape < kDisruptorCrosshairShapeCount)
+            f << "crosshair_shape = " << quoted(kDisruptorCrosshairShapes[s.crosshair_shape]) << "\n";
+        if (s.has_crosshair_size && s.crosshair_size >= 50 && s.crosshair_size <= 300)
+            f << "crosshair_size = " << s.crosshair_size << "\n";
+        if (s.has_crosshair_colour && s.crosshair_colour >= 0 && s.crosshair_colour < kDisruptorCrosshairColourCount)
+            f << "crosshair_colour = " << quoted(kDisruptorCrosshairColours[s.crosshair_colour]) << "\n";
+        if (s.has_crosshair_opacity && s.crosshair_opacity >= 20 && s.crosshair_opacity <= 100)
+            f << "crosshair_opacity = " << s.crosshair_opacity << "\n";
         if (s.has_separate_vertical_speed)
             f << "separate_vertical_speed = " << (s.separate_vertical_speed ? "true" : "false") << "\n";
         if (s.has_stick_layout && s.stick_layout >= 0 && s.stick_layout < kDisruptorStickLayoutCount)

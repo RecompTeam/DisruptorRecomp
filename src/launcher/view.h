@@ -133,6 +133,7 @@ private:
     // The tables under the setting that turns them on, with their own note, hints and default.
     void pick_section();
     void unlock_sound_row();
+    void crosshair_preview();
     void take_unlock_sound(const std::filesystem::path& chosen);
     void default_unlock_sound();
     // Take it on a note: a taken key moves where it was asked for, the owner gets the other's old key or none.

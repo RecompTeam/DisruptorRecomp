@@ -23,6 +23,12 @@ struct GameUserSettings {
     bool has_vertical_look = false; bool vertical_look = false;
     bool has_vertical_sensitivity = false; double vertical_sensitivity = 0.08;
     bool has_invert_vertical = false; bool invert_vertical = false;
+    bool has_auto_aim = false; bool auto_aim = false;
+    bool has_crosshair = false; bool crosshair = false;
+    bool has_crosshair_shape = false; int crosshair_shape = 0;  // an index into kDisruptorCrosshairShapes
+    bool has_crosshair_size = false; int crosshair_size = 100;  // percent of the plain dot
+    bool has_crosshair_colour = false; int crosshair_colour = 0;  // an index into kDisruptorCrosshairColours
+    bool has_crosshair_opacity = false; int crosshair_opacity = 90;
     bool has_separate_vertical_speed = false; bool separate_vertical_speed = false;
     bool has_stick_layout = false; int stick_layout = 1;     // an index into kDisruptorStickLayouts
     bool has_look_speed = false; int look_speed = 100;       // percent of the D-pad's turn at a full push
@@ -93,6 +99,10 @@ inline constexpr int kDisruptorBassCutDefault = 1;  // reduced: the owner's choi
 inline constexpr int kDisruptorPopupTimes[] = {3, 5, 8, 12, 15, 30};  // seconds
 inline constexpr int kDisruptorPopupTimeCount = 6;
 inline constexpr const char* kDisruptorPopupCorners[] = {"top_right", "top_left", "bottom_right", "bottom_left"};
+inline constexpr const char* kDisruptorCrosshairShapes[] = {"dot", "plus", "ring"};
+inline constexpr int kDisruptorCrosshairShapeCount = 3;
+inline constexpr const char* kDisruptorCrosshairColours[] = {"white", "green", "red", "yellow", "cyan"};
+inline constexpr int kDisruptorCrosshairColourCount = 5;
 inline constexpr int kDisruptorPopupCornerCount = 4;
 inline constexpr const char* kDisruptorMovieFilters[] = {"original", "smooth"};
 inline constexpr int kDisruptorMovieFilterCount = 2;

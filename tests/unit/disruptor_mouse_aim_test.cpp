@@ -165,6 +165,15 @@ int disruptor_vertical_camera_input_allowed() {
     return g_vertical_input_allowed;
 }
 
+int g_free_aim = -1;
+std::uint32_t g_live_frames = 0;
+std::uint32_t disruptor_vertical_camera_live_frames() {
+    return g_live_frames;
+}
+void disruptor_vertical_camera_set_free_aim(int free_aim) {
+    g_free_aim = free_aim;
+}
+
 int psx_netplay_active() {
     return g_netplay_active;
 }
@@ -550,6 +559,30 @@ void test_pause_holds_the_camera() {
     g_relative_x = 25.0f;
     mouse_aim_frame();
     expect(psx_read_byte(kTestYawAddress) == 98, "and turns again in play");
+}
+
+void test_the_crosshair_waits_for_drawn_frames() {
+    reset_state();
+    g_mouse.enabled = true;
+    g_mouse.vertical_look_enabled = true;
+    g_mouse.configured = true;
+    g_mouse.log = std::tmpfile();
+    g_live_frames = 0;
+    disruptor_mouse_set_crosshair(1);
+    mouse_aim_frame();
+    expect(!disruptor_mouse_crosshair_shown(), "a loading screen in scene 0 with a live player but no frame drawn shows no crosshair");
+    ++g_live_frames;
+    mouse_aim_frame();
+    expect(disruptor_mouse_crosshair_shown(), "the first frame the game's renderer draws in play shows it");
+    for (int frame = 0; frame < 3; ++frame) mouse_aim_frame();
+    expect(disruptor_mouse_crosshair_shown(), "it stays through a few VBlanks the renderer skips");
+    mouse_aim_frame();
+    expect(!disruptor_mouse_crosshair_shown(), "and goes when the renderer has drawn nothing for four");
+    ++g_live_frames;
+    psx_write_byte(kSceneModeAddress, 4u);
+    mouse_aim_frame();
+    expect(!disruptor_mouse_crosshair_shown(), "the pause hides it");
+    disruptor_mouse_set_crosshair(0);
 }
 
 void test_menu_pointer() {
@@ -1677,6 +1710,24 @@ void test_live_settings_api() {
     disruptor_mouse_set_vertical_look_enabled(1);
     expect(disruptor_mouse_vertical_look_enabled(),
            "live vertical-look enable is observable");
+    expect(g_free_aim == 1 && !disruptor_mouse_auto_aim(), "vertical look without Auto-aim sends shots where the view looks");
+    disruptor_mouse_set_auto_aim(1);
+    expect(g_free_aim == 0 && disruptor_mouse_auto_aim(), "Auto-aim gives the shots back to the game's target");
+    disruptor_mouse_set_auto_aim(0);
+    disruptor_mouse_set_vertical_look_enabled(0);
+    expect(g_free_aim == 0, "without vertical look the game aims as it always did");
+    disruptor_mouse_set_vertical_look_enabled(1);
+    disruptor_mouse_set_crosshair(1);
+    expect(disruptor_mouse_crosshair() && !disruptor_mouse_crosshair_shown(), "a crosshair asked for waits for play to show");
+    disruptor_mouse_set_crosshair(0);
+    const int pitch_calls = g_vertical_pitch_calls;
+    disruptor_mouse_set_vertical_pitch(5.0);
+    expect(g_vertical_pitch_calls == pitch_calls + 1 && g_requested_vertical_pitch == 5.0,
+           "a replayed pitch reaches the camera with vertical look on");
+    disruptor_mouse_set_vertical_look_enabled(0);
+    disruptor_mouse_set_vertical_pitch(7.0);
+    expect(g_requested_vertical_pitch == 0.0, "and stays out of it with vertical look off");
+    disruptor_mouse_set_vertical_look_enabled(1);
     expect_close(disruptor_mouse_set_vertical_sensitivity(0.25), 0.25,
                  "live vertical sensitivity accepts an in-range value");
     expect_close(disruptor_mouse_set_vertical_sensitivity(99.0), 2.0,
@@ -1956,6 +2007,7 @@ int main(int argc, char **argv) {
         test_vertical_direction_inversion_and_clamp();
         test_simultaneous_relative_axes_sample();
         test_pause_holds_the_camera();
+        test_the_crosshair_waits_for_drawn_frames();
         test_demo_leaves_the_camera();
         test_capture_release_and_frame_motion();
         test_focus_and_the_players_choice();

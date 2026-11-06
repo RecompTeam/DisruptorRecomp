@@ -10,7 +10,7 @@ The whole campaign can be played through.
 | Gameplay | The whole campaign can be played through on Windows. 60 FPS gameplay is on at first. Doors, a ridden lift, enemies and shots move on every frame under it. |
 | Rendering | OpenGL supports 1x–8x resolution and widescreen up to 32:9 or the window's shape, with 4x and 4:3 at first. Exact geometry, perspective textures, gap filling, a depth-sorted world and a smooth distance fade are on at first. Ambient occlusion, anti-aliasing (MSAA / SSAA) and sprites that face the camera are optional. Movies show all 320 columns, cleaned of their blocks and scaled smoothly under Movie filter. Minor edge gaps and localized texture wobble can remain. |
 | Motion | 60 FPS gameplay, the render thread and smooth mouse turning are on at first. In-between frames start off and add frames up to 320 FPS. |
-| Controls | Modern or Classic controls, a gamepad beside the keyboard with dual analog sticks, keys and gamepad buttons rebound in the launcher, and keyboard save naming. Weapon and psionic wheels and vertical mouse look remain experimental. |
+| Controls | Modern or Classic controls, a gamepad beside the keyboard with dual analog sticks, keys and gamepad buttons rebound in the launcher, and keyboard save naming. Vertical mouse look, with an Auto-aim option and a crosshair. Weapon and psionic wheels remain experimental. |
 | Settings | One settings table for the launcher and the in-game menu. The lighting options stay closed in releases while they are tested. |
 | Achievements | RetroAchievements sign-in in the launcher, with a choice of how unlocks show. |
 | Languages | A French, German or Japanese disc of the player's own can give the game its language. USA remains the required game disc. |
@@ -46,7 +46,7 @@ What changed in each release is in the [changelog](../CHANGELOG.md).
   the game itself drew a pickup lying under a shut door over the door.
 - The widescreen sky and skyline are checked at 16:9, 21:9 and 32:9 in the
   first mission only.
-- Vertical aim needs broader actor, room-edge, and level-transition testing.
+- Vertical mouse look moves the horizon instead of turning the camera, about 31 degrees each way.
 - 5x–7x resolution settings have automated coverage but have not been
   individually exercised live.
 - Live volume adjustment and its relaunch persistence need user validation.

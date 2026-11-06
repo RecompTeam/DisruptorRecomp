@@ -31,7 +31,7 @@
 #include <limits>
 
 extern "C" void gpu_geometry_camera_projection_center_y_set(double center_y);
-extern "C" int gpu_geometry_camera_projection_center_y_get(void);
+extern "C" double gpu_geometry_camera_projection_center_y_get(void);
 
 namespace {
 
@@ -43,11 +43,16 @@ constexpr uint32_t kCurrentHealth = 0x80077660u;
 constexpr uint32_t kMaximumHealth = 0x80077664u;
 constexpr uint32_t kSceneMode = 0x8007145Cu;
 constexpr uint32_t kScriptedCamera = 0x800714E0u;
+constexpr uint32_t kGameMode = 0x800716F0u;  /* gp+0x5A4: 3 while the menu's demo plays */
+constexpr uint8_t kDemoMode = 3u;
+constexpr uint32_t kMenuState = 0x800715FCu;
+constexpr uint8_t kMainMenu = 0x18u;  /* the main menu runs in scene mode 0 too */
 constexpr uint32_t kPlayerPointer = 0x80071714u;
 constexpr uint32_t kAimTargetPointer = 0x80071560u;
 constexpr uint32_t kPlayerInactiveOffset = 0x7Fu;
 
 constexpr int kNeutralCenterY = 120;
+constexpr int32_t kNeutralCenter16 = kNeutralCenterY << 16;
 constexpr double kProjectionH = 160.0;
 constexpr double kFullTurnUnits = 256.0;
 constexpr double kMaximumPitchUnits = 22.0;
@@ -104,7 +109,10 @@ std::atomic<double> g_requested_pitch{0.0};
 std::atomic<double> g_effective_pitch{0.0};
 std::atomic<double> g_effective_slope{0.0};
 std::atomic<int> g_effective_center_y{kNeutralCenterY};
+std::atomic<int32_t> g_effective_center16{kNeutralCenter16};
 std::atomic<int> g_effective_active{0};
+std::atomic<int> g_free_aim{0};
+std::atomic<uint32_t> g_live_frames{0};
 
 bool comparator_active() {
     /* The optional differential checker runs a compiled RECORD pass followed
@@ -157,57 +165,64 @@ double clamp_pitch(double pitch) {
     return std::clamp(pitch, -kMaximumPitchUnits, kMaximumPitchUnits);
 }
 
-int center_for_pitch(double pitch) {
+/* The horizon in 16.16, as GTE OFY takes it: the world moves by fractions of a row as the mouse tilts. */
+int32_t center16_for_pitch(double pitch) {
     const double radians = pitch * (2.0 * kPi / kFullTurnUnits);
-    return static_cast<int>(std::lround(
-        static_cast<double>(kNeutralCenterY) +
-        kProjectionH * std::tan(radians)));
+    return static_cast<int32_t>(std::llround(
+        (static_cast<double>(kNeutralCenterY) + kProjectionH * std::tan(radians)) * 65536.0));
 }
 
-void give_gpu_center(int center) {
+/* The whole row the game's own projection literals take. */
+int center_for_pitch(double pitch) {
+    return static_cast<int>((static_cast<int64_t>(center16_for_pitch(pitch)) + 0x8000) >> 16);
+}
+
+double slope_of(int32_t center16) {
+    return static_cast<double>(center16 - kNeutralCenter16) / (kProjectionH * 65536.0);
+}
+
+void give_gpu_center(double center) {
     if (gpu_geometry_camera_projection_center_y_get() != center)
-        gpu_geometry_camera_projection_center_y_set(static_cast<double>(center));
+        gpu_geometry_camera_projection_center_y_set(center);
 }
 
 void publish_neutral(CPUState *cpu, bool host) {
     if (comparator_active()) return;
 
     const int was_active = g_effective_active.load(std::memory_order_relaxed);
-    const int old_center =
-        g_effective_center_y.load(std::memory_order_relaxed);
+    const int32_t old_center16 = g_effective_center16.load(std::memory_order_relaxed);
     g_effective_pitch.store(0.0, std::memory_order_relaxed);
     g_effective_slope.store(0.0, std::memory_order_relaxed);
     g_effective_center_y.store(kNeutralCenterY, std::memory_order_relaxed);
+    g_effective_center16.store(kNeutralCenter16, std::memory_order_relaxed);
     g_effective_active.store(0, std::memory_order_release);
 
     /* The GPU takes a frame's list after the renderer's end: a probe counted no world triangle between entry and end. */
-    if (host) give_gpu_center(kNeutralCenterY);
-    if (!was_active && old_center == kNeutralCenterY) return;
-    if (cpu) {
-        gte_write_ctrl(cpu, 25u,
-                       static_cast<uint32_t>(kNeutralCenterY << 16));
-    }
+    if (host) give_gpu_center(static_cast<double>(kNeutralCenterY));
+    if (!was_active && old_center16 == kNeutralCenter16) return;
+    if (cpu) gte_write_ctrl(cpu, 25u, static_cast<uint32_t>(kNeutralCenter16));
 }
 
 void publish_pitch(CPUState *cpu, double pitch) {
     if (!cpu || comparator_active()) return;
 
     pitch = clamp_pitch(pitch);
-    const int center = center_for_pitch(pitch);
-    if (center == kNeutralCenterY) {
+    const int32_t center16 = center16_for_pitch(pitch);
+    if (center16 == kNeutralCenter16) {
         publish_neutral(cpu, true);
         return;
     }
-    const double slope =
-        static_cast<double>(center - kNeutralCenterY) / kProjectionH;
+    const int center = center_for_pitch(pitch);
+    const double slope = slope_of(center16);
 
     g_effective_pitch.store(pitch, std::memory_order_relaxed);
     g_effective_slope.store(slope, std::memory_order_relaxed);
     g_effective_center_y.store(center, std::memory_order_relaxed);
+    g_effective_center16.store(center16, std::memory_order_relaxed);
     g_effective_active.store(1, std::memory_order_release);
 
-    gte_write_ctrl(cpu, 25u, static_cast<uint32_t>(center << 16));
-    give_gpu_center(center);
+    gte_write_ctrl(cpu, 25u, static_cast<uint32_t>(center16));
+    give_gpu_center(static_cast<double>(center16) / 65536.0);
 }
 
 void renderer_entry(CPUState *cpu, uint32_t address) {
@@ -216,6 +231,7 @@ void renderer_entry(CPUState *cpu, uint32_t address) {
         publish_neutral(cpu, true);
         return;
     }
+    g_live_frames.fetch_add(1, std::memory_order_relaxed);
     publish_pitch(cpu,
                   g_requested_pitch.load(std::memory_order_acquire));
 }
@@ -283,32 +299,32 @@ int16_t saturated_half(int64_t value) {
 }
 
 void adjust_projectile(CPUState *cpu) {
-    const int projectile_center = center_for_pitch(
-        g_requested_pitch.load(std::memory_order_acquire));
-    const double projectile_slope =
-        static_cast<double>(projectile_center - kNeutralCenterY) /
-        kProjectionH;
-    if (projectile_slope == 0.0) return;
-
-    if (!plausible_live_gameplay() ||
-        psx_mod_read_word(kAimTargetPointer) != 0u) {
+    const double projectile_slope = slope_of(center16_for_pitch(g_requested_pitch.load(std::memory_order_acquire)));
+    const bool free_aim = g_free_aim.load(std::memory_order_relaxed) != 0;
+    if ((projectile_slope == 0.0 && !free_aim) || !plausible_live_gameplay()) return;
+    /* The shots of the player in control only: not the demo's, nor any outside play. */
+    if (psx_mod_read_byte(kSceneMode) != 0u || psx_mod_read_byte(kGameMode) == kDemoMode ||
+        psx_mod_read_byte(kMenuState) == kMainMenu) {
         return;
     }
+    /* With a target the game raised the shot to the target's height (0x8002E2CC, 0x8002EA74): free aim takes the look. */
+    const bool aimed = psx_mod_read_word(kAimTargetPointer) != 0u;
+    if (aimed && !free_aim) return;
 
     const uint32_t entity = cpu->gpr[16];  /* $s0 at both verified seams. */
     if (!valid_main_ram_pointer(entity, kVelocityYOffset + 1u)) return;
 
     const int16_t velocity_x = load_signed_half(entity + kVelocityXOffset);
     const int16_t velocity_z = load_signed_half(entity + kVelocityZOffset);
-    const int16_t velocity_y = load_signed_half(entity + kVelocityYOffset);
+    const int16_t stored_y = load_signed_half(entity + kVelocityYOffset);
+    const int16_t velocity_y = aimed ? 0 : stored_y;
     const double horizontal_speed = std::hypot(
         static_cast<double>(velocity_x), static_cast<double>(velocity_z));
     const int64_t pitch_velocity = static_cast<int64_t>(std::llround(
         horizontal_speed * projectile_slope));
-    if (pitch_velocity == 0) return;
-
     const int16_t adjusted = saturated_half(
         static_cast<int64_t>(velocity_y) + pitch_velocity);
+    if (adjusted == stored_y) return;
     psx_mod_write_half(entity + kVelocityYOffset,
                        static_cast<uint16_t>(adjusted));
 }
@@ -330,6 +346,10 @@ extern "C" void disruptor_vertical_camera_set_requested_pitch(
     if (psx_netplay_active() && pitch_units != 0.0) return;
     g_requested_pitch.store(clamp_pitch(pitch_units),
                             std::memory_order_release);
+}
+
+extern "C" void disruptor_vertical_camera_set_free_aim(int free_aim) {
+    g_free_aim.store(free_aim != 0 ? 1 : 0, std::memory_order_relaxed);
 }
 
 extern "C" void disruptor_vertical_camera_recenter(void) {
@@ -355,12 +375,22 @@ extern "C" int disruptor_vertical_camera_projection_row(void) {
     return g_effective_center_y.load(std::memory_order_relaxed);
 }
 
+extern "C" int32_t disruptor_vertical_camera_projection_row16(void) {
+    if (comparator_active() || !g_effective_active.load(std::memory_order_acquire) || !plausible_live_gameplay())
+        return kNeutralCenter16;
+    return g_effective_center16.load(std::memory_order_relaxed);
+}
+
 extern "C" double disruptor_vertical_camera_effective_slope(void) {
     return g_effective_slope.load(std::memory_order_acquire);
 }
 
 extern "C" int disruptor_vertical_camera_active(void) {
     return g_effective_active.load(std::memory_order_acquire);
+}
+
+extern "C" uint32_t disruptor_vertical_camera_live_frames(void) {
+    return g_live_frames.load(std::memory_order_relaxed);
 }
 
 extern "C" int disruptor_vertical_camera_input_allowed(void) {

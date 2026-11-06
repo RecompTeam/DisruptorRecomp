@@ -534,6 +534,7 @@ disruptor_unit_test(disruptor_marked_corners tests/unit/disruptor_marked_corners
     set_tests_properties(disruptor_main_menu_exit_hooks_replay PROPERTIES
         ENVIRONMENT "PSX_DISRUPTOR_CAPSULE_REPLAY=capsule")
     disruptor_unit_test(disruptor_menu_rows tests/unit/disruptor_menu_rows_test.cpp INCLUDES src)
+    disruptor_unit_test(disruptor_crosshair tests/unit/disruptor_crosshair_test.cpp INCLUDES src)
     disruptor_unit_test(disruptor_password_hint tests/unit/disruptor_password_hint_test.cpp INCLUDES src)
     disruptor_unit_test(disruptor_states_row tests/unit/disruptor_states_row_test.cpp INCLUDES src)
     disruptor_unit_test(disruptor_state_browser tests/unit/disruptor_state_browser_test.cpp INCLUDES src)

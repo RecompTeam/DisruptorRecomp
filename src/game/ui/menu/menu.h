@@ -10,6 +10,7 @@
 #ifndef DISRUPTOR_UI_MENU_H
 #define DISRUPTOR_UI_MENU_H
 
+#include "game/ui/crosshair_draw.h"
 #include "game/achievements/game_client.h"
 #include "game/audio/bass_cut.h"
 #include "game/session/cheats.h"
@@ -191,6 +192,11 @@ extern std::string g_language_disc;
 std::string utf8(const fs::path &path);
 void set_modern_controls_live(bool enabled);
 void mark(const char *key, int value);
+void set_crosshair_style(int shape, int size, int colour, int opacity);
+int crosshair_shape();
+int crosshair_size();
+int crosshair_colour();
+int crosshair_opacity();
 void mark_mouse_aim(bool value);
 void mark_modern_controls(bool value);
 void mark_sensitivity(double value);

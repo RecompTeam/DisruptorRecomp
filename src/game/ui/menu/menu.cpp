@@ -363,7 +363,8 @@ uint32_t current_flags(void *) {
             return PSX_HOST_UI_CAPTURE_KEYBOARD | PSX_HOST_UI_CAPTURE_MOUSE | PSX_HOST_UI_CAPTURE_GAMEPAD | PSX_HOST_UI_VISIBLE | PSX_HOST_UI_LAYER;
         const bool achievements = achievements_overlay_shown();
         const bool pointing = disruptor_menu_pointing() != 0 || password_hint_shown() || state_browser_shown();
-        return disruptor_capsule_notice() || achievements || pointing ? PSX_HOST_UI_VISIBLE | PSX_HOST_UI_LAYER : 0u;
+        const bool crosshair = disruptor_mouse_crosshair_shown() != 0;
+        return disruptor_capsule_notice() || achievements || pointing || crosshair ? PSX_HOST_UI_VISIBLE | PSX_HOST_UI_LAYER : 0u;
     }
     return PSX_HOST_UI_CAPTURE_KEYBOARD |
            PSX_HOST_UI_CAPTURE_MOUSE |
@@ -372,6 +373,18 @@ uint32_t current_flags(void *) {
 }
 
 }  // namespace
+
+namespace {
+disruptor::crosshair::Style g_crosshair_style;
+}  // namespace
+
+void set_crosshair_style(int shape, int size, int colour, int opacity) {
+    g_crosshair_style = disruptor::crosshair::clamped({shape, size, colour, opacity});
+}
+int crosshair_shape() { return g_crosshair_style.shape; }
+int crosshair_size() { return g_crosshair_style.size; }
+int crosshair_colour() { return g_crosshair_style.colour; }
+int crosshair_opacity() { return g_crosshair_style.opacity; }
 
 void draw_arrow_at(float x, float y, int width, int height) {
     namespace pointer = disruptor::menu_pointer;
@@ -396,6 +409,13 @@ void draw_arrow_at(float x, float y, int width, int height) {
 }
 
 namespace {
+
+/* Where shots go with Vertical mouse look: the picture's middle, the game's row 120 of 240. */
+void draw_crosshair(int width, int height) {
+    if (!disruptor_mouse_crosshair_shown()) return;
+    disruptor::crosshair::draw(ImGui::GetForegroundDrawList(), ImVec2(static_cast<float>(width) * 0.5f, static_cast<float>(height) * 0.5f),
+                               height, g_crosshair_style);
+}
 
 /* A menu's arrow at the pointer. */
 void draw_menu_pointer(int width, int height) {
@@ -423,6 +443,7 @@ void render_notices(const char *word, int width, int height) {
         ImGui::End();
     }
     if (!hiding) {
+        draw_crosshair(width, height);
         draw_achievements_overlay(width, height);
         draw_password_hint(width, height);
         draw_state_browser(width, height);

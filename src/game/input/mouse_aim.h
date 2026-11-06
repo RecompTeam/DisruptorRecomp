@@ -69,6 +69,13 @@ int  disruptor_mouse_invert_vertical(void);
 void disruptor_mouse_set_invert_vertical(int inverted);
 
 /* Current requested pitch in signed 256-units-per-turn units. */
+/* With Vertical mouse look: on, shots rise to the target the game picks; off, they go where the view looks. */
+int  disruptor_mouse_auto_aim(void);
+void disruptor_mouse_set_auto_aim(int enabled);
+int  disruptor_mouse_crosshair(void);
+void disruptor_mouse_set_crosshair(int shown);
+/* The crosshair is drawn: asked for, Vertical mouse look on, and the player in control. */
+int  disruptor_mouse_crosshair_shown(void);
 double disruptor_mouse_vertical_pitch(void);
 /* A replay puts back the pitch a recording had, which no save state holds. */
 void disruptor_mouse_set_vertical_pitch(double pitch);

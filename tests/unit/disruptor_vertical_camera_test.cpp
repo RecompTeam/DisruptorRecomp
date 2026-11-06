@@ -129,7 +129,7 @@ void gpu_geometry_camera_projection_center_y_set(double center_y) {
     g_projection_center = center_y;
 }
 
-int gpu_geometry_camera_projection_center_y_get(void) { return static_cast<int>(g_projection_center); }
+double gpu_geometry_camera_projection_center_y_get(void) { return g_projection_center; }
 
 }  // extern "C"
 
@@ -156,7 +156,9 @@ void reset_state() {
     g_effective_pitch.store(0.0);
     g_effective_slope.store(0.0);
     g_effective_center_y.store(kNeutralCenterY);
+    g_effective_center16.store(kNeutralCenter16);
     g_effective_active.store(0);
+    g_free_aim.store(0);
 }
 
 void seed_live_game() {
@@ -189,15 +191,17 @@ void test_registration_and_projection() {
            "live non-zero pitch activates");
     expect(disruptor_vertical_camera_effective_center_y() == expected_center,
            "projection center derives from pitch");
-    expect(std::abs(disruptor_vertical_camera_effective_slope() -
-                    static_cast<double>(expected_center - 120) / 160.0) <
-               1e-12,
-           "aim slope derives from integer projection center");
-    expect(cpu.gte_ctrl[25] ==
-               static_cast<std::uint32_t>(expected_center << 16),
-           "renderer entry writes GTE OFY");
-    expect(g_projection_center == expected_center,
-           "renderer entry publishes presentation center");
+    const std::int32_t expected_center16 = center16_for_pitch(10.0);
+    expect(std::abs(disruptor_vertical_camera_effective_slope() - std::tan(10.0 * 2.0 * kPi / 256.0)) < 1e-6,
+           "aim slope is the tilt's own tangent, not a whole row's");
+    expect(cpu.gte_ctrl[25] == static_cast<std::uint32_t>(expected_center16) &&
+               expected_center16 != expected_center << 16 && (expected_center16 + 0x8000) >> 16 == expected_center,
+           "renderer entry writes GTE OFY with the horizon's fraction, the game's literal its nearest row");
+    expect(g_projection_center == expected_center16 / 65536.0,
+           "renderer entry publishes the fractional presentation center");
+    expect(disruptor_vertical_camera_projection_row16() == expected_center16 &&
+               disruptor_vertical_camera_projection_row() == expected_center,
+           "sprite rows take the fraction, packet checks the whole row");
 
     cpu.gpr[2] = 120u;  // vanilla LI result
     disruptor_vertical_camera_instruction_hook(
@@ -240,7 +244,7 @@ void test_restore_and_zero_identity() {
     expect(!disruptor_vertical_camera_active() &&
                disruptor_vertical_camera_effective_center_y() == 120,
            "renderer exit restores neutral effective projection");
-    expect(cpu.gte_ctrl[25] == (120u << 16) && g_projection_center == center_for_pitch(-12.0),
+    expect(cpu.gte_ctrl[25] == (120u << 16) && g_projection_center == center16_for_pitch(-12.0) / 65536.0,
            "renderer exit gives the game its GTE back and leaves the GPU the frame's horizon for its list");
     expect(disruptor_vertical_camera_requested_pitch() == requested,
            "temporary renderer restore preserves requested pitch");
@@ -379,8 +383,7 @@ void test_projectile_alignment() {
     cpu.gpr[16] = kTestProjectile;
     disruptor_vertical_camera_set_requested_pitch(10.0);
     seed_projectile(300, 400, 10);
-    const double slope = static_cast<double>(center_for_pitch(10.0) - 120) /
-                         160.0;
+    const double slope = slope_of(center16_for_pitch(10.0));
     const std::int16_t expected = static_cast<std::int16_t>(
         10 + std::lround(500.0 * slope));
     disruptor_vertical_camera_instruction_hook(
@@ -406,6 +409,63 @@ void test_projectile_alignment() {
         DISRUPTOR_VERTICAL_CAMERA_AFTER_INSTRUCTION);
     expect(projectile_y() == std::numeric_limits<std::int16_t>::max(),
            "psionic vertical velocity saturates instead of wrapping");
+}
+
+void test_live_frames_count_drawn_play() {
+    reset_state();
+    CPUState cpu{};
+    const std::uint32_t before = disruptor_vertical_camera_live_frames();
+    g_renderer_callback(&cpu, kRendererEntry);
+    expect(disruptor_vertical_camera_live_frames() == before, "a frame outside live play is not counted");
+    seed_live_game();
+    g_renderer_callback(&cpu, kRendererEntry);
+    expect(disruptor_vertical_camera_live_frames() == before + 1, "a frame the renderer draws in live play is");
+}
+
+void test_free_aim_takes_the_look() {
+    reset_state();
+    seed_live_game();
+    CPUState cpu{};
+    cpu.gpr[16] = kTestProjectile;
+    disruptor_vertical_camera_set_requested_pitch(10.0);
+    seed_word(kAimTargetPointer, 0x80013000u);
+    seed_projectile(300, 400, 90);
+    disruptor_vertical_camera_instruction_hook(&cpu, kNormalProjectileSite, kNormalProjectileOpcode,
+                                               DISRUPTOR_VERTICAL_CAMERA_AFTER_INSTRUCTION);
+    expect(projectile_y() == 90, "with Auto-aim a shot keeps the height the game aimed it at");
+    disruptor_vertical_camera_set_free_aim(1);
+    disruptor_vertical_camera_instruction_hook(&cpu, kNormalProjectileSite, kNormalProjectileOpcode,
+                                               DISRUPTOR_VERTICAL_CAMERA_AFTER_INSTRUCTION);
+    const std::int16_t looked = static_cast<std::int16_t>(std::lround(500.0 * slope_of(center16_for_pitch(10.0))));
+    expect(projectile_y() == looked, "free aim drops the game's height and takes the look's slope");
+    disruptor_vertical_camera_set_requested_pitch(0.0);
+    seed_projectile(300, 400, 90);
+    disruptor_vertical_camera_instruction_hook(&cpu, kPsionicProjectileSite, kPsionicProjectileOpcode,
+                                               DISRUPTOR_VERTICAL_CAMERA_AFTER_INSTRUCTION);
+    expect(projectile_y() == 0, "looking straight, a free shot flies level past the target the game picked");
+    seed_byte(kGameMode, kDemoMode);
+    seed_projectile(300, 400, 90);
+    disruptor_vertical_camera_instruction_hook(&cpu, kNormalProjectileSite, kNormalProjectileOpcode,
+                                               DISRUPTOR_VERTICAL_CAMERA_AFTER_INSTRUCTION);
+    expect(projectile_y() == 90, "the menu's demo keeps the game's aim");
+    seed_byte(kGameMode, 1u);
+    seed_byte(kSceneMode, 4u);
+    disruptor_vertical_camera_instruction_hook(&cpu, kNormalProjectileSite, kNormalProjectileOpcode,
+                                               DISRUPTOR_VERTICAL_CAMERA_AFTER_INSTRUCTION);
+    expect(projectile_y() == 90, "and so does any scene but play");
+    seed_byte(kSceneMode, 0u);
+    seed_byte(kMenuState, kMainMenu);
+    disruptor_vertical_camera_instruction_hook(&cpu, kNormalProjectileSite, kNormalProjectileOpcode,
+                                               DISRUPTOR_VERTICAL_CAMERA_AFTER_INSTRUCTION);
+    expect(projectile_y() == 90, "and the main menu, which runs in scene mode 0");
+    seed_byte(kMenuState, 0u);
+    g_netplay = true;
+    seed_projectile(300, 400, 90);
+    disruptor_vertical_camera_instruction_hook(&cpu, kNormalProjectileSite, kNormalProjectileOpcode,
+                                               DISRUPTOR_VERTICAL_CAMERA_AFTER_INSTRUCTION);
+    expect(projectile_y() == 90, "a network game keeps the game's aim");
+    g_netplay = false;
+    disruptor_vertical_camera_set_free_aim(0);
 }
 
 void test_lockstep_replay_is_side_effect_free() {
@@ -479,6 +539,8 @@ int main() {
     test_gameplay_guards();
     test_cull_widening();
     test_projectile_alignment();
+    test_live_frames_count_drawn_play();
+    test_free_aim_takes_the_look();
     test_lockstep_replay_is_side_effect_free();
     test_requested_pitch_validation();
 
