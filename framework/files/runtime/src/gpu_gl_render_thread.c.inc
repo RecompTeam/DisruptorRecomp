@@ -175,6 +175,10 @@ static void rtb_set_sky_column(float column) {
     }
     glb_set_sky_column(column);
 }
+static void rtb_set_sky_look(int size_per_mille, int smooth) {
+    if (rth_record_mode()) RTH_REC(RTH_SKY_LOOK, 0, size_per_mille, smooth);
+    glb_set_sky_look(size_per_mille, smooth);
+}
 static void rtb_set_column_band(int low, int high, int canonical) {
     if (rth_record_mode()) RTH_REC(RTH_COLUMN_BAND, 0, low, high, canonical);
     glb_set_column_band(low, high, canonical);
@@ -414,6 +418,7 @@ static const GpuRenderBackend GL_RT_BACKEND = {
     .set_sky_cells = rtb_set_sky_cells,
     .set_sky_extension = rtb_set_sky_extension,
     .set_sky_column = rtb_set_sky_column,
+    .set_sky_look = rtb_set_sky_look,
     .set_precise_triangle = rtb_set_precise_triangle,
     .set_unpinned_triangle = rtb_set_unpinned_triangle,
     .set_perspective_triangle = rtb_set_perspective_triangle,
@@ -497,6 +502,7 @@ static void gl_rth_exec(void *user, const RtCmd *c, const void *payload) {
         glb_set_sky_column(column);
         break;
     }
+    case RTH_SKY_LOOK: glb_set_sky_look(v[0], v[1]); break;
     case RTH_PRECISE: glb_set_precise_triangle(v[0], v[1], v[2], v[3], v[4], v[5], v[6]); break;
     case RTH_UNPINNED: glb_set_unpinned_triangle(v[0], v[1], v[2], v[3], v[4], v[5]); break;
     case RTH_PERSP: glb_set_perspective_triangle(v[0], rth_float(v[1]), rth_float(v[2]), rth_float(v[3])); break;

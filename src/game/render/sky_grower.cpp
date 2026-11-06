@@ -8,6 +8,7 @@
 #include "game/render/sky_grower.h"
 
 #include "game/render/sky_extension.h"
+#include "game/render/sky_look.h"
 #include "gpu.h"
 
 #include <condition_variable>
@@ -28,6 +29,7 @@ struct Job {
     uint64_t revision = 0;
     sky::Picture picture;
     extension::Palette palette{};
+    int32_t rows = extension::kRows;
 };
 
 struct Grown {
@@ -63,7 +65,7 @@ private:
                 job = std::move(*job_);
                 job_.reset();
             }
-            Grown grown{job.revision, extension::grow(job.picture, job.palette, extension::kRows, job.revision)};
+            Grown grown{job.revision, extension::grow(job.picture, job.palette, job.rows, job.revision)};
             std::scoped_lock lock(mutex_);
             grown_ = std::move(grown);
         }
@@ -94,8 +96,11 @@ void disruptor::sky_grower::look(const sky::Cells &cells, uint32_t clut_x, uint3
             const uint64_t revision = extension::revision(picture, palette);
             if (revision != g_revision) {
                 g_revision = revision;
+                const disruptor::sky_look::Look look = disruptor::sky_look::look(picture.hash);
+                gpu_sky_look(look.size_per_mille, look.smooth ? 1 : 0);
                 gpu_sky_extension(0, 0, 0, nullptr);
-                g_grower.ask({revision, std::move(picture), palette});
+                const int32_t rows = disruptor::sky_look::grown_rows(look, extension::kRows);
+                g_grower.ask({revision, std::move(picture), palette, rows});
             }
         }
     }

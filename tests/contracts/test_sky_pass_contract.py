@@ -67,6 +67,18 @@ require(
 )
 
 texel = between(renderer, '"int sky_texel(int u, int v, bool grown){\\n"', '"vec3 sky_cap(int u){\\n"')
+ROWS_MEAN = (
+    '"vec3 sky_rows(int u, int row){  /* two panorama rows, the 16 columns from u - 8: a dither of period 2, 4, 8 or 16 '
+    'cancels */\\n"\n'
+    '    "  vec3 sum = vec3(0.0); float n = 0.0;\\n"\n'
+    '    "  for (int k = 0; k < 16; ++k) for (int r = 0; r < 2; ++r) {\\n"\n'
+    '    "    int raw = sky_texel(u - 8 + k, row + r, false);\\n"\n'
+    '    "    if (raw != 0) { sum += col5(raw); n += 1.0; }\\n"\n'
+    '    "  }\\n"\n'
+    '    "  return n > 0.0 ? sum / n : vec3(0.0);\\n"\n'
+    '    "}\\n"\n'
+    "    "
+)
 sample = between(renderer, '"bool sky_sample(out vec3 rgb, out int stp){\\n"', '"const vec2 kAround[8]')
 require(
     '"  u = int(mod(float(u), float(period)));  /* % of a negative is undefined in GLSL */\\n"' in texel
@@ -77,19 +89,33 @@ require(
     and '"    float phi = atan(v_sky.z / u_sky_frame.z);\\n"' in sample
     and '"    at.x += u_sky.y * phi - v_sky.z * u_sky.w / u_sky_frame.z;\\n"' in sample
     and '"  if (u_sky.x > 1.5 && u_sky_frame.z > 0.0) {\\n"' in sample
+    and '"  } else if (u_sky.z != 1.0 && u_sky_frame.z > 0.0) {' in sample
+    and '"    at.x += v_sky.z * u_sky.w / u_sky_frame.z * (u_sky.z - 1.0);\\n"' in sample
+    and '"    at.y += v_sky.w * (u_sky.z - 1.0);\\n"' in sample
+    and '"  if (u_filter == 0 && u_sky_grown.z == 0) {\\n"' in renderer
+    and "uniform ivec3 u_sky_grown;" in renderer
     and '"  vec2 at = vec2(v_sky.x, v_sky.y - u_sky_frame.w);  /* the vertical look moves the sky with the horizon, whole */\\n"'
     in sample
     and '"  if (at.y < 0.0 && u_sky_grown.x == 0) {  /* above the top while no sky is grown there yet: its top rows\' colour */\\n"'
     in sample
     and "clamp(u_sky_frame.w / 16.0, 0.0, 1.0)" in sample
+    and '"  float bottom = float(u_sky_shape.x * u_sky_shape.z);\\n"' in sample
+    and '"  if (at.y > bottom - 0.5) {' in sample
+    and '"    vec3 last, low = sky_rows(int(floor(at.x)), int(bottom) - 2); int last_stp;\\n"' in sample
+    and '"    bool has_last = sky_filtered(vec2(at.x, bottom - 0.5), false, last, last_stp);\\n"' in sample
+    and "mix(last, low, clamp((at.y - bottom + 0.5) / 16.0, 0.0, 1.0))" in sample
+    and between(renderer, '"vec3 sky_rows(int u, int row){', '"vec3 sky_cap(int u){\\n"') == ROWS_MEAN
+    and '"  return sky_rows(u, 0);\\n"' in renderer
     and '"  rgb = !has_band ? grown : !has_grown ? band : mix(band, grown, given);\\n"' in sample
     and "120.0 + u_sky_frame.w)" not in sample
     and '"  if (v_sky_on != 0 ? !sky_sample(rgb, stp)\\n"' in renderer
     and '"    if (v_sky_on != 0 ? sky_sample(next, next_stp) : sample_texture(sample_uv, next, next_stp)) ' in renderer,
     "each sky pixel reads its texel from the cells with the tile's own palette row, wraps the panorama with a modulo that is "
-    "defined for negatives, the fade's next palette row from the same texel, and the matched mode turns it across through the world's "
-    "focal: the vertical look moves the whole sky with the horizon, never stretched, above its top the sky grown from it, its top band "
-    "giving way to that over the first 16 rows of the look, and its top rows' colour until it is grown",
+    "defined for negatives, the fade's next palette row from the same texel, turns it across through the world's focal in the "
+    "matched mode, else draws it at the module's size about the horizon, rows with columns, and blends it when the module smooths "
+    "it: the vertical look moves the whole sky with the horizon, never stretched, above its top the sky grown from it, its top band "
+    "giving way to that over the first 16 rows of the look, its top rows' colour until it is grown, and below its last row "
+    "that row giving way over 16 rows to the colour of its last two rows over 16 columns in a row, a dither of 2 to 16 cancelled",
 )
 
 require(
@@ -111,8 +137,10 @@ require(
 )
 
 require(
-    "    p_glUniform4f(sky, (float)mode, pano->texels_a_radian, pano->focal > 0.0f ? pano->texels_a_radian / pano->focal : 0.0f, pano->focal);\n"
+    "    const int picked = !sky_mode_forced();\n"
+    "    p_glUniform4f(sky, (float)mode, pano->texels_a_radian, picked && pano->scale > 0.0f ? pano->scale : 1.0f, pano->focal);\n"
     in renderer
+    and "    p_glUniform3i(grown, pano->ext_rows, pano->ext_band, picked && pano->smooth);\n" in renderer
     and "    if (*sent == pano->generation) return;\n" in renderer
     and "                     (float)g_wide_cur_base + s_yaw_center_x, (float)s_off_y + s_yaw_center_y_relative, s_yaw_focal_x,\n"
     "                     s_yaw_center_y_relative - 120.0f);\n"
@@ -121,16 +149,36 @@ require(
     "&s_tex_sky_generation, &s_sky, s_yaw_center_x,\n"
     "                 (float)s_off_y + s_yaw_center_y_relative, s_yaw_focal_x, s_yaw_center_y_relative - 120.0f);\n"
     in renderer
-    and "    p_glUniform2i(grown, pano->ext_rows, pano->ext_band);\n" in renderer
     and "    p_glUniform4i(shape, pano->rows, pano->columns, pano->tall, 0);\n" in renderer
     and "    p_glUniform1i(irregular, pano->irregular);\n" in renderer
     and "    s_sky.texels_a_radian = count ? (float)(period / 6.28318530717958647692) : 0.0f;\n" in renderer
-    and "    return forced >= 0 ? forced : 1;  /* 2 turns the sky with the world: stretched 2.2x at the 16:9 edge, kept for a skybox */\n"
+    and "    return sky_mode_set() >= 0 ? sky_mode_set() : 1;  /* 2 turns the sky with the world: stretched 2.2x at the 16:9 edge, "
+    "kept for a skybox */\n"
     in renderer
     and "sky_perspective" not in read("src/game/settings/options.cpp") + renderer,
     "the mirror and the game's own frame get the panorama with the world's own centre and focal and the horizon's shift, its cells "
     "again only when the table changed, and "
-    "the game's own lay is the mode, the world-matched one only through PSX_SKY_MAP=2 and in no menu",
+    "the game's own lay is the mode, the world-matched one only through PSX_SKY_MAP=2 and in no menu, and the module's look reaches "
+    "the shader unless PSX_SKY_MAP is set",
+)
+
+require(
+    "                const disruptor::sky_look::Look look = disruptor::sky_look::look(picture.hash);\n"
+    "                gpu_sky_look(look.size_per_mille, look.smooth ? 1 : 0);\n"
+    "                gpu_sky_extension(0, 0, 0, nullptr);\n"
+    in read("src/game/render/sky_grower.cpp")
+    and "void gpu_sky_look(int size_per_mille, int smooth) { gr_set_sky_look(size_per_mille, smooth); }\n" in gpu
+    and "    if (rth_record_mode()) RTH_REC(RTH_SKY_LOOK, 0, size_per_mille, smooth);\n" in thread
+    and "    case RTH_SKY_LOOK: glb_set_sky_look(v[0], v[1]); break;\n" in thread
+    and "    const int size = size_per_mille < 250 ? 250 : size_per_mille > 4000 ? 4000 : size_per_mille;\n" in renderer
+    and "    if (s_raster_ok) flush_tex_batch();\n    s_sky.scale = scale;\n    s_sky.smooth = smooth != 0;\n"
+    in renderer
+    and "    .set_sky_look = glb_set_sky_look,\n" in renderer
+    and "s_sky.scale" not in between(renderer, "static void glb_set_sky_cells(", "static void glb_set_sky_extension(")
+    and "PSX_SKY_UNIFORM" not in renderer
+    and "PSX_SKY_SMOOTH" not in renderer,
+    "a panorama's look is picked by its picture once a revision, crosses the render thread, its size clamped to 250..4000 "
+    "thousandths, drawn after the batch before it, and kept across a new cell table until the module tells another",
 )
 
 require(
@@ -162,9 +210,10 @@ require(
     "    if (cells.rows == 0) return;\n" in module
     and "    disruptor::sky_grower::look(cells, clut_x, clut_y, changed, now);\n" in module
     and "constexpr uint32_t kRecheck = 60;\n" in grower
-    and "            Grown grown{job.revision, extension::grow(job.picture, job.palette, extension::kRows, job.revision)};\n"
+    and "            Grown grown{job.revision, extension::grow(job.picture, job.palette, job.rows, job.revision)};\n"
     in grower
-    and "                gpu_sky_extension(0, 0, 0, nullptr);\n                g_grower.ask({revision, std::move(picture), palette});\n"
+    and "                gpu_sky_extension(0, 0, 0, nullptr);\n                const int32_t rows = disruptor::sky_look::grown_rows(look, extension::kRows);\n"
+    "                g_grower.ask({revision, std::move(picture), palette, rows});\n"
     in grower
     and "    if (std::optional<Grown> grown = g_grower.take(); grown && grown->revision == g_revision && grown->made.rows > 0)\n"
     "        gpu_sky_extension(grown->made.width, grown->made.rows, grown->made.band, grown->made.indices.data());\n"

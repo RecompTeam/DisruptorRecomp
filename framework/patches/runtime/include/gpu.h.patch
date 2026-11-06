@@ -1,5 +1,5 @@
 diff --git a/runtime/include/gpu.h b/runtime/include/gpu.h
-index 12e9533d7a880b9de3d42a11187216f44b8d217c..dad688f261663595f964a9d14e5840b341470d41 100644
+index 12e9533d7a880b9de3d42a11187216f44b8d217c..547647925c880237048e3a8bba16f4996e249462 100644
 --- a/runtime/include/gpu.h
 +++ b/runtime/include/gpu.h
 @@ -1,4 +1,4 @@
@@ -137,7 +137,7 @@ index 12e9533d7a880b9de3d42a11187216f44b8d217c..dad688f261663595f964a9d14e5840b3
  /* Widescreen proportion correction (active only when aspect != 4:3 and the
   * game's [widescreen] block opts in — see config_loader.h). Tagged
   * character/billboard prims are re-squashed around their projected anchor;
-@@ -193,6 +315,66 @@
+@@ -193,6 +315,69 @@
   * (render the wider FOV into a wider frame, present 1:1; GTE not squashed). */
  void gpu_ws_configure(int aspect_num, int aspect_den,
                        uint32_t sprite_anchor_addr, int hud_sprt_squash, int mode);
@@ -180,6 +180,9 @@ index 12e9533d7a880b9de3d42a11187216f44b8d217c..dad688f261663595f964a9d14e5840b3
 +/* The sky above the panorama's top: `rows` rows of `width` 8-bit indices read through each sky tile's palette, the last
 + * row against the panorama's row `band`: its top `band` rows are given over to it as the look rises. No rows: none yet. */
 +void gpu_sky_extension(int width, int rows, int band, const uint8_t *indices);
++/* The panorama's look: drawn at size_per_mille thousandths of the game's size (1000 as laid), the rows with the columns about
++ * the horizon, and with smooth its texels blended whatever the texture filter. It stays until told again. */
++void gpu_sky_look(int size_per_mille, int smooth);
 +/* Widened counterpart of a frame X for such a tile span. */
 +int32_t gpu_ws_widen_x(int32_t x, int round_up);
 +/* The panorama the tiles show, as the game has it for the frame being built: scroll, period and column width in frame pixels, and the widened span the tiles fill. */
@@ -204,7 +207,7 @@ index 12e9533d7a880b9de3d42a11187216f44b8d217c..dad688f261663595f964a9d14e5840b3
  /* [widescreen] full_2d: opt a pure-2D sprite game into the widescreen present
   * path (treat every in-game frame as gameplay, since it never tags 3D prims). */
  void gpu_ws_set_full_2d(int on);
-@@ -315,6 +497,13 @@
+@@ -315,6 +500,13 @@
   * full-2D menu/title screen), so the squash is suppressed and content drawn
   * pixel-native. The present path uses the same predicate to pillarbox. */
  int  gpu_ws_present_native_43(void);
@@ -218,7 +221,7 @@ index 12e9533d7a880b9de3d42a11187216f44b8d217c..dad688f261663595f964a9d14e5840b3
  /* Per-side X cull-margin (screen/world units) emitted into the game's draw-
   * cull immediates by the recompiler ([widescreen.cull]); 0 unless stretching. */
  int  psx_ws_x_margin(void);
-@@ -428,6 +617,8 @@
+@@ -428,6 +620,8 @@
  int psx_ws_cull_packed_x_site(uint32_t pc, uint32_t instr, uint32_t x,
                                uint32_t width, uint32_t *out);
  uint32_t psx_ws_angle_widen(uint32_t vanilla);
@@ -227,7 +230,7 @@ index 12e9533d7a880b9de3d42a11187216f44b8d217c..dad688f261663595f964a9d14e5840b3
  int psx_ws_angle_site(uint32_t pc, uint32_t instr, uint32_t *out);
  /* bound * (half_extent + margin) / half_extent; identity at 4:3. */
  int32_t psx_ws_cull_scale(int32_t bound, int32_t half_extent);
-@@ -461,6 +652,9 @@
+@@ -461,6 +655,9 @@
   * widen for the paired `bltz maxSX` reject. Identity at 4:3. */
  int  psx_ws_cull_slti(uint32_t sx, uint32_t imm);
  int  psx_ws_cull_slti_lower(uint32_t sx, uint32_t imm);
@@ -237,7 +240,7 @@ index 12e9533d7a880b9de3d42a11187216f44b8d217c..dad688f261663595f964a9d14e5840b3
  int  psx_ws_cull_bltz(uint32_t v);
  /* [widescreen.cull] bgez_sites: `bgez SX, keep` keeps while SX >= -margin
   * (the exact partner of bltz_sites; see ws_cull_edge.h). Identity at 4:3. */
-@@ -625,6 +819,9 @@
+@@ -625,6 +822,9 @@
   * final screenX store to squash it around the screen centre (identity at 4:3).
   * Pulls far backdrop pieces in from past the 320px edge to cover the 16:9 FOV. */
  int  psx_ws_backdrop_x(int x);

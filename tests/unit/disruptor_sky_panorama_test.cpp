@@ -1,4 +1,5 @@
 #include "game/render/sky_panorama.h"
+#include "game/render/sky_look.h"
 
 #include <cstdint>
 #include <iostream>
@@ -145,6 +146,23 @@ void test_cells_that_share_vram_without_repeating_are_irregular() {
     expect(read(rooftop(), kAt).rows == 4 && !read(rooftop(), kAt).irregular, "the rooftop's table, repeating every five columns, is taken");
 }
 
+void test_the_city_alone_is_drawn_smaller_and_smoothed() {
+    namespace look = disruptor::sky_look;
+    const look::Look city = look::look(0xA6A30DE71D65100Dull);
+    expect(city.size_per_mille == 838 && city.smooth, "mission 1's city is drawn at 160/191 of its size, smoothed");
+    const look::Look rooftop = look::look(0xD45C4422C609AD02ull);
+    expect(rooftop.size_per_mille == 1000 && !rooftop.smooth && look::look(0u).size_per_mille == 1000, "every other sky as the game lays it");
+    expect(look::grown_rows(city, 128) == 140, "a full look up at 0.838 reaches 258 rows above the horizon: 138 grown, two to blend");
+    expect(look::grown_rows(rooftop, 128) == 128 && look::grown_rows(look::Look{0, false}, 128) == 128,
+           "the game's size needs 96 and keeps the least, a size of 0 is the game's");
+    for (size_t index = 0; index < look::kPicks.size(); ++index) {
+        expect(look::kPicks[index].look.size_per_mille >= 250 && look::kPicks[index].look.size_per_mille <= 4000,
+               "a pick is within what the renderer takes");
+        for (size_t other = index + 1; other < look::kPicks.size(); ++other)
+            expect(look::kPicks[index].picture != look::kPicks[other].picture, "a picture is picked once");
+    }
+}
+
 }  // namespace
 
 int main() {
@@ -152,6 +170,7 @@ int main() {
     test_cells_of_80_rows_are_read_and_laid_out();
     test_a_table_the_sky_pass_cannot_draw_gives_none();
     test_cells_that_share_vram_without_repeating_are_irregular();
+    test_the_city_alone_is_drawn_smaller_and_smoothed();
     if (g_failures) return 1;
     std::cout << "disruptor_sky_panorama: all tests passed\n";
     return 0;
