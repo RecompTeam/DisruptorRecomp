@@ -837,6 +837,23 @@ void runtime_defaults() {
 }
 } // namespace
 
+void controls_tabs() {
+    require(std::string_view(kControlsTabs[0]) == "Mouse" && std::string_view(kControlsTabs[1]) == "Gamepad" &&
+                std::string_view(kControlsTabs[2]) == "Weapons" && std::string_view(kControlsTabs[3]) == "Keybindings",
+            "the Controls tabs go Mouse, Gamepad, Weapons, Keybindings");
+    require(controls_tab_of("Mouse look") == ControlsTab::mouse && controls_tab_of("Gamepad") == ControlsTab::gamepad &&
+                controls_tab_of("Weapons and psionics") == ControlsTab::weapons && controls_tab_of("Scheme") == ControlsTab::keys,
+            "each group of the Controls page stands on its tab, the scheme on Keybindings");
+    std::set<ControlsTab> shown;
+    ControlsTab tab = ControlsTab::keys;
+    for (const auto& row : layout()) {
+        if (row.page != Page::controls) continue;
+        if (row.group) tab = controls_tab_of(row.group);
+        shown.insert(tab);
+    }
+    require(shown.size() == std::size(kControlsTabs), "every tab of the Controls page holds rows");
+}
+
 int main() {
     const fs::path folder = fs::temp_directory_path() /
                             ("disruptor-launcher-settings-" + std::to_string(std::chrono::steady_clock::now().time_since_epoch().count()));
@@ -848,6 +865,7 @@ int main() {
         carried();
         needed();
         placements();
+        controls_tabs();
         antialiasing_list();
         draw_distance_list();
         fog_shape_list();

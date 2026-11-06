@@ -126,7 +126,7 @@ def check(launcher: Path, folder: Path) -> None:
         "the wheel over the page's margin scrolls the card a step as long as the wheel over the card",
     )
 
-    keys = drive(launcher, folder, "keys", "Tab Tab Tab Tab Tab Tab Tab Space K Tab", page=2)
+    keys = drive(launcher, folder, "keys", "Tab Tab Tab Tab Tab Tab Tab Space K Tab", page=2, tab=3)
     require(" key up" in keys[7].view, "Space on the Move forward button waits for a key")
     require(" key " not in keys[8].view, "the next key is taken by the button that waited")
     require(
@@ -169,7 +169,7 @@ def check(launcher: Path, folder: Path) -> None:
 
     # The Gamepad tab's stops: four tabs, the layout's three parts, two turning sliders, the dead zone, then Fire, confirm.
     steps = " ".join(["Tab"] * 11) + " Pad:A Pad:A Pad:A Pad:B Pad:A Pad:Down Pad:B Pad:Down"
-    capture = drive(launcher, folder, "capture", steps, page=2, tab=3, pad=True)
+    capture = drive(launcher, folder, "capture", steps, page=2, tab=1, pad=True)
     first = capture[10].place, capture[10].scroll
     require(" button " in capture[11].view, "A on a gamepad button waits for the new button")
     require(

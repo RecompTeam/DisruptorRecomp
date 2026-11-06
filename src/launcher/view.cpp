@@ -1479,9 +1479,8 @@ void View::settings() {
     const bool controls = page_ == static_cast<int>(Page::controls);
     bool tab_changed = false;
     if (controls) {
-        static constexpr const char* tabs[] = {"Keys", "Weapons", "Mouse", "Gamepad"};
-        controls_tab_ = std::clamp(controls_tab_, 0, static_cast<int>(std::size(tabs)) - 1);
-        tab_changed = segmented("controls tabs", &controls_tab_, tabs, std::min(ImGui::GetContentRegionAvail().x, 520.0f * scale_));
+        controls_tab_ = std::clamp(controls_tab_, 0, static_cast<int>(std::size(kControlsTabs)) - 1);
+        tab_changed = segmented("controls tabs", &controls_tab_, kControlsTabs, std::min(ImGui::GetContentRegionAvail().x, 520.0f * scale_));
         if (tab_changed) {
             listening_.clear();
             stop_pad_capture();
@@ -1515,7 +1514,7 @@ void View::settings() {
     if (page_ == static_cast<int>(Page::achievements)) achievements_account();
     if (page_rows_shown(static_cast<Page>(page_))) rows();
     else coming_soon();
-    if (controls && controls_tab_ == 3) pad_buttons();
+    if (controls && controls_tab_ == static_cast<int>(ControlsTab::gamepad)) pad_buttons();
     const char* note = page_notes[std::clamp(page_, 0, static_cast<int>(std::size(page_notes)) - 1)];
     if (*note) {
         ImGui::Spacing();
@@ -2731,7 +2730,7 @@ void View::rows() {
         for (const int sample : {option.lowest, file.highest(option)})
             value_width_ = std::max(value_width_, ImGui::CalcTextSize(text_of(value_text(option, sample)).c_str()).x);
     }
-    int tab = 0;
+    int tab = static_cast<int>(ControlsTab::keys);
     bool first = true;
     for (const auto& placement : layout()) {
         const Option& option = *find_option(placement.key);
@@ -2742,9 +2741,10 @@ void View::rows() {
             continue;
         if (placement.group) {
             const std::string_view group(placement.group);
-            tab = group == "Weapons and psionics" ? 1 : group == "Mouse look" ? 2 : group == "Gamepad" ? 3 : 0;
-            // The keyboard's keys follow the scheme that sets them, at the foot of the first tab.
-            if (tabbed && tab == 1 && controls_tab_ == 0) key_table();
+            const int keys = static_cast<int>(ControlsTab::keys);
+            // The keyboard's keys follow the scheme that sets them, at the foot of the Keybindings tab.
+            if (tabbed && tab == keys && controls_tab_ == keys && controls_tab_of(group) != ControlsTab::keys) key_table();
+            tab = static_cast<int>(controls_tab_of(group));
         }
         if (tabbed && tab != controls_tab_) continue;
         ImGui::PushID(option.key);

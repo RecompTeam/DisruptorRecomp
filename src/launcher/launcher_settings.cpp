@@ -101,6 +101,13 @@ bool listed(const std::vector<std::string>& discs, const std::string& path) {
 }
 } // namespace
 
+ControlsTab controls_tab_of(std::string_view group) {
+    if (group == "Mouse look") return ControlsTab::mouse;
+    if (group == "Gamepad") return ControlsTab::gamepad;
+    if (group == "Weapons and psionics") return ControlsTab::weapons;
+    return ControlsTab::keys;
+}
+
 std::span<const Placement> layout() { return placed; }
 std::span<const wchar_t* const> page_labels() { return pages; }
 bool page_rows_shown(Page page, bool dev_tools) { return dev_tools || page != Page::experimental; }

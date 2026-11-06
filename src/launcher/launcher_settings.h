@@ -31,6 +31,10 @@ struct Placement {
 };
 
 std::span<const Placement> layout();
+// The Controls page's tabs in the order shown, and the tab a group of it stands on: the scheme and its keys on Keybindings.
+enum class ControlsTab { mouse, gamepad, weapons, keys };
+inline constexpr const char* kControlsTabs[] = {"Mouse", "Gamepad", "Weapons", "Keybindings"};
+ControlsTab controls_tab_of(std::string_view group);
 // A row still being tried on a page other than Experimental: it carries a tag beside its name.
 bool experimental(const Option& option);
 std::span<const wchar_t* const> page_labels();
