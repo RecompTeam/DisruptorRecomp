@@ -45,7 +45,6 @@ constexpr uint32_t kRendererRestoreOpcode = 0x8FBF016Cu;
 constexpr uint32_t kCurrentHealth = 0x80077660u;
 constexpr uint32_t kMaximumHealth = 0x80077664u;
 constexpr uint32_t kSceneMode = 0x8007145Cu;
-constexpr uint32_t kScriptedCamera = 0x800714E0u;
 constexpr uint32_t kGameMode = 0x800716F0u;  /* gp+0x5A4: 3 while the menu's demo plays */
 constexpr uint8_t kDemoMode = 3u;
 constexpr uint32_t kMenuState = 0x800715FCu;
@@ -149,13 +148,10 @@ bool plausible_live_gameplay() {
     }
 
     /* Scene mode 1 is the renderer's special non-gameplay presentation path.
-     * Scripted camera movement and inactive player objects retain the retail
-     * horizon so cutscenes, death sequences, and level transitions cannot be
-     * steered by a stale host pitch. */
-    if (psx_mod_read_byte(kSceneMode) == 1u ||
-        psx_mod_read_byte(kScriptedCamera) != 0u) {
-        return false;
-    }
+     * Inactive player objects retain the retail horizon so cutscenes, death
+     * sequences, and level transitions cannot be steered by a stale host pitch.
+     * 0x800714E0 is no camera: Continue from mid mission sets it to the mission's end (0x8001AF70). */
+    if (psx_mod_read_byte(kSceneMode) == 1u) return false;
 
     const uint32_t player = psx_mod_read_word(kPlayerPointer);
     const bool present = valid_main_ram_pointer(player, kPlayerInactiveOffset);

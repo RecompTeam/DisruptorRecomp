@@ -100,7 +100,6 @@ constexpr uint32_t kRoomObjects = 0x8003B78Cu;     /* the visible loop's first c
 constexpr uint32_t kCurrentHealth = 0x80077660u;
 constexpr uint32_t kMaximumHealth = 0x80077664u;
 constexpr uint32_t kSceneMode = 0x8007145Cu;
-constexpr uint32_t kScriptedCamera = 0x800714E0u;
 constexpr uint32_t kPlayerPointer = 0x80071714u;
 constexpr uint32_t kPlayerInactiveOffset = 0x7Fu;
 
@@ -399,12 +398,9 @@ bool plausible_live_gameplay() {
         return false;
     }
 
-    /* Mode 1, a scripted camera, and an inactive player cover the known map,
-     * cutscene, death, and level-transition renderer states. */
-    if (psx_mod_read_byte(kSceneMode) == 1u ||
-        psx_mod_read_byte(kScriptedCamera) != 0u) {
-        return false;
-    }
+    /* Mode 1 and an inactive player cover the known map, cutscene, death, and
+     * level-transition renderer states. 0x800714E0 is Continue from mid mission's flag, no camera. */
+    if (psx_mod_read_byte(kSceneMode) == 1u) return false;
 
     const uint32_t player = psx_mod_read_word(kPlayerPointer);
     const bool present = valid_main_ram_pointer(player, kPlayerInactiveOffset);

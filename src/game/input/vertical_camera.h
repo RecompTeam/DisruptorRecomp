@@ -24,8 +24,7 @@ double disruptor_vertical_camera_effective_pitch(void);
 int disruptor_vertical_camera_effective_center_y(void);
 double disruptor_vertical_camera_effective_slope(void);
 int disruptor_vertical_camera_active(void);
-/* True only while new mouse-Y input may update the requested pitch.  Existing
- * pitch is preserved across a temporary scripted-camera suspension. */
+/* True only while new mouse-Y input may update the requested pitch: a suspension outside live play keeps the pitch. */
 int disruptor_vertical_camera_input_allowed(void);
 /* Frames the game's renderer drew in live play: a loading screen draws none. */
 uint32_t disruptor_vertical_camera_live_frames(void);

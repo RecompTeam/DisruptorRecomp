@@ -150,6 +150,7 @@ namespace {
 constexpr std::uint32_t kTestPlayer = 0x80010000u;
 constexpr std::uint32_t kWeaponLoad = 0x80071324u, kWantedWeapon = 0x80077627u, kHeldWeapon = 0x80071484u;
 constexpr std::uint32_t kTestProjectile = 0x80012000u;
+constexpr std::uint32_t kMidMissionContinue = 0x800714E0u;
 
 void reset_state() {
     g_ram.fill(0);
@@ -175,7 +176,6 @@ void seed_live_game() {
     seed_word(kMaximumHealth, 100u);
     seed_word(kCurrentHealth, 80u);
     seed_byte(kSceneMode, 0u);
-    seed_byte(kScriptedCamera, 0u);
     seed_word(kPlayerPointer, kTestPlayer);
     seed_byte(kTestPlayer + kPlayerInactiveOffset, 0u);
     seed_word(kAimTargetPointer, 0u);
@@ -284,14 +284,13 @@ void test_gameplay_guards() {
     seed_live_game();
     expect(disruptor_vertical_camera_input_allowed() == 1,
            "verified live gameplay accepts vertical input");
-    seed_byte(kScriptedCamera, 1u);
-    expect(disruptor_vertical_camera_input_allowed() == 0,
-           "scripted camera blocks hidden vertical input accumulation");
+    seed_byte(kMidMissionContinue, 1u);
+    expect(disruptor_vertical_camera_input_allowed() == 1,
+           "after Continue from mid mission the mouse still tilts");
     g_renderer_callback(&cpu, kRendererEntry);
-    expect(!disruptor_vertical_camera_active(),
-           "scripted camera suspends pitch");
+    expect(disruptor_vertical_camera_active(),
+           "after Continue from mid mission the pitch still applies");
 
-    seed_byte(kScriptedCamera, 0u);
     seed_byte(kSceneMode, 1u);
     g_renderer_callback(&cpu, kRendererEntry);
     expect(!disruptor_vertical_camera_active(),

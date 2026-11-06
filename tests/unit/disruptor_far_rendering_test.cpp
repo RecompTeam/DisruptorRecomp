@@ -5,6 +5,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <initializer_list>
 #include <iostream>
 #include <string>
 #include <utility>
@@ -17,7 +18,10 @@ PSXModFunctionEntryCallback g_renderer_callback = nullptr;
 std::uint32_t g_registered_address = 0u;
 bool g_game_started = false;
 bool g_netplay = false;
-std::vector<std::pair<std::uint32_t, std::uint32_t>> g_writes;
+struct Write {
+    std::uint32_t address, value, width;
+};
+std::vector<Write> g_writes;
 int g_failures = 0;
 
 std::size_t physical(std::uint32_t address) {
@@ -110,6 +114,7 @@ std::uint8_t psx_mod_read_byte(std::uint32_t address) {
 }
 
 void psx_mod_write_byte(std::uint32_t address, std::uint8_t value) {
+    g_writes.push_back({address, value, 1u});
     seed_byte(address, value);
 }
 
@@ -122,6 +127,7 @@ std::uint16_t psx_mod_read_half(std::uint32_t address) {
 }
 
 void psx_mod_write_half(std::uint32_t address, std::uint16_t value) {
+    g_writes.push_back({address, value, 2u});
     const std::size_t p = physical(address);
     g_ram[p + 0] = static_cast<std::uint8_t>(value >> 0);
     g_ram[p + 1] = static_cast<std::uint8_t>(value >> 8);
@@ -132,7 +138,7 @@ std::uint32_t psx_mod_read_word(std::uint32_t address) {
 }
 
 void psx_mod_write_word(std::uint32_t address, std::uint32_t value) {
-    g_writes.emplace_back(address, value);
+    g_writes.push_back({address, value, 4u});
     seed_word(address, value);
 }
 
@@ -163,6 +169,7 @@ namespace {
 
 constexpr std::uint32_t kTestPlayer = 0x80010000u;
 constexpr std::uint32_t kWeaponLoad = 0x80071324u, kWantedWeapon = 0x80077627u, kHeldWeapon = 0x80071484u;
+constexpr std::uint32_t kMidMissionContinue = 0x800714E0u;
 constexpr std::uint32_t kRendererContext = 0x80020000u;
 constexpr std::uint32_t kTestStack = 0x80030000u;
 constexpr std::uint32_t kPrimitiveBuffer = 0x80040000u;
@@ -226,14 +233,59 @@ DisruptorFarRenderingDiagnostics diagnostics() {
     return value;
 }
 
+/* Guest RAM a test may write, every width: what a test does not name fails it, checked at each reset and at its end. */
+struct GuestRange {
+    std::uint32_t first, end;
+};
+
+struct AllowedWrites {
+    const char *test;
+    std::vector<GuestRange> ranges;
+    AllowedWrites(const char *name, std::initializer_list<GuestRange> allowed);
+    ~AllowedWrites();
+};
+
+const AllowedWrites *g_allowed = nullptr;
+
+void check_writes() {
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> told;
+    for (const Write &write : g_writes) {
+        const bool allowed = g_allowed && std::any_of(g_allowed->ranges.begin(), g_allowed->ranges.end(), [&](const GuestRange &range) {
+            return write.address >= range.first && std::uint64_t{write.address} + write.width <= range.end;
+        });
+        if (allowed || std::find(told.begin(), told.end(), std::pair{write.address, write.width}) != told.end()) continue;
+        told.emplace_back(write.address, write.width);
+        ++g_failures;
+        std::cerr << "FAIL: " << (g_allowed ? g_allowed->test : "outside a test") << " writes guest RAM it does not name: 0x" << std::hex
+                  << write.address << std::dec << ", " << write.width << " bytes\n";
+    }
+    g_writes.clear();
+}
+
+AllowedWrites::AllowedWrites(const char *name, std::initializer_list<GuestRange> allowed) : test(name), ranges(allowed) {
+    check_writes();
+    g_allowed = this;
+}
+
+AllowedWrites::~AllowedWrites() {
+    check_writes();
+    g_allowed = nullptr;
+}
+
+constexpr GuestRange word_at(std::uint32_t address) { return {address, address + 4u}; }
+constexpr GuestRange entries(std::uint32_t count) { return {kReviewedVisibleSpanBase, kReviewedVisibleSpanBase + count * kVisibleSpanStride}; }
+constexpr GuestRange kFar = word_at(kFarDistance), kFade = word_at(kFadeStart), kListEnd = word_at(kVisibleEnd);
+constexpr std::uint32_t kStackSpan = 0x801FFD20u;  /* the span the mesh renderer is given, its left and right at +12 and +16 */
+constexpr GuestRange kStackSpanSides{kStackSpan + 12u, kStackSpan + 20u};
+
 void reset_state() {
+    check_writes();
     disruptor_far_rendering_reset_session();
     g_ram.fill(0u);
     g_game_started = false;
     g_netplay = false;
     g_ls_mode = 0;
     g_ls_replay_active = 0;
-    g_writes.clear();
     g_smooth_fade = 0;
     g_arena_relocated = 0;
 }
@@ -244,7 +296,6 @@ void seed_live_game(CPUState *cpu, std::uint32_t far_distance = 1024u,
     seed_word(kMaximumHealth, 100u);
     seed_word(kCurrentHealth, 80u);
     seed_byte(kSceneMode, 0u);
-    seed_byte(kScriptedCamera, 0u);
     seed_word(kPlayerPointer, kTestPlayer);
     seed_byte(kTestPlayer + kPlayerInactiveOffset, 0u);
     seed_word(kFarDistance, far_distance);
@@ -295,12 +346,13 @@ void invoke_first_fade(CPUState *cpu) {
 }
 
 bool only_distance_writes() {
-    for (const auto& [address, value] : g_writes)
-        if (address != kFarDistance && address != kFadeStart) return false;
+    for (const Write &write : g_writes)
+        if (write.address != kFarDistance && write.address != kFadeStart) return false;
     return true;
 }
 
 void test_registration_and_written_distances() {
+    const AllowedWrites allowed{__func__, {kFar, kFade}};
     expect(g_renderer_callback != nullptr, "renderer callback registered");
     expect(g_registered_address == kRendererEntry,
            "renderer entry is address pinned");
@@ -343,6 +395,7 @@ void test_registration_and_written_distances() {
 }
 
 void test_independent_depth_fade_modes() {
+    const AllowedWrites allowed{__func__, {kFar, kFade}};
     reset_state();
     CPUState cpu{};
     seed_live_game(&cpu);
@@ -414,6 +467,7 @@ void test_independent_depth_fade_modes() {
 }
 
 void test_drawn_distances_are_the_globals() {
+    const AllowedWrites allowed{__func__, {kFar, kFade}};
     reset_state();
     CPUState cpu{};
     seed_live_game(&cpu);
@@ -456,6 +510,7 @@ void test_drawn_distances_are_the_globals() {
 }
 
 void test_live_billboard_fade_site() {
+    const AllowedWrites allowed{__func__, {kFar, kFade}};
     reset_state();
     CPUState cpu{};
     seed_live_game(&cpu);
@@ -511,6 +566,7 @@ void test_live_billboard_fade_site() {
 }
 
 void test_all_sites_and_ancestry_contracts() {
+    const AllowedWrites allowed{__func__, {kFar, kFade}};
     reset_state();
     CPUState cpu{};
     seed_live_game(&cpu);
@@ -554,6 +610,7 @@ void test_all_sites_and_ancestry_contracts() {
 }
 
 void test_retail_baseline_and_metric_reset() {
+    const AllowedWrites allowed{__func__, {}};
     reset_state();
     CPUState cpu{};
     seed_live_game(&cpu);
@@ -585,6 +642,7 @@ void test_retail_baseline_and_metric_reset() {
 }
 
 void test_current_globals_and_signed_fade() {
+    const AllowedWrites allowed{__func__, {kFar, kFade}};
     reset_state();
     CPUState cpu{};
     seed_live_game(&cpu, 1200u, 432);
@@ -627,6 +685,7 @@ void test_current_globals_and_signed_fade() {
 }
 
 void test_guards_and_exact_dispatch() {
+    const AllowedWrites allowed{__func__, {kFar, kFade}};
     reset_state();
     CPUState cpu{};
     disruptor_far_rendering_set_preset(DISRUPTOR_FAR_RENDERING_EXTENDED);
@@ -648,9 +707,6 @@ void test_guards_and_exact_dispatch() {
     seed_byte(kSceneMode, 1u);
     rejected("map/cutscene scene mode writes nothing");
     seed_byte(kSceneMode, 0u);
-    seed_byte(kScriptedCamera, 1u);
-    rejected("a scripted camera writes nothing");
-    seed_byte(kScriptedCamera, 0u);
     seed_word(kCurrentHealth, 0u);
     rejected("a dead player writes nothing");
     seed_word(kCurrentHealth, 80u);
@@ -663,8 +719,9 @@ void test_guards_and_exact_dispatch() {
     exit_renderer(&cpu);
     seed_word(kFarDistance, 1024u);
 
+    seed_byte(kMidMissionContinue, 1u);
     enter(&cpu);
-    expect(load_word(kFarDistance) == 1280u, "a live frame writes the extended far plane");
+    expect(load_word(kFarDistance) == 1280u, "a live frame writes the extended far plane, after Continue from mid mission too");
     seed_word(kTestStack + 164u, 0x800410E0u);
     cpu.gpr[12] = 999u;
     disruptor_far_rendering_instruction_hook(
@@ -687,6 +744,7 @@ void test_guards_and_exact_dispatch() {
 }
 
 void test_weapon_load_keeps_distance() {
+    const AllowedWrites allowed{__func__, {kFar, kFade}};
     reset_state();
     CPUState cpu{};
     seed_live_game(&cpu);
@@ -726,6 +784,7 @@ void test_weapon_load_keeps_distance() {
 }
 
 void test_nested_toggle_netplay_and_lockstep() {
+    const AllowedWrites allowed{__func__, {kFar, kFade}};
     reset_state();
     CPUState cpu{};
     seed_live_game(&cpu);
@@ -806,6 +865,7 @@ void test_nested_toggle_netplay_and_lockstep() {
 }
 
 void test_savestates_keep_the_game_values() {
+    const AllowedWrites allowed{__func__, {kFar, kFade}};
     reset_state();
     CPUState cpu{};
     seed_live_game(&cpu);
@@ -840,6 +900,7 @@ void test_savestates_keep_the_game_values() {
 }
 
 void test_screen_effects_see_the_game_values() {
+    const AllowedWrites allowed{__func__, {kFar, kFade}};
     reset_state();
     CPUState cpu{};
     seed_live_game(&cpu);
@@ -881,6 +942,7 @@ void test_screen_effects_see_the_game_values() {
 }
 
 void test_fades_follow_the_effects() {
+    const AllowedWrites allowed{__func__, {kFar, kFade}};
     reset_state();
     CPUState cpu{};
     seed_live_game(&cpu);
@@ -910,6 +972,7 @@ void test_fades_follow_the_effects() {
 }
 
 void test_saves_wait_for_the_epilogue() {
+    const AllowedWrites allowed{__func__, {kFar, kFade}};
     reset_state();
     CPUState cpu{};
     seed_live_game(&cpu);
@@ -942,6 +1005,7 @@ void test_saves_wait_for_the_epilogue() {
 }
 
 void test_fog_for_sprites() {
+    const AllowedWrites allowed{__func__, {kFar, kFade}};
     reset_state();
     CPUState cpu{};
     seed_live_game(&cpu);
@@ -1023,6 +1087,7 @@ void test_fog_for_sprites() {
 }
 
 void test_fog_shares_belong_to_their_packet() {
+    const AllowedWrites allowed{__func__, {kFar, kFade}};
     reset_state();
     CPUState cpu{};
     seed_live_game(&cpu);
@@ -1086,6 +1151,7 @@ void test_fog_shares_belong_to_their_packet() {
 }
 
 void test_transitions_inside_a_written_frame() {
+    const AllowedWrites allowed{__func__, {kFar, kFade}};
     reset_state();
     CPUState cpu{};
     seed_live_game(&cpu);
@@ -1110,6 +1176,7 @@ void test_transitions_inside_a_written_frame() {
 }
 
 void test_presets_up_to_twice() {
+    const AllowedWrites allowed{__func__, {kFar, kFade}};
     reset_state();
     CPUState cpu{};
     seed_live_game(&cpu);
@@ -1133,6 +1200,7 @@ void test_presets_up_to_twice() {
 }
 
 void test_edge_margin_under_the_smooth_fade() {
+    const AllowedWrites allowed{__func__, {kFar, kFade}};
     reset_state();
     CPUState cpu{};
     seed_live_game(&cpu);
@@ -1230,6 +1298,7 @@ void test_edge_margin_under_the_smooth_fade() {
 }
 
 void test_far_plane_kept_inside_the_ordering_table() {
+    const AllowedWrites allowed{__func__, {kFar, kFade}};
     reset_state();
     CPUState cpu{};
     seed_live_game(&cpu, 3000u, 2232);
@@ -1264,6 +1333,7 @@ void reach_visible_loop(CPUState *cpu, std::uint32_t rooms) {
 }
 
 void test_rooms_reach_past_their_portals() {
+    const AllowedWrites allowed{__func__, {entries(2u)}};
     reset_state();
     CPUState cpu{};
     seed_live_game(&cpu);
@@ -1332,10 +1402,6 @@ void test_rooms_reach_past_their_portals() {
     exit_renderer(&cpu);
     g_netplay = false;
 
-    for (const auto& [address, value] : g_writes)
-        expect(address == kFarDistance || address == kFadeStart ||
-                   (address >= kReviewedVisibleSpanBase && address < kReviewedVisibleSpanBase + 2u * kVisibleSpanStride),
-               "the reach writes nothing but the listed spans");
 }
 
 using disruptor::portal_reach::Wedge;
@@ -1384,6 +1450,7 @@ void test_rooms_only_the_wider_walk_reaches() {
     seed_word(far_head, 0x80081000u);
     seed_word(sector_head, 0x80082000u);
     seed_word(near_head, 0x80083000u);
+    const AllowedWrites allowed{__func__, {entries(3u), kListEnd, word_at(far_head), word_at(sector_head)}};
 
     const auto walk = [&cpu] {
         walk_into(&cpu, 0u, portal_of(1u), kScreenWedge);
@@ -1476,6 +1543,7 @@ void drop_test(CPUState *cpu, std::uint32_t packet, std::array<std::int32_t, 4> 
 }
 
 void test_faces_only_the_wider_walk_admits() {
+    const AllowedWrites allowed{__func__, {entries(3u), kListEnd, kStackSpanSides}};
     reset_state();
     CPUState cpu{};
     seed_live_game(&cpu);
@@ -1503,7 +1571,7 @@ void test_faces_only_the_wider_walk_admits() {
     constexpr std::uint32_t kPackets = 0x800A0000u;
     g_admitted.clear();
 
-    cpu.gpr[5] = 0x801FFD20u;
+    cpu.gpr[5] = kStackSpan;
     cpu.gpr[17] = kReviewedVisibleSpanBase + kVisibleSpanStride;  /* room 3, which only the wider walk lists */
     g_sector_callback(&cpu, 0x80046134u);
     drop_test(&cpu, kPackets, {150, 160, 170, 180});
@@ -1582,6 +1650,7 @@ void test_faces_only_the_wider_walk_admits() {
     walk_into(&cpu, 1u, portal_of(3u), kMarginWedge);
     walk_into(&cpu, 1u, portal_of(2u), kInnerWedge);
     reach_visible_loop(&cpu, 3u);
+    cpu.gpr[5] = kStackSpan;  /* the walk left a ray's z in $a1, the span write went to 0x578 */
     cpu.gpr[17] = kReviewedVisibleSpanBase + kVisibleSpanStride;
     g_sector_callback(&cpu, 0x80046134u);
     drop_test(&cpu, kPackets + 800u, {150, 160, 170, 180});
@@ -1598,6 +1667,7 @@ void face(CPUState *cpu, std::uint32_t gate) {
 }
 
 void test_portals_seen_edge_on() {
+    const AllowedWrites allowed{__func__, {entries(3u), {disruptor::portal_reach::kListedAt + 1u, disruptor::portal_reach::kListedAt + 4u}}};
     reset_state();
     CPUState cpu{};
     seed_live_game(&cpu);
@@ -1682,6 +1752,7 @@ void test_portals_seen_edge_on() {
 }
 
 void test_visibility_recursion_and_packet_stages() {
+    const AllowedWrites allowed{__func__, {kFar, kFade}};
     reset_state();
     CPUState cpu{};
     seed_live_game(&cpu);
@@ -1755,6 +1826,7 @@ void test_visibility_recursion_and_packet_stages() {
 }
 
 void test_portal_and_object_decision_observers() {
+    const AllowedWrites allowed{__func__, {kFar, kFade}};
     reset_state();
     CPUState cpu{};
     seed_live_game(&cpu);
@@ -1836,6 +1908,7 @@ void test_portal_and_object_decision_observers() {
 }
 
 void test_observer_safety_guards_and_abandon() {
+    const AllowedWrites allowed{__func__, {kFar, kFade}};
     reset_state();
     CPUState cpu{};
     seed_live_game(&cpu);
@@ -1873,6 +1946,7 @@ void test_observer_safety_guards_and_abandon() {
 }
 
 void test_reset_and_versioned_snapshot() {
+    const AllowedWrites allowed{__func__, {kFar, kFade}};
     reset_state();
     CPUState cpu{};
     seed_live_game(&cpu);
@@ -1954,7 +2028,8 @@ void test_reset_and_versioned_snapshot() {
 
 /* A sector span's end at the frame's edge reaches past it by the turn guard, an end inside the frame stays. */
 void test_a_sector_span_reaches_past_the_frame_edge() {
-    constexpr std::uint32_t kSpan = 0x801FFD20u;
+    const AllowedWrites allowed{__func__, {kStackSpanSides}};
+    constexpr std::uint32_t kSpan = kStackSpan;
     expect(g_sector_callback && g_sector_address == 0x80046134u, "the mesh renderer's entry is hooked");
     CPUState cpu{};
     cpu.read_word = psx_mod_read_word;
@@ -1984,6 +2059,7 @@ void test_a_sector_span_reaches_past_the_frame_edge() {
 
 void test_the_split_middle_moves_to_the_diagonal() {
     constexpr std::uint32_t kMiddle = 0x1F8000C0u;
+    const AllowedWrites allowed{__func__, {{kMiddle, kMiddle + 8u}}};
     CPUState cpu{};
     cpu.read_word = psx_mod_read_word;
     cpu.write_word = psx_mod_write_word;
@@ -2003,6 +2079,7 @@ void test_the_split_middle_moves_to_the_diagonal() {
 }
 
 void test_a_face_with_a_marked_corner_is_tested_on_its_real_sides() {
+    const AllowedWrites allowed{__func__, {}};
     constexpr std::uint32_t kRecords = 0x8005BACCu;
     CPUState cpu{};
     cpu.read_word = psx_mod_read_word;
@@ -2057,6 +2134,7 @@ void test_a_face_with_a_marked_corner_is_tested_on_its_real_sides() {
 void test_the_split_quarters_meet_at_texel_16() {
     constexpr std::uint32_t kTable = 0x80100000u;
     constexpr std::uint32_t kPacket = 0x80120000u;
+    const AllowedWrites allowed{__func__, {word_at(kPacket + 12u), word_at(kPacket + 24u), word_at(kPacket + 36u), word_at(kPacket + 48u)}};
     CPUState cpu{};
     cpu.read_word = psx_mod_read_word;
     cpu.write_word = psx_mod_write_word;
@@ -2123,7 +2201,7 @@ int main() {
     test_observer_safety_guards_and_abandon();
     test_reset_and_versioned_snapshot();
 
-    expect(only_distance_writes(), "far rendering writes no guest RAM but the two distance globals");
+    check_writes();
     if (g_failures != 0) {
         std::cerr << g_failures << " far-rendering test(s) failed\n";
         return 1;
