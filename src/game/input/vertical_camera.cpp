@@ -11,10 +11,13 @@
  *
  * Every site is pinned by both PC and opcode.  At zero pitch, during lockstep
  * replay, in netplay, or outside verified live gameplay, the original guest
- * results and memory are left byte-for-byte untouched.
+ * results and memory are left byte-for-byte untouched, except that free aim
+ * (Auto-aim off) levels a shot the game raised to its target.
  */
 
 #include "game/input/vertical_camera.h"
+
+#include "game/input/mouse_aim.h"
 
 #include "cpu_state.h"
 #include "game/session/weapon_load.h"
@@ -232,6 +235,7 @@ void renderer_entry(CPUState *cpu, uint32_t address) {
         return;
     }
     g_live_frames.fetch_add(1, std::memory_order_relaxed);
+    disruptor_mouse_late_tilt();
     publish_pitch(cpu,
                   g_requested_pitch.load(std::memory_order_acquire));
 }

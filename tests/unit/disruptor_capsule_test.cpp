@@ -21,7 +21,7 @@ bool same(const Frame &one, const Frame &other) {
            one.byte2_at == other.byte2_at && one.byte2 == other.byte2 &&
            std::memcmp(&one.pitch, &other.pitch, sizeof(one.pitch)) == 0 && one.memory == other.memory &&
            one.list == other.list && std::memcmp(&one.residual, &other.residual, sizeof(one.residual)) == 0 &&
-           one.captures == other.captures;
+           one.captures == other.captures && std::memcmp(&one.late_pitch, &other.late_pitch, sizeof(one.late_pitch)) == 0;
 }
 
 void test_frames_survive_the_file() {
@@ -37,27 +37,28 @@ void test_frames_survive_the_file() {
     frames[0].list = 2;
     frames[0].residual = -0.375f;
     frames[0].captures = 0x01020304u;
+    frames[0].late_pitch = -12.5f;
     frames[2].pitch = 3.5f;
     frames[2].memory = 0xFFFFFFFFFFFFFFFFull;
     uint64_t first = 0;
     const std::string bytes = disruptor::capsule::encode(frames, 0x0000000867A1B2C3ull);
-    expect(bytes.size() == 20 + 3 * 35 && bytes.compare(0, 8, "DCAPSUL4") == 0 && static_cast<uint8_t>(bytes[8]) == 3 &&
+    expect(bytes.size() == 20 + 3 * 39 && bytes.compare(0, 8, "DCAPSUL5") == 0 && static_cast<uint8_t>(bytes[8]) == 3 &&
                static_cast<uint8_t>(bytes[12]) == 0xC3 && static_cast<uint8_t>(bytes[16]) == 0x08,
-           "the file is a name, a count, the first VBlank's cycle and 35 bytes a frame");
+           "the file is a name, a count, the first VBlank's cycle and 39 bytes a frame");
     expect(static_cast<uint8_t>(bytes[20]) == 0xFE && static_cast<uint8_t>(bytes[21]) == 0xBF && static_cast<uint8_t>(bytes[24]) == 0x24 &&
                static_cast<uint8_t>(bytes[27]) == 0x80 && static_cast<uint8_t>(bytes[28]) == 0xC3 && static_cast<uint8_t>(bytes[33]) == 0xEF &&
                static_cast<uint8_t>(bytes[40]) == 0x01 && static_cast<uint8_t>(bytes[41]) == 0x27 &&
-               static_cast<uint8_t>(bytes[45]) == 1 && static_cast<uint8_t>(bytes[46]) == 2 && static_cast<uint8_t>(bytes[55 + 26]) == 0 &&
+               static_cast<uint8_t>(bytes[45]) == 1 && static_cast<uint8_t>(bytes[46]) == 2 && static_cast<uint8_t>(bytes[59 + 26]) == 0 &&
                static_cast<uint8_t>(bytes[50]) == 0xBE && static_cast<uint8_t>(bytes[51]) == 0x04 && static_cast<uint8_t>(bytes[54]) == 0x01,
            "every number is written low byte first, wherever the file was made");
     expect(disruptor::capsule::decode(bytes, back, first) && back.size() == 3 && same(back[0], frames[0]) && same(back[1], frames[1]) && same(back[2], frames[2]) &&
                first == 0x0000000867A1B2C3ull,
            "what was written is what is read");
-    expect(same(back[1], Frame{}) && back[1].pad[0] == 0xFFFF, "a frame with nothing pressed has both pads released");
+    expect(back.size() == 3 && same(back[1], Frame{}) && back[1].pad[0] == 0xFFFF, "a frame with nothing pressed has both pads released");
 
     std::string legacy = bytes.substr(0, 20);
     legacy[7] = '1';
-    for (size_t i = 0; i < frames.size(); ++i) legacy.append(bytes, 20 + i * 35, 21);
+    for (size_t i = 0; i < frames.size(); ++i) legacy.append(bytes, 20 + i * 39, 21);
     expect(disruptor::capsule::decode(legacy, back, first) && back.size() == frames.size() &&
                back[0].byte_at == frames[0].byte_at && back[0].byte == frames[0].byte &&
                back[0].byte2_at == 0u && back[0].pitch == frames[0].pitch &&
@@ -65,18 +66,33 @@ void test_frames_survive_the_file() {
            "older capsules still read with no second byte write");
     std::string second = bytes.substr(0, 20);
     second[7] = '2';
-    for (size_t i = 0; i < frames.size(); ++i) second.append(bytes, 20 + i * 35, 26);
+    for (size_t i = 0; i < frames.size(); ++i) second.append(bytes, 20 + i * 39, 26);
     expect(disruptor::capsule::decode(second, back, first) && back.size() == frames.size() && back[0].byte2_at == frames[0].byte2_at &&
                back[0].byte2 == frames[0].byte2 && back[0].list == 0,
            "and those of version 2 with no weapon list");
     std::string third = bytes.substr(0, 20);
     third[7] = '3';
-    for (size_t i = 0; i < frames.size(); ++i) third.append(bytes, 20 + i * 35, 27);
+    for (size_t i = 0; i < frames.size(); ++i) third.append(bytes, 20 + i * 39, 27);
     expect(disruptor::capsule::decode(third, back, first) && back.size() == frames.size() && back[0].list == frames[0].list &&
                back[0].residual == 0.0f && back[0].captures == 0u,
            "and those of version 3 with no turn remainder and no presenter count");
+    std::string fourth = bytes.substr(0, 20);
+    fourth[7] = '4';
+    for (size_t i = 0; i < frames.size(); ++i) fourth.append(bytes, 20 + i * 39, 35);
+    expect(disruptor::capsule::decode(fourth, back, first) && back.size() == frames.size() && back[0].captures == frames[0].captures &&
+               back[0].late_pitch == frames[0].pitch && back[2].late_pitch == frames[2].pitch,
+           "and those of version 4 with one look a frame, taken for the renderer's too");
+    float late = 0.0f;
+    if (bytes.size() >= 20 + 39) {
+        const uint32_t late_bits = static_cast<uint32_t>(static_cast<uint8_t>(bytes[20 + 35])) |
+                                   static_cast<uint32_t>(static_cast<uint8_t>(bytes[20 + 36])) << 8 |
+                                   static_cast<uint32_t>(static_cast<uint8_t>(bytes[20 + 37])) << 16 |
+                                   static_cast<uint32_t>(static_cast<uint8_t>(bytes[20 + 38])) << 24;
+        std::memcpy(&late, &late_bits, sizeof(late));
+    }
+    expect(late == -12.5f, "the renderer's look is the frame's last four bytes");
     std::string later = bytes;
-    later[7] = '5';
+    later[7] = '6';
     expect(!disruptor::capsule::decode(later, back, first) && back.empty(), "a version not known yet is refused");
 
     std::vector<Frame> none;

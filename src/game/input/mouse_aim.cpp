@@ -182,6 +182,13 @@ struct MouseAimState {
     double shown_yaw_fraction = 0.0;  // what fractional_yaw was a frame ago
     double sweep_counts = 0.0;
     double vertical_pitch = 0.0;
+    double late_x = 0.0;        // read at the renderer's entry with the late tilt: the next VBlank turns by it
+    bool wheel_open = false;
+    uint64_t hook_ticks = 0;
+    uint64_t interval_late_reads = 0;
+    uint64_t interval_late_ticks = 0;
+    uint64_t interval_pump_ticks = 0;
+    double interval_late_y = 0.0;
     uint64_t frame = 0;
     uint64_t motion_samples = 0;
     double interval_mouse_x = 0.0;
@@ -359,6 +366,7 @@ uint32_t get_mouse_buttons() {
 }
 
 void discard_relative_motion() {
+    g_mouse.late_x = 0.0;
 #if defined(PSX_SDL3)
     float x = 0.0f;
     float y = 0.0f;
@@ -390,11 +398,7 @@ RelativeMotion take_relative_motion() {
 }
 
 void set_capture(bool captured, const char *reason) {
-    if (captured && !g_mouse.mouse_aim_enabled &&
-        !g_mouse.vertical_look_enabled &&
-        !g_mouse.modern_controls_enabled) {
-        return;
-    }
+    if (captured && !g_mouse.mouse_aim_enabled && !g_mouse.modern_controls_enabled) return;
     if (captured == g_mouse.captured) return;
     if (!set_relative_mouse_mode(captured)) {
         set_title("ERROR enabling relative mode; see log");
@@ -799,11 +803,25 @@ bool menu_pointer_frame() {
 }
 
 constexpr int kCrosshairDrawnWithin = 4;  /* VBlanks: the renderer draws every one or every other one in play */
-std::atomic<bool> g_crosshair{false};
+std::atomic<bool> g_crosshair{true};
 std::atomic<bool> g_crosshair_shown{false};
 
+bool vertical_active() { return g_mouse.mouse_aim_enabled && g_mouse.vertical_look_enabled; }
+
 void tell_free_aim() {
-    disruptor_vertical_camera_set_free_aim(g_mouse.vertical_look_enabled && !g_mouse.auto_aim ? 1 : 0);
+    disruptor_vertical_camera_set_free_aim(vertical_active() && !g_mouse.auto_aim ? 1 : 0);
+}
+
+void vertical_changed(bool was_active) {
+    tell_free_aim();
+    const bool active = vertical_active();
+    if (active == was_active) return;
+    if (!active) {
+        g_crosshair_shown.store(false, std::memory_order_relaxed);
+        reset_vertical_pitch("settings-vertical-look-recenter");
+    } else if (!psx_netplay_active()) {
+        disruptor_vertical_camera_set_requested_pitch(g_mouse.vertical_pitch);
+    }
 }
 
 void mouse_aim_frame() {
@@ -818,8 +836,10 @@ void mouse_aim_frame() {
         g_mouse.left_was_down = (buttons & SDL_BUTTON_LMASK) != 0;
         discard_relative_motion();
         set_residual(0.0);
+        g_mouse.wheel_open = true;
         return;
     }
+    g_mouse.wheel_open = false;
     const bool pointing = menu_pointer_frame();
     /* Between two screens of the menus none points for a few frames: the mouse stays free there, or the next screen's pointer would jump. */
     const bool in_menus = pointing || disruptor_front_end_shown() != 0 || psx_read_byte(kMenuStateAddress) == kMainMenu;
@@ -876,7 +896,7 @@ void mouse_aim_frame() {
 
     const bool focused =
         (SDL_GetWindowFlags(sdl_window) & SDL_WINDOW_INPUT_FOCUS) != 0;
-    const bool usable = g_mouse.mouse_aim_enabled || g_mouse.vertical_look_enabled || g_mouse.modern_controls_enabled ||
+    const bool usable = g_mouse.mouse_aim_enabled || g_mouse.modern_controls_enabled ||
                         disruptor::settings::any_mouse(second_keys());
     const bool was_captured = g_mouse.captured;
     /* The mouse is held whenever the window has focus, with no click asked for. The player's key and clicks come before the
@@ -910,13 +930,13 @@ void mouse_aim_frame() {
     const bool demo = demo_playing();
     const bool playing = psx_read_byte(kSceneModeAddress) == 0u && !demo;
     const bool live = disruptor_vertical_camera_input_allowed() != 0;
-    const bool tilting = g_mouse.vertical_look_enabled && !vertical_netplay_blocked && live;
+    const bool tilting = vertical_active() && !vertical_netplay_blocked && live;
     const bool steering = playing && live && psx_read_byte(kMenuStateAddress) != kMainMenu;
     const uint32_t live_frames = disruptor_vertical_camera_live_frames();
     g_mouse.frames_since_live = live_frames != g_mouse.last_live_frames ? 0 : std::min(g_mouse.frames_since_live + 1, 1 << 20);
     g_mouse.last_live_frames = live_frames;
     const bool drawn = g_mouse.frames_since_live < kCrosshairDrawnWithin;
-    g_crosshair_shown.store(steering && drawn && g_mouse.vertical_look_enabled && g_crosshair.load(std::memory_order_relaxed),
+    g_crosshair_shown.store(steering && drawn && vertical_active() && g_crosshair.load(std::memory_order_relaxed),
                             std::memory_order_relaxed);
     const disruptor::sticks::Reading stick =
         pad ? disruptor::sticks::read(g_mouse.sticks, {axes[0], axes[1], axes[2], axes[3]}, psx_input_deadzone(), steering, tilting)
@@ -925,14 +945,18 @@ void mouse_aim_frame() {
     apply_modern_controls(keys, g_mouse.swallow_left ? buttons & ~static_cast<uint32_t>(SDL_BUTTON_LMASK) : buttons, stick.press);
     if (demo) g_mouse.fractional_yaw = 0.0;
     double mouse_x = 0.0, mouse_y = 0.0;
-    if (g_mouse.captured && playing && (g_mouse.mouse_aim_enabled || g_mouse.vertical_look_enabled)) {
+    if (g_mouse.captured && playing && g_mouse.mouse_aim_enabled) {
         /* SDL drains both relative axes in one call.  Keep this a single
          * coherent sample so enabling one axis can never consume the other. */
-        const RelativeMotion motion = take_relative_motion();
+        RelativeMotion motion = take_relative_motion();
+        motion.x += g_mouse.late_x;
+        g_mouse.late_x = 0.0;
+        g_mouse.hook_ticks = SDL_GetPerformanceCounter();
         if (g_mouse.mouse_aim_enabled) mouse_x = motion.x;
         if (tilting) mouse_y = motion.y;
-    } else if (g_mouse.captured) {
-        discard_relative_motion();
+    } else {
+        if (g_mouse.captured) discard_relative_motion();
+        g_mouse.late_x = 0.0;
     }
     apply_turn(mouse_x, stick.turn);
     apply_tilt(mouse_y, stick.tilt);
@@ -967,7 +991,7 @@ void mouse_aim_frame() {
                       "geometry_precise=%llu "
                       "texture_perspective=%u "
                       "ws_margin=%d ws_native_active=%d ws_pinned_43=%d "
-                     "ws_extra=%d\n",
+                     "ws_extra=%d late_reads=%llu late_y=%.3f late_after_ms=%.2f late_pump_us=%.1f\n",
                      static_cast<unsigned long long>(g_mouse.frame),
                      g_mouse.captured ? "true" : "false",
                      g_mouse.interval_mouse_x,
@@ -984,7 +1008,13 @@ void mouse_aim_frame() {
                       static_cast<unsigned>(texture_perspective),
                      static_cast<int>(psx_mod_widescreen_x_margin()),
                      ws_native_wide_active(), gpu_ws_present_native_43(),
-                     ws_nw_extra());
+                     ws_nw_extra(), static_cast<unsigned long long>(g_mouse.interval_late_reads), g_mouse.interval_late_y,
+                     g_mouse.interval_late_reads == 0 ? 0.0
+                         : 1000.0 * static_cast<double>(g_mouse.interval_late_ticks) /
+                               (static_cast<double>(SDL_GetPerformanceFrequency()) * static_cast<double>(g_mouse.interval_late_reads)),
+                     g_mouse.interval_late_reads == 0 ? 0.0
+                         : 1e6 * static_cast<double>(g_mouse.interval_pump_ticks) /
+                               (static_cast<double>(SDL_GetPerformanceFrequency()) * static_cast<double>(g_mouse.interval_late_reads)));
         if (gpu_geometry_diagnostics_detail()) {
             log_geometry_diagnostics_scope(
                 "cumulative", g_mouse.frame, geometry_diagnostics,
@@ -999,6 +1029,8 @@ void mouse_aim_frame() {
         g_mouse.interval_yaw_steps = 0;
         g_mouse.interval_pitch_delta = 0.0;
         g_mouse.interval_modern_press_mask = 0;
+        g_mouse.interval_late_reads = g_mouse.interval_late_ticks = g_mouse.interval_pump_ticks = 0;
+        g_mouse.interval_late_y = 0.0;
     }
 }
 
@@ -1021,7 +1053,6 @@ struct MouseAimRegistration {
             g_mouse.sweep_counts = std::atof(sweep);
 #endif
         g_mouse.enabled = g_mouse.mouse_aim_enabled ||
-                          g_mouse.vertical_look_enabled ||
                           g_mouse.modern_controls_enabled ||
                           g_mouse.number_keys_enabled ||
                           g_mouse.high_precision_camera;
@@ -1046,7 +1077,6 @@ void reset_presentation_residual() {
 
 void refresh_live_control_state(const char *event) {
     g_mouse.enabled = g_mouse.mouse_aim_enabled ||
-                      g_mouse.vertical_look_enabled ||
                       g_mouse.modern_controls_enabled ||
                       g_mouse.number_keys_enabled ||
                       g_mouse.high_precision_camera;
@@ -1061,9 +1091,7 @@ void refresh_live_control_state(const char *event) {
 
     /* Relative capture is only meaningful for the two input features.  Do
      * not leave the desktop pointer trapped when both are disabled live. */
-    if (!g_mouse.mouse_aim_enabled &&
-        !g_mouse.vertical_look_enabled &&
-        !g_mouse.modern_controls_enabled && g_mouse.captured) {
+    if (!g_mouse.mouse_aim_enabled && !g_mouse.modern_controls_enabled && g_mouse.captured) {
         set_capture(false, "settings-disabled-release");
     }
 
@@ -1121,8 +1149,10 @@ extern "C" void disruptor_mouse_aim_set_enabled(int enabled) {
     load_configuration();
     const bool next = enabled != 0;
     if (g_mouse.mouse_aim_enabled == next) return;
+    const bool was_active = vertical_active();
     g_mouse.mouse_aim_enabled = next;
     reset_presentation_residual();
+    vertical_changed(was_active);
     refresh_live_control_state(next ? "settings-mouse-aim-on"
                                     : "settings-mouse-aim-off");
 }
@@ -1252,16 +1282,9 @@ extern "C" void disruptor_mouse_set_vertical_look_enabled(int enabled) {
     load_configuration();
     const bool next = enabled != 0;
     if (g_mouse.vertical_look_enabled == next) return;
+    const bool was_active = vertical_active();
     g_mouse.vertical_look_enabled = next;
-    tell_free_aim();
-    if (!next) g_crosshair_shown.store(false, std::memory_order_relaxed);
-    if (next) {
-        if (!psx_netplay_active())
-            disruptor_vertical_camera_set_requested_pitch(
-                g_mouse.vertical_pitch);
-    } else {
-        reset_vertical_pitch("settings-vertical-look-recenter");
-    }
+    vertical_changed(was_active);
     refresh_live_control_state(next ? "settings-vertical-look-on"
                                     : "settings-vertical-look-off");
 }
@@ -1337,7 +1360,30 @@ extern "C" double disruptor_mouse_vertical_pitch(void) {
 extern "C" void disruptor_mouse_set_vertical_pitch(double pitch) {
     load_configuration();
     g_mouse.vertical_pitch = pitch;
-    if (g_mouse.vertical_look_enabled) disruptor_vertical_camera_set_requested_pitch(pitch);
+    if (vertical_active()) disruptor_vertical_camera_set_requested_pitch(pitch);
+}
+
+extern "C" void disruptor_mouse_late_tilt(void) {
+    if (!vertical_active()) return;
+    disruptor_capsule_note_early_pitch(g_mouse.vertical_pitch);
+    double pitch = 0.0;
+    if (disruptor_capsule_replay_late_pitch(&pitch)) {
+        disruptor_mouse_set_vertical_pitch(pitch);
+        return;
+    }
+    if (!g_mouse.enabled || !sdl_window || !g_mouse.captured || g_mouse.replaying || g_mouse.wheel_open ||
+        psx_netplay_active() || psx_host_ui_game_input_captured() || demo_playing() ||
+        psx_read_byte(kSceneModeAddress) != 0u || psx_read_byte(kMenuStateAddress) == kMainMenu)
+        return;
+    const uint64_t pumped = SDL_GetPerformanceCounter();
+    SDL_PumpEvents();
+    g_mouse.interval_pump_ticks += SDL_GetPerformanceCounter() - pumped;
+    const RelativeMotion motion = take_relative_motion();
+    g_mouse.late_x += motion.x;
+    ++g_mouse.interval_late_reads;
+    g_mouse.interval_late_y += motion.y;
+    if (g_mouse.hook_ticks != 0) g_mouse.interval_late_ticks += SDL_GetPerformanceCounter() - g_mouse.hook_ticks;
+    apply_tilt(motion.y, 0.0);
 }
 
 extern "C" void disruptor_mouse_recenter_vertical(void) {
@@ -1352,11 +1398,7 @@ extern "C" int disruptor_mouse_captured(void) {
 extern "C" int disruptor_mouse_set_captured(int captured) {
     load_configuration();
     const bool next = captured != 0;
-    if (next && !g_mouse.mouse_aim_enabled &&
-        !g_mouse.vertical_look_enabled &&
-        !g_mouse.modern_controls_enabled) {
-        return 0;
-    }
+    if (next && !g_mouse.mouse_aim_enabled && !g_mouse.modern_controls_enabled) return 0;
     set_capture(next, next ? "settings-capture" : "settings-release");
     if (next && g_mouse.captured) {
         /* A host UI can restore capture from inside its SDL event callback.

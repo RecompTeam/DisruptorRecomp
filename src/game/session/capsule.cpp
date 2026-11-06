@@ -55,16 +55,18 @@ extern "C" void gl_renderer_shown_script_counts(unsigned *shown, unsigned *misse
 namespace disruptor::capsule {
 namespace {
 
-constexpr char kMagic[8] = {'D', 'C', 'A', 'P', 'S', 'U', 'L', '4'};
-constexpr size_t kFrameBytes = 35, kHeadBytes = sizeof(kMagic) + 4 + 8;
+constexpr char kMagic[8] = {'D', 'C', 'A', 'P', 'S', 'U', 'L', '5'};
+constexpr size_t kFrameBytes = 39, kHeadBytes = sizeof(kMagic) + 4 + 8;
 
-/* A frame of version 1 has no second byte write, one of version 2 no weapon list, one of version 3 no turn remainder or presenter count. */
+/* A frame of version 1 has no second byte write, one of version 2 no weapon list, one of version 3 no turn remainder or presenter
+ * count, one of version 4 no late pitch. */
 size_t frame_bytes_of(char version) {
     switch (version) {
     case '1': return 21;
     case '2': return 26;
     case '3': return 27;
-    case '4': return kFrameBytes;
+    case '4': return 35;
+    case '5': return kFrameBytes;
     default: return 0;
     }
 }
@@ -101,6 +103,9 @@ std::string encode(const std::vector<Frame> &frames, uint64_t first_cycle) {
         std::memcpy(&residual, &frame.residual, sizeof(residual));
         put(out, residual, 4);
         put(out, frame.captures, 4);
+        uint32_t late = 0;
+        std::memcpy(&late, &frame.late_pitch, sizeof(late));
+        put(out, late, 4);
     }
     return out;
 }
@@ -134,6 +139,11 @@ bool decode(std::string_view bytes, std::vector<Frame> &frames, uint64_t &first_
             const auto residual = static_cast<uint32_t>(take(bytes, at + 27, 4));
             std::memcpy(&frame.residual, &residual, sizeof(residual));
             frame.captures = static_cast<uint32_t>(take(bytes, at + 31, 4));
+        }
+        frame.late_pitch = frame.pitch;
+        if (frame_bytes > 35) {
+            const auto late = static_cast<uint32_t>(take(bytes, at + 35, 4));
+            std::memcpy(&frame.late_pitch, &late, sizeof(late));
         }
     }
     return true;
@@ -515,6 +525,8 @@ struct Capsule {
     fs::path loading;        /* the capsule whose state was asked for, empty when none is */
     bool load_done = false;
     float load_pitch = 0.0f; /* the look up or down its recording began with, which no state holds */
+    bool early_noted = false;  /* the renderer read the mouse again this VBlank: early_pitch is the look before */
+    float early_pitch = 0.0f;
     uint32_t previews = 0;   /* pictures kept for the list so far */
     bool preview_asked = false;
     std::vector<Shown> shown;        /* what reached the screen while recording, or what a replay is to present again */
@@ -614,7 +626,10 @@ void close_frame() {
     capsule.open.byte2_at = capsule.notes.byte2_at;
     capsule.open.byte2 = capsule.notes.byte2;
     capsule.open.list = capsule.notes.list;
-    capsule.open.pitch = static_cast<float>(disruptor_mouse_vertical_pitch());
+    const float pitch = static_cast<float>(disruptor_mouse_vertical_pitch());
+    capsule.open.pitch = capsule.early_noted ? capsule.early_pitch : pitch;
+    capsule.open.late_pitch = pitch;
+    capsule.early_noted = false;
     capsule.open.residual = capsule.notes.residual;
     capsule.open.captures = static_cast<uint32_t>(gl_renderer_shown_captures() - capsule.shown_base);
     take_shown();
@@ -724,6 +739,7 @@ void store_recording(const char *why) {
     capsule.shown.clear();
     capsule.marks.clear();
     capsule.recording = Recording::kOff;
+    capsule.early_noted = false;
     say(stored ? "REC saved" : "REC NOT saved");
     if (capsule.scripted == 0) return;
     std::fflush(nullptr);
@@ -735,7 +751,7 @@ void finish_recording(const char *why) {
     Capsule &capsule = g_capsule;
     close_frame();
     Frame last;
-    last.pitch = capsule.open.pitch;
+    last.pitch = last.late_pitch = capsule.open.late_pitch;
     last.memory = memory_now();
     capsule.recorded.push_back(last);
     store_recording(why);
@@ -918,6 +934,20 @@ extern "C" void disruptor_capsule_note_byte(uint32_t address, uint8_t value) {
 extern "C" void disruptor_capsule_note_list(uint8_t list) { g_capsule.notes.list = list; }
 
 extern "C" void disruptor_capsule_note_residual(double yaw) { g_capsule.notes.residual = static_cast<float>(yaw); }
+
+extern "C" void disruptor_capsule_note_early_pitch(double pitch) {
+    Capsule &capsule = g_capsule;
+    if (capsule.recording != Recording::kOn || capsule.early_noted) return;
+    capsule.early_noted = true;
+    capsule.early_pitch = static_cast<float>(pitch);
+}
+
+extern "C" int disruptor_capsule_replay_late_pitch(double *pitch) {
+    const Capsule &capsule = g_capsule;
+    if (capsule.replay != Replay::kOn || capsule.at == 0 || !pitch) return 0;
+    *pitch = static_cast<double>(capsule.replayed[capsule.at - 1].late_pitch);
+    return 1;
+}
 
 extern "C" int disruptor_capsule_replay_residual(double *yaw) {
     const Capsule &capsule = g_capsule;

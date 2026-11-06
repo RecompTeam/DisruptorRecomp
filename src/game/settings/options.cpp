@@ -142,6 +142,7 @@ constexpr const char* needs_geometry[] = {geometry_key};
 constexpr const char* needs_frames[] = {frames_key};
 constexpr const char* needs_occlusion[] = {occlusion_key};
 constexpr const char* needs_aim_and_geometry[] = {aim_key, geometry_key};
+constexpr const char* needs_aim[] = {aim_key};
 constexpr const char* needs_vertical[] = {vertical_key};
 constexpr const char* crosshair_key = "disruptor.crosshair";
 constexpr const char* needs_crosshair[] = {vertical_key, crosshair_key};
@@ -289,8 +290,8 @@ constexpr Option option_list[] = {
         "Escape skips a logo or a movie either way"),
 
     toggle<&Settings::has_mouse_aim, &Settings::mouse_aim>(
-        "disruptor.mouse_aim", "Horizontal mouse aim", 1,
-        "In the game a middle-click captures the mouse\nA middle-click or Escape releases it"),
+        "disruptor.mouse_aim", "Mouse turning", 1,
+        "The mouse turns the view\nEscape or a middle-click lets the mouse go\nA click takes it back"),
     choice("disruptor.modern_controls", "Control scheme", 1,
            "Classic: The original keys\n"
            "  The mouse only turns\n"
@@ -312,28 +313,28 @@ constexpr Option option_list[] = {
         "Hold Choose weapon or Choose psionic, point with the mouse or the left stick, let go to equip\n"
         "Escape or a right click cancels\n"
         "The game keeps running while a wheel is open"),
-    slider("disruptor.horizontal_sensitivity", "Horizontal sensitivity", 80,
+    slider("disruptor.horizontal_sensitivity", "Sensitivity", 80,
            "", 5, 2000, Unit::thousandths,
            saved<&Settings::has_horizontal_sensitivity>, thousandths<&Settings::horizontal_sensitivity>,
-           set_speed<&Settings::has_horizontal_sensitivity, &Settings::horizontal_sensitivity>),
+           set_speed<&Settings::has_horizontal_sensitivity, &Settings::horizontal_sensitivity>, needs_aim),
     toggle<&Settings::has_invert_horizontal, &Settings::invert_horizontal>(
-        "disruptor.invert_horizontal", "Invert horizontal mouse", 0,
-        ""),
+        "disruptor.invert_horizontal", "Invert horizontal", 0,
+        "", needs_aim),
     toggle<&Settings::has_high_precision_camera, &Settings::high_precision_camera>(
-        "disruptor.high_precision_camera", "Smooth mouse turning", 1,
-        "Turns the view smoothly between the game's 256 steps\nAlso needs Exact-provenance geometry", needs_aim_and_geometry),
+        "disruptor.high_precision_camera", "Smooth turning", 1,
+        "Turns the view smoothly between the game's 256 steps\nAlso needs Exact-provenance geometry, under Enhancements", needs_aim_and_geometry),
     toggle<&Settings::has_vertical_look, &Settings::vertical_look>(
         "disruptor.vertical_look", "Vertical mouse look", 0,
-        "Looks up and down, about 31 degrees each way"),
+        "Looks up and down, about 31 degrees each way", needs_aim),
     toggle("disruptor.separate_vertical_speed", "Separate vertical speed", 0,
-           "Off: tilts at the horizontal speed", separate_saved,
+           "Off: tilts as fast as it turns", separate_saved,
            separate, write<&Settings::has_separate_vertical_speed, &Settings::separate_vertical_speed>, needs_vertical),
     slider("disruptor.vertical_sensitivity", "Vertical sensitivity", 80,
            "", 5, 2000, Unit::thousandths,
            saved<&Settings::has_vertical_sensitivity>, thousandths<&Settings::vertical_sensitivity>,
            set_speed<&Settings::has_vertical_sensitivity, &Settings::vertical_sensitivity>, needs_separate),
     toggle<&Settings::has_invert_vertical, &Settings::invert_vertical>(
-        "disruptor.invert_vertical", "Invert vertical mouse", 0,
+        "disruptor.invert_vertical", "Invert vertical", 0,
         "Looks down when the mouse moves forward", needs_vertical),
     toggle<&Settings::has_auto_aim, &Settings::auto_aim>(
         "disruptor.auto_aim", "Auto-aim", 0,
@@ -341,8 +342,8 @@ constexpr Option option_list[] = {
         "Off: shots go where you look\n"
         "Homing shots follow their target either way", needs_vertical),
     toggle<&Settings::has_crosshair, &Settings::crosshair>(
-        "disruptor.crosshair", "Crosshair", 0,
-        "A small dot in the middle of the screen while you play", needs_vertical),
+        "disruptor.crosshair", "Crosshair", 1,
+        "A mark in the middle of the screen while you play", needs_vertical),
     choice("disruptor.crosshair_shape", "Crosshair shape", 0, "", crosshair_shapes,
            saved<&Settings::has_crosshair_shape>, read<&Settings::crosshair_shape>,
            write<&Settings::has_crosshair_shape, &Settings::crosshair_shape>, needs_crosshair),
@@ -377,7 +378,7 @@ constexpr Option option_list[] = {
            write<&Settings::has_look_deadzone, &Settings::look_deadzone>, needs_layout),
     toggle<&Settings::has_invert_look, &Settings::invert_look>(
         "disruptor.invert_look", "Invert vertical stick", 0,
-        "Looks down when the turning stick is pushed forward\nNeeds Vertical mouse look, under Mouse",
+        "Looks down when the turning stick is pushed forward\nNeeds Vertical mouse look, under Mouse look",
         needs_layout_and_vertical),
 
     slider("audio.master_volume", "Master volume", 100,

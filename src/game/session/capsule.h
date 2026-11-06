@@ -18,7 +18,8 @@ struct Frame {
     uint8_t byte = 0;
     uint32_t byte2_at = 0;              /* a second write, e.g. weapon selection alongside mouse yaw */
     uint8_t byte2 = 0;
-    float pitch = 0.0f;                 /* the vertical look, which lives outside the game */
+    float pitch = 0.0f;                 /* the vertical look at the VBlank, which lives outside the game */
+    float late_pitch = 0.0f;            /* and at the renderer's entry, where the mouse is read again */
     uint8_t list = 0;                   /* the list a key showed: 1 the weapons', 2 the psionics' */
     uint64_t memory = 0;                /* 0 for a frame no recording saw: a scripted walk's */
     float residual = 0.0f;              /* the part of a game step smooth aim turned the picture by */
@@ -143,6 +144,10 @@ void disruptor_capsule_after_input(void);
 void disruptor_capsule_note_byte(uint32_t address, uint8_t value);
 void disruptor_capsule_note_list(uint8_t list);
 void disruptor_capsule_note_residual(double yaw);
+/* At the renderer's entry, before the mouse is read again: the look the VBlank left. */
+void disruptor_capsule_note_early_pitch(double pitch);
+/* In a replay: the look its recording drew this frame with, 1 when it has one. */
+int disruptor_capsule_replay_late_pitch(double *pitch);
 /* In a replay: the turn's remainder its recording had at this frame, 1 when it set one. */
 int disruptor_capsule_replay_residual(double *yaw);
 /* Ctrl+F11 while recording keeps this frame and a full picture of the screen: 1 when the key was the capsule's. */

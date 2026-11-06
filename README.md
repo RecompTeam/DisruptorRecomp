@@ -89,7 +89,7 @@
 | **Motion** | 60 FPS gameplay | On | The game runs at up to 60 FPS instead of 30 |
 | | In-between frames | Off | Adds frames for smoother motion, up to 320 FPS |
 | | Render thread | On | Draws from a thread of its own, smoother on slower processors and graphics cards |
-| | Smooth mouse turning | On | The view turns between the game's 256 heading steps |
+| | Smooth turning | On | The view turns between the game's 256 heading steps |
 | **World** | Exact-provenance geometry | On | Steadies the polygon edges that wobble on the PlayStation |
 | | Perspective-correct world textures | On | Textures keep their shape near the viewer |
 | | Gap filling | On | Closes hairline gaps between polygons |
@@ -102,9 +102,9 @@
 | | Weapon and psionic keys | Off | Two keys a weapon or power, 1 to 9 and 0 at first |
 | | Psionic keys use the power | Off | A power's key uses the power too, once it is in hand, which comes twice as fast |
 | | Weapon and psionic wheels | Off | **EXPERIMENTAL** Choose a weapon or a psionic on a wheel instead of the game's list |
-| | Vertical mouse look | Off | Looks up and down with the mouse |
+| | Vertical mouse look | Off | Under Mouse turning. Looks up and down with the mouse |
 | | Auto-aim | Off | Under vertical look. Shots go where you look, or with this on to the game's target as in the original |
-| | Crosshair | Off | Under vertical look. A small dot in the middle of the screen |
+| | Crosshair | On | Under vertical look. A dot, a plus or a ring in the middle of the screen |
 | | Stick layout | Dual analog | On a gamepad the left stick moves and strafes, the right stick turns |
 | **And more** | | | HUD size, VSync, mouse sensitivity, gamepad buttons, the bass of the sound, a skip of the intro and others, all in the [player's guide](docs/PLAYING.md#settings) |
 

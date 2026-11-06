@@ -54,7 +54,7 @@ void disruptor_mouse_set_invert_horizontal(int inverted);
  * separate signed host pitch, expressed in the same 256-units-per-turn
  * angular domain as the retail yaw.  The camera/aim extension consumes the
  * requested value and independently decides whether the current presentation
- * and gameplay state can apply it safely. */
+ * and gameplay state can apply it safely.  It acts only while mouse aim is on. */
 int  disruptor_mouse_vertical_look_enabled(void);
 void disruptor_mouse_set_vertical_look_enabled(int enabled);
 
@@ -74,16 +74,18 @@ int  disruptor_mouse_auto_aim(void);
 void disruptor_mouse_set_auto_aim(int enabled);
 int  disruptor_mouse_crosshair(void);
 void disruptor_mouse_set_crosshair(int shown);
-/* The crosshair is drawn: asked for, Vertical mouse look on, and the player in control. */
+/* The crosshair is drawn: asked for, mouse aim and Vertical mouse look on, and the player in control. */
 int  disruptor_mouse_crosshair_shown(void);
 double disruptor_mouse_vertical_pitch(void);
 /* A replay puts back the pitch a recording had, which no save state holds. */
 void disruptor_mouse_set_vertical_pitch(double pitch);
+/* At the renderer's entry: the mouse's vertical motion since the VBlank, or a replay's late pitch, goes into the look drawn. */
+void disruptor_mouse_late_tilt(void);
 void disruptor_mouse_recenter_vertical(void);
 
 int disruptor_mouse_captured(void);
 /* Returns 1 when the requested state is active.  Capture can only be enabled
- * while either mouse axis or modern controls are enabled; release is always
+ * while mouse aim or modern controls are enabled; release is always
  * allowed. */
 int disruptor_mouse_set_captured(int captured);
 

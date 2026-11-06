@@ -22,12 +22,12 @@ using settings::Unit;
 
 enum class Page { display, enhancements, controls, audio, experimental, troubleshooting, achievements };
 // A row of the settings pages. The rows of a page are shown in the order they are listed. A row with a group starts a
-// group of that name, a child row stands indented under the row it needs, right above it.
+// group of that name, a row of depth 1 or 2 stands indented under the row it needs, right above it.
 struct Placement {
     const char* key;
     Page page;
     const char* group = nullptr;
-    bool child = false;
+    int depth = 0;
 };
 
 std::span<const Placement> layout();
@@ -90,7 +90,6 @@ public:
 
 private:
     template <typename Change> bool change(Change&& alter);
-    static void put(Settings& settings, const Option& option, int value);
 
     std::filesystem::path path_;
     std::filesystem::path program_;

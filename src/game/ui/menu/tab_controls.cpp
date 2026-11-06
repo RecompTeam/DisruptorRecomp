@@ -33,7 +33,7 @@ void draw_controls_tab() {
     draw_status_badge("EXPERIMENTAL", ImVec4(1.0f, 0.73f, 0.25f, 1.0f));
     ImGui::TextDisabled("Change single keys in the launcher, on its Controls page");
 
-    ImGui::SeparatorText("Mouse");
+    ImGui::SeparatorText("Mouse look");
     bool mouse_aim = disruptor_mouse_aim_enabled() != 0;
     if (option_toggle("disruptor.mouse_aim", &mouse_aim)) {
         disruptor_mouse_aim_set_enabled(mouse_aim ? 1 : 0);
@@ -51,8 +51,14 @@ void draw_controls_tab() {
     }
     if (!turn_applies) ImGui::EndDisabled();
     draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
-    ImGui::Unindent();
 
+    const bool turned = applies("disruptor.invert_horizontal") && applies("disruptor.horizontal_sensitivity");
+    if (!turned) ImGui::BeginDisabled();
+    bool invert_x = disruptor_mouse_invert_horizontal() != 0;
+    if (option_toggle("disruptor.invert_horizontal", &invert_x)) {
+        disruptor_mouse_set_invert_horizontal(invert_x ? 1 : 0);
+        mark_invert_x(invert_x);
+    }
     float sensitivity =
         static_cast<float>(disruptor_mouse_horizontal_sensitivity());
     if (option_slider("disruptor.horizontal_sensitivity", &sensitivity)) {
@@ -60,19 +66,17 @@ void draw_controls_tab() {
             disruptor_mouse_set_horizontal_sensitivity(sensitivity);
         mark_sensitivity(applied);
     }
+    if (!turned) ImGui::EndDisabled();
+    ImGui::Unindent();
 
-    bool invert_x = disruptor_mouse_invert_horizontal() != 0;
-    if (option_toggle("disruptor.invert_horizontal", &invert_x)) {
-        disruptor_mouse_set_invert_horizontal(invert_x ? 1 : 0);
-        mark_invert_x(invert_x);
-    }
-
-    ImGui::SeparatorText("Vertical look");
+    const bool can_look = applies("disruptor.vertical_look");
+    if (!can_look) ImGui::BeginDisabled();
     bool vertical_look = disruptor_mouse_vertical_look_enabled() != 0;
     if (option_toggle("disruptor.vertical_look", &vertical_look)) {
         disruptor_mouse_set_vertical_look_enabled(vertical_look ? 1 : 0);
         mark_vertical_look(vertical_look);
     }
+    if (!can_look) ImGui::EndDisabled();
 
     ImGui::Indent();
     const bool looking = applies("disruptor.invert_vertical");
@@ -83,6 +87,26 @@ void draw_controls_tab() {
         mark_invert_y(invert_y);
     }
     if (!looking) ImGui::EndDisabled();
+
+    const bool separable = applies("disruptor.separate_vertical_speed");
+    if (!separable) ImGui::BeginDisabled();
+    bool separate = disruptor_mouse_vertical_follows_horizontal() == 0;
+    if (option_toggle("disruptor.separate_vertical_speed", &separate)) {
+        disruptor_mouse_set_vertical_follows_horizontal(separate ? 0 : 1);
+        mark_separate_vertical(separate);
+    }
+    if (!separable) ImGui::EndDisabled();
+
+    const bool own_speed = applies("disruptor.vertical_sensitivity");
+    if (!own_speed) ImGui::BeginDisabled();
+    float vertical_sensitivity =
+        static_cast<float>(disruptor_mouse_vertical_sensitivity());
+    if (option_slider("disruptor.vertical_sensitivity", &vertical_sensitivity)) {
+        const double applied =
+            disruptor_mouse_set_vertical_sensitivity(vertical_sensitivity);
+        mark_vertical_sensitivity(applied);
+    }
+    if (!own_speed) ImGui::EndDisabled();
 
     const bool aiming = applies("disruptor.auto_aim");
     if (!aiming) ImGui::BeginDisabled();
@@ -123,27 +147,7 @@ void draw_controls_tab() {
     ImGui::Unindent();
     if (!styled) ImGui::EndDisabled();
 
-    const bool separable = applies("disruptor.separate_vertical_speed");
-    if (!separable) ImGui::BeginDisabled();
-    bool separate = disruptor_mouse_vertical_follows_horizontal() == 0;
-    if (option_toggle("disruptor.separate_vertical_speed", &separate)) {
-        disruptor_mouse_set_vertical_follows_horizontal(separate ? 0 : 1);
-        mark_separate_vertical(separate);
-    }
-    if (!separable) ImGui::EndDisabled();
-
-    const bool own_speed = applies("disruptor.vertical_sensitivity");
-    if (!own_speed) ImGui::BeginDisabled();
-    float vertical_sensitivity =
-        static_cast<float>(disruptor_mouse_vertical_sensitivity());
-    if (option_slider("disruptor.vertical_sensitivity", &vertical_sensitivity)) {
-        const double applied =
-            disruptor_mouse_set_vertical_sensitivity(vertical_sensitivity);
-        mark_vertical_sensitivity(applied);
-    }
-    if (!own_speed) ImGui::EndDisabled();
-
-    const bool tilted = vertical_look && disruptor_mouse_vertical_pitch() != 0.0;
+    const bool tilted = looking && disruptor_mouse_vertical_pitch() != 0.0;
     if (!tilted) ImGui::BeginDisabled();
     if (ImGui::Button("Recenter vertical view"))
         disruptor_mouse_recenter_vertical();

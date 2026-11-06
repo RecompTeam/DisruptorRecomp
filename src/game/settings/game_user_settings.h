@@ -24,7 +24,7 @@ struct GameUserSettings {
     bool has_vertical_sensitivity = false; double vertical_sensitivity = 0.08;
     bool has_invert_vertical = false; bool invert_vertical = false;
     bool has_auto_aim = false; bool auto_aim = false;
-    bool has_crosshair = false; bool crosshair = false;
+    bool has_crosshair = false; bool crosshair = true;
     bool has_crosshair_shape = false; int crosshair_shape = 0;  // an index into kDisruptorCrosshairShapes
     bool has_crosshair_size = false; int crosshair_size = 100;  // percent of the plain dot
     bool has_crosshair_colour = false; int crosshair_colour = 0;  // an index into kDisruptorCrosshairColours

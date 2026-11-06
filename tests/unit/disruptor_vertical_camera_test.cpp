@@ -131,6 +131,15 @@ void gpu_geometry_camera_projection_center_y_set(double center_y) {
 
 double gpu_geometry_camera_projection_center_y_get(void) { return g_projection_center; }
 
+int g_late_tilts = 0;
+double g_late_pitch = 0.0;
+bool g_late_sets = false;
+void disruptor_vertical_camera_set_requested_pitch(double pitch_units);
+void disruptor_mouse_late_tilt(void) {
+    ++g_late_tilts;
+    if (g_late_sets) disruptor_vertical_camera_set_requested_pitch(g_late_pitch);
+}
+
 }  // extern "C"
 
 // Include the implementation to exercise the version-pinned internal guards.
@@ -422,6 +431,23 @@ void test_live_frames_count_drawn_play() {
     expect(disruptor_vertical_camera_live_frames() == before + 1, "a frame the renderer draws in live play is");
 }
 
+void test_the_renderer_reads_the_mouse_again() {
+    reset_state();
+    CPUState cpu{};
+    const int before = g_late_tilts;
+    g_renderer_callback(&cpu, kRendererEntry);
+    expect(g_late_tilts == before, "outside live play the renderer's entry asks the mouse nothing");
+    seed_live_game();
+    disruptor_vertical_camera_set_requested_pitch(4.0);
+    g_late_pitch = 9.0;
+    g_late_sets = true;
+    g_renderer_callback(&cpu, kRendererEntry);
+    g_late_sets = false;
+    expect(g_late_tilts == before + 1 && disruptor_vertical_camera_effective_pitch() == 9.0 &&
+               cpu.gte_ctrl[25] == static_cast<std::uint32_t>(center16_for_pitch(9.0)),
+           "in play it reads the mouse once more and draws the frame with that look, not the VBlank's");
+}
+
 void test_free_aim_takes_the_look() {
     reset_state();
     seed_live_game();
@@ -540,6 +566,7 @@ int main() {
     test_cull_widening();
     test_projectile_alignment();
     test_live_frames_count_drawn_play();
+    test_the_renderer_reads_the_mouse_again();
     test_free_aim_takes_the_look();
     test_lockstep_replay_is_side_effect_free();
     test_requested_pitch_validation();

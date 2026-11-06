@@ -29,69 +29,69 @@ constexpr Placement placed[] = {
     {"disruptor.hud_scale", Page::display},
     {"disruptor.frame_unlock", Page::enhancements, "Frame rate"},
     {"video.frame_interpolation", Page::enhancements},
-    {"video.frame_interpolation_fps", Page::enhancements, nullptr, true},
+    {"video.frame_interpolation_fps", Page::enhancements, nullptr, 1},
     {"disruptor.geometry_correction", Page::enhancements, "Picture"},
     {"disruptor.perspective_textures", Page::enhancements},
     {"disruptor.gap_filling", Page::enhancements},
     {"disruptor.smooth_fade", Page::enhancements},
-    {"disruptor.fog_shape", Page::enhancements, nullptr, true},
+    {"disruptor.fog_shape", Page::enhancements, nullptr, 1},
     {"disruptor.draw_distance", Page::enhancements},
     {"disruptor.depth_sorted_world", Page::enhancements},
     {"disruptor.multisampling", Page::enhancements},
     {"disruptor.facing_sprites", Page::enhancements},
     {"disruptor.ambient_occlusion", Page::enhancements, "Shading"},
-    {"disruptor.occlusion_reach", Page::enhancements, nullptr, true},
-    {"disruptor.occlusion_strength", Page::enhancements, nullptr, true},
+    {"disruptor.occlusion_reach", Page::enhancements, nullptr, 1},
+    {"disruptor.occlusion_strength", Page::enhancements, nullptr, 1},
     {"disruptor.movie_filter", Page::enhancements, "Movies"},
     {"disruptor.skip_intro", Page::enhancements, "Startup"},
     {"disruptor.modern_controls", Page::controls, "Scheme"},
     {"disruptor.number_keys", Page::controls, "Weapons and psionics"},
-    {"disruptor.psionic_keys_use", Page::controls, nullptr, true},
+    {"disruptor.psionic_keys_use", Page::controls, nullptr, 1},
     {"disruptor.selection_wheels", Page::controls},
-    {"disruptor.mouse_aim", Page::controls, "Mouse"},
-    {"disruptor.high_precision_camera", Page::controls, nullptr, true},
-    {"disruptor.horizontal_sensitivity", Page::controls},
-    {"disruptor.invert_horizontal", Page::controls},
-    {"disruptor.vertical_look", Page::controls, "Vertical look"},
-    {"disruptor.invert_vertical", Page::controls, nullptr, true},
-    {"disruptor.auto_aim", Page::controls, nullptr, true},
-    {"disruptor.crosshair", Page::controls, nullptr, true},
-    {"disruptor.crosshair_shape", Page::controls, nullptr, true},
-    {"disruptor.crosshair_size", Page::controls, nullptr, true},
-    {"disruptor.crosshair_colour", Page::controls, nullptr, true},
-    {"disruptor.crosshair_opacity", Page::controls, nullptr, true},
-    {"disruptor.separate_vertical_speed", Page::controls, nullptr, true},
-    {"disruptor.vertical_sensitivity", Page::controls, nullptr, true},
+    {"disruptor.mouse_aim", Page::controls, "Mouse look"},
+    {"disruptor.high_precision_camera", Page::controls, nullptr, 1},
+    {"disruptor.invert_horizontal", Page::controls, nullptr, 1},
+    {"disruptor.horizontal_sensitivity", Page::controls, nullptr, 1},
+    {"disruptor.vertical_look", Page::controls},
+    {"disruptor.invert_vertical", Page::controls, nullptr, 1},
+    {"disruptor.separate_vertical_speed", Page::controls, nullptr, 1},
+    {"disruptor.vertical_sensitivity", Page::controls, nullptr, 1},
+    {"disruptor.auto_aim", Page::controls, nullptr, 1},
+    {"disruptor.crosshair", Page::controls, nullptr, 1},
+    {"disruptor.crosshair_shape", Page::controls, nullptr, 2},
+    {"disruptor.crosshair_size", Page::controls, nullptr, 2},
+    {"disruptor.crosshair_colour", Page::controls, nullptr, 2},
+    {"disruptor.crosshair_opacity", Page::controls, nullptr, 2},
     {"disruptor.stick_layout", Page::controls, "Gamepad"},
-    {"disruptor.look_speed", Page::controls, nullptr, true},
-    {"disruptor.look_deadzone", Page::controls, nullptr, true},
-    {"disruptor.invert_look", Page::controls, nullptr, true},
+    {"disruptor.look_speed", Page::controls, nullptr, 1},
+    {"disruptor.look_deadzone", Page::controls, nullptr, 1},
+    {"disruptor.invert_look", Page::controls, nullptr, 1},
     {"controller.deadzone", Page::controls},
     {"audio.master_volume", Page::audio},
     {"disruptor.bass_cut", Page::audio},
     {"disruptor.mute_in_background", Page::audio},
     {"audio.muted", Page::audio},
     {"disruptor.probe_lighting", Page::experimental, "Lighting"},
-    {"disruptor.probe_strength", Page::experimental, nullptr, true},
-    {"disruptor.probe_bounce", Page::experimental, nullptr, true},
-    {"disruptor.probe_glow", Page::experimental, nullptr, true},
+    {"disruptor.probe_strength", Page::experimental, nullptr, 1},
+    {"disruptor.probe_bounce", Page::experimental, nullptr, 1},
+    {"disruptor.probe_glow", Page::experimental, nullptr, 1},
     {"disruptor.dynamic_shadows", Page::experimental},
-    {"disruptor.shadow_strength", Page::experimental, nullptr, true},
-    {"disruptor.shadow_underneath", Page::experimental, nullptr, true},
+    {"disruptor.shadow_strength", Page::experimental, nullptr, 1},
+    {"disruptor.shadow_underneath", Page::experimental, nullptr, 1},
     {"disruptor.shot_lights", Page::experimental},
-    {"disruptor.shot_light_strength", Page::experimental, nullptr, true},
+    {"disruptor.shot_light_strength", Page::experimental, nullptr, 1},
     {"disruptor.sun_lighting", Page::experimental},
-    {"disruptor.sun_direction", Page::experimental, nullptr, true},
-    {"disruptor.sun_height", Page::experimental, nullptr, true},
-    {"disruptor.sun_strength", Page::experimental, nullptr, true},
-    {"disruptor.sun_shade", Page::experimental, nullptr, true},
+    {"disruptor.sun_direction", Page::experimental, nullptr, 1},
+    {"disruptor.sun_height", Page::experimental, nullptr, 1},
+    {"disruptor.sun_strength", Page::experimental, nullptr, 1},
+    {"disruptor.sun_shade", Page::experimental, nullptr, 1},
     {"disruptor.detailed_logging", Page::troubleshooting, "Logging"},
     {"disruptor.achievements", Page::achievements, "Unlocks"},
     {"disruptor.achievements_encore", Page::achievements},
     {"disruptor.achievements_unofficial", Page::achievements},
     {"disruptor.achievements_sound", Page::achievements},
     {"disruptor.achievements_popups", Page::achievements, "Notifications"},
-    {"disruptor.achievements_popup_time", Page::achievements, nullptr, true},
+    {"disruptor.achievements_popup_time", Page::achievements, nullptr, 1},
     {"disruptor.achievements_corner", Page::achievements},
     {"disruptor.achievements_progress", Page::achievements},
 };
@@ -231,17 +231,6 @@ bool SettingsFile::applies(const Option& option) const {
     return settings::applies(option, [this](const Option& needed) { return shown(needed) != 0; });
 }
 
-void SettingsFile::put(Settings& settings, const Option& option, int value) {
-    option.set(settings, value);
-    if (option.kind != Kind::toggle || value != 0) return;
-    const auto named = [&](const char* key) { return std::string_view(key) == option.key; };
-    for (const auto& other : options()) {
-        if (other.kind == Kind::toggle && std::any_of(other.needs.begin(), other.needs.end(), named) &&
-            stored(settings, other) != 0)
-            put(settings, other, 0);
-    }
-}
-
 template <typename Change> bool SettingsFile::change(Change&& alter) {
     Settings fresh = PSXRecompV4::load_user_settings(path_);
     readable_ = !fresh.parse_error;
@@ -253,7 +242,7 @@ template <typename Change> bool SettingsFile::change(Change&& alter) {
 }
 
 bool SettingsFile::set(const Option& option, int value) {
-    return change([&](Settings& settings) { put(settings, option, value); });
+    return change([&](Settings& settings) { option.set(settings, value); });
 }
 
 bool SettingsFile::reset(Page page) {

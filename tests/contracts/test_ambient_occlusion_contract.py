@@ -196,8 +196,8 @@ require(
     and "constexpr const char* needs_occlusion[] = {occlusion_key};\n" in options
     and 'constexpr const char* occlusion_key = "disruptor.ambient_occlusion";\n' in options
     and '    {"disruptor.ambient_occlusion", Page::enhancements, "Shading"},\n'
-    '    {"disruptor.occlusion_reach", Page::enhancements, nullptr, true},\n'
-    '    {"disruptor.occlusion_strength", Page::enhancements, nullptr, true},\n'
+    '    {"disruptor.occlusion_reach", Page::enhancements, nullptr, 1},\n'
+    '    {"disruptor.occlusion_strength", Page::enhancements, nullptr, 1},\n'
     in launcher
     and launcher.count('", Page::experimental') == 14,
     "the launcher's Enhancements page holds these three rows and its Experimental page the lighting's fourteen rows: the switch needs geometry correction, the sliders the switch, "

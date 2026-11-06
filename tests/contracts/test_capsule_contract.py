@@ -142,7 +142,7 @@ require(
     in mouse
     and 'extern "C" void disruptor_mouse_set_vertical_pitch(double pitch) {\n    load_configuration();\n'
     "    g_mouse.vertical_pitch = pitch;\n"
-    "    if (g_mouse.vertical_look_enabled) disruptor_vertical_camera_set_requested_pitch(pitch);\n}\n"
+    "    if (vertical_active()) disruptor_vertical_camera_set_requested_pitch(pitch);\n}\n"
     in mouse,
     "the heading the mouse writes into the game must be told to a recording, and a replay must put the pitch back into the camera",
 )

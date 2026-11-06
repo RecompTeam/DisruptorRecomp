@@ -223,19 +223,25 @@ The keys are kept in `keybinds.ini` in the folder of your files, the second
 keys in `settings.toml`. A change of scheme brings the other scheme's layout
 only while the keys are a scheme's own: keys you set yourself stay.
 
-### Mouse
+### Mouse look
 
-- **Vertical mouse look** starts off. Switch it on on the Controls page. It
-  tilts at the horizontal speed unless **Separate vertical speed** is on.
+- **Mouse turning** is on at first. The mouse turns the view while the game's
+  window has focus. Escape or a middle-click lets the mouse go, a click takes
+  it back.
+- **Smooth turning** under it is on at first. It turns the picture between the
+  game's 256 heading steps and also needs Exact-provenance geometry, under
+  Enhancements. **Invert horizontal** and **Sensitivity** are under Mouse
+  turning too.
+- **Vertical mouse look** needs Mouse turning and starts off. It tilts as fast
+  as the view turns unless **Separate vertical speed** is on.
 - **Auto-aim** is under Vertical mouse look and starts off. Off, a shot goes
   where you look. On, it rises or falls to the enemy the game picks, as in the
   original. Homing shots follow their target either way.
-- **Crosshair** puts a small dot in the middle of the screen while you play.
-  It is under Vertical mouse look and starts off. Its shape (a dot, a plus or
-  a ring), size, colour and opacity are set under it.
+- **Crosshair** is under Vertical mouse look and starts on. It puts a mark in
+  the middle of the screen while you play. Its shape (a dot, a plus or a
+  ring), size, colour and opacity are set under it, and the launcher shows
+  how it will look.
 - Speeds are shown as a multiple of the default speed, 1.0x.
-- **Smooth mouse turning** is on at first. It turns the picture between the
-  game's 256 heading steps and needs captured mouse aim and exact geometry.
 
 ### Gamepad
 
@@ -271,9 +277,10 @@ In menus the left stick works as the D-pad in every layout.
 
 - A light push of the turning stick turns slowly, for fine aim. A full push
   turns as fast as the D-pad at **Turning speed** 100%, which goes from 25% to
-  300%. **Smooth mouse turning** smooths the stick's turn too.
+  300%. **Smooth turning** smooths the stick's turn too.
 - **Turning dead zone** sets how far the turning stick moves before it turns.
 - With **Vertical mouse look** on, the turning stick also looks up and down.
+  Vertical mouse look needs Mouse turning.
   **Invert vertical stick** turns that around.
 - **Stick dead zone** sets how far the moving stick goes before it counts.
   Raise it if you walk without touching the stick.
@@ -301,7 +308,8 @@ pages are locked while the game runs.
 
 The launcher shows what a setting does under its name, the game under the
 pointer. One that needs another setting says which, and stays grey until that
-one is on. A setting that is on can always be switched off.
+one is on. It keeps its own value meanwhile. A setting that is on can always
+be switched off.
 **Reset this page...** at the foot of a launcher page returns the settings
 on that page to what a new installation has.
 
@@ -674,7 +682,7 @@ describe the replay tool and its limits.
   update your graphics driver. Turn off 60 FPS gameplay and in-between frames
   if they are on.
 - **Mouse does not turn:** the game holds the mouse while its window has
-  focus and **Horizontal mouse aim** is on or the scheme is Modern. After
+  focus and **Mouse turning** is on or the scheme is Modern. After
   Escape or a middle-click, left-click in the window to hold it again.
 - **Other problems:** see [Reporting a problem](#reporting-a-problem). Do not
   attach your game image, game assets or BIOS files.

@@ -252,7 +252,7 @@ require(
     "        mark_draw_distance(distance);\n"
     in enhancements
     and "disruptor_far_rendering_netplay_blocked()" in enhancements
-    and '    {"disruptor.smooth_fade", Page::enhancements},\n    {"disruptor.fog_shape", Page::enhancements, nullptr, true},\n    {"disruptor.draw_distance", Page::enhancements},\n'
+    and '    {"disruptor.smooth_fade", Page::enhancements},\n    {"disruptor.fog_shape", Page::enhancements, nullptr, 1},\n    {"disruptor.draw_distance", Page::enhancements},\n'
     in launcher
     and "Page::experimental}" not in launcher.split("disruptor.draw_distance")[1].split("\n")[0]
     and "draw_distances, saved<&Settings::has_draw_distance>, draw_distance, set_draw_distance, {}, distances_offered),"

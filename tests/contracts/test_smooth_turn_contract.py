@@ -229,14 +229,14 @@ require(
     "into the file's settings, applied at the next start with the environment first, and applied when another run saved it",
 )
 
-row = between(options, '"disruptor.high_precision_camera", "Smooth mouse turning", 1,', "),\n")
+row = between(options, '"disruptor.high_precision_camera", "Smooth turning", 1,', "),\n")
 require(
     row.endswith("needs_aim_and_geometry")
     and "constexpr const char* needs_aim_and_geometry[] = {aim_key, geometry_key};\n" in options
     and 'constexpr const char* aim_key = "disruptor.mouse_aim";\n' in options
     and options.count('"disruptor.high_precision_camera"') == 1
     and launcher.count('"disruptor.high_precision_camera"') == 1
-    and '    {"disruptor.high_precision_camera", Page::controls, nullptr, true},\n' in launcher,
+    and '    {"disruptor.high_precision_camera", Page::controls, nullptr, 1},\n' in launcher,
     "the launcher offers it on the Controls page, off at first and only with mouse aim and geometry correction",
 )
 

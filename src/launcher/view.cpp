@@ -1674,7 +1674,7 @@ void View::crosshair_preview() {
     int height = 1080;
     if (const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(SDL_GetPrimaryDisplay())) height = mode->h;
     ImGui::Dummy(ImVec2(0.0f, 4.0f * scale_));
-    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 26.0f * scale_);
+    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + 52.0f * scale_);
     const ImVec2 at = ImGui::GetCursorScreenPos(), size(192.0f * scale_, 108.0f * scale_);
     const float horizon = at.y + size.y * 0.55f, fade = on ? 1.0f : 0.35f;
     const auto shade = [fade](int r, int g, int b) { return IM_COL32(r, g, b, static_cast<int>(255 * fade)); };
@@ -2742,7 +2742,7 @@ void View::rows() {
             continue;
         if (placement.group) {
             const std::string_view group(placement.group);
-            tab = group == "Weapons and psionics" ? 1 : group == "Mouse" || group == "Vertical look" ? 2 : group == "Gamepad" ? 3 : 0;
+            tab = group == "Weapons and psionics" ? 1 : group == "Mouse look" ? 2 : group == "Gamepad" ? 3 : 0;
             // The keyboard's keys follow the scheme that sets them, at the foot of the first tab.
             if (tabbed && tab == 1 && controls_tab_ == 0) key_table();
         }
@@ -2752,17 +2752,17 @@ void View::rows() {
         if (placement.group) {
             group_heading(placement.group, first);
             if (std::string_view(placement.group) == "Gamepad") pad_status();
-        } else if (!first && !placement.child) {
+        } else if (!first && placement.depth == 0) {
             const ImVec2 at = ImGui::GetCursorScreenPos();
             ImGui::GetWindowDrawList()->AddLineH(at.x, at.x + ImGui::GetContentRegionAvail().x, at.y, colour(kBorder));
             ImGui::Dummy(ImVec2(0.0f, 4.0f * scale_));
-        } else if (placement.child) {
+        } else if (placement.depth > 0) {
             ImGui::Dummy(ImVec2(0.0f, 2.0f * scale_));
         }
         first = false;
         const ImVec2 start = ImGui::GetCursorScreenPos();
         const float width = std::min(ImGui::GetContentRegionAvail().x, kRowWidth * scale_);
-        setting_row(placement, option, control, placement.child);
+        setting_row(placement, option, control, placement.depth);
         if (std::string_view(option.key) == "disruptor.psionic_keys_use" && file.shown(*find_option("disruptor.number_keys")) == 1)
             pick_section();
         if (std::string_view(option.key) == "disruptor.achievements_sound") unlock_sound_row();
@@ -2777,10 +2777,11 @@ void View::rows() {
     }
 }
 
-void View::setting_row(const Placement& placement, const Option& option, float control, bool hanging) {
+void View::setting_row(const Placement& placement, const Option& option, float control, int depth) {
     const SettingsFile& file = session_.settings();
     const bool on = session_.editable() && file.applies(option);
-    const float indent = hanging ? 26.0f * scale_ : 0.0f;
+    const bool hanging = depth > 0;
+    const float indent = 26.0f * static_cast<float>(depth) * scale_;
     // The control stands at the row's end, and a row stops at a reading width however wide the card is.
     const float row = std::min(ImGui::GetContentRegionAvail().x, kRowWidth * scale_);
     // A switch is narrower than the column kept for a control: its description runs on to the switch.
@@ -2788,7 +2789,7 @@ void View::setting_row(const Placement& placement, const Option& option, float c
     const float top = ImGui::GetCursorPosY();
     if (hanging) {
         // A child row hangs off the row above it: a corner line leads from that row to its label.
-        const ImVec2 at = ImGui::GetCursorScreenPos();
+        const ImVec2 at = ImGui::GetCursorScreenPos() + ImVec2(indent - 26.0f * scale_, 0.0f);
         const float middle = ImGui::GetTextLineHeight() * 0.5f;
         ImDrawList* draw = ImGui::GetWindowDrawList();
         draw->AddLineV(at.x + 9.0f * scale_, at.y - 8.0f * scale_, at.y + middle, colour(kBorder), scale_);

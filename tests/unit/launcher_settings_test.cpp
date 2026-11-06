@@ -138,6 +138,15 @@ void needed() {
             !disruptor::settings::applies(reach, on({"disruptor.ambient_occlusion"})) &&
             !disruptor::settings::applies(reach, on({"disruptor.geometry_correction"})),
             "and only when what it needs applies itself");
+    for (const char* key : {"disruptor.vertical_look", "disruptor.invert_horizontal", "disruptor.horizontal_sensitivity",
+                            "disruptor.crosshair_opacity", "disruptor.invert_look"})
+        require(!disruptor::settings::applies(
+                    option(key), on({"disruptor.vertical_look", "disruptor.crosshair", "disruptor.stick_layout"})),
+                "nothing of the mouse look applies without Mouse turning");
+    require(disruptor::settings::applies(option("disruptor.crosshair_opacity"),
+                                         on({"disruptor.mouse_aim", "disruptor.vertical_look", "disruptor.crosshair"})) &&
+                option("disruptor.crosshair").initial == 1,
+            "with it the crosshair applies, on at first");
 }
 
 // A settings.toml written before the list, as replay capsules carry it too, read by the game's own reader.
@@ -336,15 +345,39 @@ void placements() {
         require(narrow(wide(text)) == text, "UTF-8 goes to wide and back unchanged, beyond the basic plane too");
     const auto rows = layout();
     for (std::size_t index = 0; index < rows.size(); ++index) {
-        if (!rows[index].child) continue;
+        require(rows[index].depth >= 0 && rows[index].depth <= 2, "a row stands at depth 0, 1 or 2");
+        if (rows[index].depth == 0) continue;
+        require(index > 0 && rows[index - 1].page == rows[index].page && rows[index].depth <= rows[index - 1].depth + 1,
+                "a row hangs at most one step deeper than the row above it");
         const auto& needs = option(rows[index].key).needs;
         bool found = false;
         for (std::size_t above = index; above-- > 0 && rows[above].page == rows[index].page;) {
             found = found || std::find(needs.begin(), needs.end(), std::string_view(rows[above].key)) != needs.end();
-            if (!rows[above].child) break;
+            if (rows[above].depth == 0) break;
         }
         require(!rows[index].group && found, "a child row stands under a row of its group that it needs");
     }
+    const auto at = [&rows](std::string_view key) {
+        return static_cast<std::size_t>(std::find_if(rows.begin(), rows.end(), [key](const Placement& row) { return row.key == key; }) -
+                                        rows.begin());
+    };
+    const std::size_t aim_row = at("disruptor.mouse_aim");
+    const std::size_t vertical_row = at("disruptor.vertical_look");
+    require(rows[aim_row].group && std::string_view(rows[aim_row].group) == "Mouse look" && rows[vertical_row].depth == 0 &&
+                !rows[vertical_row].group,
+            "one Mouse look group: Mouse turning heads it, Vertical mouse look stands beside it");
+    const std::pair<std::string_view, int> mouse_look[] = {
+        {"disruptor.mouse_aim", 0}, {"disruptor.high_precision_camera", 1}, {"disruptor.invert_horizontal", 1},
+        {"disruptor.horizontal_sensitivity", 1}, {"disruptor.vertical_look", 0}, {"disruptor.invert_vertical", 1},
+        {"disruptor.separate_vertical_speed", 1}, {"disruptor.vertical_sensitivity", 1}, {"disruptor.auto_aim", 1},
+        {"disruptor.crosshair", 1}, {"disruptor.crosshair_shape", 2}, {"disruptor.crosshair_size", 2},
+        {"disruptor.crosshair_colour", 2}, {"disruptor.crosshair_opacity", 2}};
+    for (std::size_t index = 0; index < std::size(mouse_look); ++index)
+        require(aim_row + index < rows.size() && rows[aim_row + index].key == mouse_look[index].first &&
+                    rows[aim_row + index].depth == mouse_look[index].second,
+                "the Mouse look rows stand in the agreed order and depths, the crosshair's style under Crosshair");
+    require(aim_row + std::size(mouse_look) < rows.size() && rows[aim_row + std::size(mouse_look)].depth == 0,
+            "and no other row hangs at their end");
     std::vector<std::string> enhancements;
     for (const auto& row : rows)
         if (row.page == Page::enhancements) enhancements.emplace_back(row.key);
@@ -501,33 +534,36 @@ void dependants(const fs::path& folder) {
     require(settings.set(frames, 1) && settings.applies(textures) && settings.applies(frames) && settings.applies(rate),
             "rows apply while what they need is on");
     require(settings.set(geometry, 0), "geometry must switch off");
-    require(settings.shown(textures) == 0 && settings.shown(frames) == 0 && !settings.applies(textures) &&
-            !settings.applies(frames) && !settings.applies(rate), "what needs geometry must go off with it");
-    require(has(file, "perspective_textures = false") && has(file, "frame_interpolation = false"),
-            "a switched off dependant must be written, its default is on");
-    require(settings.set(geometry, 1) && settings.shown(textures) == 0 && settings.applies(textures) &&
-            !settings.applies(rate), "switching geometry back on must switch nothing else");
+    require(settings.shown(textures) == 1 && settings.shown(frames) == 1 && !settings.applies(textures) &&
+            !settings.applies(frames) && !settings.applies(rate), "what needs geometry greys out and keeps its value");
+    require(!has(file, "perspective_textures = false") && has(file, "frame_interpolation = true"),
+            "and nothing is written for it");
+    require(settings.set(geometry, 1) && settings.shown(textures) == 1 && settings.applies(textures) &&
+            settings.applies(frames) && settings.applies(rate), "switching geometry back on brings every row back as it was");
     const Option& aim = option("disruptor.mouse_aim");
     const Option& smooth = option("disruptor.high_precision_camera");
+    const Option& vertical = option("disruptor.vertical_look");
+    const Option& crosshair = option("disruptor.crosshair");
     const Option& gaps = option("disruptor.gap_filling");
     const Option& by_depth = option("disruptor.depth_sorted_world");
     const Option& occlusion = option("disruptor.ambient_occlusion");
     const Option& reach = option("disruptor.occlusion_reach");
     require(settings.set(aim, 1) && settings.set(smooth, 1) && settings.applies(smooth) && settings.set(aim, 0) &&
-            settings.shown(smooth) == 0 && !settings.applies(smooth) && has(file, "high_precision_camera = false"),
-            "smooth turning needs mouse aim and goes off with it");
-    require(settings.set(aim, 1) && settings.applies(smooth) && settings.set(smooth, 1) &&
-            has(file, "high_precision_camera = true") && settings.set(geometry, 0) && settings.shown(smooth) == 0 &&
-            !settings.applies(smooth) && has(file, "high_precision_camera = false") && settings.set(aim, 0),
-            "and geometry, and goes off with that too");
-    require(settings.shown(gaps) == 0 && has(file, "gap_filling = false"),
-            "gap filling, on in a fresh installation, went off with geometry above and was written so");
-    require(settings.set(geometry, 1) && settings.set(gaps, 1) && settings.set(by_depth, 1) && settings.set(occlusion, 1) &&
-            settings.applies(gaps) && settings.applies(by_depth) && settings.applies(reach),
+            settings.shown(smooth) == 1 && !settings.applies(smooth) && has(file, "high_precision_camera = true"),
+            "smooth turning needs mouse aim and keeps its value without it");
+    require(settings.set(aim, 1) && settings.set(geometry, 0) && !settings.applies(smooth) && settings.shown(smooth) == 1 &&
+            settings.set(geometry, 1) && settings.applies(smooth), "and geometry, and comes back with both");
+    require(settings.set(vertical, 1) && settings.shown(crosshair) == 1 && settings.set(aim, 0) && settings.shown(vertical) == 1 &&
+                settings.shown(crosshair) == 1 && !settings.applies(vertical) && !settings.applies(crosshair) &&
+                settings.set(aim, 1) && settings.applies(crosshair) && !has(file, "vertical_look = false") &&
+                !has(file, "crosshair = false"),
+            "Mouse turning off and on again leaves Vertical mouse look and the crosshair as they were");
+    require(settings.set(gaps, 1) && settings.set(by_depth, 1) && settings.set(occlusion, 1) && settings.applies(gaps) &&
+                settings.applies(by_depth) && settings.applies(reach),
             "the new rows apply with geometry on");
-    require(settings.set(geometry, 0) && settings.shown(gaps) == 0 && settings.shown(by_depth) == 0 &&
-            settings.shown(occlusion) == 0 && !settings.applies(gaps) && !settings.applies(reach) &&
-            has(file, "gap_filling = false"), "gap filling, the depth-sorted world and the occlusion go off with geometry");
+    require(settings.set(geometry, 0) && settings.shown(gaps) == 1 && settings.shown(by_depth) == 1 &&
+                settings.shown(occlusion) == 1 && !settings.applies(gaps) && !settings.applies(reach),
+            "and keep their values with it off");
     require(settings.set(geometry, 1) && settings.set(occlusion, 1) && settings.applies(reach) && settings.set(occlusion, 0) &&
             !settings.applies(reach), "the occlusion's sliders need its switch");
     write(file, "[video]\nframe_interpolation = true\n\n[disruptor]\ngeometry_correction = false\n");

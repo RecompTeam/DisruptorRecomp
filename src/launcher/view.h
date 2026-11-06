@@ -122,8 +122,8 @@ private:
     void report_steps(bool first = false);
     void rows();
     void coming_soon();
-    // One setting: its name, hints and control on the right, a hanging one indented under the row it needs.
-    void setting_row(const Placement& placement, const Option& option, float control, bool hanging);
+    // One setting: its name, hints and control on the right, one of depth 1 or 2 indented under the row it needs.
+    void setting_row(const Placement& placement, const Option& option, float control, int depth);
     void key_table();
     // Two keys a row for count rows from first, under the keyboard's: a key an action also has is faint, the action wins.
     void pick_table(const char* heading, std::size_t first, std::size_t count, const KeyBindings& held);

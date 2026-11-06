@@ -95,7 +95,7 @@ require(
     bass_default is not None and initial["disruptor.bass_cut"] == int(bass_default.group(1)) == 1,
     "Bass starts at Reduced in the table the launcher and the menu show and in the cut a build applies at start",
 )
-placed = re.findall(r'^    \{"([\w.]+)", Page::\w+(?:, (?:"[\w -]+"|nullptr)(?:, true)?)?\},$', table, re.MULTILINE)
+placed = re.findall(r'^    \{"([\w.]+)", Page::\w+(?:, (?:"[\w -]+"|nullptr)(?:, [12])?)?\},$', table, re.MULTILINE)
 require(
     sorted(placed) == sorted(keys)
     and not re.findall(ROW, table)
@@ -107,8 +107,10 @@ require(
 )
 require(
     "    return settings::applies(option, [this](const Option& needed) { return shown(needed) != 0; });\n" in table
-    and "std::any_of(other.needs.begin(), other.needs.end(), named)" in table,
-    "the launcher greys a row by the shared rule asked of its file, and a toggle switched off takes with it the toggles that need it",
+    and "    return change([&](Settings& settings) { option.set(settings, value); });\n" in table
+    and "other.needs" not in table,
+    "the launcher greys a row by the shared rule asked of its file and writes only the row changed: a row that needs "
+    "another keeps its value",
 )
 
 writer = loader[loader.index("bool save_user_settings(") :]

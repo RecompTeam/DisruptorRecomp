@@ -82,6 +82,19 @@ int disruptor_capsule_replay_residual(double *yaw) {
     *yaw = g_replayed_residual;
     return 1;
 }
+double g_noted_early = -99.0;
+bool g_late_replayed = false;
+double g_replayed_late = 0.0;
+void disruptor_capsule_note_early_pitch(double pitch) { g_noted_early = pitch; }
+int disruptor_capsule_replay_late_pitch(double *pitch) {
+    if (!g_late_replayed) return 0;
+    *pitch = g_replayed_late;
+    return 1;
+}
+int g_pumps = 0;
+void SDL_PumpEvents(void) { ++g_pumps; }
+std::uint64_t SDL_GetPerformanceCounter(void) { return 1000u; }
+std::uint64_t SDL_GetPerformanceFrequency(void) { return 1000000u; }
 
 void disruptor_capsule_note_byte(std::uint32_t address, std::uint8_t value) {
     g_noted_at = address;
@@ -564,10 +577,12 @@ void test_pause_holds_the_camera() {
 void test_the_crosshair_waits_for_drawn_frames() {
     reset_state();
     g_mouse.enabled = true;
+    g_mouse.mouse_aim_enabled = true;
     g_mouse.vertical_look_enabled = true;
     g_mouse.configured = true;
     g_mouse.log = std::tmpfile();
     g_live_frames = 0;
+    expect(disruptor_mouse_crosshair() != 0, "the crosshair is asked for until the player turns it off");
     disruptor_mouse_set_crosshair(1);
     mouse_aim_frame();
     expect(!disruptor_mouse_crosshair_shown(), "a loading screen in scene 0 with a live player but no frame drawn shows no crosshair");
@@ -582,7 +597,7 @@ void test_the_crosshair_waits_for_drawn_frames() {
     psx_write_byte(kSceneModeAddress, 4u);
     mouse_aim_frame();
     expect(!disruptor_mouse_crosshair_shown(), "the pause hides it");
-    disruptor_mouse_set_crosshair(0);
+    disruptor_mouse_set_crosshair(1);
 }
 
 void test_menu_pointer() {
@@ -1719,7 +1734,7 @@ void test_live_settings_api() {
     disruptor_mouse_set_vertical_look_enabled(1);
     disruptor_mouse_set_crosshair(1);
     expect(disruptor_mouse_crosshair() && !disruptor_mouse_crosshair_shown(), "a crosshair asked for waits for play to show");
-    disruptor_mouse_set_crosshair(0);
+    disruptor_mouse_set_crosshair(1);
     const int pitch_calls = g_vertical_pitch_calls;
     disruptor_mouse_set_vertical_pitch(5.0);
     expect(g_vertical_pitch_calls == pitch_calls + 1 && g_requested_vertical_pitch == 5.0,
@@ -1758,28 +1773,122 @@ void test_live_settings_api() {
                  "disabling high precision clears presentation residual");
 
     disruptor_modern_controls_set_enabled(1);
+    disruptor_mouse_set_vertical_pitch(5.0);
     disruptor_mouse_aim_set_enabled(0);
     expect(disruptor_mouse_captured(),
            "modern controls keep an existing capture after mouse aim is disabled");
+    expect(g_requested_vertical_pitch == 0.0 && g_free_aim == 0 && disruptor_mouse_vertical_look_enabled(),
+           "vertical look goes with mouse aim: the camera recentres and the game aims, the choice is kept");
     disruptor_modern_controls_set_enabled(0);
-    expect(disruptor_mouse_captured(),
-           "vertical look keeps capture after other input features are disabled");
-    disruptor_mouse_set_vertical_look_enabled(0);
     expect(!disruptor_mouse_captured() && !g_relative_mode,
-           "disabling the last input feature releases capture");
-    expect_close(g_requested_vertical_pitch, 0.0,
-                 "disabling vertical look recenters the camera sink");
+           "disabling the last input feature releases capture, vertical look on or not");
+    disruptor_mouse_set_vertical_look_enabled(0);
 }
 
-void test_vertical_only_capture() {
+void test_vertical_look_needs_mouse_aim() {
     reset_state();
     g_mouse.configured = true;
     disruptor_mouse_set_vertical_look_enabled(1);
-    expect(disruptor_mouse_set_captured(1) && g_relative_mode,
-           "vertical look alone permits relative mouse capture");
+    expect(!disruptor_mouse_set_captured(1) && !g_relative_mode, "vertical look without mouse aim takes no capture");
+    disruptor_mouse_set_vertical_pitch(5.0);
+    expect(g_requested_vertical_pitch == 0.0 && g_free_aim == 0, "and neither tilts the camera nor aims the shots");
+    disruptor_mouse_aim_set_enabled(1);
+    expect(g_requested_vertical_pitch == 5.0 && g_free_aim == 1 && disruptor_mouse_set_captured(1) && g_relative_mode,
+           "mouse aim brings it in at the pitch it keeps");
+    disruptor_mouse_aim_set_enabled(0);
+    expect(!g_mouse.captured && !g_relative_mode && g_requested_vertical_pitch == 0.0 && g_free_aim == 0,
+           "and takes it out again");
     disruptor_mouse_set_vertical_look_enabled(0);
-    expect(!g_mouse.captured && !g_relative_mode,
-           "disabling vertical-only input releases capture");
+}
+
+void test_tilt_and_crosshair_need_mouse_aim() {
+    reset_state();
+    g_mouse.enabled = g_mouse.vertical_look_enabled = g_mouse.configured = g_mouse.captured = true;
+    g_mouse.horizontal_sensitivity = g_mouse.vertical_sensitivity = 0.08;
+    g_mouse.log = std::tmpfile();
+    g_live_frames = 1;
+    disruptor_mouse_set_crosshair(1);
+    g_relative_y = -25.0f;
+    mouse_aim_frame();
+    expect_close(g_mouse.vertical_pitch, 0.0, "with mouse aim off the mouse does not tilt");
+    expect(!disruptor_mouse_crosshair_shown(), "and no crosshair shows");
+    g_mouse.mouse_aim_enabled = true;
+    ++g_live_frames;
+    g_relative_y = -25.0f;
+    mouse_aim_frame();
+    expect_close(g_mouse.vertical_pitch, 2.0, "with it on the same motion tilts");
+    expect(disruptor_mouse_crosshair_shown(), "and the crosshair shows");
+}
+
+void test_crosshair_comes_with_vertical_look_switched_on_in_play() {
+    reset_state();
+    g_mouse.enabled = g_mouse.mouse_aim_enabled = g_mouse.configured = g_mouse.captured = true;
+    g_mouse.log = std::tmpfile();
+    g_live_frames = 1;
+    mouse_aim_frame();
+    expect(disruptor_mouse_crosshair() && !disruptor_mouse_crosshair_shown(), "a fresh crosshair waits for vertical look");
+    disruptor_mouse_set_vertical_look_enabled(1);
+    ++g_live_frames;
+    mouse_aim_frame();
+    expect(disruptor_mouse_crosshair_shown(), "and shows as soon as vertical look is switched on in play, no restart");
+    disruptor_mouse_set_vertical_look_enabled(0);
+}
+
+void test_the_renderer_reads_the_mouse_again() {
+    reset_state();
+    g_mouse.enabled = g_mouse.mouse_aim_enabled = g_mouse.vertical_look_enabled = g_mouse.configured = g_mouse.captured = true;
+    g_mouse.horizontal_sensitivity = g_mouse.vertical_sensitivity = 0.08;
+    g_mouse.log = std::tmpfile();
+    psx_write_byte(kTestYawAddress, 100);
+    mouse_aim_frame();
+    const int pumps = g_pumps;
+    g_relative_x = 25.0f;
+    g_relative_y = -25.0f;
+    disruptor_mouse_late_tilt();
+    expect(g_pumps == pumps + 1 && g_noted_early == 0.0, "the renderer's entry takes the window's events and tells a recording the look before");
+    expect_close(g_mouse.vertical_pitch, 2.0, "the vertical motion since the VBlank tilts the frame about to be drawn");
+    expect(g_requested_vertical_pitch == 2.0, "and reaches the camera");
+    expect(psx_read_byte(kTestYawAddress) == 100, "the turn waits for the VBlank, the game's own moment for it");
+    mouse_aim_frame();
+    expect(psx_read_byte(kTestYawAddress) == 98, "where it comes in whole");
+    g_relative_x = 25.0f;
+    disruptor_mouse_late_tilt();
+    g_mouse.captured = false;
+    g_mouse.given_up = true;
+    mouse_aim_frame();
+    g_mouse.captured = true;
+    g_mouse.given_up = false;
+    mouse_aim_frame();
+    expect(psx_read_byte(kTestYawAddress) == 98, "a turn read late is dropped when the mouse was let go before the VBlank");
+    g_relative_y = -25.0f;
+    g_mouse.vertical_look_enabled = false;
+    disruptor_mouse_late_tilt();
+    expect(g_pumps == pumps + 2 && g_relative_y == -25.0f, "without vertical look the renderer's entry reads nothing");
+    g_mouse.vertical_look_enabled = true;
+    psx_write_byte(kSceneModeAddress, 4u);
+    disruptor_mouse_late_tilt();
+    expect(g_pumps == pumps + 2, "nor in the pause");
+    psx_write_byte(kSceneModeAddress, 0u);
+    g_relative_y = 0.0f;
+    g_late_replayed = true;
+    g_replayed_late = -7.5;
+    disruptor_mouse_late_tilt();
+    g_late_replayed = false;
+    expect(g_pumps == pumps + 2 && g_mouse.vertical_pitch == -7.5 && g_requested_vertical_pitch == -7.5,
+           "a replay puts back the look its recording drew with and reads no mouse");
+}
+
+void test_stick_tilt_needs_mouse_aim() {
+    reset_state();
+    g_mouse.configured = g_mouse.vertical_look_enabled = true;
+    g_mouse.log = std::tmpfile();
+    g_pad_open = true;
+    g_sticks = {0, 0, 0, -32767};
+    mouse_aim_frame();
+    expect_close(g_mouse.vertical_pitch, 0.0, "without mouse aim the turning stick does not tilt");
+    g_mouse.enabled = g_mouse.mouse_aim_enabled = true;
+    mouse_aim_frame();
+    expect(g_mouse.vertical_pitch != 0.0, "with it the stick tilts");
 }
 
 void test_host_ui_blocks_polled_mod_input() {
@@ -1844,6 +1953,7 @@ void test_netplay_recenters_and_blocks_vertical_motion() {
     reset_state();
     g_mouse.configured = true;
     g_mouse.enabled = true;
+    g_mouse.mouse_aim_enabled = true;
     g_mouse.vertical_look_enabled = true;
     g_mouse.captured = true;
     g_mouse.vertical_pitch = 4.0;
@@ -1868,6 +1978,7 @@ void test_gameplay_gate_discards_new_vertical_motion() {
     reset_state();
     g_mouse.configured = true;
     g_mouse.enabled = true;
+    g_mouse.mouse_aim_enabled = true;
     g_mouse.vertical_look_enabled = true;
     g_mouse.captured = true;
     g_mouse.vertical_pitch = 3.0;
@@ -2027,7 +2138,11 @@ int main(int argc, char **argv) {
     test_psionic_keys();
     test_psionic_use();
     test_live_settings_api();
-        test_vertical_only_capture();
+        test_vertical_look_needs_mouse_aim();
+    test_tilt_and_crosshair_need_mouse_aim();
+    test_stick_tilt_needs_mouse_aim();
+    test_the_renderer_reads_the_mouse_again();
+    test_crosshair_comes_with_vertical_look_switched_on_in_play();
         test_host_ui_blocks_polled_mod_input();
         test_host_ui_escape_close_restores_capture();
         test_netplay_recenters_and_blocks_vertical_motion();

@@ -599,8 +599,11 @@ for token in (
 ):
     require(token in menu or token in mouse, f"vertical settings precedence is missing {token}")
 require(
-    "take_relative_motion" in mouse and mouse.count("take_relative_motion()") == 2,
-    "mouse X/Y must come from exactly one relative sample per frame",
+    "take_relative_motion" in mouse
+    and mouse.count("take_relative_motion()") == 3
+    and "        motion.x += g_mouse.late_x;\n" in mouse
+    and "    g_mouse.late_x += motion.x;\n" in mouse,
+    "mouse X/Y come from one relative sample at the VBlank and one at the renderer's entry, whose turn waits for the next VBlank",
 )
 require(
     "kMaximumPitchUnits = 22.0" in mouse
@@ -1035,7 +1038,7 @@ require(
     and '{"4:3", "16:9", "21:9", "32:9", "Match window (up to 32:9)"}' in options
     and '{"Windowed", "Borderless fullscreen", "Exclusive fullscreen"}' in options
     and '{"Adaptive", "Immediate", "Synchronised"}' in options
-    and '"Horizontal sensitivity", 80,\n           "", 5, 2000, Unit::thousandths,' in options
+    and '"Sensitivity", 80,\n           "", 5, 2000, Unit::thousandths,' in options
     and '"Vertical sensitivity", 80,\n           "", 5, 2000, Unit::thousandths,' in options
     and '"Master volume", 100,\n           "", 0, 100, Unit::percent,' in options,
     "the menu must draw every shared option by its key, with the table's label, bounds and choices and none of its own",
@@ -1097,7 +1100,7 @@ told = set(re.findall(r'key == "([\w.]+)"', function_body(menu, "prerequisite_on
 require(
     RULE in options
     and LIVE in menu
-    and len(needing) == 41
+    and len(needing) == 44
     and needing["disruptor.high_precision_camera"] == ["disruptor.mouse_aim", "disruptor.geometry_correction"]
     and asked == set(needing) - {"video.frame_interpolation_fps"}
     and told == {key for keys in needing.values() for key in keys} - {"video.frame_interpolation"}
@@ -1127,7 +1130,7 @@ def greyed_by_own_rule(source: str, key: str) -> bool:
 
 greyed = asked - {"video.frame_interpolation"}
 require(
-    len(greyed) == 39
+    len(greyed) == 42
     and all(greyed_by_own_rule(menu, key) for key in greyed)
     and not greyed_by_own_rule(
         menu.replace("    if (!textures_apply) ImGui::BeginDisabled();\n", "    if (false) ImGui::BeginDisabled();\n"),
