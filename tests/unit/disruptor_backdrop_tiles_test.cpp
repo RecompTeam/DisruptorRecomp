@@ -103,12 +103,13 @@ void gpu_ws_backdrop_scroll(std::int32_t scroll, std::int32_t period, std::int32
 
 void gpu_sky_fog_opening(std::int32_t step) { g_fog_steps.push_back(step); }
 struct PanoramaTold {
-    int rows, columns, period, focal;
+    int rows, columns, tall, period, focal;
     std::int32_t first_x, first_y, last_x;
 };
 std::vector<PanoramaTold> g_panoramas;
-void gpu_sky_panorama(int rows, int columns, int period, int focal, const std::int32_t *cells) {
-    g_panoramas.push_back({rows, columns, period, focal, rows ? cells[0] : -1, rows ? cells[1] : -1,
+void gpu_sky_panorama(int rows, int columns, int tall, int period, int focal, const std::int32_t *cells, int irregular) {
+    (void)irregular;
+    g_panoramas.push_back({rows, columns, tall, period, focal, rows ? cells[0] : -1, rows ? cells[1] : -1,
                            rows ? cells[2 * (rows * columns - 1)] : -1});
 }
 
@@ -126,6 +127,12 @@ void gpu_ws_backdrop_span(std::int32_t left, std::int32_t right) {
 }
 
 }  // extern "C"
+
+#include "game/render/sky_grower.h"
+
+namespace disruptor::sky_grower {
+void look(const sky_panorama::Cells &, uint32_t, uint32_t, bool, uint32_t) {}
+}  // namespace disruptor::sky_grower
 
 #include "../../src/game/render/backdrop_tiles.cpp"
 
@@ -428,6 +435,19 @@ void queue_tile(std::uint32_t address, const std::array<std::uint32_t, 4> &words
     run_seam(cpu, kQueuedSeam, kQueuedWord);
 }
 
+void test_a_tile_tells_its_panorama_column() {
+    expect(psx_ws_screen_tile_sky_column(0, 0, kPeriod, kColumnWidth) == 1.0f &&
+               psx_ws_screen_tile_sky_column(64, 0, kPeriod, kColumnWidth) == 2.0f,
+           "a tile at the frame's left edge with no scroll is column 0, the next one column 1, each plus one");
+    expect(psx_ws_screen_tile_sky_column(100, 30, kPeriod, kColumnWidth) == 3.0f,
+           "a tile laid mid-column is the column its frame x and the scroll fall in");
+    expect(psx_ws_screen_tile_sky_column(10, kPeriod - 5, kPeriod, kColumnWidth) == 1.0f &&
+               psx_ws_screen_tile_sky_column(-5, 0, kPeriod, kColumnWidth) == 20.0f,
+           "the panorama wraps round its turn either way, a widened opening's tile left of the frame included");
+    expect(psx_ws_screen_tile_sky_column(0, 0, 0, kColumnWidth) == 0.0f && psx_ws_screen_tile_sky_column(0, 0, kPeriod, 0) == 0.0f,
+           "with no panorama the column is not known");
+}
+
 void test_mark_buys_one_draw_of_the_same_packet() {
     g_widescreen = true;
     g_now = 100;
@@ -726,9 +746,10 @@ void test_the_level_panorama_is_told_when_it_changes() {
     seed_word(kVBlanks, 100u);
     run_seam(cpu, kLeftSeam, kLeftWord);
     run_seam(cpu, kLeftSeam, kLeftWord);
-    expect(g_panoramas.size() == 1u && g_panoramas[0].rows == 4 && g_panoramas[0].columns == 20 && g_panoramas[0].period == 1280 &&
-               g_panoramas[0].focal == 160 && g_panoramas[0].first_x == 320 && g_panoramas[0].first_y == 256 && g_panoramas[0].last_x == 448,
-           "the level's table is told with its turn and the world's focal, once a frame");
+    expect(g_panoramas.size() == 1u && g_panoramas[0].rows == 4 && g_panoramas[0].columns == 20 && g_panoramas[0].tall == 60 &&
+               g_panoramas[0].period == 1280 && g_panoramas[0].focal == 160 && g_panoramas[0].first_x == 320 &&
+               g_panoramas[0].first_y == 256 && g_panoramas[0].last_x == 448,
+           "the level's table is told with its cells' rows, its turn and the world's focal, once a frame");
     seed_word(kVBlanks, 101u);
     run_seam(cpu, kLeftSeam, kLeftWord);
     expect(g_panoramas.size() == 1u, "the same table is not told again");
@@ -758,6 +779,7 @@ int main() {
     test_the_fog_hears_the_measured_span();
     test_only_clear_openings_reach_past_their_edges();
     test_seams_are_guarded_by_their_instruction_words();
+    test_a_tile_tells_its_panorama_column();
     test_mark_buys_one_draw_of_the_same_packet();
     test_marks_expire_and_survive_collisions();
     test_a_pinned_end_squashed_to_nothing_keeps_a_pixel();

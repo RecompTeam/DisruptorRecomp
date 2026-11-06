@@ -17,6 +17,7 @@
  */
 
 #include "cpu_state.h"
+#include "game/render/sky_grower.h"
 #include "game/render/sky_panorama.h"
 #include "gpu.h"
 
@@ -62,10 +63,19 @@ void tell_panorama(const CPUState *cpu) {
     if (now == g_cells_read_at) return;
     g_cells_read_at = now;
     const auto word = [cpu](uint32_t address) { return cpu->read_word(address); };
-    const sky::Cells cells = sky::read(word, cpu->read_word(sky::kDescriptorPointer));
-    if (cells == g_cells_told) return;
-    g_cells_told = cells;
-    gpu_sky_panorama(cells.rows, cells.columns, sky::kPeriod, sky::kFocal, cells.xy.data());
+    const uint32_t descriptor = cpu->read_word(sky::kDescriptorPointer);
+    const sky::Cells cells = sky::read(word, descriptor);
+    const bool changed = !(cells == g_cells_told);
+    if (changed) {
+        g_cells_told = cells;
+        gpu_sky_panorama(cells.rows, cells.columns, cells.tall, sky::kPeriod, sky::kFocal, cells.xy.data(), cells.irregular ? 1 : 0);
+    }
+    if (cells.rows == 0) return;
+    const uint32_t clut_x = cpu->read_word(descriptor + 1280u), clut_y = cpu->read_word(descriptor + 1284u);
+    disruptor::sky_grower::look(cells, clut_x, clut_y, changed, now);
+#if DISRUPTOR_DEV_TOOLS
+    disruptor::sky_grower::dump(cells, clut_x, clut_y);
+#endif
 }
 
 /* An edge inside the frame moves out by the margin; one that reaches the frame's edge becomes it. */

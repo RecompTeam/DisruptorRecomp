@@ -143,14 +143,37 @@ static void rtb_set_geometry_correction(int enabled) {
     glb_set_geometry_correction(enabled);
 }
 static void rtb_set_world_triangle(int world) { if (rth_record_mode()) RTH_REC(RTH_WORLD, 0, world); glb_set_world_triangle(world); }
-static void rtb_set_sky_cells(int rows, int columns, int period, int focal, const int32_t *cells) {
+static void rtb_set_sky_cells(int rows, int columns, int tall, int period, int focal, const int32_t *cells, int irregular) {
     if (rth_record_mode()) {
-        int32_t payload[4 + 2 * SKY_CELLS] = {rows, columns, period, focal};
+        int32_t payload[6 + 2 * SKY_CELLS] = {rows, columns, tall, period, focal, irregular};
         const int count = rows > 0 && columns > 0 && rows * columns <= SKY_CELLS ? rows * columns : 0;
-        if (cells && count) memcpy(payload + 4, cells, (size_t)count * 2 * sizeof(int32_t));
+        if (cells && count) memcpy(payload + 6, cells, (size_t)count * 2 * sizeof(int32_t));
         if (rth_put(RTH_SKY_CELLS, 0, payload, sizeof payload)) return;
     }
-    glb_set_sky_cells(rows, columns, period, focal, cells);
+    glb_set_sky_cells(rows, columns, tall, period, focal, cells, irregular);
+}
+static void rtb_set_sky_extension(int width, int rows, int band, const uint8_t *indices) {
+    if (rth_record_mode()) {
+        const size_t count = width > 0 && rows > 0 && indices ? (size_t)width * (size_t)rows : 0;
+        uint8_t *payload = (uint8_t *)malloc(12 + count);
+        if (payload) {
+            const int32_t head[3] = {count ? width : 0, count ? rows : 0, band};
+            memcpy(payload, head, sizeof head);
+            if (count) memcpy(payload + 12, indices, count);
+            const int put = rth_put(RTH_SKY_EXTENSION, 0, payload, (uint32_t)(12 + count));
+            free(payload);
+            if (put) return;
+        }
+    }
+    glb_set_sky_extension(width, rows, band, indices);
+}
+static void rtb_set_sky_column(float column) {
+    if (rth_record_mode()) {
+        int32_t bits;
+        memcpy(&bits, &column, sizeof bits);
+        RTH_REC(RTH_SKY_COLUMN, 0, bits);
+    }
+    glb_set_sky_column(column);
 }
 static void rtb_set_column_band(int low, int high, int canonical) {
     if (rth_record_mode()) RTH_REC(RTH_COLUMN_BAND, 0, low, high, canonical);
@@ -389,6 +412,8 @@ static const GpuRenderBackend GL_RT_BACKEND = {
     .set_world_triangle = rtb_set_world_triangle,
     .set_column_band = rtb_set_column_band,
     .set_sky_cells = rtb_set_sky_cells,
+    .set_sky_extension = rtb_set_sky_extension,
+    .set_sky_column = rtb_set_sky_column,
     .set_precise_triangle = rtb_set_precise_triangle,
     .set_unpinned_triangle = rtb_set_unpinned_triangle,
     .set_perspective_triangle = rtb_set_perspective_triangle,
@@ -455,9 +480,21 @@ static void gl_rth_exec(void *user, const RtCmd *c, const void *payload) {
     case RTH_WORLD: glb_set_world_triangle(v[0]); break;
     case RTH_COLUMN_BAND: glb_set_column_band(v[0], v[1], v[2]); break;
     case RTH_SKY_CELLS: {
-        int32_t sky[4 + 2 * SKY_CELLS];
+        int32_t sky[6 + 2 * SKY_CELLS];
         memcpy(sky, payload, sizeof sky);
-        glb_set_sky_cells(sky[0], sky[1], sky[2], sky[3], sky + 4);
+        glb_set_sky_cells(sky[0], sky[1], sky[2], sky[3], sky[4], sky + 6, sky[5]);
+        break;
+    }
+    case RTH_SKY_EXTENSION: {
+        int32_t head[3];
+        memcpy(head, payload, sizeof head);
+        glb_set_sky_extension(head[0], head[1], head[2], (const uint8_t *)payload + 12);
+        break;
+    }
+    case RTH_SKY_COLUMN: {
+        float column;
+        memcpy(&column, &v[0], sizeof column);
+        glb_set_sky_column(column);
         break;
     }
     case RTH_PRECISE: glb_set_precise_triangle(v[0], v[1], v[2], v[3], v[4], v[5], v[6]); break;

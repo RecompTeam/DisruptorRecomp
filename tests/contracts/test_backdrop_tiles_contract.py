@@ -262,7 +262,7 @@ require(
     "    } else {\n        *place = (float)x + offset + s_tile.moved;\n        *mark = -2.0f;\n        *slide = *want = 0.0f;\n    }\n"
     in renderer
     and "            if (!visual_flags && tile_placed()) {\n" in renderer
-    and "                tile_corner(xs[i], (float)us[i], (float)(high - low), sky_finds(&s_sky, vp[8], vp[9], vp[14], vp[15], vp[12]),\n"
+    and "                tile_corner(xs[i], (float)us[i], (float)(high - low), sky_finds(&s_sky, vp[8], vp[9], vp[14], vp[15], vp[12], s_yaw_center_y_relative - 120.0f, s_sky_column),\n"
     "                            &vp[20], &vp[19], &vp[22], &vp[21]);  /* y's slot: the mirror takes a_pos.y */\n"
     in renderer,
     "a tile's placement is for its own rectangle and only with geometry correction: a free edge moves with the panorama, an "
@@ -294,15 +294,21 @@ require(
     and "        if (textured && v[19] < -1.5f) {\n"
     "            s->backdrop=1; s->backdrop_origin=s_tile.origin; s->backdrop_period=s_tile.period;\n"
     "            s->backdrop_scale=s_tile.scale; s->backdrop_column=s_tile.column;\n"
+    "        }\n"
+    "        if (textured && (v[19] < -1.5f || !s->sky_known)) {  /* a tilted horizon moves a 4:3 frame's sky too */\n"
+    "            s->sky_known=1;\n"
     "            s->sky=s_sky;\n"
     "            s->sky_frame[0]=g_wide_cur_base+s_yaw_center_x+(direct ? 0 : wide_dx()); s->sky_frame[1]=s_off_y+s_yaw_center_y_relative;\n"
-    "            s->sky_frame[2]=s_yaw_focal_x;\n        }\n"
+    "            s->sky_frame[2]=s_yaw_focal_x; s->sky_frame[3]=s_yaw_center_y_relative-120.0f;\n        }\n"
     in presenter
-    and "    s->active = 1; s->bad = 0; s->nv = s->nt = s->nc = 0;\n    s->backdrop = 0; s->backdrop_back = 0.0f;\n"
+    and "    s->active = 1; s->bad = 0; s->nv = s->nt = s->nc = 0;\n"
+    "    s->backdrop = 0; s->backdrop_back = 0.0f; s->sky_known = 0; s->sky_frame[3] = 0.0f;\n"
     in presenter
-    and "    s->origin_y=y; s->height=h; s->matched=s->world=s->moving=0;\n    s->ddgi=s_ddgi_frame_now;\n    s->backdrop_back=0.0f;\n"
+    and "    s->origin_y=y; s->height=h; s->matched=s->world=s->moving=0;\n    s->ddgi=s_ddgi_frame_now;\n"
+    "    s->backdrop_back=0.0f; s->sky_back=0.0f;\n"
     in presenter
-    and "    a->backdrop=s_temp_curr.backdrop; a->backdrop_origin=s_temp_curr.backdrop_origin;\n" in presenter
+    and "    a->backdrop=s_temp_curr.backdrop; a->backdrop_origin=s_temp_curr.backdrop_origin; a->sky_shift=s_temp_curr.sky_frame[3];\n"
+    in presenter
     and "        if (s->backdrop && a->backdrop)\n"
     "            s->backdrop_back=psx_ws_backdrop_back(a->backdrop_origin,s->backdrop_origin,s->backdrop_period,TEMP_BACKDROP_MOST);\n"
     in presenter
@@ -318,7 +324,7 @@ require(
     and "            if (!(v[19]<-1.5f)) continue;\n" in presenter
     and "                if (corner[19]>-2.5f) { corner[0]=corner[20]=corner[0]+moved; continue; }\n"
     "                const int end=corner[19]<-3.5f;\n"
-    "                const int any=sky_finds(&s->sky,corner[8],corner[9],corner[14],corner[15],corner[12]);  /* as tile_corner */\n"
+    "                const int any=sky_finds(&s->sky,corner[8],corner[9],corner[14],corner[15],corner[12],s->sky_frame[3]+s_temp_sky_moved,corner[27]);  /* as tile_corner */\n"
     "                const float room=any ? 1.0e6f : psx_ws_screen_tile_room(corner[2],s->backdrop_column,end);\n"
     "                float carried=0.0f;\n"
     "                if (end ? moved>0.0f : moved<0.0f) {\n"
@@ -392,19 +398,26 @@ require(
         "    gp0_cmd_buf[3] = psx_sky_fog_rows(gp0_cmd_buf, draw_offset_y, (int32_t)draw_area_bottom, opening_top);\n"
     )
     < sky_rect.index(
-        "    gp0_exec_textured_rect();\n    sky_fogged = 0;\n    ws_screen_tile_kept = -1;\n    gp0_cmd_buf[2] = game;\n"
+        "    gp0_exec_textured_rect();\n    gr_set_sky_column(0.0f);\n    sky_fogged = 0;\n    ws_screen_tile_kept = -1;\n    gp0_cmd_buf[2] = game;\n"
         "    gp0_cmd_buf[3] = rows;\n"
     )
-    and sky_rect.count("gp0_cmd_buf[") == 6
+    and sky_rect.count("gp0_cmd_buf[") == 7
+    and "    parse_vertex(gp0_cmd_buf[1], &frame_x, &frame_y);\n"
+    "    /* the panorama column the game cut the tile from, which its VRAM block does not tell where blocks are shared */\n"
+    "    gr_set_sky_column(psx_ws_screen_tile_sky_column(frame_x, ws_backdrop_now, ws_backdrop_period, ws_backdrop_column));\n"
+    in sky_rect
+    and sky_rect.count("        gp0_exec_textured_rect();\n        gr_set_sky_column(0.0f);\n        return;\n") == 1
     and "+runtime/include/gpu_sky_fog.h\n" in read("framework/FILES.txt")
     and "disruptor_unit_test(disruptor_gpu_sky_fog tests/unit/gpu_sky_fog_test.cpp RUNTIME_HEADERS)\n" in cmake,
     "a sky tile takes its widescreen mark from the game's words and hands it to the draw, only the palette and the rows "
-    "change, and the game's words come back after",
+    "change, and the game's words come back after: the panorama column its frame x tells is the draw's alone, on either path",
 )
 
 require(
     sky_rect.index("    sky_fogged = step == PSX_SKY_FOG_LAST_STEP;\n")
-    < sky_rect.index("    gp0_exec_textured_rect();\n    sky_fogged = 0;\n    ws_screen_tile_kept = -1;\n")
+    < sky_rect.index(
+        "    gp0_exec_textured_rect();\n    gr_set_sky_column(0.0f);\n    sky_fogged = 0;\n    ws_screen_tile_kept = -1;\n"
+    )
     and sky_rect.count("sky_fogged = 0;") == 1
     and "int gpu_sky_fogged(void);\n" in gpu_header,
     "while a sky tile is drawn the renderer is told whether its opening is at the last fog step, also when its own "

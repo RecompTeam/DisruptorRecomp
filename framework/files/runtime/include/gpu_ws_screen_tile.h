@@ -127,6 +127,13 @@ static inline int psx_ws_screen_tile_keep(int32_t *left, int32_t *right, uint32_
 }
 
 /* Where a tile's edge at frame x stands in the display's picture: the squash about the centre, not rounded. */
+/* The panorama column a tile the game laid at frame x was cut from, plus one, under its scroll: 0 with no panorama. */
+static inline float psx_ws_screen_tile_sky_column(int32_t frame_x, int32_t scroll, int32_t period, int32_t column) {
+    if (period <= 0 || column <= 0) return 0.0f;
+    const int32_t across = ((frame_x + scroll) % period + period) % period;
+    return (float)(across / column + 1);
+}
+
 static inline double psx_ws_screen_tile_edge(int32_t x, int32_t centre, int32_t numerator, int32_t denominator) {
     return centre + ((double)x - centre) * numerator / denominator;
 }

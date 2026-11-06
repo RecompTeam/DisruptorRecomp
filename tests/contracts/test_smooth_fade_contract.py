@@ -60,7 +60,7 @@ require(
     '    "  }\\n"\n'
     in renderer
     and '    "  g_row = v_clut.y;\\n"\n' in renderer
-    and renderer.count("), g_row);\\n") == 3
+    and renderer.count("), g_row);\\n") == 4
     and "v_clut.y);\\n" not in renderer,
     "the texel is taken from the row of the level and mixed with the next row by the level's fraction, and a triangle "
     "with no fade is sampled from its own row as before",

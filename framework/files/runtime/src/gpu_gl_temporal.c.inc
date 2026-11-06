@@ -36,7 +36,9 @@ typedef struct {
     float backdrop_origin, backdrop_period, backdrop_scale, backdrop_column;
     float backdrop_back;  /* where the panorama stood a frame earlier, from where it stands */
     SkyPanorama sky;      /* the level's panorama as the frame had it */
-    float sky_frame[3];   /* the projection's centre and focal in the presenter's units */
+    float sky_frame[4];   /* the projection's centre and focal in the presenter's units, the horizon's shift in rows */
+    float sky_back;       /* that shift a frame earlier, from this frame's */
+    int sky_known;        /* the panorama and frame above are this frame's */
     GpuTemporalCamera camera;  /* the camera fitted to the frame before, for a near face's corners */
     GpuTemporalCamera onward;  /* its inverse, for the corners of a near face the game dropped */
     PsxNearCorner near_corners[TEMP_NEAR_CORNERS];  /* in the order drawn: where each stands, and its w */
@@ -64,13 +66,14 @@ static int s_temp_samples, s_temp_shading;  /* the twin's samples, and whether t
 static int s_temp_underlaying;  /* departed faces are being drawn: they keep the depth rule of their own pass */
 static int s_temp_marked;       /* the textured program is the one that tells fillers apart */
 static int s_temp_part;         /* what temporal_submit draws of a command: 0 all of it, 1 its fillers alone, 2 its polygons alone */
+static float s_temp_sky_moved;  /* the in-between horizon's shift from the drawn scene's own, in rows */
 static GLint s_temp_uPull=-1, s_temp_uHold=-1;
 static int s_temp_fill;         /* departed faces are leaving their depth where the scene left none, see temporal_submit */
 static float s_temp_scratch[TEXBATCH_MAXV * TEXV], s_temp_under[TEXBATCH_MAXV * TEXV];
 typedef struct {
     GLint shift, xhalf, visual, options, twin, mask, filter, pass, semi, fade, fade_at, fade_power, fade_blocks, fade_block_count, dissolve, clear;
     GLint ground_samples, ground_share, ground_view, sample_at;
-    GLint sky, sky_frame, sky_cells, sky_shape;
+    GLint sky, sky_frame, sky_cells, sky_shape, sky_irregular, sky_grown;
     int sky_sent;  /* the panorama generation its cells were sent for */
 } TemporalUniforms;
 static TemporalUniforms s_temp_uniforms[2];
@@ -231,7 +234,7 @@ static void temporal_begin(GLuint fbo, int y, int h, uint16_t color) {
     s->active = 0;
     if (!temporal_recording() || !temporal_allocate(s)) return;
     s->active = 1; s->bad = 0; s->nv = s->nt = s->nc = 0;
-    s->backdrop = 0; s->backdrop_back = 0.0f;
+    s->backdrop = 0; s->backdrop_back = 0.0f; s->sky_known = 0; s->sky_frame[3] = 0.0f;
     s->near_count = 0;
     s->texture_count = 0; s->clear_y = y; s->clear_h = h;
     s->width = g_wide_w; s->scale = s_scale;
@@ -385,9 +388,12 @@ static void temporal_draw(const float *vertices, const uint64_t *identities, int
         if (textured && v[19] < -1.5f) {
             s->backdrop=1; s->backdrop_origin=s_tile.origin; s->backdrop_period=s_tile.period;
             s->backdrop_scale=s_tile.scale; s->backdrop_column=s_tile.column;
+        }
+        if (textured && (v[19] < -1.5f || !s->sky_known)) {  /* a tilted horizon moves a 4:3 frame's sky too */
+            s->sky_known=1;
             s->sky=s_sky;
             s->sky_frame[0]=g_wide_cur_base+s_yaw_center_x+(direct ? 0 : wide_dx()); s->sky_frame[1]=s_off_y+s_yaw_center_y_relative;
-            s->sky_frame[2]=s_yaw_focal_x;
+            s->sky_frame[2]=s_yaw_focal_x; s->sky_frame[3]=s_yaw_center_y_relative-120.0f;
         }
         temporal_position(v, textured, gate, direct);
     }
@@ -509,7 +515,8 @@ typedef struct {
     GpuTemporalTriangle *start, *gone_to;
     int *gone;
     int backdrop;
-    float backdrop_origin;
+    float backdrop_origin, sky_shift;
+    int sky_known;
 } TemporalAgainst;
 
 /* The builder's scene for a display band moved to the band's rows, the cheap part of a capture. Game thread. */
@@ -520,7 +527,7 @@ static TemporalScene *temporal_prepare_scene(GLuint fbo, int y, int w, int h) {
         s->width != w || s->scale != s_scale || !s->nc) return NULL;
     s->origin_y=y; s->height=h; s->matched=s->world=s->moving=0;
     s->ddgi=s_ddgi_frame_now;
-    s->backdrop_back=0.0f;
+    s->backdrop_back=0.0f; s->sky_back=0.0f;
     memset(&s->mesh_stats,0,sizeof(s->mesh_stats));
     for (int i=0; i<s->nc; ++i) {
         TemporalCommand *c=&s->commands[i];
@@ -547,7 +554,8 @@ static void temporal_against(const TemporalScene *s, int w, int h, TemporalAgain
           s_temp_curr.scale==s_scale && s_temp_curr.tint==s->tint;
     a->triangles=s_temp_curr.triangles; a->nt=s_temp_curr.nt;
     a->start=s_temp_curr.start; a->gone_to=s_temp_curr.gone_to; a->gone=s_temp_curr.gone;
-    a->backdrop=s_temp_curr.backdrop; a->backdrop_origin=s_temp_curr.backdrop_origin;
+    a->backdrop=s_temp_curr.backdrop; a->backdrop_origin=s_temp_curr.backdrop_origin; a->sky_shift=s_temp_curr.sky_frame[3];
+    a->sky_known=s_temp_curr.sky_known;
 }
 
 /* 2 ms a frame at the original draw distance, 7 to 15 at 3x: unlocked, the presenter reads no array this writes. */
@@ -564,6 +572,7 @@ static void temporal_match_scene(TemporalScene *s, const TemporalAgainst *a) {
         s->onward_ok=s->camera.inliers>=GPU_TEMPORAL_CAMERA_MIN_INLIERS && gpu_temporal_camera_invert(&s->camera,&s->onward);
         if (s->backdrop && a->backdrop)
             s->backdrop_back=psx_ws_backdrop_back(a->backdrop_origin,s->backdrop_origin,s->backdrop_period,TEMP_BACKDROP_MOST);
+        s->sky_back=a->sky_known && s->sky_known ? a->sky_shift-s->sky_frame[3] : 0.0f;  /* a scene with no panorama has no shift */
     } else {
         s_temp_camera.inliers=0;
         /* Whole, not its inliers alone: which slot a scene gets, and the camera left there, depends on the matching thread. */
@@ -620,6 +629,7 @@ static void temporal_uniforms_init(GLuint p, TemporalUniforms *u) {
     TEMP_U(fade,"u_fade"); TEMP_U(fade_at,"u_fade_at"); TEMP_U(fade_power,"u_fade_power"); TEMP_U(fade_blocks,"u_fade_blocks"); TEMP_U(fade_block_count,"u_fade_block_count"); TEMP_U(dissolve,"u_dissolve"); TEMP_U(clear,"u_clear");
     TEMP_U(ground_samples,"u_ground_samples"); TEMP_U(ground_share,"u_ground_share"); TEMP_U(ground_view,"u_ground_view"); TEMP_U(sample_at,"u_sample_at");
     TEMP_U(sky,"u_sky"); TEMP_U(sky_frame,"u_sky_frame"); TEMP_U(sky_cells,"u_sky_cells"); TEMP_U(sky_shape,"u_sky_shape");
+    TEMP_U(sky_irregular,"u_sky_irregular"); TEMP_U(sky_grown,"u_sky_grown");
     u->sky_sent=-1;
 #undef TEMP_U
     p_glUseProgram(p);
@@ -628,6 +638,7 @@ static void temporal_uniforms_init(GLuint p, TemporalUniforms *u) {
     p_glUniform1f(p_glGetUniformLocation(p,"u_xscale"),1);
     p_glUniform4f(p_glGetUniformLocation(p,"u_camera"),0,1,0,0);
     p_glUniform1i(p_glGetUniformLocation(p,"u_vram"),0);
+    p_glUniform1i(p_glGetUniformLocation(p,"u_sky_ext"),SKY_EXT_UNIT);
 }
 /* The presenter's own copy of a vertex shader: one more attribute carries
  * the depth order. The canonical shaders stay exactly as they are. */
@@ -681,12 +692,12 @@ static int temporal_worker_init(void) {
     s_temp_uHold=p_glGetUniformLocation(s_temp_tex_prog,"u_hold");
     p_glGenBuffers(1,&s_temp_vbo);
     p_glGenVertexArrays(2,s_temp_vao);
-    const int sizes[14]={2,2,4,2,2,1,1,4,1,1,2,1,1,3};
-    const int offsets[14]={0,2,4,8,10,12,13,14,18,19,20,22,23,24};
+    const int sizes[15]={2,2,4,2,2,1,1,4,1,1,2,1,1,3,1};
+    const int offsets[15]={0,2,4,8,10,12,13,14,18,19,20,22,23,24,27};
     for (int t=0;t<2;++t) {
         p_glBindVertexArray(s_temp_vao[t]);
         p_glBindBuffer(PSXGL_ARRAY_BUFFER,s_temp_vbo);
-        for (int a=0;a<(t?14:5);++a) {
+        for (int a=0;a<(t?15:5);++a) {
             const int gs[5]={2,4,1,2,1}, go[5]={0,2,6,7,9};
             p_glVertexAttribPointer(a,t?sizes[a]:gs[a],GL_FLOAT,GL_FALSE,
                 TEXV*sizeof(float),(void *)(size_t)((t?offsets[a]:go[a])*sizeof(float)));
@@ -829,7 +840,8 @@ static void temporal_submit(const TemporalScene *s,const TemporalCommand *c,int 
     glBindTexture(GL_TEXTURE_2D,s->textures[c->texture]);
     p_glUniform4i(u->twin,c->twin[0],c->twin[1],c->twin[2],c->twin[3]);
     p_glUniform1i(u->mask,c->mask); p_glUniform1i(u->filter,c->filter);
-    if (s->backdrop) sky_uniforms(u->sky,u->sky_frame,u->sky_cells,u->sky_shape,&u->sky_sent,&s->sky,s->sky_frame[0],s->sky_frame[1],s->sky_frame[2]);
+    if (s->sky_known) sky_uniforms(u->sky,u->sky_frame,u->sky_cells,u->sky_shape,u->sky_irregular,u->sky_grown,&u->sky_sent,&s->sky,s->sky_frame[0],s->sky_frame[1],s->sky_frame[2],
+                                 s->sky_frame[3]+s_temp_sky_moved);
     p_glUniform1i(u->semi,0); p_glUniform1i(u->pass,0);
     glDisable(GL_BLEND); glDisable(GL_STENCIL_TEST); glDepthFunc(GL_ALWAYS); glDepthMask(GL_FALSE);
     glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_FALSE);
@@ -877,7 +889,8 @@ static void temporal_submit_faces(const TemporalScene *s,const TemporalCommand *
         glBindTexture(GL_TEXTURE_2D,s->textures[c->texture]);
         p_glUniform4i(u->twin,c->twin[0],c->twin[1],c->twin[2],c->twin[3]);
         p_glUniform1i(u->mask,c->mask); p_glUniform1i(u->filter,c->filter);
-    if (s->backdrop) sky_uniforms(u->sky,u->sky_frame,u->sky_cells,u->sky_shape,&u->sky_sent,&s->sky,s->sky_frame[0],s->sky_frame[1],s->sky_frame[2]);
+    if (s->sky_known) sky_uniforms(u->sky,u->sky_frame,u->sky_cells,u->sky_shape,u->sky_irregular,u->sky_grown,&u->sky_sent,&s->sky,s->sky_frame[0],s->sky_frame[1],s->sky_frame[2],
+                                 s->sky_frame[3]+s_temp_sky_moved);
         p_glUniform1i(u->semi,c->semi<0?0:c->semi); p_glUniform1i(u->pass,c->semi<0?3:4);
         glColorMask(GL_FALSE,GL_FALSE,GL_FALSE,GL_FALSE); glDisable(GL_BLEND);
         glEnable(GL_STENCIL_TEST); glStencilMask(2);
@@ -906,7 +919,8 @@ static void temporal_submit_faces(const TemporalScene *s,const TemporalCommand *
     glBindTexture(GL_TEXTURE_2D,s->textures[c->texture]);
     p_glUniform4i(u->twin,c->twin[0],c->twin[1],c->twin[2],c->twin[3]);
     p_glUniform1i(u->mask,c->mask); p_glUniform1i(u->filter,c->filter);
-    if (s->backdrop) sky_uniforms(u->sky,u->sky_frame,u->sky_cells,u->sky_shape,&u->sky_sent,&s->sky,s->sky_frame[0],s->sky_frame[1],s->sky_frame[2]);
+    if (s->sky_known) sky_uniforms(u->sky,u->sky_frame,u->sky_cells,u->sky_shape,u->sky_irregular,u->sky_grown,&u->sky_sent,&s->sky,s->sky_frame[0],s->sky_frame[1],s->sky_frame[2],
+                                 s->sky_frame[3]+s_temp_sky_moved);
     p_glUniform1i(u->semi,c->semi<0?0:c->semi);
     const int supp=s_temp_marked && c->mode==GL_TRIANGLES && (s_temp_scene_depth || s_temp_underlaying) ? c->supp : 0;
     const GLenum depth_after=s_temp_underlaying && !s_temp_scene_depth ? GL_LESS : GL_ALWAYS;
@@ -1075,6 +1089,8 @@ static void temporal_underlay(float alpha,int covered) {
     glDepthFunc(covered ? GL_LESS : GL_ALWAYS); glDepthMask(covered ? GL_FALSE : GL_TRUE);
     if (covered) glDepthRange(TEMP_ORDER_OVER_NEAREST,1.0);
     s_temp_scene_depth=!covered; s_temp_underlaying=1;
+    const float moved=s_temp_sky_moved;
+    s_temp_sky_moved=s->sky_frame[3]+moved-p->sky_frame[3];
     if (s_world_depth && !covered) glDepthMask(GL_FALSE);  /* last frame's faces must not stand in the way of this frame's */
     for (int i=0;i<p->nc;++i) {
         const TemporalCommand *c=&p->commands[i];
@@ -1125,6 +1141,7 @@ static void temporal_underlay(float alpha,int covered) {
         }
         if (any) temporal_submit(p,c,s->height,s_temp_under,c->count);
     }
+    s_temp_sky_moved=moved;
     glDepthFunc(GL_ALWAYS); glDepthMask(GL_TRUE); glDepthRange(0.0,1.0);
     s_temp_scene_depth=1; s_temp_underlaying=0;
     s_temp_fade_nearer=1.0f;
@@ -1134,6 +1151,7 @@ static int temporal_present(float alpha,int lx,int ly,int lw,int lh) {
     int first_world, last_world, underlaid=0;
     if (!s->active || !s->moving ||
         !temporal_target(s->width,s->scale)) return 0;
+    s_temp_sky_moved=(1.0f-alpha)*s->sky_back;
     for (first_world=0;first_world<s->nt && !s->triangles[first_world].world;++first_world) {}
     for (last_world=s->nt-1;last_world>=0 && !s->triangles[last_world].world;--last_world) {}
     if (s_interp_fence[s_interp_cur]) gz_wait(1,s_interp_fence[s_interp_cur]);
@@ -1169,7 +1187,7 @@ static int temporal_present(float alpha,int lx,int ly,int lw,int lh) {
                 float *corner=v+k*TEXV;
                 if (corner[19]>-2.5f) { corner[0]=corner[20]=corner[0]+moved; continue; }
                 const int end=corner[19]<-3.5f;
-                const int any=sky_finds(&s->sky,corner[8],corner[9],corner[14],corner[15],corner[12]);  /* as tile_corner */
+                const int any=sky_finds(&s->sky,corner[8],corner[9],corner[14],corner[15],corner[12],s->sky_frame[3]+s_temp_sky_moved,corner[27]);  /* as tile_corner */
                 const float room=any ? 1.0e6f : psx_ws_screen_tile_room(corner[2],s->backdrop_column,end);
                 float carried=0.0f;
                 if (end ? moved>0.0f : moved<0.0f) {

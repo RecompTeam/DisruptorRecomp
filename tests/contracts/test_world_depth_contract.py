@@ -331,7 +331,7 @@ require(
     "            vp[26] = sprite ? s_sprite_depth : 0.0f;\n"
     in renderer
     and "p_glVertexAttribPointer(13, 3, GL_FLOAT, GL_FALSE, st, (void*)(24*sizeof(float)));" in renderer
-    and "    const int sizes[14]={2,2,4,2,2,1,1,4,1,1,2,1,1,3};\n" in presenter
+    and "    const int sizes[15]={2,2,4,2,2,1,1,4,1,1,2,1,1,3,1};\n" in presenter
     and "    case RTH_SPRITE_GROUND: glb_set_temporal_sprite_ground(fv[0], fv[1]); break;\n" in thread
     and "    .set_temporal_sprite_ground = rtb_set_temporal_sprite_ground,\n" in thread,
     "a sprite's ground and half width go with its own rectangle only, through the render thread, into every vertex and "

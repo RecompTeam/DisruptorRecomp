@@ -1,8 +1,8 @@
 diff --git a/runtime/src/gpu_render.c b/runtime/src/gpu_render.c
-index e1fbe0f34a0755a07c6afc740dbae278042a517e..d8ec103a12204349477a11a5d09deb32465ba387 100644
+index e1fbe0f34a0755a07c6afc740dbae278042a517e..cf89e17d1219dcac2923a78cd13adfecfbd50a26 100644
 --- a/runtime/src/gpu_render.c
 +++ b/runtime/src/gpu_render.c
-@@ -27,8 +27,15 @@
+@@ -27,8 +27,17 @@
      .set_mask_bits                 = sw_set_mask_bits,
      .set_texture_window            = sw_set_texture_window,
      .set_color_modulation          = sw_set_color_modulation,
@@ -10,6 +10,8 @@ index e1fbe0f34a0755a07c6afc740dbae278042a517e..d8ec103a12204349477a11a5d09deb32
 +    .set_world_triangle            = NULL,
 +    .set_column_band               = NULL,
 +    .set_sky_cells                 = NULL,
++    .set_sky_extension             = NULL,
++    .set_sky_column                = NULL,
 +    .set_temporal_depth_triangle   = NULL,
 +    .set_temporal_identity_triangle = NULL,
 +    .set_presentation_yaw          = NULL,
@@ -19,7 +21,7 @@ index e1fbe0f34a0755a07c6afc740dbae278042a517e..d8ec103a12204349477a11a5d09deb32
      .fill_rect                     = sw_fill_rect,
      .copy_rect                     = sw_copy_rect,
      .draw_flat_triangle            = sw_draw_flat_triangle,
-@@ -168,6 +175,59 @@
+@@ -168,6 +177,65 @@
  void gr_set_mask_bits(int s, int c)                  { g_b->set_mask_bits(s, c); }
  void gr_set_texture_window(uint32_t raw)             { g_b->set_texture_window(raw); g_hd_texture_window=raw; }
  void gr_set_color_modulation(int r, int g, int b, int raw) { g_b->set_color_modulation(r, g, b, raw); }
@@ -33,8 +35,14 @@ index e1fbe0f34a0755a07c6afc740dbae278042a517e..d8ec103a12204349477a11a5d09deb32
 +    if (g_b->set_column_band) g_b->set_column_band(low, high, canonical);
 +}
 +int gr_has_column_band(void) { return g_b->set_column_band != NULL; }
-+void gr_set_sky_cells(int rows, int columns, int period, int focal, const int32_t *cells) {
-+    if (g_b->set_sky_cells) g_b->set_sky_cells(rows, columns, period, focal, cells);
++void gr_set_sky_cells(int rows, int columns, int tall, int period, int focal, const int32_t *cells, int irregular) {
++    if (g_b->set_sky_cells) g_b->set_sky_cells(rows, columns, tall, period, focal, cells, irregular);
++}
++void gr_set_sky_extension(int width, int rows, int band, const uint8_t *indices) {
++    if (g_b->set_sky_extension) g_b->set_sky_extension(width, rows, band, indices);
++}
++void gr_set_sky_column(float column) {
++    if (g_b->set_sky_column) g_b->set_sky_column(column);
 +}
 +void gr_set_unpinned_triangle(int32_t x0, int32_t y0, int32_t x1, int32_t y1, int32_t x2, int32_t y2) {
 +    if (g_b->set_unpinned_triangle) g_b->set_unpinned_triangle(x0, y0, x1, y1, x2, y2);
@@ -79,7 +87,7 @@ index e1fbe0f34a0755a07c6afc740dbae278042a517e..d8ec103a12204349477a11a5d09deb32
  void gr_set_precise_triangle(int enabled, int32_t x0, int32_t y0, int32_t x1, int32_t y1,
                               int32_t x2, int32_t y2) {
      if (g_b->set_precise_triangle)
-@@ -294,6 +354,12 @@
+@@ -294,6 +362,12 @@
      if (g_b->wide_clear_margins)
          g_b->wide_clear_margins(base_x, y, h, color, sides);
  }

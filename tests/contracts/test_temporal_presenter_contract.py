@@ -134,7 +134,7 @@ require(
 )
 require(
     "char *geo_vs=temporal_ordered_shader(GEO_VS,4), *tex_vs=temporal_ordered_shader(TEX_VS,12);" in temporal
-    and "const int offsets[14]={0,2,4,8,10,12,13,14,18,19,20,22,23,24};" in temporal
+    and "const int offsets[15]={0,2,4,8,10,12,13,14,18,19,20,22,23,24,27};" in temporal
     and "const int gs[5]={2,4,1,2,1}, go[5]={0,2,6,7,9};" in temporal,
     "the presenter must build its own shaders and feed them the depth slot of each vertex",
 )

@@ -45,6 +45,7 @@ endif()
 set(DISRUPTOR_EXTRA_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/achievements/game_client.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/backdrop_tiles.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/sky_grower.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/billboard_aspect.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/capsule.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/cheats.cpp"
@@ -92,6 +93,7 @@ set(DISRUPTOR_EXTRA_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/vertical_camera.cpp")
 if(DISRUPTOR_DEV_TOOLS)
     list(APPEND DISRUPTOR_EXTRA_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/mission_select.cpp")
+    list(APPEND DISRUPTOR_EXTRA_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/sky_dump.cpp")
 endif()
 
 # The project deliberately uses the redistributable OpenBIOS backend only.
@@ -288,6 +290,8 @@ disruptor_achievements_library(disruptor-achievements)
 target_link_libraries(psx-runtime PRIVATE disruptor-achievements)
 if(DISRUPTOR_DEV_TOOLS)
     target_compile_definitions(psx-runtime PRIVATE DISRUPTOR_DEV_TOOLS=1)
+    add_executable(disruptor-sky-grow "${CMAKE_CURRENT_SOURCE_DIR}/tools/sky_grow/sky_grow.cpp")
+    target_include_directories(disruptor-sky-grow PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/src")
 endif()
 if(NOT DISRUPTOR_FRAME_INTERPOLATION)
     target_compile_definitions(psx-runtime PRIVATE
@@ -518,6 +522,7 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
     disruptor_unit_test(disruptor_sector_reach tests/unit/disruptor_sector_reach_test.cpp INCLUDES src)
 disruptor_unit_test(disruptor_portal_reach tests/unit/disruptor_portal_reach_test.cpp INCLUDES src)
 disruptor_unit_test(disruptor_sky_panorama tests/unit/disruptor_sky_panorama_test.cpp INCLUDES src)
+disruptor_unit_test(disruptor_sky_extension tests/unit/disruptor_sky_extension_test.cpp INCLUDES src)
 disruptor_unit_test(disruptor_misplaced_riser tests/unit/disruptor_misplaced_riser_test.cpp INCLUDES src)
 disruptor_unit_test(disruptor_near_split tests/unit/disruptor_near_split_test.cpp INCLUDES src)
 disruptor_unit_test(disruptor_marked_corners tests/unit/disruptor_marked_corners_test.cpp INCLUDES src)
