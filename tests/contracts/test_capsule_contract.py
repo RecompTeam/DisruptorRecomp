@@ -139,9 +139,11 @@ require(
 require(
     "    psx_host_write_byte(kPlayerYawAddress, new_yaw);\n    disruptor_capsule_note_byte(kPlayerYawAddress, new_yaw);\n"
     in mouse
-    and 'extern "C" void disruptor_mouse_set_vertical_pitch(double pitch) {\n    g_mouse.vertical_pitch = pitch;\n}\n'
+    and 'extern "C" void disruptor_mouse_set_vertical_pitch(double pitch) {\n    load_configuration();\n'
+    "    g_mouse.vertical_pitch = pitch;\n"
+    "    if (g_mouse.vertical_look_enabled) disruptor_vertical_camera_set_requested_pitch(pitch);\n}\n"
     in mouse,
-    "the heading the mouse writes into the game must be told to a recording, and a replay must be able to put the pitch back",
+    "the heading the mouse writes into the game must be told to a recording, and a replay must put the pitch back into the camera",
 )
 require(
     "    if (!g_menu.open && key_down(event, SDL_SCANCODE_F12)) {\n"

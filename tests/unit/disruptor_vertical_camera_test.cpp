@@ -129,6 +129,8 @@ void gpu_geometry_camera_projection_center_y_set(double center_y) {
     g_projection_center = center_y;
 }
 
+int gpu_geometry_camera_projection_center_y_get(void) { return static_cast<int>(g_projection_center); }
+
 }  // extern "C"
 
 // Include the implementation to exercise the version-pinned internal guards.
@@ -238,14 +240,15 @@ void test_restore_and_zero_identity() {
     expect(!disruptor_vertical_camera_active() &&
                disruptor_vertical_camera_effective_center_y() == 120,
            "renderer exit restores neutral effective projection");
-    expect(cpu.gte_ctrl[25] == (120u << 16) &&
-               g_projection_center == 120.0,
-           "renderer exit restores GTE and presentation centers");
+    expect(cpu.gte_ctrl[25] == (120u << 16) && g_projection_center == center_for_pitch(-12.0),
+           "renderer exit gives the game its GTE back and leaves the GPU the frame's horizon for its list");
     expect(disruptor_vertical_camera_requested_pitch() == requested,
            "temporary renderer restore preserves requested pitch");
 
-    const int writes_before = g_gte_writes + g_projection_writes;
     disruptor_vertical_camera_recenter();
+    g_renderer_callback(&cpu, kRendererEntry);
+    expect(g_projection_center == 120.0, "the next frame at zero pitch gives the GPU the level horizon");
+    const int writes_before = g_gte_writes + g_projection_writes;
     g_renderer_callback(&cpu, kRendererEntry);
     expect(g_gte_writes + g_projection_writes == writes_before,
            "already-neutral zero pitch performs no projection writes");

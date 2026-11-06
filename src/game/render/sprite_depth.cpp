@@ -21,6 +21,7 @@
  * it on screen moves along to stay over it, and its fade is the game's own.
  */
 
+#include "game/input/vertical_camera.h"
 #include "game/render/far_rendering.h"
 #include "game/render/shot_lights.h"
 
@@ -54,7 +55,6 @@ constexpr int32_t kGteDepthPerSpriteDepth = 8;
 constexpr uint32_t kFocal = 160u;
 constexpr int64_t kOne = 65536;
 constexpr int32_t kFarColumn = 4096;  /* past this a 16.16 column no longer fits */
-constexpr int32_t kHorizon = 120;
 constexpr uint32_t kReciprocals = 0x80057E98u;  /* 65536 / n in 16 bits, a table the game builds at start */
 constexpr uint32_t kCameraHeight = 0x800775D0u;
 constexpr uint32_t kActorFloor = 40u;     /* a halfword of the actor ($s5) the shadow block 0x8003D2FC hangs its shadow from */
@@ -275,11 +275,12 @@ struct Effect {
     const uint32_t first = cpu.read_word(packet + 8u);
     const auto left = static_cast<int16_t>(first), top = static_cast<int16_t>(first >> 16);
     const auto right = static_cast<int16_t>(cpu.read_word(packet + 16u)), bottom = static_cast<int16_t>(cpu.read_word(packet + 24u) >> 16);
+    const int32_t horizon = disruptor_vertical_camera_projection_row();
     if (width <= 0 || height <= 0 || right - left + 1 != width || bottom - top + 1 != height ||
-        top != kHorizon - fall - (height >> 1)) {
+        top != horizon - fall - (height >> 1)) {
         return std::nullopt;
     }
-    return Shape{.row = static_cast<int32_t>(kHorizon * kOne) - scaled(drop, depth),
+    return Shape{.row = static_cast<int32_t>(horizon * kOne) - scaled(drop, depth),
                  .width = scaled(extent.wide, depth),
                  .height = scaled(extent.tall, depth),
                  .shadow = true};
@@ -303,7 +304,7 @@ struct Effect {
     const Place place{.x = psx_ws_project_x16(column, fraction),
                       .dy = static_cast<int32_t>(-(down % sprite.depth) * kOne / sprite.depth)};
     sprite.place = place;
-    const int32_t row = static_cast<int32_t>((kHorizon - down / sprite.depth) * kOne) + place.dy;
+    const int32_t row = static_cast<int32_t>((disruptor_vertical_camera_projection_row() - down / sprite.depth) * kOne) + place.dy;
     if (funnel.size == Size::Effect) {
         if (const std::optional<Effect> effect = readable(cpu) ? effect_size(cpu, sprite.depth) : std::nullopt) {
             sprite.shape = Shape{.row = row, .width = effect->wide.exact, .height = effect->tall.exact, .shadow = false};
@@ -482,6 +483,7 @@ enum class Cover { none, front, past, over };
     gte_ws_x_squash(&num, &den);
     const double unsquash = num > 0 && den > 0 ? static_cast<double>(den) / num : 1.0;
     std::array<std::array<double, 3>, 4> place{}, camera{};
+    const double horizon = disruptor_vertical_camera_projection_row();
     for (uint32_t corner = 0; corner < corners; ++corner) {
         const uint32_t word = at + 8u + corner * stride;
         int32_t x16 = 0, y16 = 0;
@@ -491,11 +493,11 @@ enum class Cover { none, front, past, over };
         }
         const double x = static_cast<double>(x16) / kOne, y = static_cast<double>(y16) / kOne;
         place[corner] = {x, y, static_cast<double>(z)};
-        camera[corner] = {(x - kFocal) * unsquash * z / kFocal, (y - kHorizon) * z / kFocal, static_cast<double>(z)};
+        camera[corner] = {(x - kFocal) * unsquash * z / kFocal, (y - horizon) * z / kFocal, static_cast<double>(z)};
     }
     constexpr std::array<std::array<uint32_t, 3>, 2> kTriangles{{{0u, 1u, 2u}, {1u, 3u, 2u}}};
     const Box upper{.left = box.left, .top = box.top, .right = box.right, .bottom = box.top + (box.bottom - box.top) / 2};
-    const std::array<double, 3> middle{(front.x - kFocal) * unsquash * front.depth / kFocal, (front.row - kHorizon) * front.depth / kFocal,
+    const std::array<double, 3> middle{(front.x - kFocal) * unsquash * front.depth / kFocal, (front.row - horizon) * front.depth / kFocal,
                                        front.depth};
     Cover found = Cover::none;
     for (uint32_t triangle = 0; triangle < (quad ? 2u : 1u); ++triangle) {

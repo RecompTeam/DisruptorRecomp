@@ -25,6 +25,8 @@ int disruptor_vertical_camera_active(void);
 /* True only while new mouse-Y input may update the requested pitch.  Existing
  * pitch is preserved across a temporary scripted-camera suspension. */
 int disruptor_vertical_camera_input_allowed(void);
+/* The horizon row the game's projection literals take at this moment: 120 unless a tilted frame is drawn in live play. */
+int disruptor_vertical_camera_projection_row(void);
 
 enum DisruptorVerticalCameraInstructionPhase {
     DISRUPTOR_VERTICAL_CAMERA_BEFORE_INSTRUCTION = 0,

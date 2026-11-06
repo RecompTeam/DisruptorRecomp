@@ -1289,7 +1289,9 @@ extern "C" double disruptor_mouse_vertical_pitch(void) {
 }
 
 extern "C" void disruptor_mouse_set_vertical_pitch(double pitch) {
+    load_configuration();
     g_mouse.vertical_pitch = pitch;
+    if (g_mouse.vertical_look_enabled) disruptor_vertical_camera_set_requested_pitch(pitch);
 }
 
 extern "C" void disruptor_mouse_recenter_vertical(void) {

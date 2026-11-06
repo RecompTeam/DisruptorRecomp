@@ -24,7 +24,6 @@ static inline GpuTemporalSprite gpu_temporal_sprite_from_fixed(int placed, int s
 }
 
 #define GPU_TEMPORAL_SPRITE_SIDE_LIMIT 3.0f /* px a side may move: a fraction, the squash's rounding and a size cut to whole pixels */
-#define GPU_TEMPORAL_SPRITE_HORIZON 120.0f
 #define GPU_TEMPORAL_SPRITE_FOCAL 160.0f
 #define GPU_TEMPORAL_SPRITE_MIDDLE 160.0f /* the column the game projects the view's middle to */
 #define GPU_SPRITE_CARD_FAR 0.15f  /* half width over depth a card turns all the way up to: a capsule's pickups and far enemies */
@@ -46,18 +45,18 @@ static inline int gpu_temporal_sprite_own_size(const GpuTemporalSprite *sprite, 
 
 /* How far the presentation moves the left, top, right and bottom side of a sprite's rectangle. left, top, w and h are
  * the rectangle on screen, raw_w and raw_h the packet's own size, scale the classic-wide squash. With `flat` a shadow
- * takes the height of a disc on the floor, and its top and bottom may then move by up to raw_h instead of the limit. */
+ * takes the height of a disc on the floor under `horizon`, and its top and bottom may then move by up to raw_h. */
 static inline void gpu_temporal_sprite_sides(const GpuTemporalSprite *sprite, float left, float top, int w, int h,
-                                             int raw_w, int raw_h, float scale, int flat, float sides[4]) {
+                                             int raw_w, int raw_h, float scale, int flat, float horizon, float sides[4]) {
     sides[0] = sides[1] = sides[2] = sides[3] = 0.0f;
     if (!sprite || !sprite->placed) return;
     const float cut = sprite->whole ? 0.5f : 1.5f, lean = sprite->whole ? 0.25f : -0.25f;
     float width = (float)w, height = (float)h, limit = GPU_TEMPORAL_SPRITE_SIDE_LIMIT;
     float centre_y = top + height * 0.5f + sprite->offset_y;
     if (gpu_temporal_sprite_own_size(sprite, raw_w, raw_h, scale, &width, &height, &centre_y)) {
-        if (sprite->shadow && flat && sprite->row > GPU_TEMPORAL_SPRITE_HORIZON) {
+        if (sprite->shadow && flat && sprite->row > horizon) {
             /* A disc on the floor is as tall as it is wide times its row under the horizon over the focal length. */
-            height = (sprite->width - cut) * (sprite->row - GPU_TEMPORAL_SPRITE_HORIZON) / GPU_TEMPORAL_SPRITE_FOCAL;
+            height = (sprite->width - cut) * (sprite->row - horizon) / GPU_TEMPORAL_SPRITE_FOCAL;
             limit = (float)raw_h;
         }
         if (width < 1.0f) width = 1.0f;

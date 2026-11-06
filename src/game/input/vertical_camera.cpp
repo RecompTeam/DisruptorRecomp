@@ -31,6 +31,7 @@
 #include <limits>
 
 extern "C" void gpu_geometry_camera_projection_center_y_set(double center_y);
+extern "C" int gpu_geometry_camera_projection_center_y_get(void);
 
 namespace {
 
@@ -163,7 +164,12 @@ int center_for_pitch(double pitch) {
         kProjectionH * std::tan(radians)));
 }
 
-void publish_neutral(CPUState *cpu) {
+void give_gpu_center(int center) {
+    if (gpu_geometry_camera_projection_center_y_get() != center)
+        gpu_geometry_camera_projection_center_y_set(static_cast<double>(center));
+}
+
+void publish_neutral(CPUState *cpu, bool host) {
     if (comparator_active()) return;
 
     const int was_active = g_effective_active.load(std::memory_order_relaxed);
@@ -174,15 +180,13 @@ void publish_neutral(CPUState *cpu) {
     g_effective_center_y.store(kNeutralCenterY, std::memory_order_relaxed);
     g_effective_active.store(0, std::memory_order_release);
 
-    /* Zero pitch is an exact no-op once neutral.  A prior non-zero frame must
-     * explicitly restore both guest GTE state and host presentation state. */
+    /* The GPU takes a frame's list after the renderer's end: a probe counted no world triangle between entry and end. */
+    if (host) give_gpu_center(kNeutralCenterY);
     if (!was_active && old_center == kNeutralCenterY) return;
     if (cpu) {
         gte_write_ctrl(cpu, 25u,
                        static_cast<uint32_t>(kNeutralCenterY << 16));
     }
-    gpu_geometry_camera_projection_center_y_set(
-        static_cast<double>(kNeutralCenterY));
 }
 
 void publish_pitch(CPUState *cpu, double pitch) {
@@ -191,7 +195,7 @@ void publish_pitch(CPUState *cpu, double pitch) {
     pitch = clamp_pitch(pitch);
     const int center = center_for_pitch(pitch);
     if (center == kNeutralCenterY) {
-        publish_neutral(cpu);
+        publish_neutral(cpu, true);
         return;
     }
     const double slope =
@@ -203,13 +207,13 @@ void publish_pitch(CPUState *cpu, double pitch) {
     g_effective_active.store(1, std::memory_order_release);
 
     gte_write_ctrl(cpu, 25u, static_cast<uint32_t>(center << 16));
-    gpu_geometry_camera_projection_center_y_set(static_cast<double>(center));
+    give_gpu_center(center);
 }
 
 void renderer_entry(CPUState *cpu, uint32_t address) {
     if (!cpu || address != kRendererEntry || comparator_active()) return;
     if (!plausible_live_gameplay()) {
-        publish_neutral(cpu);
+        publish_neutral(cpu, true);
         return;
     }
     publish_pitch(cpu,
@@ -345,6 +349,12 @@ extern "C" int disruptor_vertical_camera_effective_center_y(void) {
     return g_effective_center_y.load(std::memory_order_acquire);
 }
 
+extern "C" int disruptor_vertical_camera_projection_row(void) {
+    if (comparator_active() || !g_effective_active.load(std::memory_order_acquire) || !plausible_live_gameplay())
+        return kNeutralCenterY;
+    return g_effective_center_y.load(std::memory_order_relaxed);
+}
+
 extern "C" double disruptor_vertical_camera_effective_slope(void) {
     return g_effective_slope.load(std::memory_order_acquire);
 }
@@ -365,7 +375,7 @@ extern "C" void disruptor_vertical_camera_instruction_hook(
     if (phase != DISRUPTOR_VERTICAL_CAMERA_AFTER_INSTRUCTION) return;
 
     if (pc == kRendererRestore && instruction == kRendererRestoreOpcode) {
-        publish_neutral(cpu);
+        publish_neutral(cpu, false);
         return;
     }
 

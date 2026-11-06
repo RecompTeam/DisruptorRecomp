@@ -182,6 +182,9 @@ std::uint32_t psx_mod_gpu_dma_resolve_address(std::uint32_t address) {
     const std::uint32_t canonical = address & 0x00FFFFFCu;
     return canonical >= 0x00F00000u ? canonical : canonical & 0x001FFFFCu;
 }
+
+int g_horizon = 120;
+int disruptor_vertical_camera_projection_row(void) { return g_horizon; }
 }
 
 #include "../../src/game/render/sprite_depth.cpp"
@@ -486,7 +489,7 @@ void test_the_renderer_takes_every_effect_size() {
                 const int left = std::min(x0, x1), w = std::abs(x1 - x0), h = y2 - y0;
                 const GpuTemporalSprite sprite = gpu_temporal_sprite_from_fixed(1, 1, 0, 0, place.x, place.dy, size.row, size.width, size.height);
                 float sides[4];
-                gpu_temporal_sprite_sides(&sprite, static_cast<float>(left), static_cast<float>(y0), w, h, w + 1, h + 1, 1.0f, 0, sides);
+                gpu_temporal_sprite_sides(&sprite, static_cast<float>(left), static_cast<float>(y0), w, h, w + 1, h + 1, 1.0f, 0, 120.0f, sides);
                 const double cut_wide = std::abs(s6), exact_wide = 160.0 * 401.0 * 38.0 / (40.0 * depth);
                 const double wide = std::min(exact_wide, cut_wide + 1.5) + (mirrored ? 2.0 : 0.0) - 1.5;
                 const double tall = std::min(160.0 * 401.0 * 21.0 / (40.0 * depth), s2 + 1.5) - 1.5;
@@ -1515,6 +1518,55 @@ void test_a_face_sorted_behind_a_body_it_hides() {
 }
 
 
+/* Looking up or down moves the game's horizon row: sprite rows, shadows and the faces over a body are read from that row. */
+void test_a_tilted_horizon_moves_rows_with_it() {
+    g_horizon = 150;
+    {
+        CPUState cpu = ready(kTestFunnels[0]);
+        g_memory.clear();
+        cpu.gpr[21] = kActor;
+        put(kActor + 4u, 36u, 4);
+        put(kActor + 8u, 52u, 4);
+        run(cpu, kTestFunnels[0], kTestFunnels[0].packets[0]);
+        expect(sized_once(kRow + 30 * 65536, 9 * 65536, 13 * 65536, 0, 0), "a sprite's row stands under the tilted horizon");
+    }
+    const TestFunnel &fourth = kTestFunnels[3];
+    for (const std::uint32_t top : {66u, 36u}) {
+        CPUState cpu = ready(fourth);
+        fourth_actor(cpu, 0u, 5u, 3u);
+        put(kBody + 0xF8u, 60u, 4);
+        put(kBody + 0xFCu, 32u, 4);
+        put(kBody + 0xF4u, 100u, 4);
+        put(kActor + 0x28u, 500u, 2);
+        put(0x800775D0u, 80u, 4);
+        put(kPacket + 8u, 200u | top << 16, 4);
+        put(kPacket + 16u, 214u | top << 16, 4);
+        put(kPacket + 24u, 200u | (top + 7u) << 16, 4);
+        run(cpu, fourth, fourth.packets[0]);
+        if (top == 66u)
+            expect(sized_once(70 * 65536, 15 * 65536, 8 * 65536, 1, 0), "a shadow hangs from the tilted horizon");
+        else
+            expect(unsized(), "and one laid out from the level horizon is not the game's");
+    }
+    const auto lifted = [](std::array<Corner, 4> corners) {
+        for (Corner &corner : corners) corner.y += 30.0;
+        return corners;
+    };
+    CPUState cpu = body_before_its_record(5u, 600u);
+    g_projected.clear();
+    add_face(70u, kPackets + 192u, lifted(kFloor));
+    record(cpu);
+    expect(read_half(key_at(5u)) == 536u, "the floor in front of a body stays a floor under a tilted horizon");
+    cpu = body_before_its_record(5u, 600u);
+    g_projected.clear();
+    add_face(70u, kPackets + 192u, lifted({{{100.0, 137.78, 2700u}, {260.0, 137.78, 2700u}, {100.0, 134.55, 3300u}, {260.0, 134.55, 3300u}}}));
+    record(cpu);
+    expect(read_half(key_at(5u)) == 600u, "and a level face above its foot stays level");
+    forget();
+    g_memory.clear();
+    g_horizon = 120;
+}
+
 void test_the_nearest_depth_over_a_box() {
     const auto near = [](const Box &box, std::array<std::array<double, 3>, 3> corners) {
         for (auto &corner : corners) corner[2] = 1.0 / corner[2];
@@ -1559,6 +1611,7 @@ int main() {
     test_walls_hold_bodies_in_order();
     test_a_face_sorted_behind_a_body_it_hides();
     test_the_nearest_depth_over_a_box();
+    test_a_tilted_horizon_moves_rows_with_it();
     expect(g_places.empty() && g_sizes.empty(), "no test leaves a place or a size behind");
     if (g_failures) return 1;
     std::cout << "Disruptor sprite depth tests passed\n";

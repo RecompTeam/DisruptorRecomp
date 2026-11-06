@@ -25,11 +25,13 @@ struct Drawn {
     int raw_h = 20;
     float scale = 1.0f;
     int flat = 0;
+    float horizon = 120.0f;
 };
 
 std::array<float, 4> sides(const GpuTemporalSprite *sprite, const Drawn &drawn) {
     std::array<float, 4> moved{9.0f, 9.0f, 9.0f, 9.0f};
-    gpu_temporal_sprite_sides(sprite, drawn.left, drawn.top, drawn.w, drawn.h, drawn.raw_w, drawn.raw_h, drawn.scale, drawn.flat, moved.data());
+    gpu_temporal_sprite_sides(sprite, drawn.left, drawn.top, drawn.w, drawn.h, drawn.raw_w, drawn.raw_h, drawn.scale, drawn.flat, drawn.horizon,
+                              moved.data());
     return moved;
 }
 
@@ -169,6 +171,10 @@ void test_a_shadow_lies_flat_when_asked() {
     expect(is(sides(&sprite, under(0)), -0.05f, 0.05f, 0.05f, 0.45f), "a shadow keeps the game's height by default");
     /* 14.1 * 48 / 160 = 4.23 tall: the top comes down 5.635 px, more than the limit of the other sides. */
     expect(is(sides(&sprite, under(1)), -0.05f, 5.635f, 0.05f, -5.135f), "flat, it is as tall as its row under the horizon makes a disc");
+    Drawn tilted = under(1);
+    tilted.horizon = 144.0f;
+    /* 24 rows under a horizon tilted to 144: 14.1 * 24 / 160 = 2.115 tall. */
+    expect(is(sides(&sprite, tilted), -0.05f, 6.6925f, 0.05f, -6.1925f), "under a tilted horizon the disc is as tall as its row under that one");
     /* Squashed to three quarters: 10.575 wide around 107.0625, and still 14.1 * 48 / 160 tall. */
     Drawn narrow = under(1);
     narrow.w = 10;

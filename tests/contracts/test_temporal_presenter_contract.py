@@ -333,7 +333,8 @@ require(
     and "    const GpuTemporalSprite sprite = gpu_temporal_sprite_from_fixed(\n        t->placed, t->sized, t->shadow, t->whole, t->centre_x, t->offset_y, t->row, t->width, t->height);"
     in sides
     and "    gpu_temporal_sprite_sides(&sprite, (float)x, (float)y, w, h, raw_w, raw_h,\n"
-    "                              squashed ? (float)ws_xnum / (float)ws_xden : 1.0f, gpu_shadow_shape(), sides);"
+    "                              squashed ? (float)ws_xnum / (float)ws_xden : 1.0f, gpu_shadow_shape(),\n"
+    "                              (float)s_geometry_camera_projection_center_y, sides);"
     in sides
     and '#include "gpu_temporal_sprite.h"' in gpu
     and "static inline void gpu_temporal_sprite_sides(const GpuTemporalSprite *sprite, float left, float top, int w, int h,"
