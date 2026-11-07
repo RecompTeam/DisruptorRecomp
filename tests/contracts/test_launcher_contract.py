@@ -505,4 +505,23 @@ require(
     "and the launcher's window its icon: a desktop shows the entry's icon for both",
 )
 
+first_frame = re.search(
+    r'inline constexpr std::string_view first_frame_line = "([^"]+)";', read("src/launcher/startup_log.h")
+)
+require(
+    first_frame is not None
+    and f'std::printf("{first_frame.group(1)}%.1f s after the start\\n", seconds);'
+    in read("src/game/session/diagnostics.cpp")
+    and "    std::setvbuf(stdout, nullptr, _IONBF, 0);\n" in runtime_main
+    and '    launch.output = data / "startup.log";\n' in window
+    and 'if (first_frame_.seen(data_ / "startup.log")) game_showed_ = game_shown_ = true;' in session
+    and session.index("        if (!game_showed_ && (code || now >= next_look_)) {\n")
+    < session.index('if (first_frame_.seen(data_ / "startup.log"))')
+    < session.index("        if (code) game_ended(*code);\n")
+    and "        first_frame_ = {};\n" in session
+    and "    game_end_ = code;\n" in session,
+    "the launcher closes for the game on the line the game writes unbuffered into startup.log at its first picture, "
+    "reading each game's log from its start and once more as the game ends, and comes back or ends with its exit code",
+)
+
 print("Disruptor launcher source contract: PASS")

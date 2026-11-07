@@ -80,7 +80,14 @@ void Session::poll() {
     if (upgrade) finish_upgrade(*upgrade);
     if (earlier) finish_earlier(*earlier);
     if (game_) {
-        if (const auto code = game_->ended()) game_ended(*code);
+        const auto code = game_->ended();
+        const auto now = std::chrono::steady_clock::now();
+        // A game gone between two looks has its log read once more: its picture may have come meanwhile.
+        if (!game_showed_ && (code || now >= next_look_)) {
+            next_look_ = now + std::chrono::milliseconds(250);
+            if (first_frame_.seen(data_ / "startup.log")) game_showed_ = game_shown_ = true;
+        }
+        if (code) game_ended(*code);
     }
 }
 
@@ -265,6 +272,10 @@ void Session::finish_earlier(Earlier& earlier) {
 void Session::launch() {
     try {
         game_ = std::make_unique<GameProcess>(program_, data_, verified_);
+        first_frame_ = {};
+        next_look_ = {};
+        game_showed_ = game_shown_ = false;
+        game_end_.reset();
         say(running_text(environment_overrides()));
     } catch (const std::exception& error) {
         say(error_text(error));
@@ -274,6 +285,7 @@ void Session::launch() {
 void Session::game_ended(unsigned long code) {
     const unsigned long long seconds = game_->seconds();
     game_.reset();
+    game_end_ = code;
     settings_.load(); // the in-game menu writes the same file
     if (code == 0) {
         show({});

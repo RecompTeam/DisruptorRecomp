@@ -67,6 +67,18 @@ std::wstring running_text(const std::wstring& overriding);
 // What the status line shows: what was said, then a settings problem under it. Empty shows no line.
 std::wstring shown_status(std::wstring_view said, std::wstring_view problem);
 
+// The window while a game it started runs, when the player chose to close it once the game shows a picture. The
+// process outlives the window to the game's end, so the exit is still noted in the log and an error still shown.
+enum class WindowStep { stay, hide, show, close };
+class GameWindow {
+public:
+    // `shown`: the game showed its first picture since the last call. `ended`: its exit code, when it ended since then.
+    WindowStep after(bool shown, std::optional<unsigned long> ended, bool close_after_start);
+
+private:
+    bool hidden_ = false;
+};
+
 // The language box: English first, then the listed discs in their order.
 struct LanguageList {
     std::vector<std::wstring> labels;

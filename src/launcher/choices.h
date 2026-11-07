@@ -17,6 +17,8 @@ struct WindowPlace {
 // What the launcher alone keeps, in launcher.ini beside settings.toml.
 struct LauncherChoices {
     bool check_for_updates = true;
+    // The window goes once the game it started shows its first picture, and the launcher ends with the game.
+    bool close_after_start = false;
     std::optional<WindowPlace> window;
 };
 

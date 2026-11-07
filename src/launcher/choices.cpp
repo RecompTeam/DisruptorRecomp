@@ -9,6 +9,7 @@ namespace disruptor::launcher {
 namespace {
 
 constexpr const char* check_key = "check_for_updates = ";
+constexpr const char* close_key = "close_after_start = ";
 constexpr const char* window_key = "window = ";
 constexpr int smallest_side = 200;
 constexpr int largest_side = 16384;
@@ -35,6 +36,7 @@ LauncherChoices read_choices(const std::filesystem::path& file) {
     for (std::string line; std::getline(input, line);) {
         if (!line.empty() && line.back() == '\r') line.pop_back();
         if (line.starts_with(check_key)) choices.check_for_updates = line.substr(std::string(check_key).size()) != "false";
+        if (line.starts_with(close_key)) choices.close_after_start = line.substr(std::string(close_key).size()) == "true";
         if (line.starts_with(window_key)) choices.window = place_of(line.substr(std::string(window_key).size()));
     }
     return choices;
@@ -43,6 +45,7 @@ LauncherChoices read_choices(const std::filesystem::path& file) {
 bool write_choices(const std::filesystem::path& file, const LauncherChoices& choices) {
     std::ofstream output(file, std::ios::binary | std::ios::trunc);
     output << check_key << (choices.check_for_updates ? "true" : "false") << "\n";
+    output << close_key << (choices.close_after_start ? "true" : "false") << "\n";
     if (const auto& place = choices.window)
         output << window_key << place->x << " " << place->y << " " << place->width << " " << place->height << " "
                << (place->maximized ? 1 : 0) << "\n";

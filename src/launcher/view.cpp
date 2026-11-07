@@ -47,6 +47,7 @@ constexpr const char* kTeamPage = "https://github.com/RecompTeam";
 constexpr const char* kDiscord = "https://discord.gg/hWbFatkXpU";
 constexpr const char* kGuidePage = "https://github.com/RecompTeam/DisruptorRecomp/blob/main/docs/PLAYING.md";
 constexpr float kFontSize = 16.0f, kSmallSize = 15.0f;
+constexpr const char* kCloseChoice = "Close the launcher when the game starts";
 // Inter's thin stems drawn light on dark lose weight in grayscale blending: coverage of the regular face times 1.25.
 constexpr float kRegularInk = 1.25f;
 constexpr float kSidebarWidth = 216.0f, kCaptionHeight = 40.0f, kCaptionButton = 46.0f, kResizeEdge = 6.0f;
@@ -240,6 +241,8 @@ void card_begin(const char* id, float width, float height = 0.0f) {
 
 // How tall the card's contents want it, padding included.
 float toggle_width() { return ImGui::GetFrameHeight() * 0.78f * 1.8f; }
+
+float close_choice_width() { return ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x + ImGui::CalcTextSize(kCloseChoice).x; }
 
 float settings_column(float scale) { return (kRowWidth + 2.0f * kRowsPadding) * scale + ImGui::GetStyle().ScrollbarSize; }
 
@@ -980,8 +983,10 @@ void View::banner(float height, bool dialog_open) {
     const float pill_size = ImGui::GetFontSize() * 0.9f;
     const ImVec2 said_size = pill_font->CalcTextSizeA(pill_size, width * 0.55f, 0.0f, said.c_str());
     const float pill_height = 28.0f * scale_;
+    // The lowest row holds the choice to close the launcher, under PLAY: the rest stands above it.
+    const float floor_y = bottom.y - pad - ImGui::GetFrameHeight() - 8.0f * scale_;
     const bool sub = playable && !busy;
-    const ImVec2 pill(top.x + pad, bottom.y - pad - pill_height - (sub ? 26.0f * scale_ : 0.0f));
+    const ImVec2 pill(top.x + pad, floor_y - pill_height - (sub ? 26.0f * scale_ : 0.0f));
     draw->AddRectFilled(pill, pill + ImVec2(said_size.x + 40.0f * scale_, pill_height), colour(0x0a0e0b, 0.82f), pill_height * 0.5f);
     draw->AddRect(pill, pill + ImVec2(said_size.x + 40.0f * scale_, pill_height), colour(kBorder), pill_height * 0.5f);
     if (busy) {
@@ -1004,10 +1009,11 @@ void View::banner(float height, bool dialog_open) {
     }
 
     const ImVec2 play_size(210.0f * scale_, 56.0f * scale_);
-    const ImVec2 play_at(bottom.x - pad - play_size.x, bottom.y - pad - play_size.y);
+    const ImVec2 play_at(bottom.x - pad - play_size.x, floor_y - play_size.y);
+    const float choice_left = bottom.x - pad - close_choice_width();
     if (busy && session_.cancellable()) {
         ImGui::SetCursorScreenPos(ImVec2(bottom.x - pad - ImGui::CalcTextSize("Cancel").x - ImGui::GetStyle().FramePadding.x * 2.0f,
-                                         bottom.y - pad - ImGui::GetFrameHeight()));
+                                         floor_y - ImGui::GetFrameHeight()));
         if (ImGui::Button("Cancel")) session_.cancel();
     } else {
         ImGui::SetCursorScreenPos(play_at);
@@ -1040,13 +1046,15 @@ void View::banner(float height, bool dialog_open) {
         }
         focus_ring(ImGui::GetItemID(), play_at, play_at + play_size, 10.0f * scale_);
         if (pressed && playable && !held_off("play")) session_.play();
-        // Beside PLAY, else above it where the logo leaves room, else in a line under the banner.
+        // Beside PLAY, else beside the choice under it, else above PLAY where the logo leaves room, else under the banner.
         const float above = play_at.y - 12.0f * scale_ - ImGui::GetTextLineHeight();
-        if (!busy && !last_activity(taken + pad, play_at.x - 18.0f * scale_, play_at.y + play_size.y * 0.5f)) {
+        if (!busy && !last_activity(taken + pad, play_at.x - 18.0f * scale_, play_at.y + play_size.y * 0.5f) &&
+            !last_activity(top.x + pad, choice_left - 28.0f * scale_, bottom.y - pad - ImGui::GetFrameHeight() * 0.5f)) {
             if (above - ImGui::GetTextLineHeight() * 0.5f >= logo_bottom) last_activity(top.x + pad, bottom.x - pad, above);
             else status_below_ = true;
         }
     }
+    close_choice(bottom.x - pad, bottom.y - pad, dialog_open);
     if (busy) {
         const float done = std::clamp(static_cast<float>(session_.progress()) / 100.0f, 0.0f, 1.0f);
         const float inset = rounding;
@@ -1055,6 +1063,22 @@ void View::banner(float height, bool dialog_open) {
     }
     ImGui::SetCursorScreenPos(top);
     ImGui::Dummy(ImVec2(width, height));
+}
+
+void View::close_choice(float right, float bottom, bool dialog_open) {
+    ImGui::SetCursorScreenPos(ImVec2(right - close_choice_width(), bottom - ImGui::GetFrameHeight()));
+    bool chosen = choices_.close_after_start;
+    ImGui::BeginDisabled(dialog_open);
+    ImGui::PushStyleColor(ImGuiCol_Text, rgb(kMuted));
+    const bool changed = ImGui::Checkbox(kCloseChoice, &chosen);
+    ImGui::PopStyleColor();
+    hand_when_hovered();
+    ImGui::EndDisabled();
+    tooltip("The launcher closes as soon as the game is on the screen\nIt comes back if the game ends with an error");
+    if (!changed) return;
+    choices_.close_after_start = chosen;
+    if (!write_choices(choices_file_, choices_))
+        activity_.add("launcher.ini cannot be written, so the choice holds until the launcher closes");
 }
 
 void View::first_run(bool dialog_open) {

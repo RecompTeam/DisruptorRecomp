@@ -106,6 +106,8 @@ private:
     void step_page(int step);
     bool home(const UpdateView& update);
     void banner(float height, bool dialog_open);
+    // The choice to close the launcher once the game shows, its lower right corner at `right` and `bottom`.
+    void close_choice(float right, float bottom, bool dialog_open);
     void first_run(bool dialog_open);
     void cards(bool dialog_open);
     // The last task's line between `left` and `right`. False, with nothing drawn, when it has no room there.

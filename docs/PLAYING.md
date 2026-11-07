@@ -73,6 +73,9 @@ start.
 In the game's menu, pick **New Game** with the arrow keys and **Enter**, or
 **Practice Mode** for a training mission.
 
+- **Close the launcher when the game starts**, under **Play**, closes the
+  launcher once the game is on the screen. It comes back if the game stops
+  with an error.
 - If the game stops with an error, the launcher says so in its banner, beside
   **Play**.
 - **Details** there shows the end of `startup.log` and everything the launcher

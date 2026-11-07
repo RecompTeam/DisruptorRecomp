@@ -98,6 +98,14 @@ std::wstring shown_status(std::wstring_view said, std::wstring_view problem) {
     return text;
 }
 
+WindowStep GameWindow::after(bool shown, std::optional<unsigned long> ended, bool close_after_start) {
+    const bool hide = shown && close_after_start && !hidden_;
+    if (hide) hidden_ = true;
+    if (!ended) return hide ? WindowStep::hide : WindowStep::stay;
+    if (!std::exchange(hidden_, false)) return WindowStep::stay;
+    return *ended == 0 ? WindowStep::close : WindowStep::show;
+}
+
 std::wstring running_text(const std::wstring& overriding) {
     std::wstring text = L"Disruptor is running\nYou can close this launcher and keep playing";
     if (!overriding.empty())

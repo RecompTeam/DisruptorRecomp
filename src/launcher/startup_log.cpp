@@ -40,6 +40,31 @@ std::wstring log_tail(const fs::path& log, size_t lines) {
     return wide(joined);
 }
 
+bool FirstFrameWatch::seen(const fs::path& log) {
+    if (seen_) return true;
+    std::ifstream file(log, std::ios::binary | std::ios::ate);
+    const std::streamoff size = file ? static_cast<std::streamoff>(file.tellg()) : -1;
+    if (size < 0 || static_cast<std::uintmax_t>(size) < read_) {
+        read_ = 0;
+        line_.clear();
+    }
+    if (size <= 0 || static_cast<std::uintmax_t>(size) == read_) return false;
+    std::string text(static_cast<size_t>(static_cast<std::uintmax_t>(size) - read_), '\0');
+    file.seekg(static_cast<std::streamoff>(read_));
+    file.read(text.data(), static_cast<std::streamsize>(text.size()));
+    text.resize(static_cast<size_t>(std::max<std::streamsize>(file.gcount(), 0)));
+    read_ += text.size();
+    for (const char letter : text) {
+        if (letter == '\n') {
+            line_.clear();
+            continue;
+        }
+        if (line_.size() < first_frame_line.size()) line_ += letter;
+        if (line_ == first_frame_line) return seen_ = true;
+    }
+    return false;
+}
+
 void note_exit(const fs::path& log, unsigned long code, unsigned long long seconds) {
     bool mid_line = false;
     if (std::ifstream file(log, std::ios::binary | std::ios::ate); file && file.tellg() > 0) {

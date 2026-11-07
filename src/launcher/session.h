@@ -7,9 +7,11 @@
 #include "launcher_flow.h"
 #include "launcher_settings.h"
 #include "player_files.h"
+#include "startup_log.h"
 #include "state_upgrade.h"
 
 #include <atomic>
+#include <chrono>
 #include <filesystem>
 #include <functional>
 #include <memory>
@@ -76,6 +78,9 @@ public:
     bool cancellable() const { return busy_ && !closing_; }
     // A game this launcher started, or one started before it opened or beside it on the same player's files.
     bool game_running() const { return game_ != nullptr || other_game_; }
+    // Once each: the game this launcher started showed its first picture, and its exit code when it ended.
+    bool take_game_shown() { return std::exchange(game_shown_, false); }
+    std::optional<unsigned long> take_game_end() { return std::exchange(game_end_, std::nullopt); }
     bool editable() const { return !busy_ && !game_running() && settings_.readable(); }
     bool playable() const { return !busy_ && !game_running() && verified_.profile; }
     const SettingsFile& settings() const { return settings_; }
@@ -124,6 +129,10 @@ private:
     bool busy_ = false, closing_ = false, closed_ = false, upgraded_ = false;
     std::unique_ptr<GameProcess> game_;
     bool other_game_ = false;
+    FirstFrameWatch first_frame_;
+    std::chrono::steady_clock::time_point next_look_{};
+    bool game_showed_ = false, game_shown_ = false;
+    std::optional<unsigned long> game_end_;
     VerifiedDisc verified_;
     Regions regions_; // filled by the worker only: an image on a share that is gone must not stall the window
     std::wstring status_;

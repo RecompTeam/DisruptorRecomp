@@ -3,6 +3,7 @@
 #include "disc_import.h"
 #include "game/settings/user_folder.h"
 #include "game_process.h"
+#include "launcher_flow.h"
 #include "launcher_settings.h"
 #include "platform.h"
 #include "session.h"
@@ -613,6 +614,7 @@ int run_window(const Arguments& arguments, Updater& updater, Activity& activity,
             return true;
         };
         SDL_AddEventWatch(redraw, &live);
+        GameWindow game_window;
         bool running = true;
         // Frames go on a while after the last event, so a tooltip shows at its own delay and not at the next 250 ms wake.
         constexpr Uint64 kLively = 700;
@@ -666,16 +668,33 @@ int run_window(const Arguments& arguments, Updater& updater, Activity& activity,
                 lively_until = SDL_GetTicks() + kLively;
             }
             if (session.closed()) running = false;
-            if (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED) {
+            if (SDL_GetWindowFlags(window) & (SDL_WINDOW_MINIMIZED | SDL_WINDOW_HIDDEN)) {
                 session.poll();
-                continue;
+            } else {
+                if (frame()) running = false;
+                SDL_RenderPresent(renderer);
+                // After the first frame is on screen: opening the gamepads made the start about 120 ms slower.
+                if (!std::exchange(gamepads_tried, true)) {
+                    gamepads = SDL_InitSubSystem(SDL_INIT_GAMEPAD);
+                    choose_nav_pad();
+                }
             }
-            if (frame()) running = false;
-            SDL_RenderPresent(renderer);
-            // After the first frame is on screen: opening the gamepads made the start about 120 ms slower.
-            if (!std::exchange(gamepads_tried, true)) {
-                gamepads = SDL_InitSubSystem(SDL_INIT_GAMEPAD);
-                choose_nav_pad();
+            switch (game_window.after(session.take_game_shown(), session.take_game_end(), view.choices().close_after_start)) {
+            case WindowStep::hide:
+                note_normal();
+                if (normal) normal->maximized = (SDL_GetWindowFlags(window) & SDL_WINDOW_MAXIMIZED) != 0;
+                SDL_HideWindow(window);
+                break;
+            case WindowStep::show:
+                SDL_ShowWindow(window);
+                if (SDL_GetWindowFlags(window) & SDL_WINDOW_MINIMIZED) SDL_RestoreWindow(window);
+                SDL_RaiseWindow(window);
+                break;
+            case WindowStep::close:
+                if (session.close()) running = false;
+                break;
+            case WindowStep::stay:
+                break;
             }
         }
         SDL_RemoveEventWatch(redraw, &live);
@@ -685,7 +704,8 @@ int run_window(const Arguments& arguments, Updater& updater, Activity& activity,
         LauncherChoices kept = view.choices();
         note_normal();
         if (normal) {
-            normal->maximized = (SDL_GetWindowFlags(window) & SDL_WINDOW_MAXIMIZED) != 0;
+            // A window hidden for the game keeps what it was as it went.
+            if (!(SDL_GetWindowFlags(window) & SDL_WINDOW_HIDDEN)) normal->maximized = (SDL_GetWindowFlags(window) & SDL_WINDOW_MAXIMIZED) != 0;
             kept.window = normal;
         }
         write_choices(choices_file, kept);

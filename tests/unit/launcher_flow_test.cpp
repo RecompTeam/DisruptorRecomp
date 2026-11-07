@@ -1,5 +1,6 @@
 #include "choices.h"
 #include "launcher_flow.h"
+#include "startup_log.h"
 
 #include <algorithm>
 #include <atomic>
@@ -335,13 +336,15 @@ void test_the_launcher_choices() {
     const fs::path file = fs::temp_directory_path() / "disruptor-launcher-choices-test.ini";
     fs::remove(file);
     LauncherChoices none = read_choices(file);
-    require(none.check_for_updates && !none.window, "without the file updates are checked and no place is known");
+    require(none.check_for_updates && !none.close_after_start && !none.window,
+            "without the file updates are checked, the launcher stays with the game and no place is known");
     LauncherChoices chosen;
     chosen.check_for_updates = false;
+    chosen.close_after_start = true;
     chosen.window = WindowPlace{-1200, 40, 1100, 760, true};
     require(write_choices(file, chosen), "the choices are written");
     const LauncherChoices back = read_choices(file);
-    require(!back.check_for_updates && back.window && back.window->x == -1200 && back.window->y == 40 &&
+    require(!back.check_for_updates && back.close_after_start && back.window && back.window->x == -1200 && back.window->y == 40 &&
                 back.window->width == 1100 && back.window->height == 760 && back.window->maximized,
             "they read back, a place on a monitor left of the main one included");
     for (const char* broken : {"window = 10 10 50 50 0", "window = 10 10 1000", "window = 10 10 1000 700 2", "window = a b c d e",
@@ -351,6 +354,47 @@ void test_the_launcher_choices() {
         require(!read_choices(file).window, "a place too small, cut short, not numbers or beyond any desktop is forgotten");
     }
     fs::remove(file);
+}
+
+void test_the_first_picture_is_seen_in_the_log() {
+    const fs::path log = fs::temp_directory_path() / "disruptor-first-frame-test.log";
+    fs::remove(log);
+    FirstFrameWatch watch;
+    require(!watch.seen(log), "a log not made yet shows no picture");
+    const auto add = [&](const std::string& text) { std::ofstream(log, std::ios::binary | std::ios::app) << text; };
+    add("launcher: started 2026-11-07\r\npsxrecomp: main() entered\r\nnote: disruptor: first frame 1.0 s after the start\r\n");
+    require(!watch.seen(log), "the words inside another line are no picture");
+    add("disruptor: first fr");
+    require(!watch.seen(log), "half the line is no picture");
+    add("ame 2.3 s after the start\r\n");
+    require(watch.seen(log) && watch.seen(log), "the line read in two parts is the picture, and stays seen");
+    std::ofstream(log, std::ios::binary | std::ios::trunc) << "launcher: started again\r\n";
+    FirstFrameWatch next;
+    require(!next.seen(log), "a new game's log shows no picture before its own line");
+    FirstFrameWatch shorter;
+    std::ofstream(log, std::ios::binary | std::ios::trunc) << std::string(400, 'a') << "\n";
+    require(!shorter.seen(log), "a long first read without the line shows none");
+    std::ofstream(log, std::ios::binary | std::ios::trunc) << "disruptor: first frame 0.9 s after the start\n";
+    require(shorter.seen(log), "a log that began again is read from its start");
+    fs::remove(log);
+}
+
+void test_the_window_goes_with_the_game() {
+    GameWindow kept;
+    require(kept.after(true, std::nullopt, false) == WindowStep::stay && kept.after(false, 0ul, false) == WindowStep::stay,
+            "with the choice off the window stays through the game");
+    GameWindow closing;
+    require(closing.after(false, std::nullopt, true) == WindowStep::stay, "before the game's first picture the window stays");
+    require(closing.after(true, std::nullopt, true) == WindowStep::hide, "the first picture hides it");
+    require(closing.after(false, std::nullopt, true) == WindowStep::stay, "and it stays hidden while the game runs");
+    require(closing.after(false, 0ul, false) == WindowStep::close, "a game that ends well closes the launcher, the choice turned off meanwhile");
+    GameWindow failing;
+    failing.after(true, std::nullopt, true);
+    require(failing.after(false, 0xC0000005ul, true) == WindowStep::show, "a game that ends with an error brings the window back");
+    require(failing.after(true, std::nullopt, true) == WindowStep::hide, "the next game hides it again");
+    GameWindow early;
+    require(early.after(false, 1ul, true) == WindowStep::stay, "a game that ends before its first picture leaves the window where it was");
+    require(early.after(true, 0ul, true) == WindowStep::close, "a picture and a good end at once close the launcher");
 }
 
 void test_the_command_line() {
@@ -430,6 +474,8 @@ int main() {
         test_fitted_text();
         test_the_title_bar();
         test_the_launcher_choices();
+        test_the_first_picture_is_seen_in_the_log();
+        test_the_window_goes_with_the_game();
         test_the_sliders();
     } catch (const std::exception& error) {
         std::cerr << "FAIL: " << error.what() << '\n';
