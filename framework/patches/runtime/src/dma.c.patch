@@ -1,8 +1,68 @@
 diff --git a/runtime/src/dma.c b/runtime/src/dma.c
-index 1b20ca91462901edd4f92e4b0aa1478b8af964a4..d4d41578aed0f86eafe185f9ce6b8a1b67e10875 100644
+index 1b20ca91462901edd4f92e4b0aa1478b8af964a4..76530043ce42573a9e562337c649149bec120c14 100644
 --- a/runtime/src/dma.c
 +++ b/runtime/src/dma.c
-@@ -1122,6 +1122,10 @@
+@@ -20,6 +20,7 @@
+ #include "gpu.h"
+ #include "mdec.h"
+ #include "mod_memory.h"
++#include "gpu_dma_step.h"
+ #include "overlay_capture.h"
+ #include "psx_cycles.h"
+ #include "psx_memory.h"
+@@ -917,12 +918,13 @@
+             uint32_t block_size = channels[2].bcr & 0xFFFF;
+             uint32_t block_count = (channels[2].bcr >> 16) & 0xFFFF;
+             uint32_t total_words = block_size * block_count;
+-            uint32_t addr = DMA_RAM_ADDR(channels[2].madr);
++            const uint32_t used = psx_mod_gpu_dma_memory_bytes();
++            uint32_t addr = psx_mod_gpu_dma_resolve_address_for(channels[2].madr, used);
+             int32_t  addr_step = step ? -4 : 4;
+             for (uint32_t i = 0; i < total_words; i++) {
+                 uint32_t pixel_data = gpu_read_gpuread();
+                 psx_write_word(addr, pixel_data);
+-                addr = DMA_RAM_ADDR((addr + addr_step));
++                addr = psx_gpu_dma_next_for(addr, addr_step, used);
+             }
+             channels[2].madr = addr;
+             actual_words = total_words;
+@@ -936,14 +938,15 @@
+         uint32_t block_size = channels[2].bcr & 0xFFFF;
+         uint32_t block_count = (channels[2].bcr >> 16) & 0xFFFF;
+         uint32_t total_words = block_size * block_count;
+-        uint32_t addr = DMA_RAM_ADDR(channels[2].madr); /* mask to RAM, word-aligned */
++        const uint32_t used = psx_mod_gpu_dma_memory_bytes();
++        uint32_t addr = psx_mod_gpu_dma_resolve_address_for(channels[2].madr, used);
+         int32_t  addr_step = step ? -4 : 4;
+ 
+         for (uint32_t i = 0; i < total_words; i++) {
+             uint32_t word = psx_read_word(addr);
+             gpu_set_gp0_source(addr);
+             gpu_write_gp0(word);
+-            addr = DMA_RAM_ADDR((addr + addr_step));
++            addr = psx_gpu_dma_next_for(addr, addr_step, used);
+         }
+         channels[2].madr = addr;
+         actual_words = total_words;
+@@ -955,14 +958,15 @@
+         /* Burst mode (sync_mode == 0) */
+         uint32_t word_count = channels[2].bcr & 0xFFFF;
+         if (word_count == 0) word_count = 0x10000; /* 0 means 0x10000 */
+-        uint32_t addr = DMA_RAM_ADDR(channels[2].madr);
++        const uint32_t used = psx_mod_gpu_dma_memory_bytes();
++        uint32_t addr = psx_mod_gpu_dma_resolve_address_for(channels[2].madr, used);
+         int32_t  addr_step = step ? -4 : 4;
+ 
+         for (uint32_t i = 0; i < word_count; i++) {
+             uint32_t word = psx_read_word(addr);
+             gpu_set_gp0_source(addr);
+             gpu_write_gp0(word);
+-            addr = DMA_RAM_ADDR((addr + addr_step));
++            addr = psx_gpu_dma_next_for(addr, addr_step, used);
+         }
+         channels[2].madr = addr;
+         actual_words = word_count;
+@@ -1122,6 +1126,10 @@
              } else {
                  schedule_delayed_complete(2, execute_ch2_gpu(),
                                            DMA_GPU_CYCLES_PER_WORD);
@@ -13,7 +73,7 @@ index 1b20ca91462901edd4f92e4b0aa1478b8af964a4..d4d41578aed0f86eafe185f9ce6b8a1b
              }
              break;
          case 3:
-@@ -1290,7 +1294,9 @@
+@@ -1290,7 +1298,9 @@
          g_dma_cur_madr = gpu_linked_list.current_addr;
          g_dma_cur_bcr = channels[2].bcr;
          g_dma_initiator_pc = s_dma_ch_initiator_pc[2];

@@ -453,4 +453,10 @@ require(
     "the wall texture's light first row is replaced at every upload to video memory and every loaded save state",
 )
 
+require(
+    "    return (present && !hands_empty) || disruptor::weapon_switching(hands_empty) || disruptor::unarmed();\n"
+    in source,
+    "far rendering stays on while the player owns no weapon",
+)
+
 print("far rendering source/codegen contract: PASS")

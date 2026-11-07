@@ -156,7 +156,7 @@ bool plausible_live_gameplay() {
     const uint32_t player = psx_mod_read_word(kPlayerPointer);
     const bool present = valid_main_ram_pointer(player, kPlayerInactiveOffset);
     const bool hands_empty = present && psx_mod_read_byte(player + kPlayerInactiveOffset) != 0u;
-    return (present && !hands_empty) || disruptor::weapon_switching(hands_empty);
+    return (present && !hands_empty) || disruptor::weapon_switching(hands_empty) || disruptor::unarmed();
 }
 
 double clamp_pitch(double pitch) {

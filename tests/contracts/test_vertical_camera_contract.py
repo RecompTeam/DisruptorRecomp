@@ -111,4 +111,10 @@ require(
     "the exact-instruction dispatcher must remain a declared C ABI",
 )
 
+require(
+    "    return (present && !hands_empty) || disruptor::weapon_switching(hands_empty) || disruptor::unarmed();\n"
+    in camera,
+    "a player with no weapon owned plays live: mission 6 starts unarmed",
+)
+
 print("vertical camera source/codegen contract: PASS")
