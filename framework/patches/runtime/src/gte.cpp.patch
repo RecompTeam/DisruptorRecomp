@@ -1,5 +1,5 @@
 diff --git a/runtime/src/gte.cpp b/runtime/src/gte.cpp
-index 06a0b31c3bced061c5862228b266b2f216e2516b..897e69077d203e5ac335ccd3c90f05fe8f7b63d8 100644
+index 06a0b31c3bced061c5862228b266b2f216e2516b..f73a0aa0d1a411c8f6b6e9c4d992b24de7683aa0 100644
 --- a/runtime/src/gte.cpp
 +++ b/runtime/src/gte.cpp
 @@ -7,6 +7,9 @@
@@ -53,12 +53,12 @@ index 06a0b31c3bced061c5862228b266b2f216e2516b..897e69077d203e5ac335ccd3c90f05fe
 +/* Half of what a 16.16 coordinate holds: an exact place stays under it with the screen centre in, the drawing offset comes later. */
 +constexpr int64_t kUnboundedLimit16 = INT64_C(1) << 30;
 +
-+#define PRECISION_STORE_SIZE 65536u
++#define PRECISION_STORE_SIZE GTE_PRECISION_STORE_WORDS
 +struct PrecisionStoreTag {
 +    uint32_t addr;
 +    uint32_t generation;
 +};
-+/* Tags apart from the projections: every store into a live page checks a tag, 512 KB of them against 5.8 MB of entries. */
++/* Tags apart from the projections: every store into a live page checks a tag, 2 MB of them against 23 MB of entries. */
 +static PrecisionStoreTag s_precision_tag[PRECISION_STORE_SIZE];
 +static PreciseProjection s_precision_projection[PRECISION_STORE_SIZE];
 +extern "C" uint32_t g_gte_precision_ram_pages[16] = {};

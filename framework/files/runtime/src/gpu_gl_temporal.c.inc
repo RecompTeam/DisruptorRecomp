@@ -6,7 +6,7 @@
 #include "gpu_temporal_mesh.h"
 
 #define TEMP_BUILD_SLOTS (WIDE_MAX_SURF * 2)
-#define TEMP_MAX_VERTS 24576
+#define TEMP_MAX_VERTS (GPU_TEMPORAL_MAX_TRIANGLES * 3)
 #define TEMP_MAX_COMMANDS 2048
 #define TEMP_MAX_TEXTURES 16
 #define TEMP_NEAR_CORNERS 384 /* of near faces in one frame, kept by the level's point: 30 were the most seen */

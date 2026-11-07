@@ -421,5 +421,9 @@ require(
     "    if (!site) return;\n    disruptor_sprite_depth_packet(cpu, pc, cpu->gpr[site->packet_gpr]);" in billboards,
     "every audited billboard packet seam must hand its depth over, whatever the aspect mask says",
 )
+require(
+    "#define TEMP_MAX_VERTS (GPU_TEMPORAL_MAX_TRIANGLES * 3)\n" in temporal,
+    "a scene must hold as many triangles as the matcher takes, else a full frame falls back before matching",
+)
 
 print("Disruptor in-between presenter source contract: PASS")

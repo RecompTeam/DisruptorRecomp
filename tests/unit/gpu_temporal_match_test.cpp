@@ -229,11 +229,10 @@ void interpolated_depth() {
            "a departed corner on its way behind the viewer is as deep as it is on the way");
 }
 
-void scale_and_fallback() {
-    constexpr int count = GPU_TEMPORAL_MAX_TRIANGLES;
-    std::vector<GpuTemporalTriangle> previous, current;
-    std::vector<int> matches(count, -2);
-    previous.reserve(count); current.reserve(count);
+bool shifted_grid_matches(int count, std::vector<GpuTemporalTriangle> &previous, std::vector<GpuTemporalTriangle> &current,
+                          std::vector<int> &matches) {
+    previous.clear(); current.clear();
+    matches.assign(count, -2);
     for (int index = 0; index < count; ++index)
         previous.push_back(triangle(static_cast<float>(index % 128) * 80.0f,
                                     static_cast<float>(index / 128) * 80.0f));
@@ -246,7 +245,16 @@ void scale_and_fallback() {
     bool all_match = true;
     for (int index = 0; index < count; ++index)
         all_match = all_match && matches[index] == count - index - 1;
-    expect(all_match, "8192 repeated-material triangles remain spatially scalable");
+    return all_match;
+}
+
+void scale_and_fallback() {
+    constexpr int corridor = 8558;  /* the most triangles one frame of the owner's capsule 1794066724 drew */
+    constexpr int count = GPU_TEMPORAL_MAX_TRIANGLES;
+    std::vector<GpuTemporalTriangle> previous, current;
+    std::vector<int> matches;
+    expect(shifted_grid_matches(corridor, previous, current, matches), "a frame as full as the pipe corridor's is matched");
+    expect(shifted_grid_matches(count, previous, current, matches), "repeated-material triangles up to the cap remain spatially scalable");
     std::fill(previous.begin(), previous.end(), triangle());
     std::fill(current.begin(), current.end(), triangle());
     gpu_temporal_match(previous.data(), count, current.data(), count, matches.data());

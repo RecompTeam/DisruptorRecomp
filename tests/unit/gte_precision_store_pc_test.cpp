@@ -1393,10 +1393,31 @@ int test_enhancement_packet_provenance() {
     return 0;
 }
 
+/* Two back buffers' packets live at once while the GPU reads one and the game writes the other. */
+int test_two_arenas_keep_every_word() {
+    constexpr uint32_t kHalfBlock = GTE_PRECISION_STORE_WORDS * 2u;
+    constexpr uint32_t kCorridorFrame = 139u * 1024u;  /* a frame of Triton's pipe corridor, capsule 1794069171 */
+    const uint32_t arenas[2] = {PSX_MOD_GPU_DMA_GUEST_BASE, PSX_MOD_GPU_DMA_GUEST_BASE + PSX_MOD_GPU_DMA_APERTURE_SIZE / 2u + kHalfBlock};
+    reset_fixture();
+    if (!add_capture() || !add_store()) return fail("two-arena routes missing");
+    for (const uint32_t arena : arenas)
+        for (uint32_t offset = 0; offset < kCorridorFrame; offset += 4u) {
+            capture();
+            gte_precision_word_write_begin();
+            gte_precision_gpu_dma_word_committed((arena + offset) & 0x1FFFFFFFu);
+            store(kStorePc, arena + offset);
+        }
+    for (const uint32_t arena : arenas)
+        for (uint32_t offset = 0; offset < kCorridorFrame; offset += 4u)
+            if (!lookup(arena + offset)) return fail("a word of two corridor frames lost its projection to the other");
+    return 0;
+}
+
 }  // namespace
 
 int main() {
     if (int rc = test_enhancement_packet_provenance()) return rc;
+    if (int rc = test_two_arenas_keep_every_word()) return rc;
     if (int rc = test_registration_and_committed_store()) return rc;
     if (int rc = test_captured_snapshot_and_multiple_stores()) return rc;
     if (int rc = test_fail_closed_paths()) return rc;

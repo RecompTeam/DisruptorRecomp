@@ -116,6 +116,27 @@ int main() {
     require(psx_mod_read_word(first) == 0x12345678u &&
             psx_mod_read_word(second) == 0x12345679u,
             "retail packet templates were lost");
+    require((second - PSX_MOD_GPU_DMA_GUEST_BASE) / 4u % GTE_PRECISION_STORE_WORDS == GTE_PRECISION_STORE_WORDS / 2u,
+            "the second arena must start in the other half of a provenance block");
+    for (const uint32_t former : kFormerSecondOffsets) {
+        psx_mod_write_word(kContexts[1] + kArenaOffset, PSX_MOD_GPU_DMA_GUEST_BASE + former);
+        renderer_entry(&cpu, kRendererEntry);
+        require(psx_mod_read_word(kContexts[1] + kArenaOffset) == second, "an older state's second arena was not moved");
+        g_arena_base = 0u;  /* the host cache of a fresh process that loaded the state */
+        psx_mod_write_word(kContexts[1] + kArenaOffset, PSX_MOD_GPU_DMA_GUEST_BASE + former);
+        renderer_entry(&cpu, kRendererEntry);
+        require(psx_mod_read_word(kContexts[1] + kArenaOffset) == second,
+                "an older state loaded into a fresh process kept its second arena until the first context drew");
+        g_arena_base = 0u;
+        psx_mod_write_word(kContexts[1] + kArenaOffset, PSX_MOD_GPU_DMA_GUEST_BASE + former);
+        psx_mod_write_word(kScreen, kMapScreen);
+        renderer_entry(&cpu, kRendererEntry);
+        psx_mod_write_word(kScreen, 0u);
+        require(psx_mod_read_word(kContexts[1] + kArenaOffset) == original[1],
+                "the map of an older state loaded into a fresh process drew from the moved arena");
+        renderer_entry(&cpu, kRendererEntry);
+        require(psx_mod_read_word(kContexts[1] + kArenaOffset) == second, "the arena did not come back after the map");
+    }
 
     /* The captured failing view emitted 1579 GT4s. Recreate a linked list
      * larger than the retail arena, with a canary at its texture-data boundary. */

@@ -13,6 +13,7 @@
 
 #include "cpu_state.h"
 #include "gpu.h"
+#include "gte_precision.h"
 #include "lockstep.h"
 #include "mod_plugins.h"
 #include "mod_memory.h"
@@ -41,8 +42,12 @@ constexpr uint32_t kOriginalRoots[2] = {0x800776BCu, 0x800776C0u};
 constexpr uint32_t kArenaOffset = 0x70u;
 constexpr uint32_t kRetailBytes = 0x11000u;
 constexpr uint32_t kArenaBytes = PSX_MOD_GPU_DMA_APERTURE_SIZE / 2u;
-/* gte.cpp's provenance hash is collision free within a 256 KiB block: 512 KiB apart the arenas evicted each other's corners. */
-constexpr uint32_t kArenaOffsets[2] = {0u, kArenaBytes + 0x20000u};
+/* Opposite halves of the provenance table's blocks: 512 KiB each without a collision, Triton's pipes took 139 a frame. */
+constexpr uint32_t kProvenanceBlock = GTE_PRECISION_STORE_WORDS * 4u;
+constexpr uint32_t kArenaOffsets[2] = {0u, kArenaBytes + kProvenanceBlock / 2u};
+constexpr uint32_t kFormerSecondOffsets[2] = {kArenaBytes, kArenaBytes + 0x20000u};  /* where older states keep it */
+static_assert(PSX_MOD_GPU_DMA_APERTURE_BASE % kProvenanceBlock == 0u && kArenaBytes % kProvenanceBlock == 0u &&
+              kArenaOffsets[1] + kProvenanceBlock / 2u <= 2u * kArenaBytes, "the arenas' provenance halves");
 constexpr uint32_t kDescriptors = 0x8007162Cu;      /* gp+0x4E0, set at 0x80015B4C: 8 bytes a texture, the palette in the first's top half */
 constexpr uint32_t kDescriptorCount = 0x800717B4u;  /* gp+0x668, set at 0x80015B58 */
 constexpr uint32_t kMostDescriptors = 1024u;        /* the mesh renderer's index (0x80046D14) reaches no further */
@@ -131,17 +136,20 @@ void renderer_entry(CPUState *cpu, uint32_t address) {
     const uint32_t allocated = psx_mod_gpu_dma_memory_bytes();
     if (allocated != 2u * kArenaBytes) g_arena_base = 0u;
     const uint32_t saved_root = PSX_MOD_GPU_DMA_GUEST_BASE + kArenaOffsets[index];
-    if (!g_arena_base && allocated == 2u * kArenaBytes && current == saved_root)
+    const bool saved_former = index == 1u && (current == PSX_MOD_GPU_DMA_GUEST_BASE + kFormerSecondOffsets[0] ||
+                                              current == PSX_MOD_GPU_DMA_GUEST_BASE + kFormerSecondOffsets[1]);
+    if (!g_arena_base && allocated == 2u * kArenaBytes && (current == saved_root || saved_former))
         g_arena_base = PSX_MOD_GPU_DMA_GUEST_BASE;
     const uint32_t relocated = g_arena_base ?
         g_arena_base + kArenaOffsets[index] : 0u;
-    const uint32_t earlier = g_arena_base ? g_arena_base + index * kArenaBytes : 0u;  /* an older state's place */
-    if (current != original && current != relocated && current != earlier) return;
+    const bool earlier = g_arena_base && index == 1u &&
+                         (current == g_arena_base + kFormerSecondOffsets[0] || current == g_arena_base + kFormerSecondOffsets[1]);
+    if (current != original && current != relocated && !earlier) return;
 
     if (g_ls_mode || g_ls_replay_active || psx_netplay_active() || map ||
         (psx_mod_widescreen_x_margin() == 0 && !disruptor_far_rendering_edge_margin() &&
          disruptor_far_rendering_get_preset() == DISRUPTOR_FAR_RENDERING_RETAIL && !disruptor_far_rendering_portal_reach())) {
-        if ((current == relocated || current == earlier) && relocated)
+        if ((current == relocated || earlier) && relocated)
             psx_mod_write_word(root_address, original);
         return;
     }

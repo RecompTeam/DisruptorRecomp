@@ -8,6 +8,10 @@
 
 #include <stdint.h>
 
+/* Provenance slots, one per guest word: an aligned block of this many words never collides with itself, and its two
+ * halves never collide with the other half of any block of the GPU packet aperture. */
+#define GTE_PRECISION_STORE_WORDS (1u << 18)
+
 #ifdef __cplusplus
 extern "C" {
 #endif

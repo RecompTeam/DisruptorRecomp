@@ -23,7 +23,7 @@ typedef struct GpuTemporalTriangle {
     float w[3];
 } GpuTemporalTriangle;
 
-#define GPU_TEMPORAL_MAX_TRIANGLES 8192
+#define GPU_TEMPORAL_MAX_TRIANGLES 16384 /* a dense corridor filled 8558 at a 1.25x draw distance: at 8192 most frames fell back */
 #define GPU_TEMPORAL_MAX_PROBES 256
 #define GPU_TEMPORAL_MAX_MOTION 32.0
 #define GPU_TEMPORAL_MIN_AREA 0.5
