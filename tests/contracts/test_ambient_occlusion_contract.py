@@ -204,4 +204,14 @@ require(
     "with the menu's own bounds",
 )
 
+temporal = read("psxrecomp/runtime/src/gpu_gl_temporal.c.inc")
+require(
+    "(v0 + v1) * 0.5f * (float)h + horizon * (float)scale);" in renderer
+    and "lx, ly, lw, lh, s_yaw_center_y_relative - 120.0f))" in renderer
+    and "s_temp_curr.sky_known ? s_temp_curr.sky_frame[3] : 0.0f);" in renderer
+    and "s->sky_known ? s->sky_frame[3]+(1.0f-alpha)*s->sky_back : 0.0f);" in temporal,
+    "the occlusion takes positions back from the depth about the projection's own centre row: the frame's horizon, an "
+    "in-between picture's on its way from the frame before",
+)
+
 print("Disruptor ambient occlusion source contract: PASS")

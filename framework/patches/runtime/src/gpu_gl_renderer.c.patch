@@ -1,5 +1,5 @@
 diff --git a/runtime/src/gpu_gl_renderer.c b/runtime/src/gpu_gl_renderer.c
-index 5665d9760569b1b0d565f2f1635865c6acd31e4c..9f3bcd62ee2713b68e6ab04a807789f87bb78e57 100644
+index 5665d9760569b1b0d565f2f1635865c6acd31e4c..fa8317bc9b85791f691856d820928ce061adb5fd 100644
 --- a/runtime/src/gpu_gl_renderer.c
 +++ b/runtime/src/gpu_gl_renderer.c
 @@ -4,10 +4,7 @@
@@ -9965,7 +9965,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..9f3bcd62ee2713b68e6ab04a807789f8
      for (int i = 0; i < 18; i++) out[i] = 0.0;
      if (!s_pf_on) return 0;
      int navail = (int)(s_pf_ring_seq < (uint64_t)GLPERF_RING ? s_pf_ring_seq : GLPERF_RING);
-@@ -7853,247 +5979,530 @@
+@@ -7853,247 +5979,531 @@
  }
  
  /* Native-wide mirror ablation (perf attribution): see s_ws_ablate. */
@@ -10101,8 +10101,9 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..9f3bcd62ee2713b68e6ab04a807789f8
 +
 +/* Shades `color` by a depth of the same size and puts it on screen. The depth is `depth`, or with 0 is first copied from the
 + * frame buffer `from`. uv is the part shown. 0: nothing drawn, the caller presents plainly. */
++/* horizon: native rows the projection's centre stands below the picture's middle, moved there by the vertical look. */
 +static int ssao_draw(SsaoTargets *t, GLuint vao, GLuint from, GLuint depth, GLuint color, int w, int h,
-+                     float u0, float v0, float u1, float v1, int scale, int linear, int lx, int ly, int lw, int lh) {
++                     float u0, float v0, float u1, float v1, int scale, int linear, int lx, int ly, int lw, int lh, float horizon) {
 +    int32_t num = 1, den = 1;
 +    float focal_x, focal_y;
 +    if (!s_ssao || !s_geometry_correction || !s_ssao_prog || !s_ssao_mix_prog || lw <= 0 || lh <= 0 || w <= 0 || h <= 0) return 0;
@@ -10142,7 +10143,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..9f3bcd62ee2713b68e6ab04a807789f8
 +    p_glUniform1i(s_ssao_uTex, 1);
 +    p_glUniform4f(s_ssao_uUvRect, u0, v0, u1, v1);
 +    p_glUniform4f(s_ssao_uTexel, 1.0f / (float)w, 1.0f / (float)h, (float)s_ssao, 0.0f);
-+    p_glUniform4f(s_ssao_uProj, focal_x, focal_y, (u0 + u1) * 0.5f * (float)w, (v0 + v1) * 0.5f * (float)h);
++    p_glUniform4f(s_ssao_uProj, focal_x, focal_y, (u0 + u1) * 0.5f * (float)w, (v0 + v1) * 0.5f * (float)h + horizon * (float)scale);
 +    p_glUniform4f(s_ssao_uAo, s_ssao_radius, s_ssao_on || s_ssao_view ? s_ssao_strength : 0.0f, 24.0f * (float)scale, (float)scale);
 +    p_glUniform4f(s_ssao_uFade, s_ssao_fade_from, s_ssao_fade_to, s_ssao_tilt, 0.0f);
 +    p_glBindVertexArray(vao);
@@ -10702,7 +10703,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..9f3bcd62ee2713b68e6ab04a807789f8
      if (s_interp_valid == 0) {
          s_interp_cur = dst;
          s_interp_valid = 1;
-@@ -8102,73 +6511,765 @@
+@@ -8102,73 +6512,766 @@
          s_interp_cur = dst;
          s_interp_valid = 2;
      }
@@ -11037,7 +11038,8 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..9f3bcd62ee2713b68e6ab04a807789f8
 +        ddgi_present_between(&s_temp_curr.ddgi, &s_temp_curr.ddgi, 1.0f);
 +        gz_begin_at(1, GZ_SHADE);
 +        const int shaded = ssao_draw(&s_ssao_thread, s_interp_thread_vao, 0, s_interp_depth[curr], s_interp_tex[curr],
-+                                     s_interp_w, s_interp_h, ix, iy, 1 - ix, 1 - iy, s_interp_scale, s_interp_linear, lx, ly, lw, lh);
++                                     s_interp_w, s_interp_h, ix, iy, 1 - ix, 1 - iy, s_interp_scale, s_interp_linear, lx, ly, lw, lh,
++                                     s_temp_curr.sky_known ? s_temp_curr.sky_frame[3] : 0.0f);
 +        gz_end_at(1);
 +        if (shaded) return alpha;
 +    }
@@ -11513,7 +11515,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..9f3bcd62ee2713b68e6ab04a807789f8
      int lx, ly, lw, lh;
      if (s_interp_force_4_3)
          letterbox_rect_aspect(ww, wh, 4, 3, &lx, &ly, &lw, &lh);
-@@ -8180,2551 +7281,255 @@
+@@ -8180,2551 +7283,255 @@
          glClearColor(0.f, 0.f, 0.f, 1.f);
          glClear(GL_COLOR_BUFFER_BIT);
      }
@@ -14277,7 +14279,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..9f3bcd62ee2713b68e6ab04a807789f8
      int lx, ly, lw, lh;
      if (force_4_3)
          letterbox_rect_aspect(ww, wh, 4, 3, &lx, &ly, &lw, &lh);
-@@ -10734,41 +7539,16 @@
+@@ -10734,41 +7541,16 @@
       * display mode (e.g. 216/224-line menus) must fill the rect as before.
       * The FMV band fix lives in the depth24/CPU present paths only. */
  
@@ -14322,7 +14324,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..9f3bcd62ee2713b68e6ab04a807789f8
          gl_perf_present_exit(0);
          present_dirty_rect(disp_x, disp_y, disp_x + w - 1, disp_y + h - 1, 0);
          present_force_consumed();
-@@ -10776,28 +7556,14 @@
+@@ -10776,28 +7558,14 @@
          s_last_dx = disp_x; s_last_dy = disp_y; s_last_dw = w; s_last_dh = h;
          return;
      }
@@ -14356,7 +14358,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..9f3bcd62ee2713b68e6ab04a807789f8
      gl_perf_present_exit(0);
      present_dirty_rect(disp_x, disp_y, disp_x + w - 1, disp_y + h - 1, 0);
      present_force_consumed();
-@@ -10814,19 +7580,13 @@
+@@ -10814,19 +7582,13 @@
   * x-translated by the reveal offset. No-op when s_wide_fast is off (then the
   * mirror drew the full surface, as before). Shared by both present paths. */
  static void wide_blit_center(GLuint wide_fbo, int base_x, int disp_y, int disp_h) {
@@ -14380,7 +14382,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..9f3bcd62ee2713b68e6ab04a807789f8
      /* Copy the canonical framebuffer column into the wide surface CENTRE over the
       * FULL VRAM height, not just the current display band [disp_y, disp_y+disp_h].
       * The wide surface holds BOTH vertical double-buffer bands (Ape flips
-@@ -10835,37 +7595,6 @@
+@@ -10835,37 +7597,6 @@
       * column makes the wide CENTRE bit-identical to what the full mirror would
       * have drawn there for every band, so nothing the present reads is ever left
       * black. The margins (x outside the centre) are untouched. */
@@ -14418,7 +14420,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..9f3bcd62ee2713b68e6ab04a807789f8
      p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, s_hr_fbo);
      p_glBindFramebuffer(PSXGL_DRAW_FRAMEBUFFER, wide_fbo);
      glDisable(GL_SCISSOR_TEST);
-@@ -10873,7 +7602,7 @@
+@@ -10873,7 +7604,7 @@
                          (base_x + native_w) * S, VRAM_H * S,
                          g_wide_off * S, 0,
                          (g_wide_off + native_w) * S, VRAM_H * S,
@@ -14427,7 +14429,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..9f3bcd62ee2713b68e6ab04a807789f8
      p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, 0);
      p_glBindFramebuffer(PSXGL_DRAW_FRAMEBUFFER, 0);
  }
-@@ -10884,57 +7613,134 @@
+@@ -10884,57 +7615,134 @@
   * disp_y+disp_h] region into the letterbox, V-flipped like present_vram (FBO y
   * bottom-origin → window top). Returns 0 if there's no wide surface for base_x
   * (caller falls back). disp_x is the displayed buffer base (the wide-surface key). */
@@ -14444,7 +14446,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..9f3bcd62ee2713b68e6ab04a807789f8
 +    if (!ssao_draw(&s_ssao_main, s_present_vao, fbo, 0, tex, g_wide_w * s_scale, VRAM_H * s_scale,
 +                   0.5f / (float)g_wide_w, ((float)y + 0.5f) / (float)VRAM_H,
 +                   ((float)g_wide_w - 0.5f) / (float)g_wide_w, ((float)(y + h) - 0.5f) / (float)VRAM_H,
-+                   s_scale, linear, lx, ly, lw, lh))
++                   s_scale, linear, lx, ly, lw, lh, s_yaw_center_y_relative - 120.0f))
 +        return 0;
 +    for (int i = 0; i < WIDE_MAX_SURF; i++)
 +        if (s_wide_fbo[i] == fbo) s_wide_depth_shown[i] |= wide_depth_rows(y, h);
@@ -14592,7 +14594,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..9f3bcd62ee2713b68e6ab04a807789f8
  
      p_glBindFramebuffer(PSXGL_DRAW_FRAMEBUFFER, 0);
      glDisable(GL_SCISSOR_TEST);
-@@ -10942,15 +7748,12 @@
+@@ -10942,15 +7750,12 @@
      if (lx != 0 || ly != 0 || lw != ww || lh != wh) {
          glClearColor(0.f, 0.f, 0.f, 1.f); glClear(GL_COLOR_BUFFER_BIT);
      }
@@ -14613,7 +14615,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..9f3bcd62ee2713b68e6ab04a807789f8
          gl_perf_present_exit(1);
          present_dirty_rect(0, disp_y, VRAM_W - 1, disp_y + disp_h - 1, 0);
          present_force_consumed();
-@@ -10959,26 +7762,23 @@
+@@ -10959,26 +7764,23 @@
          s_last_dw = g_wide_w; s_last_dh = disp_h;
          return 1;
      }
@@ -14654,7 +14656,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..9f3bcd62ee2713b68e6ab04a807789f8
      gl_perf_present_exit(1);
      present_dirty_rect(0, disp_y, VRAM_W - 1, disp_y + disp_h - 1, 0);
      present_force_consumed();
-@@ -10988,594 +7788,37 @@
+@@ -10988,594 +7790,37 @@
      return 1;
  }
  
@@ -15272,7 +15274,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..9f3bcd62ee2713b68e6ab04a807789f8
      .fill_rect = glb_fill_rect, .copy_rect = glb_copy_rect,
      .draw_flat_triangle = glb_draw_flat_triangle, .draw_gouraud_triangle = glb_draw_gouraud_triangle,
      .draw_textured_triangle = glb_draw_textured_triangle,
-@@ -11589,3517 +7832,32 @@
+@@ -11589,3517 +7834,32 @@
      .set_draw_area = glb_set_draw_area, .get_draw_area = glb_get_draw_area,
      .set_draw_offset = glb_set_draw_offset,
      .wide_configure = glb_wide_configure,

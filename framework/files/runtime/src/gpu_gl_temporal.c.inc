@@ -1293,7 +1293,8 @@ static int temporal_present(float alpha,int lx,int ly,int lw,int lh) {
     gz_begin_at(1,GZ_SHADE);
     const int shaded=ssao_draw(&s_ssao_thread,s_interp_thread_vao,s_temp_fbo,0,s_temp_tex,s->width*s->scale,VRAM_H*s->scale,
                                0.5f/s->width,0.5f/VRAM_H,1-0.5f/s->width,(s->height-0.5f)/VRAM_H,
-                               s->scale,s_interp_linear,lx,ly,lw,lh);
+                               s->scale,s_interp_linear,lx,ly,lw,lh,
+                               s->sky_known ? s->sky_frame[3]+(1.0f-alpha)*s->sky_back : 0.0f);  /* the horizon on its way */
     gz_end_at(1);
     if (shaded) {
         ++s_temp_replays;
