@@ -2,6 +2,22 @@
 
 What changed in each release. The launcher shows the section of its own version on its home page.
 
+## v0.14.0
+
+### Enhancements
+
+- Launcher: Close the launcher when the game starts, under PLAY, off by default, the launcher comes back with the reason if the game stops with an error
+- Replay capsules: a capsule recorded in a window of any size with Adaptive view replays at that window's aspect
+
+### Bug fixes
+
+- Triton: in-between frames no longer drop out in the red pipe corridor behind the second drop down
+- Triton: the far walls and the nearest pipes there no longer flicker and change shape every other frame
+- Sixth mission: the game no longer closes to the desktop after the jump into the underground, broken since 0.10.0
+- Sixth mission: enemies and effects in the underground no longer turn into squares
+- Sixth mission: Vertical mouse look, the crosshair and the Draw distance you chose work at the start while you own no weapon
+- Sky: a patch of sky no longer shows through a wall in front of you while you turn
+- Depth-sorted world: turning near a pillar on the first mission's roof no longer draws the ledge over the pillar's foot
 ## v0.13.0
 
 ### Changes
