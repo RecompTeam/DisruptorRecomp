@@ -65,6 +65,7 @@ struct Chunk {
     std::vector<std::array<std::uint32_t, 5>> quads; /* corner indices A B C D and the texture */
     std::vector<std::uint8_t> light = {};             /* a byte a record, 64 (neutral) for every record when empty */
     std::vector<std::uint16_t> table = {};            /* the colours of light bytes 128, 129, ... */
+    std::uint8_t room = 255;                          /* drawn only while this room is unseen, 255 always */
 };
 
 std::uint32_t corner(std::uint32_t a, std::uint32_t b, std::uint32_t c, std::uint32_t copies = 0) {
@@ -79,7 +80,7 @@ std::uint32_t write_mesh(std::uint32_t at, const std::vector<Chunk> &chunks) {
         const std::uint32_t lights = (records + 2 * static_cast<std::uint32_t>(chunk.table.size()) + 3) & ~3u;
         const std::uint32_t size = 8 + lights + 4 * static_cast<std::uint32_t>(chunk.corners.size()) + 4 +
                                    8 * static_cast<std::uint32_t>(chunk.quads.size()) + 4;
-        seed_word(at, size << 8);
+        seed_word(at, size << 8 | chunk.room);
         seed_word(at + 4, lights);
         for (std::uint32_t r = 0; r < records; ++r) seed_byte(at + 8 + r, chunk.light.empty() ? 64 : chunk.light[r]);
         for (std::size_t i = 0; i < chunk.table.size(); ++i) {
@@ -158,6 +159,18 @@ void reads_the_rooms_faces() {
     expect(second.uv[2][0] == 63 && second.uv[2][1] == 95, "C is the first uv 31 across and 31 down");
     expect(first.clut == 0x7A40 && first.texpage == 0x0089 && first.flags == 1, "the table's CLUT and page, textured");
     expect(first.colour[0][0] == 128 && second.colour[2][2] == 128, "light byte 64 is the neutral vertex colour 128");
+}
+
+void stand_ins_left_out() {
+    one_room();
+    Chunk lid = square();
+    lid.room = 3;
+    write_mesh(0x80110000u, {lid, square()});
+    g_sun = 0;
+    draws(1);
+    g_sun = 1;
+    draws(1);
+    expect(g_level.size() == 2, "a block drawn only while another room is unseen is left out, the room's own block stays");
 }
 
 // The (y, z) cross product of a triangle of the face's plane: its winding.
@@ -360,6 +373,7 @@ void malformed_levels() {
 
 int main() {
     reads_the_rooms_faces();
+    stand_ins_left_out();
     halves_wound_alike();
     lit_as_the_game_lights_it();
     covers_the_face_once();

@@ -18,7 +18,6 @@
 #define DDGI_FIT_SUN_TRIES 96       /* directions over the sky's half */
 #define DDGI_FIT_SUN_EVERY 4        /* a direction is judged on one face in four */
 #define DDGI_FIT_SUN_GAIN 0.03f     /* the share of the baked light's variance a sun must explain to be taken */
-#define DDGI_FIT_SUN_HINT 0.01f     /* a sun the game asks for keeps the direction found when it explains this much */
 
 typedef struct {
     float position[3], normal[3], size, colour[3], power;
@@ -380,8 +379,8 @@ static inline void psx_ddgi_sun_try(int i, int tries, float dir[3]) {
 
 /* Fits the lamps' powers and the ambient to the faces' baked light; with find_sun, also the sun whose light explains most of
  * the baked light, kept when it explains DDGI_FIT_SUN_GAIN of its variance. asked (unit, toward the sun, or NULL): the game wants
- * a sun on this level whatever the light shows, along the direction found if it explains DDGI_FIT_SUN_HINT, else along asked,
- * at least as strong as the light every surface has. */
+ * a sun on this level whatever the light shows, along asked where none was found (mission 1's weak find put a 12 degree sun in
+ * the player's face), at least as strong as the light every surface has. */
 static inline void psx_ddgi_fit_level(const DdgiNode *nodes, const DdgiBuildFace *order, const GpuDdgiTriangle *tris, int count,
                                       float front, int find_sun, const float *asked, DdgiFit *fit, DdgiFitWork *work) {
     const int samples = psx_ddgi_fit_sample(nodes, order, tris, count, front, fit, work);
@@ -420,7 +419,7 @@ static inline void psx_ddgi_fit_level(const DdgiNode *nodes, const DdgiBuildFace
     fit->sun_gain = fit->variance > 0.0 && weights > 0.0 ? (float)(best / (fit->variance * weights)) : 0.0f;
     const int found = fit->sun_gain >= DDGI_FIT_SUN_GAIN;
     if (!found && !asked) return;
-    if (!found && fit->sun_gain < DDGI_FIT_SUN_HINT) memcpy(chosen, asked, sizeof chosen);
+    if (!found) memcpy(chosen, asked, sizeof chosen);
     for (int i = 0; i < samples; ++i) work->sun[i] = psx_ddgi_sun_share(nodes, order, tris, &work->sample[i], chosen);
     psx_ddgi_fit_solve(fit, work, samples, work->sun);
     if (!found) {

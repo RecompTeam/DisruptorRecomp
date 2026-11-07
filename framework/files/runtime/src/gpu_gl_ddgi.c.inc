@@ -306,7 +306,7 @@ static const char *DDGI_MIX_FS =
     "   * subtraction flattened half-fogged walls), so the lamps' factor and light fade out with the fog instead. */\n"
     "vec3 lamped(vec3 c, vec3 gain, vec4 lamp, float f){\n"
     "  c = max(c, vec3(0.0))*max(gain, vec3(0.0));\n"
-    "  float a = mix(1.0, lamp.a >= 0.2 ? min(lamp.a, 1.0) : (lamp.a < 0.2 ? 0.2 : 1.0), 1.0 - f);\n"
+    "  float a = mix(1.0, lamp.a >= 0.2 ? min(lamp.a, 2.0) : (lamp.a < 0.2 ? 0.2 : 1.0), 1.0 - f);\n"
     "  return pow(max(pow(c, vec3(2.2))*a + lamp.rgb*(1.0 - f), vec3(0.0)), vec3(1.0/2.2)); }\n"
     "void main(){\n"
     "  ivec2 at_shade = ivec2((gl_FragCoord.xy - u_span.xy) / max(u_span.w, 1.0)), most = textureSize(u_shade, 0) - 1;\n"
@@ -411,6 +411,30 @@ static const char *DDGI_LAMP_FS =
     "float caster_hides_far(vec3 p, vec3 dir, float angle, int i){\n"
     "  float upright = smoothstep(0.2, 0.4, length(dir.xz));\n"
     "  return mix(upright < 1.0 ? hidden_far(p, dir, angle, i) : 0.0, upright > 0.0 ? picture_hides(p, dir, angle, 1e9, i, false) : 0.0, upright); }\n"
+    "uniform sampler2D u_sunmap, u_skymap;\n"
+    "uniform vec4 u_sunrow0, u_sunrow1, u_sunrow2, u_sunlook;  /* world to the sun's map; light in sun, shade, -, 1 with every map */\n"
+    "uniform vec4 u_skyrow[15];  /* world to each of the sky's five maps, tiles across its atlas */\n"
+    "/* How much of a map's light reaches p of normal n past the level's faces: four taps in tile of tiles, res texels a side, p a\n"
+    "   texel and a half off its face, the depth's slope over a texel allowed, which a low sun on a floor made its own shadow. */\n"
+    "float map_lit(sampler2D map, vec4 r0, vec4 r1, vec4 r2, vec3 p, vec3 n, float facing, float tile, float tiles, float res){\n"
+    "  float texel = 1.0/(res*length(r0.xyz)), slope = min(sqrt(max(1.0 - facing*facing, 0.0))/max(facing, 0.05), 10.0);\n"
+    "  p += n*texel*1.5;\n"
+    "  vec3 q = vec3(dot(r0.xyz, p) + r0.w, dot(r1.xyz, p) + r1.w, dot(r2.xyz, p) + r2.w);\n"
+    "  if (any(lessThan(q, vec3(0.0))) || any(greaterThan(q, vec3(1.0)))) return 1.0;\n"
+    "  float bias = length(r2.xyz)*texel*(1.0 + 1.5*slope), lit = 0.0;\n"
+    "  for (int k = 0; k < 4; ++k) {\n"
+    "    vec2 t = clamp(q.xy + (vec2(float(k & 1), float(k >> 1)) - 0.5)/res, 0.0, 1.0);\n"
+    "    lit += texture(map, vec2((tile + t.x)/tiles, t.y)).r >= q.z - bias ? 0.25 : 0.0; }\n"
+    "  return lit; }\n"
+    "/* The share of the sky p sees, each of the five ways weighed by how square the face turns to it: a ceiling sees none. */\n"
+    "float sky_seen(vec3 p, vec3 n, bool sprite){\n"
+    "  float seen = 0.0, weight = 0.0;\n"
+    "  for (int k = 0; k < 5; ++k) {\n"
+    "    vec4 r0 = u_skyrow[3*k], r1 = u_skyrow[3*k + 1], r2 = u_skyrow[3*k + 2];\n"
+    "    float f = sprite ? 1.0 : dot(n, -normalize(r2.xyz)); if (f <= 0.0) continue;\n"
+    "    seen += f*map_lit(u_skymap, r0, r1, r2, p, n, f, float(k), 5.0, 1024.0);\n"
+    "    weight += f; }\n"
+    "  return weight > 0.0 ? seen/weight : 0.0; }\n"
     "bool blocked(vec3 o, vec3 q){\n"
     "  vec3 d = q - o; float len = length(d); if (len < 40.0) return false;\n"
     "  float best = len*0.95 - 16.0, hu, hv; d /= len;\n"
@@ -445,7 +469,7 @@ static const char *DDGI_LAMP_FS =
     "  float shadow = 1.0;\n"
     "  if (!sprite && nearby > 0) {\n"
     "    /* Each light fitted to the level's baked light takes its share of it here, the sun too, against what every surface has. */\n"
-    "    float share[LAMPS], sun_share = u_sun.w > 0.0 ? u_sun.w*max(0.0, dot(n, u_sun.xyz)) : 0.0, total = u_count.w + sun_share;\n"
+    "    float share[LAMPS], total = u_count.w;\n"
     "    float shade = 0.0, open = 1.0;\n"
     "    for (int i = 0; i < lamps; ++i) {\n"
     "      share[i] = 0.0;\n"
@@ -462,13 +486,18 @@ static const char *DDGI_LAMP_FS =
     "      for (int j = 0; j < nearby; ++j) h = max(h, caster_hides(p, a.xyz, a.w, near[j], false));\n"
     "      if (h > 0.01 && blocked(p + n*8.0, a.xyz)) h = 0.0;\n"
     "      shade += share[i]/total*h; }\n"
-    "    if (sun_share > 0.03*total) {\n"
-    "      float h = 0.0;\n"
-    "      for (int j = 0; j < nearby; ++j) h = max(h, caster_hides_far(p, u_sun.xyz, 0.05, near[j]));\n"
-    "      if (h > 0.01 && sun_blocked(p + n*8.0)) h = 0.0;  /* the level's own shadow has no sun to take */\n"
-    "      shade += sun_share/total*h; }\n"
+
     "    for (int j = 0; j < nearby; ++j) open *= 1.0 - min(1.0, contact(p, n, near[j]));\n"
     "    shadow = 1.0 - clamp(u_shadow.x*shade + u_shadow.y*(1.0 - open), 0.0, u_shadow.z); }\n"
+    "  /* Where the sun is on it lights the world: brighter wherever it reaches, under a canopy's edge or through a window too; the\n"
+    "   * shade, with the casters' shadows, only under the open sky, so a room keeps the game's own light. */\n"
+    "  if (u_sun.w > 0.0 && u_sunlook.w > 0.5) {\n"
+    "    float facing = sprite ? 0.7 : dot(n, u_sun.xyz), vis = 0.0;\n"
+    "    if (facing > 0.0) {\n"
+    "      vis = map_lit(u_sunmap, u_sunrow0, u_sunrow1, u_sunrow2, p, n, facing, 0.0, 1.0, 2048.0);\n"
+    "      if (!sprite) for (int j = 0; j < nearby && vis > 0.0; ++j) vis *= 1.0 - caster_hides_far(p, u_sun.xyz, 0.05, near[j]); }\n"
+    "    float open = sky_seen(p, n, sprite);\n"
+    "    shadow *= 1.0 + u_sunlook.x*max(facing, 0.0)*vis - u_sunlook.y*open*(1.0 - vis); }\n"
     "  vec3 added = vec3(0.0);\n"
     "  for (int i = 0; i < lamps && u_shadow.w > 0.0; ++i) {\n"
     "    vec4 a = u_lamp[3*i], b = u_lamp[3*i + 1], c = u_lamp[3*i + 2];\n"
@@ -511,7 +540,7 @@ typedef struct {
 } DdgiApplyUniforms;
 typedef struct {
     GLint nodes, tris, vram, rect, size, eye, count, shadow, caster, lamp, level_nodes, level_tris, sun, sun_colour, level, fog,
-        cast, mask;
+        cast, mask, sunmap, sunrow0, sunrow1, sunrow2, sunlook, skymap, skyrow;
 } DdgiLampUniforms;
 /* A camera, the BVH drawn under it and its casters and lights: what one context shows. */
 typedef struct DdgiFrame {
@@ -730,6 +759,8 @@ static SDL_cond *s_ddgi_level_cond;
 static int s_ddgi_level_run, s_ddgi_level_incoming_count = -1, s_ddgi_level_generation, s_ddgi_level_staged, s_ddgi_level_uploading;
 static int s_ddgi_level_staged_faces, s_ddgi_level_staged_nodes, s_ddgi_level_staged_generation;
 static int s_ddgi_level_made_count = -1, s_ddgi_level_made_generation = -1; /* the level thread's own */
+static float s_ddgi_level_bounds[2][3]; /* GL thread: the uploaded level's box and its faces */
+static int s_ddgi_level_faces_built;
 /* What each face gives off: the game thread's, the one handed over, the level thread's. */
 static float (*s_ddgi_level_emission_game)[3], (*s_ddgi_level_emission_incoming)[3], (*s_ddgi_level_emission)[3];
 /* The sun the game asks for, toward it, w 1 when it asks: the game thread's, the one handed over, the level thread's. */
@@ -982,6 +1013,13 @@ static void ddgi_level_update(void) {
     SDL_LockMutex(s_ddgi_level_mutex);
     /* A level change while uploading leaves this BVH unused, a level of no faces leaves none. */
     if (generation == s_ddgi_level_generation) {
+        if (faces) {
+            for (int a = 0; a < 3; ++a) {
+                s_ddgi_level_bounds[0][a] = s_ddgi_level_node_staging[a];
+                s_ddgi_level_bounds[1][a] = s_ddgi_level_node_staging[4 + a];
+            }
+            s_ddgi_level_faces_built = faces;
+        }
         s_ddgi_level_built = faces ? target : -1;
         if (faces) s_ddgi_level_next ^= 1;
         if (fit) {
@@ -994,6 +1032,148 @@ static void ddgi_level_update(void) {
     s_ddgi_level_uploading = 0;
     SDL_CondBroadcast(s_ddgi_level_cond);
     SDL_UnlockMutex(s_ddgi_level_mutex);
+}
+
+/* The sun's map: the level's faces drawn from the sun into a depth map, once for each level and sun. */
+#define DDGI_SUNMAP 2048
+static const char *DDGI_SUNMAP_VS =
+    "#version 330\n"
+    "uniform sampler2D u_tris;\n"
+    "uniform vec4 u_row0, u_row1, u_row2;\n"
+    "out vec2 v_uv; flat out ivec3 v_mat;\n"
+    "void main(){ int tri = gl_VertexID / 3, i = tri*5 + gl_VertexID - tri*3, m = tri*5 + 3;\n"
+    "  vec4 t = texelFetch(u_tris, ivec2(i & 1023, i >> 10), 0); vec3 p = t.xyz; int word = int(t.w);\n"
+    "  v_uv = vec2(float(word & 255), float((word >> 8) & 255)) + 0.5;\n"
+    "  v_mat = ivec3(texelFetch(u_tris, ivec2(m & 1023, m >> 10), 0).xyz);\n"
+    "  vec3 q = vec3(dot(u_row0.xyz, p) + u_row0.w, dot(u_row1.xyz, p) + u_row1.w, dot(u_row2.xyz, p) + u_row2.w);\n"
+    "  gl_Position = vec4(q*2.0 - 1.0, 1.0); }\n";
+/* A transparent texel lets the light through, as the rays have it: the game's sky shows through a ceiling of them. */
+static const char *DDGI_SUNMAP_FS =
+    "#version 330\n" DDGI_GLSL_BVH
+    "in vec2 v_uv; flat in ivec3 v_mat;\n"
+    "void main(){ int raw = (v_mat.z & 1) != 0 ? texel(v_uv, v_mat.y, v_mat.x) : 0x8000;\n"
+    "  if (raw == 0 || ((v_mat.z & 2) != 0 && (raw & 0x8000) != 0)) discard; }\n";
+static GLuint s_ddgi_sunmap_tex[2], s_ddgi_sunmap_fbo[2], s_ddgi_sunmap_prog;
+static GLint s_ddgi_sunmap_tris = -1, s_ddgi_sunmap_vram = -1, s_ddgi_sunmap_row[3] = {-1, -1, -1};
+/* Map 0 looks from the sun. Maps 1..5 look from the sky, straight down and 45 degrees four ways, as tiles of one atlas: how much
+ * sky a surface sees, so a slot over a corridor leaves it a room. */
+#define DDGI_SKY_TILE 1024
+#define DDGI_SKY_MAPS 5
+static float s_ddgi_sunmap_rows[1 + DDGI_SKY_MAPS][3][4]; /* world to each map: across, up and depth, each 0..1 */
+static float s_ddgi_sunmap_for[1 + DDGI_SKY_MAPS][5];     /* the way it looks, the level slot and its faces it was drawn for */
+static int s_ddgi_sunmap_ready[1 + DDGI_SKY_MAPS], s_ddgi_sunmap_failed;
+static float s_ddgi_sun_light = 0.45f, s_ddgi_sun_shade = 0.4f; /* prototype: how much brighter in sun, darker in shade */
+
+/* Draws map m of the level's faces seen along -toward (toward points at the sun or the sky). */
+static void ddgi_sunmap_update(int m, const float toward[3], int level) {
+    if (level < 0 || s_ddgi_level_faces_built <= 0 || s_ddgi_sunmap_failed) {
+        s_ddgi_sunmap_ready[m] = 0;
+        return;
+    }
+    const float key[5] = {toward[0], toward[1], toward[2], (float)level, (float)s_ddgi_level_faces_built};
+    if (s_ddgi_sunmap_ready[m] && !memcmp(key, s_ddgi_sunmap_for[m], sizeof key)) return;
+    if (!s_ddgi_sunmap_prog) {
+        s_ddgi_sunmap_prog = build_program(DDGI_SUNMAP_VS, DDGI_SUNMAP_FS);
+        if (!s_ddgi_sunmap_prog) {
+            s_ddgi_sunmap_failed = 1;
+            return;
+        }
+        s_ddgi_sunmap_tris = ddgi_uniform(s_ddgi_sunmap_prog, "u_tris");
+        s_ddgi_sunmap_vram = ddgi_uniform(s_ddgi_sunmap_prog, "u_vram");
+        s_ddgi_sunmap_row[0] = ddgi_uniform(s_ddgi_sunmap_prog, "u_row0");
+        s_ddgi_sunmap_row[1] = ddgi_uniform(s_ddgi_sunmap_prog, "u_row1");
+        s_ddgi_sunmap_row[2] = ddgi_uniform(s_ddgi_sunmap_prog, "u_row2");
+    }
+    const int atlas = m > 0;
+    if (!s_ddgi_sunmap_tex[atlas]) {
+        s_ddgi_sunmap_tex[atlas] = atlas ? depth_stencil_texture(DDGI_SKY_TILE * DDGI_SKY_MAPS, DDGI_SKY_TILE)
+                                         : depth_stencil_texture(DDGI_SUNMAP, DDGI_SUNMAP);
+        p_glGenFramebuffers(1, &s_ddgi_sunmap_fbo[atlas]);
+        p_glBindFramebuffer(PSXGL_FRAMEBUFFER, s_ddgi_sunmap_fbo[atlas]);
+        p_glFramebufferTexture2D(PSXGL_FRAMEBUFFER, PSXGL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, s_ddgi_sunmap_tex[atlas], 0);
+        glDrawBuffer(GL_NONE);
+        glReadBuffer(GL_NONE);
+        if (!s_ddgi_sunmap_tex[atlas] || p_glCheckFramebufferStatus(PSXGL_FRAMEBUFFER) != PSXGL_FRAMEBUFFER_COMPLETE) {
+            fprintf(stdout, "psxrecomp: GL probe lighting has no sun map, the sun lights no wall\n");
+            s_ddgi_sunmap_failed = 1;
+            return;
+        }
+    }
+    /* Across and up face the light, depth runs the way it goes; the box takes the level's corners. */
+    const float forward[3] = {-toward[0], -toward[1], -toward[2]};
+    const float helper[3] = {fabsf(forward[1]) < 0.99f ? 0.0f : 1.0f, fabsf(forward[1]) < 0.99f ? 1.0f : 0.0f, 0.0f};
+    float across[3] = {helper[1] * forward[2] - helper[2] * forward[1], helper[2] * forward[0] - helper[0] * forward[2],
+                       helper[0] * forward[1] - helper[1] * forward[0]};
+    const float length = sqrtf(across[0] * across[0] + across[1] * across[1] + across[2] * across[2]);
+    for (int a = 0; a < 3; ++a) across[a] /= length;
+    const float up[3] = {forward[1] * across[2] - forward[2] * across[1], forward[2] * across[0] - forward[0] * across[2],
+                         forward[0] * across[1] - forward[1] * across[0]};
+    const float *axes[3] = {across, up, forward};
+    for (int r = 0; r < 3; ++r) {
+        float lo = 1e30f, hi = -1e30f;
+        for (int c = 0; c < 8; ++c) {
+            const float corner[3] = {s_ddgi_level_bounds[c & 1][0], s_ddgi_level_bounds[(c >> 1) & 1][1], s_ddgi_level_bounds[c >> 2][2]};
+            const float v = axes[r][0] * corner[0] + axes[r][1] * corner[1] + axes[r][2] * corner[2];
+            lo = v < lo ? v : lo;
+            hi = v > hi ? v : hi;
+        }
+        const float pad = (hi - lo) * 0.01f + 64.0f, span = hi - lo + 2.0f * pad;
+        for (int a = 0; a < 3; ++a) s_ddgi_sunmap_rows[m][r][a] = axes[r][a] / span;
+        s_ddgi_sunmap_rows[m][r][3] = (pad - lo) / span;
+    }
+    GLint depth_func, depth_mask, scissor_box[4];
+    GLfloat clear_depth;
+    glGetIntegerv(GL_DEPTH_FUNC, &depth_func);
+    glGetIntegerv(GL_DEPTH_WRITEMASK, &depth_mask);
+    glGetIntegerv(GL_SCISSOR_BOX, scissor_box);
+    glGetFloatv(GL_DEPTH_CLEAR_VALUE, &clear_depth);
+    const GLboolean cull = glIsEnabled(GL_CULL_FACE), scissor = glIsEnabled(GL_SCISSOR_TEST);
+    const int x = atlas ? (m - 1) * DDGI_SKY_TILE : 0, size = atlas ? DDGI_SKY_TILE : DDGI_SUNMAP;
+    /* The presenter samples the maps: drawn after its queued draws and fenced like the probes. */
+    if (s_interp_mutex) SDL_LockMutex(s_interp_mutex);
+    if (s_interp_draw_fence) gz_wait(0, s_interp_draw_fence);
+    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, s_ddgi_sunmap_fbo[atlas]);
+    glViewport(x, 0, size, size);
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(x, 0, size, size);
+    glDisable(GL_BLEND);
+    glDisable(GL_CULL_FACE);
+    glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+    glEnable(GL_DEPTH_TEST);
+    glDepthFunc(GL_LESS);
+    glDepthMask(GL_TRUE);
+    glClearDepth(1.0);
+    glClear(GL_DEPTH_BUFFER_BIT);
+    p_glUseProgram(s_ddgi_sunmap_prog);
+    p_glActiveTexture(PSXGL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, s_ddgi_level_tris_tex[level]);
+    p_glActiveTexture(PSXGL_TEXTURE0 + 1);
+    glBindTexture(GL_TEXTURE_2D, s_raw_tex);
+    p_glActiveTexture(PSXGL_TEXTURE0);
+    p_glUniform1i(s_ddgi_sunmap_tris, 0);
+    p_glUniform1i(s_ddgi_sunmap_vram, 1);
+    for (int r = 0; r < 3; ++r)
+        p_glUniform4f(s_ddgi_sunmap_row[r], s_ddgi_sunmap_rows[m][r][0], s_ddgi_sunmap_rows[m][r][1], s_ddgi_sunmap_rows[m][r][2],
+                      s_ddgi_sunmap_rows[m][r][3]);
+    p_glBindVertexArray(s_present_vao);
+    glDrawArrays(GL_TRIANGLES, 0, s_ddgi_level_faces_built * 3);
+    glDisable(GL_DEPTH_TEST);
+    glDepthFunc((GLenum)depth_func);
+    glDepthMask((GLboolean)depth_mask);
+    glClearDepth(clear_depth);
+    glScissor(scissor_box[0], scissor_box[1], scissor_box[2], scissor_box[3]);
+    if (!scissor) glDisable(GL_SCISSOR_TEST);
+    if (cull) glEnable(GL_CULL_FACE);
+    glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
+    if (s_ddgi_probe_fence) p_glDeleteSync(s_ddgi_probe_fence);
+    s_ddgi_probe_fence = p_glFenceSync(PSXGL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+    glFlush();
+    if (s_interp_mutex) SDL_UnlockMutex(s_interp_mutex);
+    memcpy(s_ddgi_sunmap_for[m], key, sizeof key);
+    s_ddgi_sunmap_ready[m] = 1;
+    if (getenv("PSX_DDGI"))
+        fprintf(stderr, "ddgi %s map %d: %d faces toward %.2f %.2f %.2f\n", m ? "sky" : "sun", m, s_ddgi_level_faces_built, toward[0],
+                toward[1], toward[2]);
 }
 
 static int ddgi_posmod(int a, int n) { return ((a % n) + n) % n; }
@@ -1283,6 +1463,8 @@ static void ddgi_update(float cy) {
         if (getenv("PSX_DDGI_SHADOWS") && getenv("PSX_DDGI_SHADOWS")[0] == '1') gl_renderer_set_ddgi_shadows(1);
         if (getenv("PSX_DDGI_LAMPS") && getenv("PSX_DDGI_LAMPS")[0] == '1') gl_renderer_set_ddgi_lamps(1);
         if (getenv("PSX_DDGI_SUN") && getenv("PSX_DDGI_SUN")[0] == '1') gl_renderer_set_ddgi_sun(1);
+        if (getenv("PSX_DDGI_SUN_LIGHT")) s_ddgi_sun_light = (float)atof(getenv("PSX_DDGI_SUN_LIGHT"));
+        if (getenv("PSX_DDGI_SUN_SHADE")) s_ddgi_sun_shade = (float)atof(getenv("PSX_DDGI_SUN_SHADE"));
     }
     const int probes = s_ddgi_light, sun = ddgi_sun_active(), lamps = s_ddgi_shadows || s_ddgi_lamps || sun;
     if ((!probes && !lamps) || s_ddgi_failed || !s_raster_ok) return;
@@ -1377,6 +1559,13 @@ static void ddgi_update(float cy) {
             now->sun[1] = -sinf(el);
             now->sun[2] = cosf(el) * cosf(az);
             now->sun[3] = s_ddgi_fit_now.sun;
+            static const float sky[DDGI_SKY_MAPS][3] = {{0.0f, -1.0f, 0.0f},
+                                                         {0.70710678f, -0.70710678f, 0.0f},
+                                                         {-0.70710678f, -0.70710678f, 0.0f},
+                                                         {0.0f, -0.70710678f, 0.70710678f},
+                                                         {0.0f, -0.70710678f, -0.70710678f}};
+            ddgi_sunmap_update(0, now->sun, now->level);
+            for (int k = 0; k < DDGI_SKY_MAPS; ++k) ddgi_sunmap_update(1 + k, sky[k], now->level);
         }
         s_ddgi_ctx[0].frame = *now;
         if (probes) ddgi_probe_update(now);
@@ -1479,7 +1668,10 @@ static DdgiContext *ddgi_context(int thread) {
                                  ddgi_uniform(l, "u_count"), ddgi_uniform(l, "u_shadow"), ddgi_uniform(l, "u_caster"),
                                  ddgi_uniform(l, "u_lamp"),  ddgi_uniform(l, "u_level_nodes"), ddgi_uniform(l, "u_level_tris"),
                                  ddgi_uniform(l, "u_sun"),   ddgi_uniform(l, "u_sun_colour"), ddgi_uniform(l, "u_level"),
-                                 ddgi_uniform(l, "u_fog"),   ddgi_uniform(l, "u_cast"), ddgi_uniform(l, "u_mask")};
+                                 ddgi_uniform(l, "u_fog"),   ddgi_uniform(l, "u_cast"), ddgi_uniform(l, "u_mask"),
+                                 ddgi_uniform(l, "u_sunmap"), ddgi_uniform(l, "u_sunrow0"), ddgi_uniform(l, "u_sunrow1"),
+                                 ddgi_uniform(l, "u_sunrow2"), ddgi_uniform(l, "u_sunlook"), ddgi_uniform(l, "u_skymap"),
+                                 ddgi_uniform(l, "u_skyrow")};
     ctx->built = 1;
     return ctx;
 }
@@ -1578,6 +1770,21 @@ static void ddgi_lamp_pass(int thread, GLuint color, GLuint depth, float focal_x
     p_glActiveTexture(PSXGL_TEXTURE0);
     p_glUniform1i(ctx->la.cast, 12);
     p_glUniform1i(ctx->la.mask, 13);
+    p_glActiveTexture(PSXGL_TEXTURE0 + 14);
+    int maps = 1;
+    for (int m = 0; m <= DDGI_SKY_MAPS; ++m) maps &= s_ddgi_sunmap_ready[m];
+    glBindTexture(GL_TEXTURE_2D, maps ? s_ddgi_sunmap_tex[0] : 0);
+    p_glActiveTexture(PSXGL_TEXTURE0 + 15);
+    glBindTexture(GL_TEXTURE_2D, maps ? s_ddgi_sunmap_tex[1] : 0);
+    p_glActiveTexture(PSXGL_TEXTURE0);
+    p_glUniform1i(ctx->la.sunmap, 14);
+    p_glUniform1i(ctx->la.skymap, 15);
+    const GLint sun_rows[3] = {ctx->la.sunrow0, ctx->la.sunrow1, ctx->la.sunrow2};
+    for (int r = 0; r < 3; ++r)
+        p_glUniform4f(sun_rows[r], s_ddgi_sunmap_rows[0][r][0], s_ddgi_sunmap_rows[0][r][1], s_ddgi_sunmap_rows[0][r][2],
+                      s_ddgi_sunmap_rows[0][r][3]);
+    p_glUniform4fv(ctx->la.skyrow, 3 * DDGI_SKY_MAPS, &s_ddgi_sunmap_rows[1][0][0]);
+    p_glUniform4f(ctx->la.sunlook, s_ddgi_sun_light, s_ddgi_sun_shade, 0.0f, maps ? 1.0f : 0.0f);
     p_glUniform1i(ctx->la.level_nodes, 10);
     p_glUniform1i(ctx->la.level_tris, 11);
     p_glUniform4f(ctx->la.level, f->level >= 0 ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
@@ -1623,6 +1830,10 @@ static void ddgi_lamp_pass(int thread, GLuint color, GLuint depth, float focal_x
     p_glActiveTexture(PSXGL_TEXTURE0 + 12);
     glBindTexture(GL_TEXTURE_2D, 0);
     p_glActiveTexture(PSXGL_TEXTURE0 + 13);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    p_glActiveTexture(PSXGL_TEXTURE0 + 14);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    p_glActiveTexture(PSXGL_TEXTURE0 + 15);
     glBindTexture(GL_TEXTURE_2D, 0);
     p_glActiveTexture(PSXGL_TEXTURE0);
     ctx->lamp_ready = 1;
@@ -1762,6 +1973,8 @@ void gl_renderer_set_ddgi_mission(int mission) {
     if (getenv("PSX_DDGI")) fprintf(stdout, "psxrecomp: DDGI mission %d\n", mission);
     s_ddgi_level_built = -1;
     s_ddgi_sun_found = 0;
+    memset(s_ddgi_sunmap_ready, 0, sizeof s_ddgi_sunmap_ready);
+    s_ddgi_level_faces_built = 0;
     memset(&s_ddgi_fit_now, 0, sizeof s_ddgi_fit_now);
     memset(s_ddgi_level_weight, 0, sizeof s_ddgi_level_weight);
     s_ddgi_probe_reset = 1;

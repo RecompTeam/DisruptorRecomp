@@ -55,6 +55,7 @@ public:
     bool read(std::vector<GpuDdgiTriangle> &out, uint64_t &digest) {
         out.clear();
         digest = faces_ = materials_ = 1469598103934665603ull;
+        stand_ins_ = 0;
         const uint32_t rooms = psx_mod_read_word(kRoomCount), textures = psx_mod_read_word(kTextures);
         if (rooms == 0 || rooms > kMostRooms || !in_ram(textures, 8)) return false;
         mix(digest, rooms);
@@ -73,6 +74,7 @@ public:
     }
 
     uint64_t faces() const { return faces_; }
+    int stand_ins() const { return stand_ins_; }
     uint64_t materials() const { return materials_; }
 
 private:
@@ -88,6 +90,12 @@ private:
             const uint32_t end = at + size;
             mix(digest, header);
             mix(digest, lights);
+            /* 0x800461AC: a block whose low byte names a room draws only while that room is unseen, a stand-in for it. */
+            if ((header & 255u) != 255u) {
+                ++stand_ins_;
+                at = end;
+                continue;
+            }
             uint32_t vertex = at + 8 + lights;
             entries_.clear();
             for (;;) {
@@ -162,6 +170,7 @@ private:
     static constexpr int kHalves[2][3] = {{0, 1, 2}, {2, 1, 3}};  /* wound alike, as the frame recorder's */
     std::vector<Corner> entries_;
     uint64_t faces_ = 0, materials_ = 0;
+    int stand_ins_ = 0;
 };
 
 LevelReader g_reader;
@@ -184,8 +193,9 @@ void publish_if_changed() {
     const auto began = std::chrono::steady_clock::now();
     const bool read = g_reader.read(g_faces, digest);
     if (std::getenv("PSX_DDGI"))
-        std::fprintf(stderr, "disruptor: level read in %.2f ms\n",
-                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count());
+        std::fprintf(stderr, "disruptor: level read in %.2f ms, %zu faces, %d stand-in blocks left out\n",
+                     std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count(), g_faces.size(),
+                     g_reader.stand_ins());
     if (!read) {
         if (!g_told) std::fprintf(stderr, "disruptor: the level's meshes did not read whole, the lighting keeps the faces it had\n");
         g_told = true;
