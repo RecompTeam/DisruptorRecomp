@@ -39,7 +39,7 @@ typedef struct GpuDdgiCard {
 
 #define GPU_DDGI_CASTERS 64
 #define GPU_DDGI_LAMPS 24
-#define GPU_DDGI_DYNAMIC_LAMPS 8
+#define GPU_DDGI_DYNAMIC_LAMPS 4 /* a fast-firing gun kept eight lit, each a ray a pixel */
 
 /* What casts a shadow: an upright ellipsoid fitted to a sprite's opaque texels for the shade under it, the picture itself
  * for the shadow it throws. previous: its place in the frame before, or -1. */

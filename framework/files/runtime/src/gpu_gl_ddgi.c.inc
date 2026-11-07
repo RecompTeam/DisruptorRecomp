@@ -148,9 +148,11 @@ static const char *DDGI_TRACE_FS =
     "    vec3 l = a.xyz - p; float dist = length(l); if (dist >= a.w) continue; l /= max(dist, 1e-3);\n"
     "    float ndl = dot(n, l); if (ndl <= 0.0) continue;\n"
     "    float x = dist/a.w, r = dist/(0.35*a.w), fall = (1.0 - x*x)*(1.0 - x*x)/(1.0 + r*r), far = dist*0.95 - 16.0, hu, hv;\n"
+    "    float give = u_lamps.y*(b.w/(b.w + 20000.0))*2.0*(-c.w)*fall*ndl;\n"
+    "    if (give < 0.002) continue;\n"
     "    if (u_level.x > 0.5 && far > 2.0 && bvh_hit_in(u_level_nodes, u_level_tris, p, l, 2.0, far, hu, hv, true, true) >= 0) continue;\n"
     "    float lum = dot(b.rgb, vec3(0.2126, 0.7152, 0.0722));\n"
-    "    sum += b.rgb/max(lum, 1e-3)*u_lamps.y*(b.w/(b.w + 20000.0))*2.0*(-c.w)*fall*ndl; }\n"
+    "    sum += b.rgb/max(lum, 1e-3)*give; }\n"
     "  return sum; }\n"
     "void main(){\n"
     "  ivec2 at = ivec2(gl_FragCoord.xy); int ray = at.x, probe = at.y*2 + int(u_view.w);\n"
@@ -415,6 +417,11 @@ static const char *DDGI_LAMP_FS =
     "  if (bvh_hit(o, d, 2.0, best, hu, hv, true, true) >= 0) return true;\n"
     "  best = len*0.95 - 16.0;\n"
     "  return u_level.x > 0.5 && bvh_hit_in(u_level_nodes, u_level_tris, o, d, 2.0, best, hu, hv, true, true) >= 0; }\n"
+    "/* What the frame drew alone: an added light's every pixel asks, the level's BVH too doubled the pass's cost. */\n"
+    "bool blocked_frame(vec3 o, vec3 q){\n"
+    "  vec3 d = q - o; float len = length(d); if (len < 40.0) return false;\n"
+    "  float best = len*0.95 - 16.0, hu, hv;\n"
+    "  return bvh_hit(o, d/len, 2.0, best, hu, hv, true, true) >= 0; }\n"
     "void main(){\n"
     "  vec2 uv = mix(u_rect.xy, u_rect.zw, gl_FragCoord.xy/u_size.xy);\n"
     "  ivec2 tsize = textureSize(u_tex, 0);\n"
@@ -469,10 +476,12 @@ static const char *DDGI_LAMP_FS =
     "    vec3 l = a.xyz - p; float dist = length(l); if (dist >= a.w) continue; l /= max(dist, 1e-3);\n"
     "    float ndl = sprite ? 0.6 + 0.4*dot(n, l) : dot(n, l); if (ndl <= 0.0) continue;\n"
     "    float x = dist/a.w, r = dist/(0.35*a.w), fall = (1.0 - x*x)*(1.0 - x*x)/(1.0 + r*r), vis = 1.0;\n"
-    "    if (!sprite && blocked(p + n*8.0, a.xyz)) vis = 0.0;\n"
+    "    float give = u_shadow.w*(b.w/(b.w + 20000.0))*2.0*(-c.w)*fall*ndl;\n"
+    "    if (give < 0.002) continue;  /* under half a step of an 8-bit colour: no ray for it */\n"
+    "    if (!sprite && blocked_frame(p + n*8.0, a.xyz)) continue;\n"
     "    for (int j = 0; j < nearby && vis > 0.0; ++j) vis *= 1.0 - caster_hides(p, a.xyz, 60.0, near[j], sprite);\n"
     "    float lum = dot(b.rgb, vec3(0.2126, 0.7152, 0.0722));\n"
-    "    added += b.rgb/max(lum, 1e-3)*u_shadow.w*(b.w/(b.w + 20000.0))*2.0*(-c.w)*fall*ndl*vis; }\n"
+    "    added += b.rgb/max(lum, 1e-3)*give*vis; }\n"
     "  /* The added lights' light come back off the surfaces round about, from the probes. */\n"
     "  if (u_ddgi.x > 0.0) { vec3 e = probe_light(p, n, normalize(u_eye.xyz - p)); if (e.x >= 0.0) added += e*u_ddgi.x; }\n"
     "  if (dot(added, vec3(1.0)) > 1e-4) {\n"
@@ -1503,9 +1512,9 @@ static void ddgi_lamp_pass(int thread, GLuint color, GLuint depth, float focal_x
     int lw = (int)((u1 - u0) * (float)w * 0.5f + 0.5f), lh = (int)((v1 - v0) * (float)h * 0.5f + 0.5f);
     static int full = -1;
     if (full < 0) full = getenv("PSX_DDGI_LAMP_FULL") != NULL;
-    if (!full && (lw > shown_w / 2 || lh > shown_h / 2) && shown_w > 1 && shown_h > 1) {
-        /* Finer than half the screen the soft lamp light showed no difference, at up to four times the cost. */
-        const float fit = fminf((float)(shown_w / 2) / (float)lw, (float)(shown_h / 2) / (float)lh);
+    if (!full && (lw > shown_w / 3 || lh > shown_h / 3) && shown_w > 1 && shown_h > 1) {
+        /* A third of the screen: a fast-firing gun's lights made the half-screen pass the frame's heaviest at 1440p. */
+        const float fit = fminf((float)(shown_w / 3) / (float)lw, (float)(shown_h / 3) / (float)lh);
         if (fit < 1.0f) { lw = (int)((float)lw * fit + 0.5f); lh = (int)((float)lh * fit + 0.5f); }
     }
     if (lw <= 0 || lh <= 0) return;
