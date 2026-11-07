@@ -302,4 +302,13 @@ require(
     "serves",
 )
 
+apply_set = function_body(lighting, "static void ddgi_apply_set(const DdgiApplyUniforms *u, const DdgiFrame *f,")
+require(
+    "    if (f->focal > 0.0f) centre_y += (f->centre_y - 120.0f) * focal_y / f->focal;\n" in apply_set
+    and "        now->centre_y = (float)cam.centre_y16 / 65536.0f;\n" in update
+    and "    shown->centre_y = before->centre_y * keep + after->centre_y * (1.0f - keep);\n" in between,
+    "a world place taken back from the picture uses the projection's own centre row: the vertical look moves the horizon "
+    "off the picture's middle",
+)
+
 print("Disruptor probe lighting source contract: PASS")

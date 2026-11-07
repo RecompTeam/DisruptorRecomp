@@ -513,6 +513,7 @@ typedef struct DdgiFrame {
     int level;                   /* the level BVH it was drawn with, -1 for none */
     float sun[4], sun_colour[4]; /* as the shaders' u_sun and u_sun_colour, the fit's weight 0 for no sun */
     float ambient;               /* the fit's light every surface has besides the lamps */
+    float centre_y, focal;       /* the projection's centre row (a vertical look moves it off the middle) and its focal */
     GpuDdgiScene scene;
 } DdgiFrame;
 /* Programs are made in each context: a program's uniforms are shared between contexts with it. */
@@ -1364,6 +1365,8 @@ static void ddgi_update(float cy) {
         /* The picture was drawn turned about the eye by the smooth turn's part of a step: the rows that read it are too. */
         psx_ddgi_turn_rows(now->rows, shot->turn);
         for (int a = 0; a < 3; ++a) now->offset[a] = (float)cam.offset[a];
+        now->centre_y = (float)cam.centre_y16 / 65536.0f;
+        now->focal = (float)cam.focal;
         psx_ddgi_camera_back(now->rows, now->offset, now->back, now->eye);
         ddgi_build(tris, count, bvh, now->eye);
         if (shot->scene_ok) now->scene = shot->scene;
@@ -1430,6 +1433,8 @@ static void ddgi_update(float cy) {
 
 static void ddgi_apply_set(const DdgiApplyUniforms *u, const DdgiFrame *f, float focal_x, float focal_y, float centre_x,
                            float centre_y, int w, int h, int scale) {
+    /* centre_y is the middle, row 120 of 240: the vertical look moves the horizon off it. */
+    if (f->focal > 0.0f) centre_y += (f->centre_y - 120.0f) * focal_y / f->focal;
     p_glUniform1i(u->tex, 0);
     p_glUniform1i(u->depth, 2);
     p_glUniform1i(u->irr, 3);
@@ -1662,6 +1667,7 @@ static void ddgi_present_between(const DdgiFrame *before, const DdgiFrame *after
     const float keep = 1.0f - (alpha < 0.0f ? 0.0f : alpha);
     psx_ddgi_camera_between(before->rows, before->offset, after->rows, after->offset, keep, shown->rows, shown->offset,
                             shown->back, shown->eye);
+    shown->centre_y = before->centre_y * keep + after->centre_y * (1.0f - keep);
     if (after->scene.before != before->scene.pose) return;
     for (int i = 0; i < shown->scene.casters; ++i) {
         GpuDdgiCaster *c = &shown->scene.caster[i];
