@@ -26,7 +26,10 @@ void camera_offset(int32_t offset[3]) {
 
 void world_draw(CPUState *, uint32_t) {
     gte_pose_begin();
-    gl_renderer_set_ddgi_mission(psx_mod_read_byte(kMission));
+    const uint8_t mission = psx_mod_read_byte(kMission);
+    gl_renderer_set_ddgi_mission(mission);
+    /* The owner's choice: the first two missions have a sun though their baked light shows none; the second's old one. */
+    gl_renderer_ddgi_sun_ask(mission == 1 || mission == 2, 35.0f, 50.0f);
     disruptor::ddgi_level::publish_if_changed();
 }
 

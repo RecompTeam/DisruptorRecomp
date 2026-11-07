@@ -18,6 +18,7 @@
 #define DDGI_FIT_SUN_TRIES 96       /* directions over the sky's half */
 #define DDGI_FIT_SUN_EVERY 4        /* a direction is judged on one face in four */
 #define DDGI_FIT_SUN_GAIN 0.03f     /* the share of the baked light's variance a sun must explain to be taken */
+#define DDGI_FIT_SUN_HINT 0.01f     /* a sun the game asks for keeps the direction found when it explains this much */
 
 typedef struct {
     float position[3], normal[3], size, colour[3], power;
@@ -28,6 +29,7 @@ typedef struct {
     DdgiLevelLamp lamp[DDGI_FIT_LAMPS];
     float ambient, sun; /* in the lamp pass's units: its share denominator's floor, the sun's weight */
     float sun_dir[3], sun_gain; /* toward the sun found, zero for none; the share of the variance it explained alone */
+    int sun_asked;              /* the game asked for this sun: the level's light did not show one */
     int samples, emitting; /* faces fitted; lamps from emitting faces, the rest stand before the brightest baked light */
     double residual, variance; /* the mean squared error left and the baked light's own, linear light */
 } DdgiFit;
@@ -377,14 +379,17 @@ static inline void psx_ddgi_sun_try(int i, int tries, float dir[3]) {
 }
 
 /* Fits the lamps' powers and the ambient to the faces' baked light; with find_sun, also the sun whose light explains most of
- * what is left, kept only when it explains DDGI_FIT_SUN_GAIN of the baked light's variance. */
+ * the baked light, kept when it explains DDGI_FIT_SUN_GAIN of its variance. asked (unit, toward the sun, or NULL): the game wants
+ * a sun on this level whatever the light shows, along the direction found if it explains DDGI_FIT_SUN_HINT, else along asked,
+ * at least as strong as the light every surface has. */
 static inline void psx_ddgi_fit_level(const DdgiNode *nodes, const DdgiBuildFace *order, const GpuDdgiTriangle *tris, int count,
-                                      float front, int find_sun, DdgiFit *fit, DdgiFitWork *work) {
+                                      float front, int find_sun, const float *asked, DdgiFit *fit, DdgiFitWork *work) {
     const int samples = psx_ddgi_fit_sample(nodes, order, tris, count, front, fit, work);
     psx_ddgi_fit_solve(fit, work, samples, NULL);
     fit->sun_dir[0] = fit->sun_dir[1] = fit->sun_dir[2] = 0.0f;
     fit->sun_gain = 0.0f;
-    if (!find_sun || samples == 0 || fit->variance <= 0.0) return;
+    fit->sun_asked = 0;
+    if (!find_sun || samples == 0) return;
     /* Each direction's share of the baked light's variance alone, cov(g, b)^2 / var(g). Taken after the lamps, the lamps standing
      * before sunlit ground had already explained it (mission 1's roof gave 0.004); a sun only lights faces open to the sky, so an
      * indoor level finds none either way. */
@@ -412,10 +417,16 @@ static inline void psx_ddgi_fit_level(const DdgiNode *nodes, const DdgiBuildFace
             memcpy(chosen, dir, sizeof chosen);
         }
     }
-    fit->sun_gain = (float)(best / (fit->variance * weights));
-    if (fit->sun_gain < DDGI_FIT_SUN_GAIN) return;
+    fit->sun_gain = fit->variance > 0.0 && weights > 0.0 ? (float)(best / (fit->variance * weights)) : 0.0f;
+    const int found = fit->sun_gain >= DDGI_FIT_SUN_GAIN;
+    if (!found && !asked) return;
+    if (!found && fit->sun_gain < DDGI_FIT_SUN_HINT) memcpy(chosen, asked, sizeof chosen);
     for (int i = 0; i < samples; ++i) work->sun[i] = psx_ddgi_sun_share(nodes, order, tris, &work->sample[i], chosen);
     psx_ddgi_fit_solve(fit, work, samples, work->sun);
+    if (!found) {
+        fit->sun_asked = 1;
+        if (fit->sun < fit->ambient) fit->sun = fit->ambient;
+    }
     if (fit->sun > 0.0f) memcpy(fit->sun_dir, chosen, sizeof chosen);
 }
 

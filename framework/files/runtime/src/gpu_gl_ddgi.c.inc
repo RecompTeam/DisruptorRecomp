@@ -732,6 +732,8 @@ static int s_ddgi_level_staged_faces, s_ddgi_level_staged_nodes, s_ddgi_level_st
 static int s_ddgi_level_made_count = -1, s_ddgi_level_made_generation = -1; /* the level thread's own */
 /* What each face gives off: the game thread's, the one handed over, the level thread's. */
 static float (*s_ddgi_level_emission_game)[3], (*s_ddgi_level_emission_incoming)[3], (*s_ddgi_level_emission)[3];
+/* The sun the game asks for, toward it, w 1 when it asks: the game thread's, the one handed over, the level thread's. */
+static float s_ddgi_sun_asked_game[4], s_ddgi_sun_asked_given[4], s_ddgi_sun_asked_incoming[4], s_ddgi_sun_asked[4];
 static int s_ddgi_level_emission_fresh;            /* under the mutex: the faces handed over carry new emission */
 static uint64_t s_ddgi_level_shape;                /* game thread: the corners the emission was read for */
 static DdgiFit s_ddgi_fit_made, s_ddgi_fit_staged; /* the level thread's, the one left for the GL thread */
@@ -782,6 +784,7 @@ static int ddgi_level_main(void *opaque) {
             float (*emission)[3] = s_ddgi_level_emission;
             s_ddgi_level_emission = s_ddgi_level_emission_incoming;
             s_ddgi_level_emission_incoming = emission;
+            memcpy(s_ddgi_sun_asked, s_ddgi_sun_asked_incoming, sizeof s_ddgi_sun_asked);
             s_ddgi_level_emission_fresh = 0;
         }
         const int count = s_ddgi_level_incoming_count, generation = s_ddgi_level_generation;
@@ -816,7 +819,7 @@ static int ddgi_level_main(void *opaque) {
                                                        s_ddgi_fit_made.lamp + s_ddgi_fit_made.emitting,
                                                        DDGI_FIT_LAMPS - s_ddgi_fit_made.emitting);
             psx_ddgi_fit_level(s_ddgi_level_nodes, s_ddgi_level_faces, s_ddgi_level, count, DDGI_FRONT,
-                               1, &s_ddgi_fit_made, &s_ddgi_fit_work);
+                               1, s_ddgi_sun_asked[3] > 0.5f ? s_ddgi_sun_asked : NULL, &s_ddgi_fit_made, &s_ddgi_fit_work);
         }
         if (getenv("PSX_DDGI")) {
             const double tick = 1000.0 / (double)SDL_GetPerformanceFrequency();
@@ -909,14 +912,16 @@ int gpu_ddgi_set_level(const GpuDdgiTriangle *tris, int count) {
         memcpy(bits, tris[i].world, sizeof bits);
         for (int k = 0; k < 9; ++k) shape = (shape ^ bits[k]) * 1099511628211ull;
     }
-    /* VRAM is the game thread's: a lamp's texels are read here, only when the corners change. */
-    const int fresh = shape != s_ddgi_level_shape;
+    /* VRAM is the game thread's: a lamp's texels are read here, only when the corners change. A sun asked anew fits again. */
+    const int fresh = shape != s_ddgi_level_shape || memcmp(s_ddgi_sun_asked_game, s_ddgi_sun_asked_given, sizeof s_ddgi_sun_asked_given);
+    memcpy(s_ddgi_sun_asked_given, s_ddgi_sun_asked_game, sizeof s_ddgi_sun_asked_given);
     if (fresh) gpu_ddgi_level_emission(tris, count, s_ddgi_level_emission_game);
     s_ddgi_level_shape = shape;
     SDL_LockMutex(s_ddgi_level_mutex);
     if (count) memcpy(s_ddgi_level_incoming, tris, sizeof(GpuDdgiTriangle) * (size_t)count);
     if (fresh) {
         if (count) memcpy(s_ddgi_level_emission_incoming, s_ddgi_level_emission_game, sizeof(float) * 3 * (size_t)count);
+        memcpy(s_ddgi_sun_asked_incoming, s_ddgi_sun_asked_game, sizeof s_ddgi_sun_asked_incoming);
         s_ddgi_level_emission_fresh = 1;
     }
     s_ddgi_level_incoming_count = count;
@@ -1763,6 +1768,13 @@ void gl_renderer_set_ddgi_mission(int mission) {
     ssao_mode();
 }
 int gl_renderer_ddgi_sun_here(void) { return s_ddgi_sun_found; }
+/* Game thread, before the level is handed over: a sun on this level whatever its light shows. */
+void gl_renderer_ddgi_sun_ask(int asked, float azimuth, float elevation) {
+    const float az = azimuth * 0.017453293f, el = elevation * 0.017453293f;
+    const float want[4] = {asked ? cosf(el) * sinf(az) : 0.0f, asked ? -sinf(el) : 0.0f, asked ? cosf(el) * cosf(az) : 0.0f,
+                           asked ? 1.0f : 0.0f};
+    memcpy(s_ddgi_sun_asked_game, want, sizeof want);
+}
 void gl_renderer_ddgi_sun_get(float sun[4]) {
     GL_RT_SYNC(__func__);
     sun[0] = s_ddgi_sun_turn;

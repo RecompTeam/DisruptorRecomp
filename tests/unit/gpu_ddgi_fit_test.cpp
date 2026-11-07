@@ -120,8 +120,8 @@ void fit_finds_the_lamp() {
             for (uint8_t &channel : corner) channel = static_cast<uint8_t>(byte);
     }
     static DdgiFitWork work;
-    psx_ddgi_fit_level(scene.nodes.data(), scene.faces.data(), scene.tris.data(), static_cast<int>(scene.tris.size()), 1.0f, 0, &fit,
-                       &work);
+    psx_ddgi_fit_level(scene.nodes.data(), scene.faces.data(), scene.tris.data(), static_cast<int>(scene.tris.size()), 1.0f, 0,
+                       nullptr, &fit, &work);
     std::cout << "fit: ambient " << fit.ambient << " power " << fit.lamp[0].power << " other " << fit.lamp[1].power << " error "
               << fit.residual << '\n';
     expect(std::fabs(fit.ambient - ambient) < 0.03f * ambient, "the ambient comes back within 3 percent");
@@ -151,8 +151,8 @@ void the_sun_is_found() {
     light_by_sun(scene, 0.25f, 0.9f, toward);
     DdgiFit fit{};
     static DdgiFitWork work;
-    psx_ddgi_fit_level(scene.nodes.data(), scene.faces.data(), scene.tris.data(), static_cast<int>(scene.tris.size()), 1.0f, 1, &fit,
-                       &work);
+    psx_ddgi_fit_level(scene.nodes.data(), scene.faces.data(), scene.tris.data(), static_cast<int>(scene.tris.size()), 1.0f, 1,
+                       nullptr, &fit, &work);
     const float off = std::acos(std::fmin(1.0f, psx_ddgi_dot3(fit.sun_dir, toward))) * 57.29578f;
     std::cout << "sun: weight " << fit.sun << " off by " << off << " degrees, explained alone " << fit.sun_gain << '\n';
     expect(fit.sun > 0.6f && off < 20.0f, "a room lit by a sun gets that sun back, within 20 degrees");
@@ -160,9 +160,16 @@ void the_sun_is_found() {
     Scene plain = room();
     light_by_sun(plain, 0.6f, 0.0f, toward);
     DdgiFit none{};
-    psx_ddgi_fit_level(plain.nodes.data(), plain.faces.data(), plain.tris.data(), static_cast<int>(plain.tris.size()), 1.0f, 1, &none,
-                       &work);
+    psx_ddgi_fit_level(plain.nodes.data(), plain.faces.data(), plain.tris.data(), static_cast<int>(plain.tris.size()), 1.0f, 1,
+                       nullptr, &none, &work);
     expect(none.sun == 0.0f && none.sun_dir[1] == 0.0f, "a room lit evenly gets no sun");
+
+    const float asked[3] = {0.0f, -1.0f, 0.0f};
+    DdgiFit wanted{};
+    psx_ddgi_fit_level(plain.nodes.data(), plain.faces.data(), plain.tris.data(), static_cast<int>(plain.tris.size()), 1.0f, 1,
+                       asked, &wanted, &work);
+    expect(wanted.sun_asked && wanted.sun_dir[1] == -1.0f && wanted.sun >= wanted.ambient && wanted.ambient > 0.0f,
+           "a sun the game asks for on an evenly lit room comes from where it asked, as strong as the ambient");
 }
 
 void baked_is_linear_by_channel() {
