@@ -14,6 +14,10 @@
 #define DDGI_FIT_SAMPLES 16384
 #define DDGI_FIT_SWEEPS 400
 #define DDGI_FIT_HOT_CELL 2000.0f   /* with the brightest quarter: 0.27 of mission 1's baked light explained, 0.15 at 1200 */
+#define DDGI_FIT_ROW 48             /* lamps a face keeps: the strongest in reach that see it */
+#define DDGI_FIT_SUN_TRIES 96       /* directions over the sky's half */
+#define DDGI_FIT_SUN_EVERY 4        /* a direction is judged on one face in four */
+#define DDGI_FIT_SUN_GAIN 0.03f     /* the share of the baked light's variance a sun must explain to be taken */
 
 typedef struct {
     float position[3], normal[3], size, colour[3], power;
@@ -23,14 +27,25 @@ typedef struct {
     int lamps;
     DdgiLevelLamp lamp[DDGI_FIT_LAMPS];
     float ambient, sun; /* in the lamp pass's units: its share denominator's floor, the sun's weight */
+    float sun_dir[3], sun_gain; /* toward the sun found, zero for none; the share of the variance it explained alone */
     int samples, emitting; /* faces fitted; lamps from emitting faces, the rest stand before the brightest baked light */
     double residual, variance; /* the mean squared error left and the baked light's own, linear light */
 } DdgiFit;
 
-/* The fit's normal equations: unknowns are the ambient, each lamp, the sun. */
+/* A face as the fit samples it: what lights it is fixed once, its residual follows each solve. */
+typedef struct {
+    float centre[3], normal[3], weight, baked, residual;
+    int count;
+    uint16_t lamp[DDGI_FIT_ROW];
+    float share[DDGI_FIT_ROW];
+} DdgiFitSample;
+
+/* The fit's normal equations (unknowns: the ambient, each lamp, the sun) and its samples. */
 #define DDGI_FIT_UNKNOWNS (DDGI_FIT_LAMPS + 2)
 typedef struct {
     double ata[DDGI_FIT_UNKNOWNS * DDGI_FIT_UNKNOWNS], atb[DDGI_FIT_UNKNOWNS], x[DDGI_FIT_UNKNOWNS];
+    DdgiFitSample sample[DDGI_FIT_SAMPLES];
+    float sun[DDGI_FIT_SAMPLES];
 } DdgiFitWork;
 
 static inline float psx_ddgi_dot3(const float a[3], const float b[3]) { return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]; }
@@ -253,48 +268,71 @@ static inline void psx_ddgi_nnls(const double *ata, const double *atb, int n, do
         }
 }
 
-/* Fits the lamps' powers, the ambient and the sun (unit, toward it, or NULL) to the faces' baked light. */
-static inline void psx_ddgi_fit_level(const DdgiNode *nodes, const DdgiBuildFace *order, const GpuDdgiTriangle *tris, int count,
-                                      float front, const float *sun, DdgiFit *fit, DdgiFitWork *work) {
-    const int n = fit->lamps + 2, sun_at = fit->lamps + 1;
-    memset(work->ata, 0, sizeof(double) * (size_t)n * (size_t)n);
-    memset(work->atb, 0, sizeof(double) * (size_t)n);
+/* The faces sampled once: place, front, weight, baked light, and the strongest lamps in reach that see them. */
+static inline int psx_ddgi_fit_sample(const DdgiNode *nodes, const DdgiBuildFace *order, const GpuDdgiTriangle *tris, int count,
+                                      float front, const DdgiFit *fit, DdgiFitWork *work) {
     const int stride = count > DDGI_FIT_SAMPLES ? (count + DDGI_FIT_SAMPLES - 1) / DDGI_FIT_SAMPLES : 1;
-    double sum_b = 0.0, sum_w = 0.0, sum_mean = 0.0;
-    fit->samples = 0;
-    for (int i = 0; i < count; i += stride) {
+    int samples = 0;
+    for (int i = 0; i < count && samples < DDGI_FIT_SAMPLES; i += stride) {
         const GpuDdgiTriangle *t = &tris[i];
-        float normal[3], centre[3], from[3];
-        const float area = 0.5f * psx_ddgi_face_normal(t, front, normal);
+        DdgiFitSample *s = &work->sample[samples];
+        const float area = 0.5f * psx_ddgi_face_normal(t, front, s->normal);
         if (area < 1.0f) continue;
+        float from[3];
         for (int a = 0; a < 3; ++a) {
-            centre[a] = (t->world[0][a] + t->world[1][a] + t->world[2][a]) / 3.0f;
-            from[a] = centre[a] + normal[a] * 8.0f;
+            s->centre[a] = (t->world[0][a] + t->world[1][a] + t->world[2][a]) / 3.0f;
+            from[a] = s->centre[a] + s->normal[a] * 8.0f;
         }
-        int at[DDGI_FIT_LAMPS + 2], used = 0;
-        double row[DDGI_FIT_LAMPS + 2];
-        at[used] = 0;
-        row[used++] = 1.0;
+        s->weight = area;
+        s->baked = psx_ddgi_baked(t);
+        s->count = 0;
         for (int k = 0; k < fit->lamps; ++k) {
             const DdgiLevelLamp *lamp = &fit->lamp[k];
             float to[3] = {lamp->position[0] - from[0], lamp->position[1] - from[1], lamp->position[2] - from[2]};
             const float dist = sqrtf(psx_ddgi_dot3(to, to));
             if (dist > DDGI_FIT_REACH || dist < 40.0f) continue;
-            const float g = psx_ddgi_lamp_share(centre, normal, lamp);
+            const float g = psx_ddgi_lamp_share(s->centre, s->normal, lamp);
+            int slot = s->count;
+            if (slot == DDGI_FIT_ROW) { /* full: the weakest gives way */
+                slot = 0;
+                for (int j = 1; j < DDGI_FIT_ROW; ++j)
+                    if (s->share[j] < s->share[slot]) slot = j;
+                if (g <= s->share[slot]) continue;
+            }
             if (g <= 0.0f) continue;
             for (int a = 0; a < 3; ++a) to[a] /= dist;
             if (psx_ddgi_bvh_blocked(nodes, order, tris, from, to, 2.0f, dist * 0.95f - 16.0f)) continue;
-            at[used] = k + 1;
-            row[used++] = g;
+            s->lamp[slot] = (uint16_t)k;
+            s->share[slot] = g;
+            if (slot == s->count) ++s->count;
         }
-        if (sun) {
-            const float facing = psx_ddgi_dot3(normal, sun);
-            if (facing > 0.0f && !psx_ddgi_bvh_blocked(nodes, order, tris, from, sun, 1.0f, 40000.0f)) {
-                at[used] = sun_at;
-                row[used++] = facing;
-            }
+        ++samples;
+    }
+    return samples;
+}
+
+/* The ambient, the lamps' powers and, with sun given (each sample's share), the sun's, by non-negative least squares over
+ * the samples; each sample's residual left behind. */
+static inline void psx_ddgi_fit_solve(DdgiFit *fit, DdgiFitWork *work, int samples, const float *sun) {
+    const int n = fit->lamps + 2, sun_at = fit->lamps + 1;
+    memset(work->ata, 0, sizeof(double) * (size_t)n * (size_t)n);
+    memset(work->atb, 0, sizeof(double) * (size_t)n);
+    double sum_b = 0.0, sum_w = 0.0, sum_mean = 0.0;
+    for (int i = 0; i < samples; ++i) {
+        const DdgiFitSample *s = &work->sample[i];
+        int at[DDGI_FIT_ROW + 2], used = 0;
+        double row[DDGI_FIT_ROW + 2];
+        at[used] = 0;
+        row[used++] = 1.0;
+        for (int j = 0; j < s->count; ++j) {
+            at[used] = s->lamp[j] + 1;
+            row[used++] = s->share[j];
         }
-        const double b = psx_ddgi_baked(t), w = area;
+        if (sun && sun[i] > 0.0f) {
+            at[used] = sun_at;
+            row[used++] = sun[i];
+        }
+        const double b = s->baked, w = s->weight;
         for (int p = 0; p < used; ++p) {
             work->atb[at[p]] += w * row[p] * b;
             for (int q = 0; q < used; ++q) work->ata[at[p] * n + at[q]] += w * row[p] * row[q];
@@ -302,20 +340,83 @@ static inline void psx_ddgi_fit_level(const DdgiNode *nodes, const DdgiBuildFace
         sum_b += w * b * b;
         sum_mean += w * b;
         sum_w += w;
-        ++fit->samples;
     }
     psx_ddgi_nnls(work->ata, work->atb, n, work->x, DDGI_FIT_SWEEPS);
-    /* |Ax - b|^2 = x'A'Ax - 2x'A'b + b'b */
-    double error = sum_b;
-    for (int p = 0; p < n; ++p) {
-        error -= 2.0 * work->x[p] * work->atb[p];
-        for (int q = 0; q < n; ++q) error += work->x[p] * work->ata[p * n + q] * work->x[q];
+    double error = 0.0;
+    for (int i = 0; i < samples; ++i) {
+        DdgiFitSample *s = &work->sample[i];
+        double model = work->x[0] + (sun ? work->x[sun_at] * sun[i] : 0.0);
+        for (int j = 0; j < s->count; ++j) model += work->x[s->lamp[j] + 1] * s->share[j];
+        s->residual = (float)(s->baked - model);
+        error += s->weight * (double)s->residual * s->residual;
     }
+    fit->samples = samples;
     fit->residual = sum_w > 0.0 ? error / sum_w : 0.0;
     fit->variance = sum_w > 0.0 ? sum_b / sum_w - (sum_mean / sum_w) * (sum_mean / sum_w) : 0.0;
     fit->ambient = (float)work->x[0];
     for (int k = 0; k < fit->lamps; ++k) fit->lamp[k].power = (float)work->x[k + 1];
     fit->sun = sun ? (float)work->x[sun_at] : 0.0f;
+}
+
+/* The sun's share of a sample along dir (unit, toward the sun), as the lamp pass takes it: its facing where nothing hides it. */
+static inline float psx_ddgi_sun_share(const DdgiNode *nodes, const DdgiBuildFace *order, const GpuDdgiTriangle *tris,
+                                       const DdgiFitSample *s, const float dir[3]) {
+    const float facing = psx_ddgi_dot3(s->normal, dir);
+    if (facing <= 0.0f) return 0.0f;
+    const float from[3] = {s->centre[0] + s->normal[0] * 8.0f, s->centre[1] + s->normal[1] * 8.0f, s->centre[2] + s->normal[2] * 8.0f};
+    return psx_ddgi_bvh_blocked(nodes, order, tris, from, dir, 1.0f, 40000.0f) ? 0.0f : facing;
+}
+
+/* Direction i of tries spread evenly over the sky from 10 degrees up to straight up; world y grows downward. */
+static inline void psx_ddgi_sun_try(int i, int tries, float dir[3]) {
+    const float low = 0.17364818f, up = low + (1.0f - low) * ((float)i + 0.5f) / (float)tries;
+    const float round = sqrtf(1.0f - up * up), turn = 2.3999632f * (float)i;
+    dir[0] = round * sinf(turn);
+    dir[1] = -up;
+    dir[2] = round * cosf(turn);
+}
+
+/* Fits the lamps' powers and the ambient to the faces' baked light; with find_sun, also the sun whose light explains most of
+ * what is left, kept only when it explains DDGI_FIT_SUN_GAIN of the baked light's variance. */
+static inline void psx_ddgi_fit_level(const DdgiNode *nodes, const DdgiBuildFace *order, const GpuDdgiTriangle *tris, int count,
+                                      float front, int find_sun, DdgiFit *fit, DdgiFitWork *work) {
+    const int samples = psx_ddgi_fit_sample(nodes, order, tris, count, front, fit, work);
+    psx_ddgi_fit_solve(fit, work, samples, NULL);
+    fit->sun_dir[0] = fit->sun_dir[1] = fit->sun_dir[2] = 0.0f;
+    fit->sun_gain = 0.0f;
+    if (!find_sun || samples == 0 || fit->variance <= 0.0) return;
+    /* Each direction's share of the baked light's variance alone, cov(g, b)^2 / var(g). Taken after the lamps, the lamps standing
+     * before sunlit ground had already explained it (mission 1's roof gave 0.004); a sun only lights faces open to the sky, so an
+     * indoor level finds none either way. */
+    double best = 0.0, weights = 0.0, sum_b = 0.0;
+    float chosen[3] = {0.0f, 0.0f, 0.0f};
+    for (int i = 0; i < samples; i += DDGI_FIT_SUN_EVERY) {
+        weights += work->sample[i].weight;
+        sum_b += work->sample[i].weight * work->sample[i].baked;
+    }
+    for (int t = 0; t < DDGI_FIT_SUN_TRIES; ++t) {
+        float dir[3];
+        psx_ddgi_sun_try(t, DDGI_FIT_SUN_TRIES, dir);
+        double sg = 0.0, sgg = 0.0, sgb = 0.0;
+        for (int i = 0; i < samples; i += DDGI_FIT_SUN_EVERY) {
+            const DdgiFitSample *s = &work->sample[i];
+            const double g = psx_ddgi_sun_share(nodes, order, tris, s, dir);
+            sg += s->weight * g;
+            sgg += s->weight * g * g;
+            sgb += s->weight * g * s->baked;
+        }
+        const double cov = sgb - sg * sum_b / weights, var = sgg - sg * sg / weights;
+        const double gain = cov > 0.0 && var > 0.0 ? cov * cov / var : 0.0;
+        if (gain > best) {
+            best = gain;
+            memcpy(chosen, dir, sizeof chosen);
+        }
+    }
+    fit->sun_gain = (float)(best / (fit->variance * weights));
+    if (fit->sun_gain < DDGI_FIT_SUN_GAIN) return;
+    for (int i = 0; i < samples; ++i) work->sun[i] = psx_ddgi_sun_share(nodes, order, tris, &work->sample[i], chosen);
+    psx_ddgi_fit_solve(fit, work, samples, work->sun);
+    if (fit->sun > 0.0f) memcpy(fit->sun_dir, chosen, sizeof chosen);
 }
 
 #endif

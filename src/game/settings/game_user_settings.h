@@ -78,8 +78,8 @@ struct GameUserSettings {
     bool has_shot_lights = false; bool shot_lights = false;
     bool has_shot_light_strength = false; int shot_light_strength = 150;
     bool has_sun_lighting = false; bool sun_lighting = false;
-    bool has_sun_direction = false; int sun_direction = 35;   // degrees round from +z
-    bool has_sun_height = false; int sun_height = 50;         // degrees up, 1..89
+    bool has_sun_turn = false; int sun_turn = 0;              // degrees the found sun is turned round, 0..360
+    bool has_sun_raise = false; int sun_raise = 0;            // degrees it is raised, -45..45
     // An index into kDisruptorDiagnosticViews. A session's own: at start only a capsule's replay takes it from the file.
     bool has_diagnostic_view = false; int diagnostic_view = 0;
 };

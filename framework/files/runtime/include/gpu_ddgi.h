@@ -131,7 +131,8 @@ void gpu_ddgi_level_emission(const GpuDdgiTriangle *tris, int count, float (*emi
 /* The mission being played, from the game each world draw: a new one forgets the level's faces. */
 void gl_renderer_set_ddgi_mission(int mission);
 int gl_renderer_ddgi_sun_here(void);
-/* The current mission's sun: degrees round, degrees up; above 0 in the third for a mission that has one, the fourth unused. */
+/* The player's turn (0..360) and raise (-45..45) of the sun the level's fit found, in degrees; then its weight and the share of the
+ * baked light it explained alone. Every mission alike: the mission given is not used. */
 void gl_renderer_ddgi_sun_get(float sun[4]);
 void gl_renderer_ddgi_sun_set(const float sun[4]);
 void gl_renderer_ddgi_sun_set_mission(int mission, const float sun[4]);

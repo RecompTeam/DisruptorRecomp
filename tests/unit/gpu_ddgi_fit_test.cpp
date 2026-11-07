@@ -120,13 +120,49 @@ void fit_finds_the_lamp() {
             for (uint8_t &channel : corner) channel = static_cast<uint8_t>(byte);
     }
     static DdgiFitWork work;
-    psx_ddgi_fit_level(scene.nodes.data(), scene.faces.data(), scene.tris.data(), static_cast<int>(scene.tris.size()), 1.0f, nullptr,
-                       &fit, &work);
+    psx_ddgi_fit_level(scene.nodes.data(), scene.faces.data(), scene.tris.data(), static_cast<int>(scene.tris.size()), 1.0f, 0, &fit,
+                       &work);
     std::cout << "fit: ambient " << fit.ambient << " power " << fit.lamp[0].power << " other " << fit.lamp[1].power << " error "
               << fit.residual << '\n';
     expect(std::fabs(fit.ambient - ambient) < 0.03f * ambient, "the ambient comes back within 3 percent");
     expect(std::fabs(fit.lamp[0].power - power) < 0.05f * power, "the lamp's power within 5 percent");
     expect(fit.lamp[1].power < 0.05f * power, "a lamp that explains nothing gets next to none");
+}
+
+// The room lit by an ambient and, when sun_weight is above 0, a sun along toward (unit), stored as the game's bytes.
+void light_by_sun(Scene &scene, float ambient, float sun_weight, const float toward[3]) {
+    for (GpuDdgiTriangle &t : scene.tris) {
+        DdgiFitSample sample{};
+        psx_ddgi_face_normal(&t, 1.0f, sample.normal);
+        for (int a = 0; a < 3; ++a) sample.centre[a] = (t.world[0][a] + t.world[1][a] + t.world[2][a]) / 3.0f;
+        const float sun = sun_weight > 0.0f ? psx_ddgi_sun_share(scene.nodes.data(), scene.faces.data(), scene.tris.data(), &sample,
+                                                                 toward)
+                                            : 0.0f;
+        const float byte = std::fmin(255.0f, std::round(128.0f * std::pow(ambient + sun_weight * sun, 1.0f / 2.2f)));
+        for (auto &corner : t.colour)
+            for (uint8_t &channel : corner) channel = static_cast<uint8_t>(byte);
+    }
+}
+
+void the_sun_is_found() {
+    Scene scene = room();
+    const float elevation = 0.87f, azimuth = 0.70f;  /* 50 and 40 degrees */
+    const float toward[3] = {std::cos(elevation) * std::sin(azimuth), -std::sin(elevation), std::cos(elevation) * std::cos(azimuth)};
+    light_by_sun(scene, 0.25f, 0.9f, toward);
+    DdgiFit fit{};
+    static DdgiFitWork work;
+    psx_ddgi_fit_level(scene.nodes.data(), scene.faces.data(), scene.tris.data(), static_cast<int>(scene.tris.size()), 1.0f, 1, &fit,
+                       &work);
+    const float off = std::acos(std::fmin(1.0f, psx_ddgi_dot3(fit.sun_dir, toward))) * 57.29578f;
+    std::cout << "sun: weight " << fit.sun << " off by " << off << " degrees, explained alone " << fit.sun_gain << '\n';
+    expect(fit.sun > 0.6f && off < 20.0f, "a room lit by a sun gets that sun back, within 20 degrees");
+
+    Scene plain = room();
+    light_by_sun(plain, 0.6f, 0.0f, toward);
+    DdgiFit none{};
+    psx_ddgi_fit_level(plain.nodes.data(), plain.faces.data(), plain.tris.data(), static_cast<int>(plain.tris.size()), 1.0f, 1, &none,
+                       &work);
+    expect(none.sun == 0.0f && none.sun_dir[1] == 0.0f, "a room lit evenly gets no sun");
 }
 
 void baked_is_linear_by_channel() {
@@ -154,6 +190,7 @@ int main() {
     wall_blocks();
     fit_finds_the_lamp();
     baked_is_linear_by_channel();
+    the_sun_is_found();
     a_plateau_still_seeds_lamps();
     if (failures) {
         std::cerr << failures << " failure(s)\n";

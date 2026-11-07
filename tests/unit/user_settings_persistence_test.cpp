@@ -184,10 +184,10 @@ int main() {
         written.shot_light_strength = 200;
         written.has_sun_lighting = true;
         written.sun_lighting = true;
-        written.has_sun_direction = true;
-        written.sun_direction = 270;
-        written.has_sun_height = true;
-        written.sun_height = 20;
+        written.has_sun_turn = true;
+        written.sun_turn = 270;
+        written.has_sun_raise = true;
+        written.sun_raise = -20;
         written.has_language = true;
         written.language = "en";
 
@@ -273,8 +273,8 @@ int main() {
                     loaded.has_shot_lights && loaded.shot_lights &&
                     loaded.has_shot_light_strength && loaded.shot_light_strength == 200 &&
                     loaded.has_sun_lighting && loaded.sun_lighting &&
-                    loaded.has_sun_direction && loaded.sun_direction == 270 &&
-                    loaded.has_sun_height && loaded.sun_height == 20,
+                    loaded.has_sun_turn && loaded.sun_turn == 270 &&
+                    loaded.has_sun_raise && loaded.sun_raise == -20,
                 "lighting preferences did not round-trip");
         require(loaded.has_language && loaded.language == "en",
                 "merge-save dropped an unrelated known setting");
@@ -454,22 +454,22 @@ int main() {
             const fs::path lighting = root / "lighting.toml";
             {
                 std::ofstream out(lighting, std::ios::trunc);
-                out << "[disruptor]\nprobe_strength = 201\nsun_height = 0\n"
+                out << "[disruptor]\nprobe_strength = 201\nsun_raise = -46\n"
                        "shot_light_strength = -1\nprobe_lighting = 1\n";
             }
             const UserSettings rejected = PSXRecompV4::load_user_settings(lighting);
-            require(!rejected.parse_error && !rejected.has_probe_strength && !rejected.has_sun_height &&
+            require(!rejected.parse_error && !rejected.has_probe_strength && !rejected.has_sun_raise &&
                         !rejected.has_shot_light_strength && !rejected.has_probe_lighting,
                     "a lighting value out of its range was accepted on load");
             UserSettings preference;
-            preference.has_sun_height = true;
-            preference.sun_height = 90;
-            preference.has_sun_direction = true;
-            preference.sun_direction = 360;
+            preference.has_sun_raise = true;
+            preference.sun_raise = 90;
+            preference.has_sun_turn = true;
+            preference.sun_turn = 360;
             const fs::path saved = root / "lighting-saved.toml";
             require(PSXRecompV4::save_user_settings(saved, preference), "lighting preferences failed to save");
             const UserSettings kept = PSXRecompV4::load_user_settings(saved);
-            require(!kept.has_sun_height && kept.has_sun_direction && kept.sun_direction == 360,
+            require(!kept.has_sun_raise && kept.has_sun_turn && kept.sun_turn == 360,
                     "a lighting value was saved outside its range or the top of a range was lost");
         }
 

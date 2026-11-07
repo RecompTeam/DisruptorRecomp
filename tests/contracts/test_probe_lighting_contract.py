@@ -173,11 +173,12 @@ require(
     mission.index("        ddgi_level_clear();\n        gpu_ddgi_forget_level();\n")
     < mission.index("    if (rth_rec_call(RTH_DDGI_MISSION, v, 1)) return;\n")
     < mission.index("    s_ddgi_probe_reset = 1;\n")
-    and "ssao_mode();" in sun_set
+    and "ssao_mode();" in function_body(lighting, "static void ddgi_level_update(void)")
+    and "            s_ddgi_sun_found = taken.sun > 0.0f;\n" in lighting
     and f"bound[{max(units) + 1}]" in update
     and update.count(f"for (int i = 0; i < {max(units) + 1}; ++i)") == 2,
     "a new mission forgets the level's hand-overs and the scene's caches on the game's thread before the call is recorded, "
-    "the probes' light where the call runs; a sun setting recomputes the shading path, and the update puts back every "
+    "the probes' light where the call runs; a level's fit, which may find a sun, recomputes the shading path, and the update puts back every "
     "texture unit it and the probes bind",
 )
 reset = probes[probes.index("    if (s_ddgi_probe_reset) {\n") : probes.index("        s_ddgi_probe_reset = 0;\n")]

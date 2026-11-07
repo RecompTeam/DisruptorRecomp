@@ -373,18 +373,18 @@ void read_game_user_settings(const toml::value& doc, UserSettings& s) {
             s.sun_lighting = toml::find<bool>(d, "sun_lighting");
             s.has_sun_lighting = true;
         });
-        if (d.contains("sun_direction")) try_get([&]{
-            const int amount = toml::find<int>(d, "sun_direction");
+        if (d.contains("sun_turn")) try_get([&]{
+            const int amount = toml::find<int>(d, "sun_turn");
             if (amount >= 0 && amount <= 360) {
-                s.sun_direction = amount;
-                s.has_sun_direction = true;
+                s.sun_turn = amount;
+                s.has_sun_turn = true;
             }
         });
-        if (d.contains("sun_height")) try_get([&]{
-            const int amount = toml::find<int>(d, "sun_height");
-            if (amount >= 1 && amount <= 89) {
-                s.sun_height = amount;
-                s.has_sun_height = true;
+        if (d.contains("sun_raise")) try_get([&]{
+            const int amount = toml::find<int>(d, "sun_raise");
+            if (amount >= -45 && amount <= 45) {
+                s.sun_raise = amount;
+                s.has_sun_raise = true;
             }
         });
         /* The switch movie_filter replaced: off keeps the movies as they are, on takes the filter's default. */
@@ -456,8 +456,8 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
         s.has_stick_layout || s.has_look_speed || s.has_look_deadzone || s.has_invert_look ||
         s.has_probe_lighting || s.has_probe_strength ||
         s.has_dynamic_shadows || s.has_shadow_strength || s.has_shadow_underneath ||
-        s.has_shot_lights || s.has_shot_light_strength || s.has_sun_lighting || s.has_sun_direction ||
-        s.has_sun_height || s.has_dynamic_resolution || s.has_resolution || s.has_render_thread ||
+        s.has_shot_lights || s.has_shot_light_strength || s.has_sun_lighting || s.has_sun_turn ||
+        s.has_sun_raise || s.has_dynamic_resolution || s.has_resolution || s.has_render_thread ||
         s.has_high_precision_camera || s.has_geometry_correction ||
         s.has_perspective_textures || s.has_frame_unlock ||
         s.has_ambient_occlusion || s.has_occlusion_reach || s.has_occlusion_strength || s.has_smooth_fade ||
@@ -625,10 +625,10 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
             f << "shot_light_strength = " << s.shot_light_strength << "\n";
         if (s.has_sun_lighting)
             f << "sun_lighting = " << (s.sun_lighting ? "true" : "false") << "\n";
-        if (s.has_sun_direction && s.sun_direction >= 0 && s.sun_direction <= 360)
-            f << "sun_direction = " << s.sun_direction << "\n";
-        if (s.has_sun_height && s.sun_height >= 1 && s.sun_height <= 89)
-            f << "sun_height = " << s.sun_height << "\n";
+        if (s.has_sun_turn && s.sun_turn >= 0 && s.sun_turn <= 360)
+            f << "sun_turn = " << s.sun_turn << "\n";
+        if (s.has_sun_raise && s.sun_raise >= -45 && s.sun_raise <= 45)
+            f << "sun_raise = " << s.sun_raise << "\n";
         if (s.has_movie_filter && s.movie_filter >= 0 && s.movie_filter < kDisruptorMovieFilterCount)
             f << "movie_filter = " << quoted(kDisruptorMovieFilters[s.movie_filter]) << "\n";
         if (s.has_draw_distance &&

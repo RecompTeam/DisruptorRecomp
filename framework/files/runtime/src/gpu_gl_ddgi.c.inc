@@ -540,15 +540,11 @@ typedef struct {
 static int s_ddgi_light = 0, s_ddgi_light_view = 0, s_ddgi_ready = 0, s_ddgi_failed = 0, s_ddgi_applies = 0;
 static float s_ddgi_strength = 1.0f;
 static int s_ddgi_shadows = 0, s_ddgi_lamps = 0, s_ddgi_lamp_view = 0;
-/* A sun for a mission with open sky: degrees round from +z, degrees up, strength, the share of baked light shade takes. */
-typedef struct {
-    float azimuth, elevation, strength, shade, colour[3];
-} DdgiSun;
-static DdgiSun s_ddgi_suns[16] = {[2] = {35.0f, 50.0f, 1.1f, 0.5f, {1.0f, 0.93f, 0.8f}}};
-static int s_ddgi_sun = 0, s_ddgi_mission = -1, s_ddgi_mission_game = -1; /* the GL side's mission, the game thread's */
-static int ddgi_sun_active(void) {
-    return s_ddgi_sun && s_ddgi_mission >= 0 && s_ddgi_mission < 16 && s_ddgi_suns[s_ddgi_mission].strength > 0.0f;
-}
+/* The player's turn and raise of the sun the level's fit found, in degrees. */
+static float s_ddgi_sun_turn = 0.0f, s_ddgi_sun_raise = 0.0f;
+static int s_ddgi_sun = 0, s_ddgi_sun_found = 0;
+static int s_ddgi_mission = -1, s_ddgi_mission_game = -1; /* the GL side's mission, the game thread's */
+static int ddgi_sun_active(void) { return s_ddgi_sun && s_ddgi_sun_found; }
 static float s_ddgi_shadow_strength = 1.0f, s_ddgi_contact = 1.0f, s_ddgi_lamp_strength = 1.5f;
 static DdgiContext s_ddgi_ctx[2]; /* the frame loop's context, the in-between presenter's */
 static DdgiFrame s_ddgi_frame_now;
@@ -737,9 +733,6 @@ static int s_ddgi_level_made_count = -1, s_ddgi_level_made_generation = -1; /* t
 /* What each face gives off: the game thread's, the one handed over, the level thread's. */
 static float (*s_ddgi_level_emission_game)[3], (*s_ddgi_level_emission_incoming)[3], (*s_ddgi_level_emission)[3];
 static int s_ddgi_level_emission_fresh;            /* under the mutex: the faces handed over carry new emission */
-static int s_ddgi_level_sun_fresh;                 /* under the mutex: a new sun to fit */
-static float s_ddgi_level_sun_given[4];            /* game thread: the sun last handed over */
-static float s_ddgi_level_sun_incoming[4], s_ddgi_level_sun[4]; /* toward the mission's sun, w 1 when it has one */
 static uint64_t s_ddgi_level_shape;                /* game thread: the corners the emission was read for */
 static DdgiFit s_ddgi_fit_made, s_ddgi_fit_staged; /* the level thread's, the one left for the GL thread */
 static DdgiFitWork s_ddgi_fit_work;
@@ -791,11 +784,6 @@ static int ddgi_level_main(void *opaque) {
             s_ddgi_level_emission_incoming = emission;
             s_ddgi_level_emission_fresh = 0;
         }
-        const int sun_moved = s_ddgi_level_sun_fresh;
-        if (sun_moved) {
-            memcpy(s_ddgi_level_sun, s_ddgi_level_sun_incoming, sizeof s_ddgi_level_sun);
-            s_ddgi_level_sun_fresh = 0;
-        }
         const int count = s_ddgi_level_incoming_count, generation = s_ddgi_level_generation;
         s_ddgi_level_incoming_count = -1;
         /* Under the lock: the next hand-over is copied into the faces before. */
@@ -808,8 +796,8 @@ static int ddgi_level_main(void *opaque) {
         s_ddgi_level_made_count = count;
         s_ddgi_level_made_generation = generation;
         const uint64_t made = SDL_GetPerformanceCounter();
-        /* A new shape or sun: the lamps and their powers fitted to the faces' baked light, on the BVH as it stands. */
-        const int fitted = count > 0 && (!same || sun_moved);
+        /* A new shape: the lamps, their powers and the sun fitted to the faces' baked light. */
+        const int fitted = count > 0 && !same;
         const char *dump = getenv("PSX_DDGI_LEVEL_DUMP");
         if (fitted && dump) {
             FILE *file = fopen(dump, "wb");
@@ -817,7 +805,6 @@ static int ddgi_level_main(void *opaque) {
                 fwrite(&count, sizeof count, 1, file);
                 fwrite(s_ddgi_level, sizeof(GpuDdgiTriangle), (size_t)count, file);
                 fwrite(s_ddgi_level_emission, sizeof(float) * 3, (size_t)count, file);
-                fwrite(s_ddgi_level_sun, sizeof s_ddgi_level_sun, 1, file);
                 fclose(file);
             }
         }
@@ -829,16 +816,18 @@ static int ddgi_level_main(void *opaque) {
                                                        s_ddgi_fit_made.lamp + s_ddgi_fit_made.emitting,
                                                        DDGI_FIT_LAMPS - s_ddgi_fit_made.emitting);
             psx_ddgi_fit_level(s_ddgi_level_nodes, s_ddgi_level_faces, s_ddgi_level, count, DDGI_FRONT,
-                               s_ddgi_level_sun[3] > 0.5f ? s_ddgi_level_sun : NULL, &s_ddgi_fit_made, &s_ddgi_fit_work);
+                               1, &s_ddgi_fit_made, &s_ddgi_fit_work);
         }
         if (getenv("PSX_DDGI")) {
             const double tick = 1000.0 / (double)SDL_GetPerformanceFrequency();
             fprintf(stderr, "ddgi level: %d faces, %d nodes, %s in %.2f ms\n", count, s_ddgi_level_node_count,
                     same ? "materials repacked" : "made", (double)(made - began) * tick);
             if (fitted) {
-                fprintf(stderr, "ddgi fit: %d lamps over %d faces in %.1f ms, ambient %.4f sun %.4f, %d emitting, explains %.3f of the variance\n",
+                fprintf(stderr, "ddgi fit: %d lamps over %d faces in %.1f ms, ambient %.4f sun %.4f toward %.2f %.2f %.2f (alone %.3f), %d emitting, "
+                        "explains %.3f of the variance\n",
                         s_ddgi_fit_made.lamps, s_ddgi_fit_made.samples, (double)(SDL_GetPerformanceCounter() - made) * tick,
-                        s_ddgi_fit_made.ambient, s_ddgi_fit_made.sun, s_ddgi_fit_made.emitting,
+                        s_ddgi_fit_made.ambient, s_ddgi_fit_made.sun, s_ddgi_fit_made.sun_dir[0], s_ddgi_fit_made.sun_dir[1],
+                        s_ddgi_fit_made.sun_dir[2], s_ddgi_fit_made.sun_gain, s_ddgi_fit_made.emitting,
                         s_ddgi_fit_made.variance > 0.0 ? 1.0 - s_ddgi_fit_made.residual / s_ddgi_fit_made.variance : 0.0);
                 for (int k = 0; k < s_ddgi_fit_made.lamps; ++k)
                     if (s_ddgi_fit_made.lamp[k].power > 0.0f)
@@ -924,25 +913,11 @@ int gpu_ddgi_set_level(const GpuDdgiTriangle *tris, int count) {
     const int fresh = shape != s_ddgi_level_shape;
     if (fresh) gpu_ddgi_level_emission(tris, count, s_ddgi_level_emission_game);
     s_ddgi_level_shape = shape;
-    float sun[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-    const int mission = s_ddgi_mission_game;
-    if (mission >= 0 && mission < 16 && s_ddgi_suns[mission].strength > 0.0f) {
-        const float az = s_ddgi_suns[mission].azimuth * 0.017453293f, el = s_ddgi_suns[mission].elevation * 0.017453293f;
-        sun[0] = cosf(el) * sinf(az);
-        sun[1] = -sinf(el);
-        sun[2] = cosf(el) * cosf(az);
-        sun[3] = 1.0f;
-    }
     SDL_LockMutex(s_ddgi_level_mutex);
     if (count) memcpy(s_ddgi_level_incoming, tris, sizeof(GpuDdgiTriangle) * (size_t)count);
     if (fresh) {
         if (count) memcpy(s_ddgi_level_emission_incoming, s_ddgi_level_emission_game, sizeof(float) * 3 * (size_t)count);
         s_ddgi_level_emission_fresh = 1;
-    }
-    if (fresh || memcmp(sun, s_ddgi_level_sun_given, sizeof sun)) {
-        memcpy(s_ddgi_level_sun_incoming, sun, sizeof sun);
-        memcpy(s_ddgi_level_sun_given, sun, sizeof sun);
-        s_ddgi_level_sun_fresh = 1;
     }
     s_ddgi_level_incoming_count = count;
     SDL_CondBroadcast(s_ddgi_level_cond);
@@ -1006,7 +981,9 @@ static void ddgi_level_update(void) {
         if (faces) s_ddgi_level_next ^= 1;
         if (fit) {
             s_ddgi_fit_now = taken;
+            s_ddgi_sun_found = taken.sun > 0.0f;
             memset(s_ddgi_level_weight, 0, sizeof s_ddgi_level_weight);
+            ssao_mode();
         }
     }
     s_ddgi_level_uploading = 0;
@@ -1385,15 +1362,16 @@ static void ddgi_update(float cy) {
         ddgi_level_lamps(now);
         memset(now->sun, 0, sizeof now->sun);
         memset(now->sun_colour, 0, sizeof now->sun_colour);
-        if (sun && s_ddgi_fit_now.samples) {
-            const DdgiSun *s = &s_ddgi_suns[s_ddgi_mission];
-            const float az = s->azimuth * 0.017453293f, el = s->elevation * 0.017453293f;
-            /* World y grows downward. */
+        if (sun) {
+            /* The found sun turned and raised by the player. World y grows downward. */
+            const float *found = s_ddgi_fit_now.sun_dir;
+            float el = asinf(fminf(1.0f, fmaxf(-1.0f, -found[1]))) + s_ddgi_sun_raise * 0.017453293f;
+            const float az = atan2f(found[0], found[2]) + s_ddgi_sun_turn * 0.017453293f;
+            el = fminf(fmaxf(el, 0.017453293f), 1.5533430f);
             now->sun[0] = cosf(el) * sinf(az);
             now->sun[1] = -sinf(el);
             now->sun[2] = cosf(el) * cosf(az);
             now->sun[3] = s_ddgi_fit_now.sun;
-            for (int k = 0; k < 3; ++k) now->sun_colour[k] = powf(s->colour[k], 2.2f);
         }
         s_ddgi_ctx[0].frame = *now;
         if (probes) ddgi_probe_update(now);
@@ -1778,28 +1756,24 @@ void gl_renderer_set_ddgi_mission(int mission) {
     s_ddgi_mission = mission;
     if (getenv("PSX_DDGI")) fprintf(stdout, "psxrecomp: DDGI mission %d\n", mission);
     s_ddgi_level_built = -1;
+    s_ddgi_sun_found = 0;
     memset(&s_ddgi_fit_now, 0, sizeof s_ddgi_fit_now);
     memset(s_ddgi_level_weight, 0, sizeof s_ddgi_level_weight);
     s_ddgi_probe_reset = 1;
     ssao_mode();
 }
-int gl_renderer_ddgi_sun_here(void) { return s_ddgi_mission >= 0 && s_ddgi_mission < 16 && s_ddgi_suns[s_ddgi_mission].strength > 0.0f; }
+int gl_renderer_ddgi_sun_here(void) { return s_ddgi_sun_found; }
 void gl_renderer_ddgi_sun_get(float sun[4]) {
     GL_RT_SYNC(__func__);
-    const DdgiSun *s = &s_ddgi_suns[s_ddgi_mission >= 0 && s_ddgi_mission < 16 ? s_ddgi_mission : 0];
-    sun[0] = s->azimuth;
-    sun[1] = s->elevation;
-    sun[2] = s->strength;
-    sun[3] = s->shade;
+    sun[0] = s_ddgi_sun_turn;
+    sun[1] = s_ddgi_sun_raise;
+    sun[2] = s_ddgi_fit_now.sun;
+    sun[3] = s_ddgi_fit_now.sun_gain;
 }
 void gl_renderer_ddgi_sun_set(const float sun[4]) { GL_RT_SYNC(__func__); gl_renderer_ddgi_sun_set_mission(s_ddgi_mission, sun); }
 void gl_renderer_ddgi_sun_set_mission(int mission, const float sun[4]) {
     GL_RT_SYNC(__func__);
-    if (mission < 0 || mission >= 16) return;
-    DdgiSun *s = &s_ddgi_suns[mission];
-    s->azimuth = sun[0];
-    s->elevation = sun[1] < 1.0f ? 1.0f : sun[1] > 89.0f ? 89.0f : sun[1];
-    s->strength = sun[2] < 0.01f ? 0.01f : sun[2] > 4.0f ? 4.0f : sun[2];
-    s->shade = sun[3] < 0.0f ? 0.0f : sun[3] > 0.9f ? 0.9f : sun[3];
-    ssao_mode();
+    (void)mission;
+    s_ddgi_sun_turn = sun[0] < 0.0f ? 0.0f : sun[0] > 360.0f ? 360.0f : sun[0];
+    s_ddgi_sun_raise = sun[1] < -45.0f ? -45.0f : sun[1] > 45.0f ? 45.0f : sun[1];
 }

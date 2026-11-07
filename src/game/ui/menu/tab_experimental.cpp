@@ -75,17 +75,17 @@ void draw_lighting() {
     ImGui::Indent();
     // Another mission's placement would be saved as the second mission's.
     if (!gl_renderer_ddgi_sun_here()) {
-        ImGui::TextDisabled("No sun on this mission");
+        ImGui::TextDisabled("No sun found on this level");
     } else {
         float place[4];
         gl_renderer_ddgi_sun_get(place);
         int amounts[2] = {static_cast<int>(std::lround(place[0])), static_cast<int>(std::lround(place[1]))};
-        const bool placement_applies = applies("disruptor.sun_direction") && applies("disruptor.sun_height");
+        const bool placement_applies = applies("disruptor.sun_turn") && applies("disruptor.sun_raise");
         if (!placement_applies) ImGui::BeginDisabled();
         ImGui::SetNextItemWidth(260.0f);
-        const bool direction_moved = option_slider("disruptor.sun_direction", &amounts[0]);
+        const bool direction_moved = option_slider("disruptor.sun_turn", &amounts[0]);
         ImGui::SetNextItemWidth(260.0f);
-        const bool height_moved = option_slider("disruptor.sun_height", &amounts[1]);
+        const bool height_moved = option_slider("disruptor.sun_raise", &amounts[1]);
         if (!placement_applies) ImGui::EndDisabled();
         if (direction_moved || height_moved) {
             const float sun_now[4] = {static_cast<float>(amounts[0]), static_cast<float>(amounts[1]), place[2], place[3]};

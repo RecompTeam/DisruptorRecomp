@@ -199,8 +199,8 @@ void mark_lighting() {
 }
 
 void mark_sun(const int amounts[2]) {
-    mark("disruptor.sun_direction", amounts[0]);
-    mark("disruptor.sun_height", amounts[1]);
+    mark("disruptor.sun_turn", amounts[0]);
+    mark("disruptor.sun_raise", amounts[1]);
 }
 
 namespace {
@@ -231,12 +231,11 @@ void apply_sticks(const PSXRecompV4::UserSettings &settings) {
                              value("disruptor.look_deadzone"), value("disruptor.invert_look") != 0});
 }
 
-// Only the second mission has a sun. Its strength comes from the fit to the level's light, the renderer's 1 only marks one.
+// The player's turn and raise of the sun each level's fit finds.
 void apply_sun(const PSXRecompV4::UserSettings &settings) {
     const auto value = [&](const char *key) { return stored(settings, *find_option(key)); };
-    const float sun[4] = {static_cast<float>(value("disruptor.sun_direction")), static_cast<float>(value("disruptor.sun_height")), 1.0f,
-                          0.5f};
-    gl_renderer_ddgi_sun_set_mission(2, sun);
+    const float sun[4] = {static_cast<float>(value("disruptor.sun_turn")), static_cast<float>(value("disruptor.sun_raise")), 0.0f, 0.0f};
+    gl_renderer_ddgi_sun_set(sun);
 }
 
 }  // namespace
@@ -562,7 +561,7 @@ void apply_pending_preferences() {
         changed("disruptor.shadow_underneath") || changed("disruptor.shot_lights") ||
         changed("disruptor.shot_light_strength") || changed("disruptor.sun_lighting"))
         apply_lighting(pending);
-    if (changed("disruptor.sun_direction") || changed("disruptor.sun_height"))
+    if (changed("disruptor.sun_turn") || changed("disruptor.sun_raise"))
         apply_sun(pending);
     if (g_preferences.diagnostic_view_changed)
         apply_diagnostic_view(pending.diagnostic_view);
