@@ -306,7 +306,7 @@ static const char *DDGI_MIX_FS =
     "   * subtraction flattened half-fogged walls), so the lamps' factor and light fade out with the fog instead. */\n"
     "vec3 lamped(vec3 c, vec3 gain, vec4 lamp, float f){\n"
     "  c = max(c, vec3(0.0))*max(gain, vec3(0.0));\n"
-    "  float a = mix(1.0, max(lamp.a, 0.0), 1.0 - f);\n"
+    "  float a = mix(1.0, lamp.a >= 0.2 ? min(lamp.a, 1.0) : (lamp.a < 0.2 ? 0.2 : 1.0), 1.0 - f);\n"
     "  return pow(max(pow(c, vec3(2.2))*a + lamp.rgb*(1.0 - f), vec3(0.0)), vec3(1.0/2.2)); }\n"
     "void main(){\n"
     "  ivec2 at_shade = ivec2((gl_FragCoord.xy - u_span.xy) / max(u_span.w, 1.0)), most = textureSize(u_shade, 0) - 1;\n"
@@ -497,7 +497,7 @@ static const char *DDGI_LAMP_FS =
     "        albedo = (int(m.z) & 1) != 0 ? col5(texel(uv8(v0.w)*w0 + uv8(v1.w)*hu + uv8(v2.w)*hv, int(m.y), int(m.x)))\n"
     "                                     : rgb8(col.x)*w0 + rgb8(col.y)*hu + rgb8(col.z)*hv; } }\n"
     "    added *= pow(albedo, vec3(2.2)); }\n"
-    "  frag = vec4(added, shadow); }\n";
+    "  frag = any(isnan(vec4(added, shadow))) || any(isinf(vec4(added, shadow))) ? vec4(0.0, 0.0, 0.0, 1.0) : vec4(added, shadow); }\n";
 
 typedef struct {
     GLint nodes, tris, vram, origin, rot0, rot1, rot2, camera, sky, view, level_nodes, level_tris, level, lamp, lamps;
@@ -1676,6 +1676,15 @@ static void ddgi_present_between(const DdgiFrame *before, const DdgiFrame *after
     const float keep = 1.0f - (alpha < 0.0f ? 0.0f : alpha);
     psx_ddgi_camera_between(before->rows, before->offset, after->rows, after->offset, keep, shown->rows, shown->offset,
                             shown->back, shown->eye);
+    float sum = 0.0f;
+    for (int k = 0; k < 3; ++k) sum += shown->eye[k] + shown->back[k][0] + shown->back[k][1] + shown->back[k][2] + shown->rows[k][3];
+    if (!isfinite(sum)) {
+        const DdgiFrame *nearer = keep > 0.5f ? before : after;
+        memcpy(shown->rows, nearer->rows, sizeof shown->rows);
+        memcpy(shown->offset, nearer->offset, sizeof shown->offset);
+        memcpy(shown->back, nearer->back, sizeof shown->back);
+        memcpy(shown->eye, nearer->eye, sizeof shown->eye);
+    }
     shown->centre_y = before->centre_y * keep + after->centre_y * (1.0f - keep);
     if (after->scene.before != before->scene.pose) return;
     for (int i = 0; i < shown->scene.casters; ++i) {
