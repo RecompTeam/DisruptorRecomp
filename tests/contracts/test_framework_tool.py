@@ -188,13 +188,13 @@ def main() -> int:
         if path.is_file()
     }
     require(
-        len(entries) == 102
+        len(entries) == 103
         and patches == {f"{line}.patch" for line in entries if not line.startswith("+")}
         and files == {line[1:] for line in entries if line.startswith("+")}
         and len(patches) == 61
-        and len(files) == 41
+        and len(files) == 42
         and "framework/patches/** -text\n" in (ROOT / ".gitattributes").read_text(encoding="utf-8"),
-        "the project lists 102 changed files, with a patch for each of 61 and 41 added whole, and stores patches byte for byte",
+        "the project lists 103 changed files, with a patch for each of 61 and 42 added whole, and stores patches byte for byte",
     )
     for script, call in (
         ("build.ps1", "python (Join-Path $Root 'tools/framework.py') apply --framework $Framework"),

@@ -247,11 +247,12 @@ void apply_sun(const PSXRecompV4::UserSettings &settings) {
 
 }  // namespace
 
-// Views 1 to 4 are layers of the occlusion pass, 5 is the mesh drawn over in-between frames.
+// Views 1 to 4 are layers of the occlusion pass, 5 is the mesh drawn over in-between frames, 7 the depth layer of a pure z-buffer.
 void apply_diagnostic_view(int view) {
-    gl_renderer_set_ssao_view(view >= 1 && view <= 4 ? view : 0);
+    gl_renderer_set_ssao_view(view >= 1 && view <= 4 ? view : view == 7 ? 2 : 0);
     gl_renderer_set_mesh_view(view == 5 ? 1 : 0);
     gl_renderer_set_uv_view(view == 6 ? 1 : 0);
+    gl_renderer_set_zbuffer_oracle(view == 7 ? 1 : 0);
 }
 
 void mark_diagnostic_view(int value) {

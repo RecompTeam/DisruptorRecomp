@@ -113,6 +113,8 @@ extern "C" int gl_renderer_edge_smoothing(void);
 extern "C" int gl_renderer_mesh_view(void);
 extern "C" void gl_renderer_set_uv_view(int enabled);
 extern "C" int gl_renderer_uv_view(void);
+extern "C" void gl_renderer_set_zbuffer_oracle(int enabled);
+extern "C" int gl_renderer_zbuffer_oracle(void);
 extern "C" int gl_renderer_record_shown(const char *folder, int skip, int count, int width);
 extern "C" int gl_renderer_recording_shown(void);
 extern "C" void gl_renderer_set_gap_fill(int enabled);

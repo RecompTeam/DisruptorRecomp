@@ -73,29 +73,6 @@ static inline const PsxSupplementalRange *psx_supplemental_find(const PsxSupplem
 
 static inline int psx_supplemental_has(const PsxSupplemental *s, uint32_t address) { return psx_supplemental_find(s, address) != NULL; }
 
-/* Columns [low, high] of a face, and whether they lie outside its band. */
-typedef struct {
-    int32_t low, high;
-    int outside;
-} PsxSupplementalPiece;
-
-static inline int psx_supplemental_piece(PsxSupplementalPiece *piece, int32_t low, int32_t high, int outside) {
-    piece->low = low;
-    piece->high = high;
-    piece->outside = outside;
-    return 1;
-}
-
-/* The pieces a face spanning columns [least, most] is drawn in against its band, left to right; a whole face is one. */
-static inline int psx_supplemental_pieces(int32_t least, int32_t most, int32_t left, int32_t right, PsxSupplementalPiece out[3]) {
-    int pieces = 0;
-    if (left > right) return psx_supplemental_piece(&out[0], -PSX_SUPPLEMENTAL_FAR, PSX_SUPPLEMENTAL_FAR, 1);
-    if (least < left) pieces += psx_supplemental_piece(&out[pieces], -PSX_SUPPLEMENTAL_FAR, left, 1);
-    if (most >= left && least <= right) pieces += psx_supplemental_piece(&out[pieces], left, right, 0);
-    if (most > right) pieces += psx_supplemental_piece(&out[pieces], right, PSX_SUPPLEMENTAL_FAR, 1);
-    return pieces;
-}
-
 #ifdef __cplusplus
 }
 #endif

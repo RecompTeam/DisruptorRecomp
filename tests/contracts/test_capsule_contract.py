@@ -455,6 +455,9 @@ require(
     "    if (!capsule.loading.empty() && !savestate_pending()) finish_load();\n"
     in capsule
     and "    if (!psx_mod_set_fixed_display_aspect(numerator, denominator)) {\n" in capsule
+    and "        numerator > 0x7FFFu || denominator > 0x7FFFu ||\n" in host
+    and "g_applied_display_aspect.store(((uint32_t)(g_video_aspect_num & 0x7FFF) << 16) | (uint32_t)(g_video_aspect_den & 0xFFFF) |"
+    in host
     and "    gl_renderer_set_display_aspect(static_cast<int>(numerator), static_cast<int>(denominator));\n}\n"
     in capsule
     and "kRamBytes / disruptor::capsule::kPageBytes,\n" in capsule
@@ -474,7 +477,8 @@ require(
     and "    } else if (frame.memory != 0u && !capsule.pages_told && capsule.at < capsule.played_pages.size()) {\n"
     in capsule,
     "a recording keeps the aspect it was shown at and its first frames' memory by page, and a replay shows that aspect "
-    "before its state loads and names the pages of a compared first frame that is apart",
+    "before its state loads (any the applied aspect can hold, an adaptive window's 2560:1441 too) and names the pages "
+    "of a compared first frame that is apart",
 )
 
 print("Disruptor replay capsule source contract: PASS")

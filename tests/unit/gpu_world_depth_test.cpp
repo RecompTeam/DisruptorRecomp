@@ -42,6 +42,20 @@ void only_exact_polygons_beyond_the_nearest_depth_are_drawn_by_depth() {
     }
 }
 
+void a_near_face_is_classed_by_its_own_w() {
+    const float pinned_w[3] = {216.0f, 688.0f, 792.0f}, at_viewer_w[3] = {12.0f, 688.0f, 792.0f};
+    const float far_turned[3] = {200.0f, 640.0f, 3200.0f}, no_turned[3] = {0.0f, 0.0f, 0.0f};
+    expect(psx_world_depth_triangle_class(1, kExact, 1, pinned_w, no_turned, kMargin) == 1,
+           "a near face whose corner the game pinned, every w beyond the nearest depth, is drawn by depth");
+    expect(psx_world_depth_triangle_class(1, kExact, 1, at_viewer_w, far_turned, kMargin) == 0,
+           "a near face with a corner at the viewer is not, whatever its turned depths");
+    expect(psx_world_depth_triangle_class(0, kExact, 1, pinned_w, far_turned, kMargin) == 0, "with the setting off no near face is");
+    expect(psx_world_depth_triangle_class(1, kWorld, 1, pinned_w, far_turned, kMargin) == 0, "nor one that is not exact");
+    expect(psx_world_depth_triangle_class(1, kExact, 0, no_turned, far_turned, kMargin) == 1,
+           "any other polygon goes by its turned depths, not by a near face's w");
+    expect(psx_world_depth_triangle_class(1, kExact, 0, pinned_w, no_turned, kMargin) == 0, "and without them it stays out");
+}
+
 void a_pulled_depth_stays_between_the_eye_and_the_far_end() {
     expect(psx_world_depth_stored(32.0f, 0.0f) == 0.0f && std::fabs(psx_world_depth_stored(3200.0f, 0.0f) - 0.99f) < 1e-6f,
            "a depth is stored as one less 32 over it");
@@ -63,6 +77,7 @@ void a_pulled_depth_stays_between_the_eye_and_the_far_end() {
 
 int main() {
     only_exact_polygons_beyond_the_nearest_depth_are_drawn_by_depth();
+    a_near_face_is_classed_by_its_own_w();
     a_pulled_depth_stays_between_the_eye_and_the_far_end();
     std::puts("GPU world depth tests passed");
     return 0;

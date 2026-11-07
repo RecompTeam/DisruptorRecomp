@@ -17,4 +17,10 @@ static inline int psx_world_depth_class(int enabled, int visual_flags, const flo
     return enabled && (visual_flags & 2) && depth[0] > nearest && depth[1] > nearest && depth[2] > nearest;
 }
 
+/* A near face goes by its own w: with all three beyond the nearest depth its corner was pinned by the game, none is at the viewer. */
+static inline int psx_world_depth_triangle_class(int enabled, int visual_flags, int near_face, const float near_w[3],
+                                                 const float turned[3], float margin) {
+    return psx_world_depth_class(enabled, visual_flags, near_face ? near_w : turned, margin);
+}
+
 #endif

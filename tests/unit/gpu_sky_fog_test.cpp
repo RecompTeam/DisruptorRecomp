@@ -361,28 +361,7 @@ void test_a_tile_the_game_stops_above_the_frames_last_row_reaches_it() {
            "a taken tile is forgotten: its opening's top is read before it is taken");
 }
 
-void test_the_drawn_sky_is_met_within_a_margin() {
-    auto cover = std::make_unique<PsxSkyCover>();
-    psx_sky_cover_reset(cover.get());
-    expect(!psx_sky_cover_meets(cover.get(), -1000, 1000, -1000, 1000), "a buffer with no tile has no sky");
-    psx_sky_cover_add(cover.get(), PsxSkyRect{100, 60, 164, 120});
-    expect(psx_sky_cover_meets(cover.get(), 90, 101, 70, 80), "a piece over a tile's columns and rows meets it");
-    expect(psx_sky_cover_meets(cover.get(), 90, 98, 70, 80) && !psx_sky_cover_meets(cover.get(), 90, 97, 70, 80),
-           "two columns short of it still do, three do not");
-    expect(psx_sky_cover_meets(cover.get(), 165, 170, 70, 80) && !psx_sky_cover_meets(cover.get(), 166, 170, 70, 80),
-           "the right side the same, past the tile's last column");
-    expect(!psx_sky_cover_meets(cover.get(), 90, 120, 123, 200) && psx_sky_cover_meets(cover.get(), 90, 120, 121, 200),
-           "and the rows below it");
-    for (uint32_t i = 1; i < PSX_SKY_COVER_RECTS; ++i) psx_sky_cover_add(cover.get(), PsxSkyRect{0, 0, 1, 1});
-    expect(!cover->full && !psx_sky_cover_meets(cover.get(), 300, 310, 300, 310), "a full table still tells");
-    psx_sky_cover_add(cover.get(), PsxSkyRect{0, 0, 1, 1});
-    expect(cover->full && psx_sky_cover_meets(cover.get(), 300, 310, 300, 310), "past it every place counts as sky");
-    psx_sky_cover_reset(cover.get());
-    expect(!cover->full && !psx_sky_cover_meets(cover.get(), 90, 101, 70, 80), "a new buffer forgets the old one's tiles");
-}
-
 int main() {
-    test_the_drawn_sky_is_met_within_a_margin();
     test_a_tile_the_game_stops_above_the_frames_last_row_reaches_it();
     test_a_known_tile_tells_its_palette_and_step();
     test_the_clearest_sky_runs_across_openings_that_overlap();

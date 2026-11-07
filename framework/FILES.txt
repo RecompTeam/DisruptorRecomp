@@ -15,6 +15,7 @@ runtime/include/crash_trace.h
 runtime/include/dirty_ram_interp.h
 +runtime/include/game_host.h
 runtime/include/gpu.h
++runtime/include/gpu_coverage.h
 +runtime/include/gpu_ddgi.h
 +runtime/include/gpu_ddgi_bvh.h
 +runtime/include/gpu_ddgi_mask.h

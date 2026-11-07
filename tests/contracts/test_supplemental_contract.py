@@ -41,7 +41,8 @@ require(
 )
 
 require(
-    "        const int supp = near_face ? 0 : s_took_supplemental;\n" in renderer
+    "        const int supp = near_face || (s_zbuffer_oracle && s_took_supplemental == 2) ? 0 : s_took_supplemental;\n"
+    in renderer
     and "        if (s_tb_n > 0 && (deferred ? s_tb_supp != 0 : supp != s_tb_supp)) flush_tex_batch();\n" in renderer
     and "            s_tb_supp = deferred ? 0 : supp;\n" in renderer,
     "such a polygon and its kind are a key of its batch, so a batch holds one kind alone",
@@ -50,7 +51,7 @@ deferred = between(renderer, "static void flush_tex_batch(void) {", "\n}\n")
 require(
     "        const int deferred = supp != 0 && mirror_depth();" in renderer
     and deferred.index("    flush_tex_batch_now();\n    if (s_tp_n == 0) return;\n")
-    < deferred.index("    for (int kind = 2; kind >= 1; --kind) {\n")
+    < deferred.index("    for (int kind = 2; kind >= 1 + s_zbuffer_oracle; --kind) {")
     < deferred.index("            memcpy(&s_tb[n * TEXV], &s_tp[at * TEXV], 3 * TEXV * sizeof(float));\n")
     < deferred.index(
         "        s_tb_supp = kind;\n        s_tb_held_back = 1;\n        flush_tex_batch_now();\n        s_tb_held_back = 0;\n"
@@ -171,24 +172,42 @@ require(
 
 pieces = between(
     gpu,
-    "static int band_pieces(const int32_t *vx, const int32_t *vy, int a, int b, int c, PsxSupplementalPiece pieces[3]) {",
+    "static int band_pieces(const int32_t *vx, const int32_t *vy, int a, int b, int c, PsxCoveragePiece pieces[PSX_COVERAGE_PIECES]) {",
     "\n}\n",
 )
+prepass = between(gpu, "static void coverage_prepass(uint32_t start_addr) {", "\n}\n")
 require(
     "    const PsxSupplementalRange *range = gte_geometry_correction_enabled() && gr_has_column_band() ? gp0_supplemental_range() : NULL;\n"
     "    if (!range || range->left > range->right) return 0;\n"
     in pieces
     and "int gr_has_column_band(void) { return g_b->set_column_band != NULL; }\n"
     in read("psxrecomp/runtime/src/gpu_render.c")
-    and "range->left + draw_offset_x, range->right + draw_offset_x, pieces);" in pieces
-    and "        if (pieces[piece].outside && psx_sky_cover_meets(&sky_cover, pieces[piece].low > least ? pieces[piece].low : least,\n"
+    and "    return psx_coverage_pieces(&coverage, least, most, top, bottom, left, right, pieces);" in pieces
+    and "void gpu_ws_prepass_linked_list(uint32_t start_addr) {\n    coverage_list = start_addr;\n" in gpu
+    and "    coverage_list_unread = 1;\n    if (coverage_dump_folder()) coverage_read_list();\n" in gpu
+    and prepass.endswith("    coverage_current = 1;")
+    and "    coverage_read_list();\n    if (!coverage_current) return 0;\n    psx_coverage_build(&coverage);\n    return psx_coverage_pieces("
     in pieces
-    and "            return count;\n    return 0;" in pieces
+    and "const int sky = offset == 0 && (psx_sky_fog_opening_top(&sky_fog, addr) != INT32_MAX ||" in prepass
+    and "range && range->left > range->right ? PSX_COVER_REACH : PSX_COVER_WORLD" in prepass
+    and prepass.count("!(op & 0x02u)") == 2
+    and "    for (int kind = 2; kind >= 1 + s_zbuffer_oracle; --kind) {" in renderer
+    and "    if (s_zbuffer_oracle && c->supp==1) return;  /* the z-buffer view shows the game's own faces alone */\n"
+    in presenter
     and gpu.count("band_pieces(vx, vy, ") == 6
-    and gpu.count("    psx_sky_cover_reset(&sky_cover);\n    psx_sky_fog_reset(&sky_fog);\n") == 2
-    and "    if (draw_offset_x != was_x || draw_offset_y != was_y) psx_sky_cover_reset(&sky_cover);\n" in gpu
-    and "    psx_sky_cover_add(&sky_cover, (PsxSkyRect){tile.left + draw_offset_x, tile.top + draw_offset_y, tile.right + draw_offset_x,\n"
-    in gpu
+    and "reach_face_hidden" not in gpu
+    and "psx_coverage_sky_keys_has(&coverage_sky_drawn, addr)" in prepass
+    and "    psx_coverage_sky_keys_add(&coverage_sky_drawn, key);\n" in gpu
+    and gpu.count("psx_coverage_sky_keys_reset(&coverage_sky_drawn);\n") == 3
+    and gpu.count(
+        "    coverage_new_buffer = 1;\n    coverage_current = 0;\n    coverage_list_unread = 0;\n    psx_coverage_sky_keys_reset(&coverage_sky_drawn);\n    psx_sky_fog_reset(&sky_fog);\n"
+    )
+    == 2
+    and "    if (draw_offset_x != was_x || draw_offset_y != was_y) coverage_end_buffer();\n" in gpu
+    and "sky_cover" not in gpu
+    and "+runtime/include/gpu_coverage.h\n" in read("framework/FILES.txt")
+    and "disruptor_unit_test(disruptor_gpu_coverage tests/unit/gpu_coverage_test.cpp RUNTIME_HEADERS)\n"
+    in read("CMakeLists.txt")
     and "    if (count > 1) gr_set_column_band(pieces[piece].low, pieces[piece].high, piece == 0);\n" in gpu
     and gpu.count("        for (int piece = 0; piece < (pieces > 1 ? pieces : 1); ++piece) {\n") == 4
     and gpu.count("    for (int piece = 0; piece < (pieces > 1 ? pieces : 1); ++piece) {\n") == 6
@@ -204,8 +223,9 @@ require(
     in module
     and "            gpu_supplemental_band(g_admitted_from, end, g_admitted_band.left, g_admitted_band.right);\n"
     in module,
-    "a textured face of the game's room over an inner edge of its own span is drawn in pieces cut to their columns, the game's "
-    "inside and the widened walk's past the edge, the first alone in the game's picture",
+    "a textured face of the game's room over an inner edge of its own span is drawn whole unless the game's whole picture, "
+    "read from the display list before it runs, shows a tick of it over the sky; then that tick is cut away, the first "
+    "piece alone in the game's picture",
 )
 require(
     "#define PAST_SPAN_MARK_PASS -3.0f" in renderer

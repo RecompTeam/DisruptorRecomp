@@ -607,6 +607,7 @@ disruptor_unit_test(disruptor_bass_cut tests/unit/disruptor_bass_cut_test.cpp
     disruptor_unit_test(disruptor_gpu_ws_hud_scale tests/unit/gpu_ws_hud_scale_test.cpp RUNTIME_HEADERS)
 disruptor_unit_test(disruptor_gpu_sky_fog tests/unit/gpu_sky_fog_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_gpu_supplemental tests/unit/gpu_supplemental_test.cpp RUNTIME_HEADERS)
+disruptor_unit_test(disruptor_gpu_coverage tests/unit/gpu_coverage_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_gpu_presentation tests/unit/gpu_presentation_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_gpu_ws_hud_widget tests/unit/gpu_ws_hud_widget_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_gpu_ws_tag_match tests/unit/gpu_ws_tag_match_test.cpp RUNTIME_HEADERS)

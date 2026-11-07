@@ -87,8 +87,8 @@ struct GameUserSettings {
     // An index into kDisruptorDiagnosticViews. A session's own: at start only a capsule's replay takes it from the file.
     bool has_diagnostic_view = false; int diagnostic_view = 0;
 };
-inline constexpr const char* kDisruptorDiagnosticViews[] = {"off", "shading", "depth", "normals", "fade", "mesh", "uv"};
-inline constexpr int kDisruptorDiagnosticViewCount = 7;
+inline constexpr const char* kDisruptorDiagnosticViews[] = {"off", "shading", "depth", "normals", "fade", "mesh", "uv", "zbuffer"};
+inline constexpr int kDisruptorDiagnosticViewCount = 8;
 inline constexpr int kDisruptorSampleCounts[] = {0, 2, 4, 8};
 inline constexpr int kDisruptorDrawDistances[] = {100, 125, 150, 200};
 inline constexpr const char* kDisruptorFogShapes[] = {"even", "soft", "late"};

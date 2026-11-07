@@ -43,10 +43,10 @@ require(
     '            if (ImGui::BeginTabItem("Debug")) {\n                draw_debug_tab();\n' in menu
     and '    if (ImGui::Button("Record the screen") && !gl_renderer_recording_shown()) g_menu.record_shown = true;\n'
     in debug
-    and """    int view = gl_renderer_uv_view() ? 6 : gl_renderer_mesh_view() ? 5 : gl_renderer_ssao_view();
+    and """    int view = gl_renderer_zbuffer_oracle() ? 7 : gl_renderer_uv_view() ? 6 : gl_renderer_mesh_view() ? 5 : gl_renderer_ssao_view();
 """
     in debug
-    and """    if (ImGui::Combo("Diagnostic view", &view, "Off\\0Shading alone\\0Depth\\0Surface normals\\0Fog fade\\0Mesh\\0Texture coordinates\\0")) {
+    and """    if (ImGui::Combo("Diagnostic view", &view, "Off\\0Shading alone\\0Depth\\0Surface normals\\0Fog fade\\0Mesh\\0Texture coordinates\\0Depth by z-buffer alone\\0")) {
         apply_diagnostic_view(view);
         mark_diagnostic_view(view);
     }
@@ -54,24 +54,25 @@ require(
     in debug
     and menu.count('"Diagnostic view"') == 1
     and menu.count('"Record the screen"') == 1,
-    "the Debug tab holds the recorder's button, which arms nothing while a recording runs, and the seven views in the "
+    "the Debug tab holds the recorder's button, which arms nothing while a recording runs, and the eight views in the "
     "order the settings file names them",
 )
 
 require(
-    'inline constexpr const char* kDisruptorDiagnosticViews[] = {"off", "shading", "depth", "normals", "fade", "mesh", "uv"};\n'
+    'inline constexpr const char* kDisruptorDiagnosticViews[] = {"off", "shading", "depth", "normals", "fade", "mesh", "uv", "zbuffer"};\n'
     in settings
     and """void apply_diagnostic_view(int view) {
-    gl_renderer_set_ssao_view(view >= 1 && view <= 4 ? view : 0);
+    gl_renderer_set_ssao_view(view >= 1 && view <= 4 ? view : view == 7 ? 2 : 0);
     gl_renderer_set_mesh_view(view == 5 ? 1 : 0);
     gl_renderer_set_uv_view(view == 6 ? 1 : 0);
+    gl_renderer_set_zbuffer_oracle(view == 7 ? 1 : 0);
 }
 """
     in menu
     and "void gl_renderer_set_mesh_view(int enabled) { GL_RT_SYNC(__func__); s_mesh_view = enabled != 0; }\n"
     in renderer
     and "    s_ssao_view = view >= 1 && view <= 4 ? view : 0;\n" in renderer,
-    "views 1 to 4 are layers of the occlusion pass and view 5 is the mesh, never two at once",
+    "views 1 to 4 are layers of the occlusion pass, view 5 is the mesh and view 7 the depth layer of a pure z-buffer, never two at once",
 )
 
 require(
@@ -166,7 +167,7 @@ require(
     '        "  }\\n"\n'
     '        "}\\n";\n'
     in renderer
-    and "inline constexpr int kDisruptorDiagnosticViewCount = 7;\n" in settings
+    and "inline constexpr int kDisruptorDiagnosticViewCount = 8;\n" in settings
     and "static void apply_texel_blend(int mode, int mirror) {\n    if (s_uv_view && mirror) glDisable(GL_BLEND);\n    else apply_psx_blend(mode);\n}\n"
     in renderer
     and "        apply_texel_blend(semi, s_visual_on);          /* Pass 2: STP=1 texels (blended) */\n" in renderer

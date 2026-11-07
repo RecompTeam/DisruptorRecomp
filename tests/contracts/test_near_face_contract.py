@@ -130,14 +130,14 @@ require(
     and "        s_near_shader = tex_fs != NULL;\n" in renderer
     and "    const int near_face = s_near_set;\n    const int banded = s_next_band, canonical = !banded || s_next_band_canonical;\n    s_next_band = 0;\n    if (near_face && !canonical) return;  /* uncut, a near face's first piece already drew all of it */\n    const int cut_corners = near_face ? -1 : turn_clip(px, py, visual_flags, banded, s_next_band_low, s_next_band_high, cut);\n"
     in renderer
-    and "        int world = near_face ? 0 : psx_world_depth_class(s_world_depth, visual_flags, turned_z, s_world_margin);\n"
+    and "        const float near_w[3] = {s_near[0][2], s_near[1][2], s_near[2][2]};\n        int world = psx_world_depth_triangle_class(s_world_depth || s_zbuffer_oracle, visual_flags, near_face, near_w, turned_z, s_world_margin);\n"
     in renderer
     and "            if (near_face) { vp[19] = 4.0f; vp[20] = s_near[i][0]; vp[21] = s_near[i][1]; vp[22] = s_near[i][2]; }\n"
     in renderer
     and renderer.count("    glEnable(PSXGL_DEPTH_CLAMP);") == 1
     and presenter.count("    glEnable(PSXGL_DEPTH_CLAMP);") == 1,
-    "a near triangle is an exact one of the marked shader whose corners no other triangle can take, is never cut by the turn clip "
-    "nor depth-sorted, carries the mark 4 with its place and w, and both contexts clamp depth instead of clipping it",
+    "a near triangle is an exact one of the marked shader whose corners no other triangle can take, is never cut by the turn clip, "
+    "is depth-sorted by its own w, carries the mark 4 with its place and w, and both contexts clamp depth instead of clipping it",
 )
 
 require(

@@ -384,7 +384,8 @@ require(
     and "psx_sky_fog_tile(&sky_fog, psx_mod_gpu_dma_resolve_address(primitive_addr), words);" in gpu
     and "    psx_sky_fog_reset(&sky_fog);\n    psx_supplemental_reset(&supplemental);\n\n    /* Reset GP0 state machine"
     in gpu
-    and "the CPU copy is not it */\n    psx_sky_cover_reset(&sky_cover);\n    psx_sky_fog_reset(&sky_fog);\n" in gpu,
+    and "the CPU copy is not it */\n    coverage_new_buffer = 1;\n    coverage_current = 0;\n    coverage_list_unread = 0;\n    psx_coverage_sky_keys_reset(&coverage_sky_drawn);\n    psx_sky_fog_reset(&sky_fog);\n"
+    in gpu,
     "each sky opening tells its fog step from the routine's own stack word at its first row, each tile its packet, "
     "every variable-size textured rectangle goes through the sky's palette first, and a reset or a loaded state forgets the "
     "records",

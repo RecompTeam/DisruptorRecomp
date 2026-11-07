@@ -17,8 +17,6 @@ extern "C" {
 #define PSX_SKY_FOG_OPCODE 0x64u
 #define PSX_SKY_FOG_LAST_STEP 11 /* (767 >> 6): the opening is wholly in the fog */
 #define PSX_SKY_FOG_TILE_ROWS 60 /* a panorama block's rows, four to a frame */
-#define PSX_SKY_COVER_RECTS 128u
-#define PSX_SKY_COVER_MARGIN 2 /* frame pixels: a tile is placed and a face is drawn apart from the game's integers */
 
 typedef struct {
     int32_t left, top, right, bottom;
@@ -65,37 +63,6 @@ static inline uint32_t psx_sky_fog_rows(const uint32_t *words, int32_t offset_y,
 }
 
 static inline PsxSkyFrame *psx_sky_fog_current(PsxSkyFog *fog) { return &fog->frames[fog->frame & 1u]; }
-
-/* The sky tiles drawn into the frame buffer in use, in VRAM pixels. */
-typedef struct {
-    PsxSkyRect rects[PSX_SKY_COVER_RECTS];
-    uint32_t count;
-    int full; /* more tiles than rects: all of it counts as sky */
-} PsxSkyCover;
-
-static inline void psx_sky_cover_reset(PsxSkyCover *cover) {
-    cover->count = 0u;
-    cover->full = 0;
-}
-
-static inline void psx_sky_cover_add(PsxSkyCover *cover, PsxSkyRect rect) {
-    if (cover->count < PSX_SKY_COVER_RECTS)
-        cover->rects[cover->count++] = rect;
-    else
-        cover->full = 1;
-}
-
-/* Whether a drawn tile, widened by the margin, meets columns low..high and rows top..bottom, both inclusive. */
-static inline int psx_sky_cover_meets(const PsxSkyCover *cover, int32_t low, int32_t high, int32_t top, int32_t bottom) {
-    if (cover->full) return 1;
-    for (uint32_t i = 0; i < cover->count; ++i) {
-        const PsxSkyRect *rect = &cover->rects[i];
-        if (low < rect->right + PSX_SKY_COVER_MARGIN && high >= rect->left - PSX_SKY_COVER_MARGIN &&
-            top < rect->bottom + PSX_SKY_COVER_MARGIN && bottom >= rect->top - PSX_SKY_COVER_MARGIN)
-            return 1;
-    }
-    return 0;
-}
 
 /* A reset or a loaded state: no record may meet a packet of the new timeline. */
 static inline void psx_sky_fog_reset(PsxSkyFog *fog) { memset(fog, 0, sizeof *fog); }

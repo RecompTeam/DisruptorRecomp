@@ -59,9 +59,9 @@ require(
 )
 
 require(
-    "        int world = near_face ? 0 : psx_world_depth_class(s_world_depth, visual_flags, turned_z, s_world_margin);\n"
+    "        const float near_w[3] = {s_near[0][2], s_near[1][2], s_near[2][2]};\n        int world = psx_world_depth_triangle_class(s_world_depth || s_zbuffer_oracle, visual_flags, near_face, near_w, turned_z, s_world_margin);\n"
     in renderer
-    and "            world = psx_world_depth_class(s_world_depth, visual_flags, piece_z, s_world_margin);\n"
+    and "            world = psx_world_depth_class(s_world_depth || s_zbuffer_oracle, visual_flags, piece_z, s_world_margin);\n"
     "        }\n"
     "        if (s_tb_n > 0 && !deferred && world != s_tb_world) flush_tex_batch();\n"
     in renderer
@@ -111,7 +111,7 @@ require(
     "            if (world && mirror_depth()) tex_batch_by_depth(nverts, semi);\n"
     "            else tex_batch_draw_passes(nverts, semi);\n"
     in renderer
-    and "static int mirror_depth(void) {\n    return s_geometry_correction && (s_ssao || s_grown_under || s_crack_fill > 0.0f || s_world_depth || s_sprite_hold);\n}\n"
+    and "static int mirror_depth(void) {\n    return s_geometry_correction && (s_ssao || s_grown_under || s_crack_fill > 0.0f || s_world_depth || s_sprite_hold || s_zbuffer_oracle);\n}\n"
     in renderer
     and '    s_tex_uPull = p_glGetUniformLocation(s_tex_prog, "u_pull");\n' in renderer,
     "only a batch of the class is drawn by depth, the setting alone keeps the mirror's depth, and the shader's pull is found",

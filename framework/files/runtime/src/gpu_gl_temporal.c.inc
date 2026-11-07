@@ -857,6 +857,7 @@ static void temporal_submit(const TemporalScene *s,const TemporalCommand *c,int 
 
 static void temporal_submit_faces(const TemporalScene *s,const TemporalCommand *c,int height,
                                   const float *vertices,int count) {
+    if (s_zbuffer_oracle && c->supp==1) return;  /* the z-buffer view shows the game's own faces alone */
     const int t=c->textured;
     TemporalUniforms *u=&s_temp_uniforms[t];
     int sy=c->sy, sh=c->sh;

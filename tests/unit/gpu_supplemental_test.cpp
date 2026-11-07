@@ -86,23 +86,6 @@ void test_a_band_range_keeps_its_band() {
     expect(!psx_supplemental_find(s.get(), 0x10D0u), "past the last range there is none");
 }
 
-void test_pieces_of_a_face_against_its_band() {
-    PsxSupplementalPiece pieces[3];
-    expect(psx_supplemental_pieces(190, 210, 199, 223, pieces) == 2 && pieces[0].outside && pieces[0].high == 199 && !pieces[1].outside &&
-               pieces[1].low == 199 && pieces[1].high == 223,
-           "a face over the left edge: past it as the widened walk's, then inside as the game's");
-    expect(psx_supplemental_pieces(150, 300, 199, 223, pieces) == 3 && pieces[0].outside && !pieces[1].outside && pieces[2].outside &&
-               pieces[2].low == 223,
-           "a face over both edges is three pieces");
-    expect(psx_supplemental_pieces(200, 220, 199, 223, pieces) == 1 && !pieces[0].outside, "a face inside is one piece, the game's");
-    expect(psx_supplemental_pieces(199, 223, 199, 223, pieces) == 1, "corners on the edges are inside");
-    expect(psx_supplemental_pieces(150, 190, 199, 223, pieces) == 1 && pieces[0].outside, "a face wholly past an edge is one piece");
-    expect(psx_supplemental_pieces(150, 300, PSX_SUPPLEMENTAL_FAR, -PSX_SUPPLEMENTAL_FAR, pieces) == 1 && pieces[0].outside,
-           "a whole face is one piece, outside");
-    expect(psx_supplemental_pieces(150, 300, -PSX_SUPPLEMENTAL_FAR, 223, pieces) == 2 && !pieces[0].outside && pieces[1].outside,
-           "a band open on the left cuts on the right alone");
-}
-
 }  // namespace
 
 int main() {
@@ -112,7 +95,6 @@ int main() {
     test_a_frame_keeps_the_one_before_and_forgets_the_one_before_that();
     test_a_full_table_drops_the_rest();
     test_a_band_range_keeps_its_band();
-    test_pieces_of_a_face_against_its_band();
     if (g_failures) {
         std::cerr << g_failures << " failure(s)\n";
         return 1;
