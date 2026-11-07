@@ -31,7 +31,23 @@ int32_t signed_word(uint32_t address) { return static_cast<int32_t>(psx_mod_read
 
 struct Corner {
     float world[3];
+    uint8_t light[3];
 };
+
+/* 0x800464F0's near colour: 2 x a byte below 128, else the 15-bit entry byte - 128 steps down from the vertex words. */
+bool vertex_light(uint8_t byte, uint32_t block, uint32_t end, uint8_t out[3]) {
+    if (byte < 128u) {
+        out[0] = out[1] = out[2] = static_cast<uint8_t>(2u * byte);
+        return true;
+    }
+    const uint32_t entry = end - 2u - 2u * (byte - 128u);
+    if (entry < block) return false;
+    const uint32_t colour = psx_mod_read_byte(entry) | static_cast<uint32_t>(psx_mod_read_byte(entry + 1)) << 8;
+    out[0] = static_cast<uint8_t>((colour & 31u) << 3);
+    out[1] = static_cast<uint8_t>(((colour >> 5) & 31u) << 3);
+    out[2] = static_cast<uint8_t>(((colour >> 10) & 31u) << 3);
+    return true;
+}
 
 class LevelReader {
 public:
@@ -82,9 +98,16 @@ private:
                 mix(digest, word);
                 const int32_t a = static_cast<int32_t>((word >> 20) & 1023u), b = static_cast<int32_t>((word >> 10) & 1023u),
                               c = static_cast<int32_t>(word & 1023u);
-                const Corner corner{{static_cast<float>(-(origin[1] * 8 + b * 16)), static_cast<float>(-(origin[2] * 8 + c * 16)),
-                                     static_cast<float>(origin[0] * 8 + a * 16)}};
-                for (uint32_t copy = 0; copy <= word >> 30; ++copy) entries_.push_back(corner);
+                Corner corner{{static_cast<float>(-(origin[1] * 8 + b * 16)), static_cast<float>(-(origin[2] * 8 + c * 16)),
+                               static_cast<float>(origin[0] * 8 + a * 16)},
+                              {}};
+                for (uint32_t copy = 0; copy <= word >> 30; ++copy) {
+                    const uint32_t record = static_cast<uint32_t>(entries_.size());  /* each record its own light byte */
+                    if (record >= lights ||
+                        !vertex_light(psx_mod_read_byte(at + 8 + record), at + 8, at + 8 + lights, corner.light))
+                        return false;
+                    entries_.push_back(corner);
+                }
                 if (entries_.size() > kMostEntries) return false;
             }
             mix(digest, static_cast<uint32_t>(entries_.size()));
@@ -121,7 +144,8 @@ private:
                         for (int axis = 0; axis < 3; ++axis) triangle.world[k][axis] = entries_[corner[three[k]]].world[axis];
                         triangle.uv[k][0] = uv[three[k]][0];
                         triangle.uv[k][1] = uv[three[k]][1];
-                        triangle.colour[k][0] = triangle.colour[k][1] = triangle.colour[k][2] = 128;
+                        for (int channel = 0; channel < 3; ++channel)
+                            triangle.colour[k][channel] = entries_[corner[three[k]]].light[channel];
                     }
                     triangle.clut = static_cast<uint16_t>(clut_uv >> 16);
                     triangle.texpage = static_cast<uint16_t>(page_uv >> 16);
@@ -135,7 +159,7 @@ private:
         return false;
     }
 
-    static constexpr int kHalves[2][3] = {{0, 1, 2}, {1, 2, 3}};
+    static constexpr int kHalves[2][3] = {{0, 1, 2}, {2, 1, 3}};  /* wound alike, as the frame recorder's */
     std::vector<Corner> entries_;
     uint64_t faces_ = 0, materials_ = 0;
 };
@@ -143,13 +167,13 @@ private:
 LevelReader g_reader;
 std::vector<GpuDdgiTriangle> g_faces;
 uint64_t g_published = 0, g_shape = 0, g_face_words = 0, g_materials = 0;
-int g_draws = kEveryDraws; /* the first draw with the sun on reads at once */
+int g_draws = kEveryDraws; /* the first draw with lighting on reads at once */
 bool g_told = false;
 
 }  // namespace
 
 void publish_if_changed() {
-    if (!gl_renderer_ddgi_sun() || !gl_renderer_ddgi_sun_here()) {
+    if (!gl_renderer_ddgi() && !gl_renderer_ddgi_shadows() && !gl_renderer_ddgi_lamps()) {
         g_published = 0;
         g_draws = kEveryDraws;
         return;
@@ -163,11 +187,11 @@ void publish_if_changed() {
         std::fprintf(stderr, "disruptor: level read in %.2f ms\n",
                      std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - began).count());
     if (!read) {
-        if (!g_told) std::fprintf(stderr, "disruptor: the level's meshes did not read whole, the sun keeps the faces it had\n");
+        if (!g_told) std::fprintf(stderr, "disruptor: the level's meshes did not read whole, the lighting keeps the faces it had\n");
         g_told = true;
         return;
     }
-    /* Materials count too: the game rewrites animated textures' entries every frame (measured on mission 2), the sun sees
+    /* Materials count too: the game rewrites animated textures' entries every frame (measured on mission 2), the probes see
      * the phase of every 30th draw, and with the same corners the renderer repacks them into the BVH it has. */
     const uint64_t whole = digest ^ g_reader.faces() * 31u ^ g_reader.materials() * 131u;
     if (whole == g_published) return;

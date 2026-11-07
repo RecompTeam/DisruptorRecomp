@@ -3,6 +3,7 @@
  * distances in octahedral tiles. The picture is multiplied by the probes' light relative to its average. */
 #include "gpu_ddgi.h"
 #include "gpu_ddgi_bvh.h"
+#include "gpu_ddgi_fit.h"
 #include "gpu_ddgi_turn.h"
 
 #define DDGI_NX 20
@@ -121,66 +122,57 @@ static const char *DDGI_VS =
     "#version 330\n"
     "void main(){ vec2 p = vec2((gl_VertexID<<1)&2, gl_VertexID&2); gl_Position = vec4(p*2.0 - 1.0, 0.0, 1.0); }\n";
 
-/* One fragment a ray: x the ray, y the probe. rgb what it brings back, a its length, negative for a back face, past the
- * farthest for a miss nobody saw. */
+/* One fragment a ray: x the ray, y the probe. rgb the added lights' light it brings back, a its length, negative for a back
+ * face, DDGI_SKIP for a probe out of every added light's reach. */
+#define DDGI_SKIP "-1e9"
 static const char *DDGI_TRACE_FS =
     "#version 330\n" DDGI_GLSL_COMMON DDGI_GLSL_BVH
+    "#define LAMPS " DDGI_STR(GPU_DDGI_LAMPS) "\n"
     "out vec4 frag;\n"
-    "uniform sampler2D u_irr, u_frame, u_state;\n"
-    "uniform vec4 u_frame_at;  /* the frame's size and its picture's centre, in native pixels */\n"
     "uniform vec4 u_origin;  /* the world cell of the grid's corner, spacing */\n"
     "uniform vec4 u_rot0, u_rot1, u_rot2;  /* columns of this update's turn of the rays */\n"
-    "uniform vec4 u_camera;  /* where the camera stood, how much a hit is lit by the probes */\n"
-    "uniform vec4 u_sky;     /* how much a bright surface glows, the farthest a ray goes */\n"
-    "uniform vec4 u_row0, u_row1, u_row2, u_offset;  /* the camera: rows of its turn and its shift, world = vertex + offset */\n"
-    "uniform vec4 u_view;    /* focal, half the picture's width and height, which half of the probes is traced */\n"
-    "ivec2 state_texel(ivec3 cell){ ivec3 s = slot_of(cell); int p = s.x + NX*(s.z + NZ*s.y); return ivec2(p % 64, p / 64); }\n"
-    "vec3 probe_irr(ivec3 cell, vec3 dir){ return texture(u_irr, tile_uv(cell, dir, IRR, vec2(textureSize(u_irr, 0)))).rgb; }\n"
-    "vec3 probe_light(vec3 p, vec3 n){\n"
-    "  vec3 g = p/u_origin.w; ivec3 base = ivec3(floor(g)); vec3 f = g - vec3(base);\n"
-    "  ivec3 lo = ivec3(u_origin.xyz), hi = lo + ivec3(NX, NY, NZ) - 1; vec3 sum = vec3(0.0); float ws = 0.0;\n"
-    "  for (int i = 0; i < 8; ++i) {\n"
-    "    ivec3 off = ivec3(i & 1, (i >> 1) & 1, (i >> 2) & 1), c = clamp(base + off, lo, hi);\n"
-    "    vec3 w3 = mix(1.0 - f, f, vec3(off)); vec3 to = vec3(c)*u_origin.w - p;\n"
-    "    float w = w3.x*w3.y*w3.z*max(0.05, dot(normalize(to + vec3(0.001)), n));\n"
-    "    if (texelFetch(u_state, state_texel(c), 0).r < 0.5) continue;\n"
-    "    vec3 e = probe_irr(c, n); if (dot(e, vec3(1.0)) <= 1e-5) continue;\n"
-    "    sum += e*w; ws += w; }\n"
-    "  return ws > 1e-5 ? sum/ws : vec3(0.0); }\n"
-    "/* Where a ray that hits nothing leaves the picture: the frame there is what it brings back. */\n"
-    "bool seen(vec3 p, out vec3 colour){\n"
-    "  vec3 v = p - u_offset.xyz;\n"
-    "  vec3 c = vec3(dot(u_row0.xyz, v) + u_row0.w, dot(u_row1.xyz, v) + u_row1.w, dot(u_row2.xyz, v) + u_row2.w);\n"
-    "  colour = vec3(0.0);\n"
-    "  if (c.z <= 16.0) return false;\n"
-    "  vec2 s = c.xy*u_view.x/c.z;\n"
-    "  if (abs(s.x) >= u_view.y || abs(s.y) >= u_view.z) return false;\n"
-    "  colour = texture(u_frame, (u_frame_at.zw + s)/u_frame_at.xy).rgb;\n"
-    "  return true; }\n"
+    "uniform vec4 u_camera;  /* where the camera stood, the side the game draws a level face from (1 or -1) */\n"
+    "uniform vec4 u_sky;     /* w: the farthest a ray goes */\n"
+    "uniform vec4 u_view;    /* w: which half of the probes is traced */\n"
+    "uniform vec4 u_lamp[LAMPS*3], u_lamps;  /* the added lights as the lamp pass has them; their count, their strength */\n"
+    "vec4 tri(bool level, int i){ return level ? fetch(u_level_tris, i) : fetch(u_tris, i); }\n"
+    "bool lamp_near(vec3 p, float margin){\n"
+    "  for (int i = 0; i < int(u_lamps.x); ++i) if (u_lamp[3*i + 2].w < 0.0 && distance(u_lamp[3*i].xyz, p) < u_lamp[3*i].w + margin) return true;\n"
+    "  return false; }\n"
+    "/* The added lights' light at p of normal n before the surface's colour: the lamp pass's, seen past the level's faces. */\n"
+    "vec3 lamps_at(vec3 p, vec3 n){\n"
+    "  vec3 sum = vec3(0.0);\n"
+    "  for (int i = 0; i < int(u_lamps.x); ++i) {\n"
+    "    vec4 a = u_lamp[3*i], b = u_lamp[3*i + 1], c = u_lamp[3*i + 2];\n"
+    "    if (c.w >= 0.0) continue;\n"
+    "    vec3 l = a.xyz - p; float dist = length(l); if (dist >= a.w) continue; l /= max(dist, 1e-3);\n"
+    "    float ndl = dot(n, l); if (ndl <= 0.0) continue;\n"
+    "    float x = dist/a.w, r = dist/(0.35*a.w), fall = (1.0 - x*x)*(1.0 - x*x)/(1.0 + r*r), far = dist*0.95 - 16.0, hu, hv;\n"
+    "    if (u_level.x > 0.5 && far > 2.0 && bvh_hit_in(u_level_nodes, u_level_tris, p, l, 2.0, far, hu, hv, true, true) >= 0) continue;\n"
+    "    float lum = dot(b.rgb, vec3(0.2126, 0.7152, 0.0722));\n"
+    "    sum += b.rgb/max(lum, 1e-3)*u_lamps.y*(b.w/(b.w + 20000.0))*2.0*(-c.w)*fall*ndl; }\n"
+    "  return sum; }\n"
     "void main(){\n"
     "  ivec2 at = ivec2(gl_FragCoord.xy); int ray = at.x, probe = at.y*2 + int(u_view.w);\n"
     "  ivec3 slot = ivec3(probe % NX, probe / (NX*NZ), (probe / NX) % NZ), origin = ivec3(u_origin.xyz);\n"
     "  ivec3 cell = origin + ivec3(posmod(slot.x - origin.x, NX), posmod(slot.y - origin.y, NY), posmod(slot.z - origin.z, NZ));\n"
-    "  vec3 o = vec3(cell)*u_origin.w, d = mat3(u_rot0.xyz, u_rot1.xyz, u_rot2.xyz)*fib(ray);\n"
-    "  float best = u_sky.w, hu, hv; int hit = bvh_hit(o, d, 1.0, best, hu, hv, false, false);\n"
-    "  if (hit < 0) { vec3 sky; frag = seen(o + d*u_sky.w, sky) ? vec4(sky, u_sky.w) : vec4(0.0, 0.0, 0.0, u_sky.w + 1.0); return; }\n"
-    "  vec4 v0 = fetch(u_tris, hit*5), v1 = fetch(u_tris, hit*5 + 1), v2 = fetch(u_tris, hit*5 + 2);\n"
-    "  vec4 m = fetch(u_tris, hit*5 + 3), c = fetch(u_tris, hit*5 + 4);\n"
-    "  vec3 n = cross(v1.xyz - v0.xyz, v2.xyz - v0.xyz); if (dot(n, u_camera.xyz - v0.xyz) < 0.0) n = -n;\n"
+    "  vec3 o = vec3(cell)*u_origin.w;\n"
+    "  if (!lamp_near(o, 2.0*u_origin.w)) { frag = vec4(0.0, 0.0, 0.0, " DDGI_SKIP "); return; }\n"
+    "  vec3 d = mat3(u_rot0.xyz, u_rot1.xyz, u_rot2.xyz)*fib(ray);\n"
+    "  float best = u_sky.w, hu, hv, lu, lv; int hit = bvh_hit(o, d, 1.0, best, hu, hv, false, false); bool level = false;\n"
+    "  if (u_level.x > 0.5) { int h = bvh_hit_in(u_level_nodes, u_level_tris, o, d, 1.0, best, lu, lv, false, false);\n"
+    "    if (h >= 0) { hit = h; hu = lu; hv = lv; level = true; } }\n"
+    "  if (hit < 0) { frag = vec4(0.0, 0.0, 0.0, u_sky.w); return; }\n"
+    "  vec4 v0 = tri(level, hit*5), v1 = tri(level, hit*5 + 1), v2 = tri(level, hit*5 + 2), m = tri(level, hit*5 + 3);\n"
+    "  vec4 c = tri(level, hit*5 + 4);\n"
+    "  vec3 n = cross(v1.xyz - v0.xyz, v2.xyz - v0.xyz);\n"
+    "  /* A face the frame drew was seen from its front. */\n"
+    "  if (level) n *= u_camera.w; else if (dot(n, u_camera.xyz - v0.xyz) < 0.0) n = -n;\n"
     "  if (dot(n, d) > 0.0) { frag = vec4(0.0, 0.0, 0.0, -0.2*best); return; }\n"
-    "  float w0 = 1.0 - hu - hv; vec3 vc = rgb8(c.x)*w0 + rgb8(c.y)*hu + rgb8(c.z)*hv;\n"
-    "  int flags = int(m.z); vec3 albedo = vc, lit = vc;\n"
-    "  if ((flags & 1) != 0) {\n"
-    "    albedo = col5(texel(uv8(v0.w)*w0 + uv8(v1.w)*hu + uv8(v2.w)*hv, int(m.y), int(m.x)));\n"
-    "    lit = (flags & 4) != 0 ? albedo : albedo*vc*2.0; }\n"
-    "  /* A lamp, a light strip, a screen, a glowing pool, an added blend: light of its own. */\n"
-    "  float bright = max(max(lit.r, lit.g), lit.b), abr = float((int(m.y) >> 5) & 3);\n"
-    "  float glow = smoothstep(0.55, 0.95, bright) + ((flags & 3) == 3 && (abr == 1.0 || abr == 3.0) ? 1.0 : 0.0);\n"
-    "  lit += lit*u_sky.x*min(glow, 1.0);\n"
-    "  if (u_sun.w > 0.0) { vec3 nn = normalize(n); float s = dot(nn, u_sun.xyz);\n"
-    "    if (s > 0.0 && !sun_blocked(o + d*best + nn*8.0)) lit += albedo*u_sun_colour.rgb*u_sun.w*s; }\n"
-    "  if (u_camera.w > 0.0) lit += albedo*probe_light(o + d*best, normalize(n))*u_camera.w;\n"
-    "  frag = vec4(lit, best); }\n";
+    "  n = normalize(n);\n"
+    "  float w0 = 1.0 - hu - hv; vec3 albedo = rgb8(c.x)*w0 + rgb8(c.y)*hu + rgb8(c.z)*hv;\n"
+    "  if ((int(m.z) & 1) != 0) albedo = col5(texel(uv8(v0.w)*w0 + uv8(v1.w)*hu + uv8(v2.w)*hv, int(m.y), int(m.x)));\n"
+    "  frag = vec4(pow(albedo, vec3(2.2))*lamps_at(o + d*best + n*8.0, n), best); }\n";
 
 /* One texel of the irradiance or distance atlas: its direction's share of every ray of its probe, blended into what was. */
 static const char *DDGI_UPDATE_FS =
@@ -208,6 +200,7 @@ static const char *DDGI_UPDATE_FS =
     "  for (int r = 0; r < RAYS; ++r) {\n"
     "    vec4 ray = texelFetch(u_rays, ivec2(r, probe / 2), 0);\n"
     "    float w = max(0.0, dot(dir, rot*fib(r)));\n"
+    "    if (ray.a < -1e8) { if (u_mode.y < 0.5) sum.w += w; continue; }  /* out of reach: no light, the distances kept */\n"
     "    if (u_mode.y > 0.5) { w = pow(w, 30.0); float dist = min(abs(ray.a), u_mode.w); sum += vec4(dist*w, dist*dist*w, 0.0, w); }\n"
     "    else if (ray.a >= 0.0 && ray.a <= u_mode.w) sum += vec4(ray.rgb*w, w); }\n"
     "  if (sum.w <= 1e-5) { frag = vec4(0.0, 0.0, 0.0, fresh ? 1.0 : 0.0); return; }\n"
@@ -222,9 +215,10 @@ static const char *DDGI_CLASSIFY_FS =
     "void main(){\n"
     "  ivec2 px = ivec2(gl_FragCoord.xy); int probe = px.x + 64*px.y;\n"
     "  if (probe >= NX*NY*NZ || probe % 2 != int(u_half)) { frag = vec4(0.0); return; }\n"
-    "  float back = 0.0;\n"
-    "  for (int r = 0; r < RAYS; ++r) if (texelFetch(u_rays, ivec2(r, probe / 2), 0).a < 0.0) back += 1.0;\n"
-    "  frag = vec4(vec3(back > 0.25*float(RAYS) ? 0.0 : 1.0), 1.0); }\n";
+    "  float back = 0.0, skipped = 0.0;\n"
+    "  for (int r = 0; r < RAYS; ++r) { float a = texelFetch(u_rays, ivec2(r, probe / 2), 0).a;\n"
+    "    if (a < -1e8) skipped += 1.0; else if (a < 0.0) back += 1.0; }\n"
+    "  frag = skipped >= float(RAYS) ? vec4(0.0) : vec4(vec3(back > 0.25*float(RAYS) ? 0.0 : 1.0), 1.0); }\n";
 
 /* What both the measure and the mix need: a screen pixel's world place, normal and the probes' light there. */
 #define DDGI_GLSL_APPLY                                                                                                               \
@@ -265,7 +259,6 @@ static const char *DDGI_CLASSIFY_FS =
     "    if (w < 0.2) w *= w*w*25.0;\n"                                                                                              \
     "    vec3 w3 = mix(1.0 - f, f, vec3(off)); w *= w3.x*w3.y*w3.z;\n"                                                               \
     "    vec3 e = texture(u_irr, tile_uv(c, n, IRR, irr_size)).rgb;\n"                                                               \
-    "    if (dot(e, vec3(1.0)) <= 1e-5) continue;\n"                                                                                 \
     "    sum += e*w; ws += w; }\n"                                                                                                   \
     "  return ws > 1e-5 ? sum/ws : vec3(-1.0); }\n"                                                                                  \
     "/* world_only leaves out sprites and blended pixels, which have no surface of their own. */\n"                                  \
@@ -281,36 +274,11 @@ static const char *DDGI_CLASSIFY_FS =
     "  e = probe_light(v + u_offset.xyz, normalize(back_turn(nc)), normalize(back_turn(-pc)));\n"                                    \
     "  return e.x >= 0.0; }\n"
 
-#define DDGI_SAMPLES_X 32
-#define DDGI_SAMPLES_Y 18
-
-/* The probes' light at a grid of the picture's world pixels. */
-static const char *DDGI_SAMPLE_FS =
-    "#version 330\n" DDGI_GLSL_COMMON DDGI_GLSL_APPLY
-    "out vec4 frag;\n"
-    "uniform vec4 u_rect;  /* the part of the textures shown */\n"
-    "void main(){\n"
-    "  vec2 uv = mix(u_rect.xy, u_rect.zw, gl_FragCoord.xy/vec2(" DDGI_STR(DDGI_SAMPLES_X) ".0, " DDGI_STR(DDGI_SAMPLES_Y) ".0));\n"
-    "  vec3 e; frag = pixel_light(uv, true, e) ? vec4(e, 1.0) : vec4(0.0); }\n";
-
-/* Their average, blended slowly into one texel with its weight in alpha: the light the picture keeps on the whole. */
-static const char *DDGI_AVERAGE_FS =
-    "#version 330\n"
-    "out vec4 frag;\n"
-    "uniform sampler2D u_samples;\n"
-    "void main(){\n"
-    "  vec4 sum = vec4(0.0);\n"
-    "  for (int y = 0; y < " DDGI_STR(DDGI_SAMPLES_Y) "; ++y) for (int x = 0; x < " DDGI_STR(DDGI_SAMPLES_X) "; ++x)\n"
-    "    sum += texelFetch(u_samples, ivec2(x, y), 0);\n"
-    "  if (sum.w < 1.0) discard;\n"
-    "  frag = vec4(sum.rgb/sum.w, 1.0); }\n";
-
-/* The shading's mix with the probes' light and the lamps': SSAO_MIX_FS, the probes' light at the pixel's world place relative to
- * the picture's average, then the casters' shadow and the dynamic lights' light from the half-size lamp pass, in linear light. */
+/* The shading's mix with the lamps': SSAO_MIX_FS, then the casters' shadow and the added light from the half-size lamp pass. */
 static const char *DDGI_MIX_FS =
     "#version 330\n" DDGI_GLSL_COMMON DDGI_GLSL_APPLY
     "in vec2 v_uv; out vec4 frag;\n"
-    "uniform sampler2D u_shade, u_exposure, u_lamps;\n"
+    "uniform sampler2D u_shade, u_lamps;\n"
     "uniform vec4 u_span, u_uv_rect;\n"
     "uniform vec4 u_lit;  /* 1 with the lamps' texture, 1 to show it alone, 1 with the probes' light */\n"
     "uniform vec4 u_fog;  /* the game's fog as in the lamp pass */\n"
@@ -359,20 +327,7 @@ static const char *DDGI_MIX_FS =
     "    if (near.g == 0.0 || abs(near.g - here.g) > 2.5/255.0) continue;\n"
     "    lit += near.r; count += 1.0; }\n"
     "  lit = count > 0.0 ? lit/count : here.r;\n"
-    "  vec3 light = vec3(1.0), e;\n"
-    "  if (u_lit.z > 0.5) {\n"
-    "    vec4 kept = texelFetch(u_exposure, ivec2(0), 0);\n"
-    "    vec3 average = kept.rgb/max(kept.w, 1e-4); float mean = dot(average, vec3(0.2126, 0.7152, 0.0722));\n"
-    "    if (kept.w > 0.05 && mean > 1e-4 && pixel_light(v_uv, true, e)) {\n"
-    "      float lum = dot(e, vec3(0.2126, 0.7152, 0.0722)), d = cam(v_uv);\n"
-    "      vec3 hue = (e/max(lum, 1e-4))/max(average/mean, vec3(0.05));\n"
-    "      vec3 relative = soft(clamp(lum/mean*mix(vec3(1.0), hue, 0.5), 0.0, 8.0));\n"
-    "      float clear = u_fade.y > u_fade.x ? 1.0 - clamp((d - u_fade.x)/(u_fade.y - u_fade.x), 0.0, 1.0) : 1.0;\n"
-    "      light = max(mix(vec3(1.0), relative, u_ddgi.x*clear), vec3(0.0));\n"
-    "      if (u_ddgi.y > 0.5) { frag = vec4(clamp(relative*0.5, 0.0, 1.0), seen.a); return; }\n"
-    "    } else if (u_ddgi.y > 0.5) { frag = vec4(0.25, 0.0, 0.25, seen.a); return; }\n"
-    "  }\n"
-    "  frag = vec4(u_span.z > 1.5 ? vec3(lit) : lamped(c, lit*light, lamp, f), seen.a); }\n";
+    "  frag = vec4(u_span.z > 1.5 ? vec3(lit) : lamped(c, vec3(lit), lamp, f), seen.a); }\n";
 
 /* Half size: the casters' shadow from the level's lights and under themselves (a), the dynamic lights' light times the
  * surface's own colour (rgb, linear). A caster is an ellipsoid for the shade under it and its own picture, turned to face the
@@ -454,17 +409,12 @@ static const char *DDGI_LAMP_FS =
     "float caster_hides_far(vec3 p, vec3 dir, float angle, int i){\n"
     "  float upright = smoothstep(0.2, 0.4, length(dir.xz));\n"
     "  return mix(upright < 1.0 ? hidden_far(p, dir, angle, i) : 0.0, upright > 0.0 ? picture_hides(p, dir, angle, 1e9, i, false) : 0.0, upright); }\n"
-    "vec3 oct16(int q){ return oct_decode(vec2(float(q & 255), float((q >> 8) & 255))/127.5 - 1.0); }\n"
-    "/* The smooth normal at a point of face i of the frame's BVH, zero where the face has none. */\n"
-    "vec3 smooth_at(int i, float hu, float hv){\n"
-    "  int a = int(fetch(u_tris, i*5 + 3).w), b = int(fetch(u_tris, i*5 + 4).w);\n"
-    "  if (a == 0 && b == 0) return vec3(0.0);\n"
-    "  vec3 s = oct16(a & 65535)*(1.0 - hu - hv) + oct16(((a >> 16) & 255) | ((b & 255) << 8))*hu + oct16((b >> 8) & 65535)*hv;\n"
-    "  return dot(s, s) > 1e-6 ? normalize(s) : vec3(0.0); }\n"
     "bool blocked(vec3 o, vec3 q){\n"
     "  vec3 d = q - o; float len = length(d); if (len < 40.0) return false;\n"
-    "  float best = len*0.95 - 16.0, hu, hv;\n"
-    "  return bvh_hit(o, d/len, 2.0, best, hu, hv, true, true) >= 0; }\n"
+    "  float best = len*0.95 - 16.0, hu, hv; d /= len;\n"
+    "  if (bvh_hit(o, d, 2.0, best, hu, hv, true, true) >= 0) return true;\n"
+    "  best = len*0.95 - 16.0;\n"
+    "  return u_level.x > 0.5 && bvh_hit_in(u_level_nodes, u_level_tris, o, d, 2.0, best, hu, hv, true, true) >= 0; }\n"
     "void main(){\n"
     "  vec2 uv = mix(u_rect.xy, u_rect.zw, gl_FragCoord.xy/u_size.xy);\n"
     "  ivec2 tsize = textureSize(u_tex, 0);\n"
@@ -483,17 +433,13 @@ static const char *DDGI_LAMP_FS =
     "    if (dot(nc, nc) <= 1e-12) return;\n"
     "    nc = normalize(nc); if (dot(nc, pc) > 0.0) nc = -nc;\n"
     "    n = normalize(back_turn(nc)); }\n"
-    "  /* The face under the pixel along the camera's ray: its colour, and its smooth normal for the light it takes. */\n"
-    "  int seen = -1; float seen_u = 0.0, seen_v = 0.0; vec3 lit_n = n;\n"
-    "  if (!sprite) {\n"
-    "    vec3 dir = p - u_eye.xyz; float len = length(dir), best = len + 100.0; dir /= max(len, 1e-3);\n"
-    "    seen = bvh_hit(u_eye.xyz, dir, max(len - 200.0, 1.0), best, seen_u, seen_v, true, false);\n"
-    "    if (seen >= 0) { vec3 s = smooth_at(seen, seen_u, seen_v); if (dot(s, n) > 0.5) lit_n = s; } }\n"
     "  int casters = int(u_count.x), lamps = int(u_count.y), near[CASTERS], nearby = 0;\n"
     "  for (int j = 0; j < casters; ++j) { vec3 to = u_caster[2*j].xyz - p; if (dot(to, to) < 1.6e7) near[nearby++] = j; }\n"
     "  float shadow = 1.0;\n"
     "  if (!sprite && nearby > 0) {\n"
-    "    float share[LAMPS], total = u_count.w, shade = 0.0, open = 1.0;\n"
+    "    /* Each light fitted to the level's baked light takes its share of it here, the sun too, against what every surface has. */\n"
+    "    float share[LAMPS], sun_share = u_sun.w > 0.0 ? u_sun.w*max(0.0, dot(n, u_sun.xyz)) : 0.0, total = u_count.w + sun_share;\n"
+    "    float shade = 0.0, open = 1.0;\n"
     "    for (int i = 0; i < lamps; ++i) {\n"
     "      share[i] = 0.0;\n"
     "      vec4 a = u_lamp[3*i], b = u_lamp[3*i + 1], c = u_lamp[3*i + 2];\n"
@@ -501,7 +447,7 @@ static const char *DDGI_LAMP_FS =
     "      vec3 l = a.xyz - p; float dist = length(l); l /= max(dist, 1e-3);\n"
     "      float ndl = dot(n, l); if (ndl <= 0.0) continue;\n"
     "      float side = dot(c.xyz, c.xyz) > 0.25 ? max(0.15, dot(c.xyz, -l)) : 1.0;\n"
-    "      share[i] = b.w*ndl*side*c.w/(dist*dist + a.w*a.w + 1.44e6);\n"
+    "      share[i] = b.w*ndl*side*c.w/(dist*dist + a.w*a.w);\n"
     "      total += share[i]; }\n"
     "    for (int i = 0; i < lamps; ++i) {\n"
     "      if (share[i] <= 0.03*total) continue;\n"
@@ -509,55 +455,51 @@ static const char *DDGI_LAMP_FS =
     "      for (int j = 0; j < nearby; ++j) h = max(h, caster_hides(p, a.xyz, a.w, near[j], false));\n"
     "      if (h > 0.01 && blocked(p + n*8.0, a.xyz)) h = 0.0;\n"
     "      shade += share[i]/total*h; }\n"
+    "    if (sun_share > 0.03*total) {\n"
+    "      float h = 0.0;\n"
+    "      for (int j = 0; j < nearby; ++j) h = max(h, caster_hides_far(p, u_sun.xyz, 0.05, near[j]));\n"
+    "      if (h > 0.01 && sun_blocked(p + n*8.0)) h = 0.0;  /* the level's own shadow has no sun to take */\n"
+    "      shade += sun_share/total*h; }\n"
     "    for (int j = 0; j < nearby; ++j) open *= 1.0 - min(1.0, contact(p, n, near[j]));\n"
     "    shadow = 1.0 - clamp(u_shadow.x*shade + u_shadow.y*(1.0 - open), 0.0, u_shadow.z); }\n"
     "  vec3 added = vec3(0.0);\n"
-    "  /* The sun takes its share of the game's own light and gives it back by how the surface faces it: sunlit ground stays\n"
-    "   * as the game lit it, shade keeps the rest, a wall turned to the sun gets more. */\n"
-    "  if (u_sun.w > 0.0 && u_sun_colour.w > 0.0) {\n"
-    "    float facing = sprite ? 0.7 : dot(lit_n, u_sun.xyz), lit = 0.0;\n"
-    "    if (facing > 0.0 && (sprite || dot(n, u_sun.xyz) > -0.2) && !sun_blocked(p + n*8.0)) {\n"
-    "      lit = facing;\n"
-    "      if (!sprite) for (int j = 0; j < nearby && lit > 0.0; ++j) lit *= 1.0 - caster_hides_far(p, u_sun.xyz, 0.05, near[j]); }\n"
-    "    shadow *= 1.0 - u_sun_colour.w + u_sun_colour.w*u_sun.w*min(lit/max(abs(u_sun.y), 0.2), 1.6); }\n"
     "  for (int i = 0; i < lamps && u_shadow.w > 0.0; ++i) {\n"
     "    vec4 a = u_lamp[3*i], b = u_lamp[3*i + 1], c = u_lamp[3*i + 2];\n"
     "    if (c.w >= 0.0) continue;\n"
     "    vec3 l = a.xyz - p; float dist = length(l); if (dist >= a.w) continue; l /= max(dist, 1e-3);\n"
-    "    float ndl = sprite ? 0.6 + 0.4*dot(n, l) : dot(lit_n, l); if (ndl <= 0.0) continue;\n"
+    "    float ndl = sprite ? 0.6 + 0.4*dot(n, l) : dot(n, l); if (ndl <= 0.0) continue;\n"
     "    float x = dist/a.w, r = dist/(0.35*a.w), fall = (1.0 - x*x)*(1.0 - x*x)/(1.0 + r*r), vis = 1.0;\n"
     "    if (!sprite && blocked(p + n*8.0, a.xyz)) vis = 0.0;\n"
     "    for (int j = 0; j < nearby && vis > 0.0; ++j) vis *= 1.0 - caster_hides(p, a.xyz, 60.0, near[j], sprite);\n"
     "    float lum = dot(b.rgb, vec3(0.2126, 0.7152, 0.0722));\n"
     "    added += b.rgb/max(lum, 1e-3)*u_shadow.w*(b.w/(b.w + 20000.0))*2.0*(-c.w)*fall*ndl*vis; }\n"
+    "  /* The added lights' light come back off the surfaces round about, from the probes. */\n"
+    "  if (u_ddgi.x > 0.0) { vec3 e = probe_light(p, n, normalize(u_eye.xyz - p)); if (e.x >= 0.0) added += e*u_ddgi.x; }\n"
     "  if (dot(added, vec3(1.0)) > 1e-4) {\n"
     "    /* The surface's own colour: the texel the camera's ray meets, before the game's vertex light. */\n"
     "    vec3 albedo = texture(u_tex, uv).rgb;\n"
-    "    if (seen >= 0) {\n"
-    "      int hit = seen; float hu = seen_u, hv = seen_v;\n"
-    "      vec4 v0 = fetch(u_tris, hit*5), v1 = fetch(u_tris, hit*5 + 1), v2 = fetch(u_tris, hit*5 + 2);\n"
-    "      vec4 m = fetch(u_tris, hit*5 + 3), col = fetch(u_tris, hit*5 + 4);\n"
-    "      float w0 = 1.0 - hu - hv;\n"
-    "      albedo = (int(m.z) & 1) != 0 ? col5(texel(uv8(v0.w)*w0 + uv8(v1.w)*hu + uv8(v2.w)*hv, int(m.y), int(m.x)))\n"
-    "                                   : rgb8(col.x)*w0 + rgb8(col.y)*hu + rgb8(col.z)*hv; }\n"
+    "    if (!sprite) {\n"
+    "      vec3 dir = p - u_eye.xyz; float len = length(dir), best = len + 100.0, hu, hv; dir /= max(len, 1e-3);\n"
+    "      int hit = bvh_hit(u_eye.xyz, dir, max(len - 200.0, 1.0), best, hu, hv, true, false);\n"
+    "      if (hit >= 0) {\n"
+    "        vec4 v0 = fetch(u_tris, hit*5), v1 = fetch(u_tris, hit*5 + 1), v2 = fetch(u_tris, hit*5 + 2);\n"
+    "        vec4 m = fetch(u_tris, hit*5 + 3), col = fetch(u_tris, hit*5 + 4);\n"
+    "        float w0 = 1.0 - hu - hv;\n"
+    "        albedo = (int(m.z) & 1) != 0 ? col5(texel(uv8(v0.w)*w0 + uv8(v1.w)*hu + uv8(v2.w)*hv, int(m.y), int(m.x)))\n"
+    "                                     : rgb8(col.x)*w0 + rgb8(col.y)*hu + rgb8(col.z)*hv; } }\n"
     "    added *= pow(albedo, vec3(2.2)); }\n"
     "  frag = vec4(added, shadow); }\n";
 
 typedef struct {
-    GLint nodes, tris, irr, vram, origin, rot0, rot1, rot2, camera, sky, row0, row1, row2, offset, view, frame, frame_at, state,
-        level_nodes, level_tris, sun, sun_colour, level;
+    GLint nodes, tris, vram, origin, rot0, rot1, rot2, camera, sky, view, level_nodes, level_tris, level, lamp, lamps;
 } DdgiTraceUniforms;
 typedef struct {
     GLint rays, fresh, rot0, rot1, rot2, mode, half;
 } DdgiUpdateUniforms;
 typedef struct {
-    GLint tex, shade, depth, irr, dist, exposure, state, span, ddgi, proj, texel, back0, back1, back2, offset, origin, fade, uv_rect,
+    GLint tex, shade, depth, irr, dist, state, span, ddgi, proj, texel, back0, back1, back2, offset, origin, fade, uv_rect,
         rect;
 } DdgiApplyUniforms;
-typedef struct {
-    GLuint samples_tex, samples_fbo, average_tex, average_fbo;
-    int frames;
-} DdgiScreen;
 typedef struct {
     GLint nodes, tris, vram, rect, size, eye, count, shadow, caster, lamp, level_nodes, level_tris, sun, sun_colour, level, fog,
         cast, mask;
@@ -569,34 +511,33 @@ typedef struct DdgiFrame {
     float rows[3][4], offset[3], eye[3];
     float back[3][3]; /* the inverse of the rows' turn, a column each: camera to world */
     int level;                   /* the level BVH it was drawn with, -1 for none */
-    float sun[4], sun_colour[4]; /* as the shaders' u_sun and u_sun_colour, strength 0 for no sun */
+    float sun[4], sun_colour[4]; /* as the shaders' u_sun and u_sun_colour, the fit's weight 0 for no sun */
+    float ambient;               /* the fit's light every surface has besides the lamps */
     GpuDdgiScene scene;
 } DdgiFrame;
 /* Programs are made in each context: a program's uniforms are shared between contexts with it. */
 typedef struct {
     int built, failed;
-    GLuint sample_prog, average_prog, mix_prog, lamp_prog;
-    DdgiApplyUniforms su, mu, lu;
+    GLuint mix_prog, lamp_prog;
+    DdgiApplyUniforms mu, lu;
     DdgiLampUniforms la;
-    GLint average_samples, mix_lamps, mix_lit, mix_fog;
-    DdgiScreen screen;
+    GLint mix_lamps, mix_lit, mix_fog;
     GLuint lamp_tex, lamp_fbo, cast_tex, mask_tex;
     int lamp_w, lamp_h, lamp_ready;
     DdgiFrame frame;
 } DdgiContext;
 
 static int s_ddgi_light = 0, s_ddgi_light_view = 0, s_ddgi_ready = 0, s_ddgi_failed = 0, s_ddgi_applies = 0;
-static float s_ddgi_strength = 1.0f, s_ddgi_bounce = 0.0f, s_ddgi_glow = 2.0f;
+static float s_ddgi_strength = 1.0f;
 static int s_ddgi_shadows = 0, s_ddgi_lamps = 0, s_ddgi_lamp_view = 0;
 /* A sun for a mission with open sky: degrees round from +z, degrees up, strength, the share of baked light shade takes. */
 typedef struct {
     float azimuth, elevation, strength, shade, colour[3];
 } DdgiSun;
 static DdgiSun s_ddgi_suns[16] = {[2] = {35.0f, 50.0f, 1.1f, 0.5f, {1.0f, 0.93f, 0.8f}}};
-static int s_ddgi_sun = 0, s_ddgi_mission = -1;
+static int s_ddgi_sun = 0, s_ddgi_mission = -1, s_ddgi_mission_game = -1; /* the GL side's mission, the game thread's */
 static int ddgi_sun_active(void) {
-    return s_ddgi_sun && s_ddgi_mission >= 0 && s_ddgi_mission < 16 && s_ddgi_suns[s_ddgi_mission].strength > 0.0f &&
-           s_ddgi_suns[s_ddgi_mission].shade > 0.0f;
+    return s_ddgi_sun && s_ddgi_mission >= 0 && s_ddgi_mission < 16 && s_ddgi_suns[s_ddgi_mission].strength > 0.0f;
 }
 static float s_ddgi_shadow_strength = 1.0f, s_ddgi_contact = 1.0f, s_ddgi_lamp_strength = 1.5f;
 static DdgiContext s_ddgi_ctx[2]; /* the frame loop's context, the in-between presenter's */
@@ -612,7 +553,7 @@ static DdgiUpdateUniforms s_ddgi_uu;
 static GLuint s_ddgi_nodes_tex[2], s_ddgi_tris_tex[2], s_ddgi_fresh_tex, s_ddgi_rays_tex, s_ddgi_rays_fbo;
 static GLuint s_ddgi_irr_tex, s_ddgi_irr_fbo, s_ddgi_dist_tex, s_ddgi_dist_fbo;
 static GLsync s_ddgi_probe_fence;
-static uint32_t s_ddgi_last_pose, s_ddgi_updates;
+static uint32_t s_ddgi_updates;
 static int s_ddgi_slot_cell[DDGI_PROBES][3], s_ddgi_slots_known;
 static DdgiNode *s_ddgi_nodes;
 static int s_ddgi_node_count;
@@ -620,6 +561,18 @@ static DdgiBuildFace *s_ddgi_frame_faces;
 static float *s_ddgi_staging;
 static unsigned char s_ddgi_fresh[64 * 64], s_ddgi_pending[DDGI_PROBES];
 static int s_ddgi_origin[3];
+#define DDGI_FRONT -1.0f    /* the game draws a face seen against its winding: 0 of 54 drawn faces wound toward the eye */
+#define DDGI_RESPONSE 0.15f /* seconds the probes take to follow the added lights by 1/e */
+#define DDGI_SHADOW_AMBIENT 0.3f /* the owner chose darker shadows than the fit: a third of its ambient stands against the lamps */
+
+static float s_ddgi_probe_seconds = -1.0f; /* since an added light was last in the scene, -1 once the probes are dark */
+static int s_ddgi_probe_reset = 1;
+static uint64_t s_ddgi_update_clock;
+static DdgiFit s_ddgi_fit_now; /* the GL thread's copy of the level's fit */
+static float s_ddgi_level_weight[DDGI_FIT_LAMPS];
+
+static int ddgi_probes_live(void) { return s_ddgi_light && s_ddgi_applies && s_ddgi_probe_seconds >= 0.0f; }
+
 
 static void ssao_mode(void);
 void gl_renderer_set_ddgi(int enabled);
@@ -628,7 +581,7 @@ static GLint ddgi_uniform(GLuint prog, const char *name) { return p_glGetUniform
 
 static DdgiApplyUniforms ddgi_apply_locations(GLuint m) {
     return (DdgiApplyUniforms){ddgi_uniform(m, "u_tex"),   ddgi_uniform(m, "u_shade"),  ddgi_uniform(m, "u_depth"),
-                               ddgi_uniform(m, "u_irr"),   ddgi_uniform(m, "u_dist"),   ddgi_uniform(m, "u_exposure"),
+                               ddgi_uniform(m, "u_irr"),   ddgi_uniform(m, "u_dist"),
                                ddgi_uniform(m, "u_state"), ddgi_uniform(m, "u_span"),   ddgi_uniform(m, "u_ddgi"),
                                ddgi_uniform(m, "u_proj"),  ddgi_uniform(m, "u_texel"),  ddgi_uniform(m, "u_back0"),
                                ddgi_uniform(m, "u_back1"), ddgi_uniform(m, "u_back2"),  ddgi_uniform(m, "u_offset"),
@@ -658,14 +611,11 @@ static int ddgi_init(void) {
     s_ddgi_classify_rays = ddgi_uniform(s_ddgi_classify_prog, "u_rays");
     s_ddgi_classify_half = ddgi_uniform(s_ddgi_classify_prog, "u_half");
     const GLuint t = s_ddgi_trace_prog;
-    s_ddgi_tu = (DdgiTraceUniforms){ddgi_uniform(t, "u_nodes"), ddgi_uniform(t, "u_tris"),   ddgi_uniform(t, "u_irr"),
-                                    ddgi_uniform(t, "u_vram"),  ddgi_uniform(t, "u_origin"), ddgi_uniform(t, "u_rot0"),
-                                    ddgi_uniform(t, "u_rot1"),  ddgi_uniform(t, "u_rot2"),   ddgi_uniform(t, "u_camera"),
-                                    ddgi_uniform(t, "u_sky"),   ddgi_uniform(t, "u_row0"),   ddgi_uniform(t, "u_row1"),
-                                    ddgi_uniform(t, "u_row2"),  ddgi_uniform(t, "u_offset"), ddgi_uniform(t, "u_view"),
-                                    ddgi_uniform(t, "u_frame"), ddgi_uniform(t, "u_frame_at"), ddgi_uniform(t, "u_state"),
-                                    ddgi_uniform(t, "u_level_nodes"), ddgi_uniform(t, "u_level_tris"), ddgi_uniform(t, "u_sun"),
-                                    ddgi_uniform(t, "u_sun_colour"), ddgi_uniform(t, "u_level")};
+    s_ddgi_tu = (DdgiTraceUniforms){ddgi_uniform(t, "u_nodes"),       ddgi_uniform(t, "u_tris"),       ddgi_uniform(t, "u_vram"),
+                                    ddgi_uniform(t, "u_origin"),      ddgi_uniform(t, "u_rot0"),       ddgi_uniform(t, "u_rot1"),
+                                    ddgi_uniform(t, "u_rot2"),        ddgi_uniform(t, "u_camera"),     ddgi_uniform(t, "u_sky"),
+                                    ddgi_uniform(t, "u_view"),        ddgi_uniform(t, "u_level_nodes"), ddgi_uniform(t, "u_level_tris"),
+                                    ddgi_uniform(t, "u_level"),       ddgi_uniform(t, "u_lamp"),       ddgi_uniform(t, "u_lamps")};
     const GLuint u = s_ddgi_update_prog;
     s_ddgi_uu = (DdgiUpdateUniforms){ddgi_uniform(u, "u_rays"), ddgi_uniform(u, "u_fresh"), ddgi_uniform(u, "u_rot0"),
                                      ddgi_uniform(u, "u_rot1"), ddgi_uniform(u, "u_rot2"),  ddgi_uniform(u, "u_mode"),
@@ -774,17 +724,29 @@ static SDL_cond *s_ddgi_level_cond;
 static int s_ddgi_level_run, s_ddgi_level_incoming_count = -1, s_ddgi_level_generation, s_ddgi_level_staged, s_ddgi_level_uploading;
 static int s_ddgi_level_staged_faces, s_ddgi_level_staged_nodes, s_ddgi_level_staged_generation;
 static int s_ddgi_level_made_count = -1, s_ddgi_level_made_generation = -1; /* the level thread's own */
+/* What each face gives off: the game thread's, the one handed over, the level thread's. */
+static float (*s_ddgi_level_emission_game)[3], (*s_ddgi_level_emission_incoming)[3], (*s_ddgi_level_emission)[3];
+static int s_ddgi_level_emission_fresh;            /* under the mutex: the faces handed over carry new emission */
+static int s_ddgi_level_sun_fresh;                 /* under the mutex: a new sun to fit */
+static float s_ddgi_level_sun_given[4];            /* game thread: the sun last handed over */
+static float s_ddgi_level_sun_incoming[4], s_ddgi_level_sun[4]; /* toward the mission's sun, w 1 when it has one */
+static uint64_t s_ddgi_level_shape;                /* game thread: the corners the emission was read for */
+static DdgiFit s_ddgi_fit_made, s_ddgi_fit_staged; /* the level thread's, the one left for the GL thread */
+static DdgiFitWork s_ddgi_fit_work;
+static int s_ddgi_fit_staged_fresh;
 
 static void ddgi_level_clear(void) {
     if (s_ddgi_level_mutex) SDL_LockMutex(s_ddgi_level_mutex);
     s_ddgi_level_incoming_count = -1;
     s_ddgi_level_staged = 0;
+    s_ddgi_fit_staged_fresh = 0;
+    s_ddgi_level_emission_fresh = 0;
+    s_ddgi_level_shape = 0;
     ++s_ddgi_level_generation;
     if (s_ddgi_level_mutex) {
         SDL_CondBroadcast(s_ddgi_level_cond);
         SDL_UnlockMutex(s_ddgi_level_mutex);
     }
-    s_ddgi_level_built = -1;
 }
 
 static void ddgi_level_make(int count);
@@ -813,6 +775,17 @@ static int ddgi_level_main(void *opaque) {
         GpuDdgiTriangle *swap = s_ddgi_level;
         s_ddgi_level = s_ddgi_level_incoming;
         s_ddgi_level_incoming = swap;
+        if (s_ddgi_level_emission_fresh) {
+            float (*emission)[3] = s_ddgi_level_emission;
+            s_ddgi_level_emission = s_ddgi_level_emission_incoming;
+            s_ddgi_level_emission_incoming = emission;
+            s_ddgi_level_emission_fresh = 0;
+        }
+        const int sun_moved = s_ddgi_level_sun_fresh;
+        if (sun_moved) {
+            memcpy(s_ddgi_level_sun, s_ddgi_level_sun_incoming, sizeof s_ddgi_level_sun);
+            s_ddgi_level_sun_fresh = 0;
+        }
         const int count = s_ddgi_level_incoming_count, generation = s_ddgi_level_generation;
         s_ddgi_level_incoming_count = -1;
         /* Under the lock: the next hand-over is copied into the faces before. */
@@ -824,12 +797,52 @@ static int ddgi_level_main(void *opaque) {
         else ddgi_level_make(count);
         s_ddgi_level_made_count = count;
         s_ddgi_level_made_generation = generation;
-        if (getenv("PSX_DDGI"))
+        const uint64_t made = SDL_GetPerformanceCounter();
+        /* A new shape or sun: the lamps and their powers fitted to the faces' baked light, on the BVH as it stands. */
+        const int fitted = count > 0 && (!same || sun_moved);
+        const char *dump = getenv("PSX_DDGI_LEVEL_DUMP");
+        if (fitted && dump) {
+            FILE *file = fopen(dump, "wb");
+            if (file) {
+                fwrite(&count, sizeof count, 1, file);
+                fwrite(s_ddgi_level, sizeof(GpuDdgiTriangle), (size_t)count, file);
+                fwrite(s_ddgi_level_emission, sizeof(float) * 3, (size_t)count, file);
+                fwrite(s_ddgi_level_sun, sizeof s_ddgi_level_sun, 1, file);
+                fclose(file);
+            }
+        }
+        if (fitted) {
+            s_ddgi_fit_made.emitting = psx_ddgi_cluster_lamps(s_ddgi_level, (const float (*)[3])s_ddgi_level_emission, count,
+                                                              DDGI_FRONT, s_ddgi_fit_made.lamp, 16);
+            s_ddgi_fit_made.lamps = s_ddgi_fit_made.emitting +
+                                    psx_ddgi_hot_lamps(s_ddgi_level_nodes, s_ddgi_level_faces, s_ddgi_level, count, DDGI_FRONT,
+                                                       s_ddgi_fit_made.lamp + s_ddgi_fit_made.emitting,
+                                                       DDGI_FIT_LAMPS - s_ddgi_fit_made.emitting);
+            psx_ddgi_fit_level(s_ddgi_level_nodes, s_ddgi_level_faces, s_ddgi_level, count, DDGI_FRONT,
+                               s_ddgi_level_sun[3] > 0.5f ? s_ddgi_level_sun : NULL, &s_ddgi_fit_made, &s_ddgi_fit_work);
+        }
+        if (getenv("PSX_DDGI")) {
+            const double tick = 1000.0 / (double)SDL_GetPerformanceFrequency();
             fprintf(stderr, "ddgi level: %d faces, %d nodes, %s in %.2f ms\n", count, s_ddgi_level_node_count,
-                    same ? "materials repacked" : "made",
-                    (double)(SDL_GetPerformanceCounter() - began) * 1000.0 / (double)SDL_GetPerformanceFrequency());
+                    same ? "materials repacked" : "made", (double)(made - began) * tick);
+            if (fitted) {
+                fprintf(stderr, "ddgi fit: %d lamps over %d faces in %.1f ms, ambient %.4f sun %.4f, %d emitting, explains %.3f of the variance\n",
+                        s_ddgi_fit_made.lamps, s_ddgi_fit_made.samples, (double)(SDL_GetPerformanceCounter() - made) * tick,
+                        s_ddgi_fit_made.ambient, s_ddgi_fit_made.sun, s_ddgi_fit_made.emitting,
+                        s_ddgi_fit_made.variance > 0.0 ? 1.0 - s_ddgi_fit_made.residual / s_ddgi_fit_made.variance : 0.0);
+                for (int k = 0; k < s_ddgi_fit_made.lamps; ++k)
+                    if (s_ddgi_fit_made.lamp[k].power > 0.0f)
+                        fprintf(stderr, "ddgi fit: lamp %d at %.0f %.0f %.0f size %.0f power %.0f\n", k, s_ddgi_fit_made.lamp[k].position[0],
+                                s_ddgi_fit_made.lamp[k].position[1], s_ddgi_fit_made.lamp[k].position[2], s_ddgi_fit_made.lamp[k].size,
+                                s_ddgi_fit_made.lamp[k].power);
+            }
+        }
         SDL_LockMutex(s_ddgi_level_mutex);
         if (generation == s_ddgi_level_generation) {
+            if (fitted) {
+                s_ddgi_fit_staged = s_ddgi_fit_made;
+                s_ddgi_fit_staged_fresh = 1;
+            }
             s_ddgi_level_staged = 1;
             s_ddgi_level_staged_faces = count;
             s_ddgi_level_staged_nodes = count ? s_ddgi_level_node_count : 0;
@@ -863,8 +876,12 @@ static int ddgi_level_start(void) {
     s_ddgi_level_nodes = (DdgiNode *)malloc(sizeof(DdgiNode) * 2 * DDGI_LEVEL_TRIS);
     s_ddgi_level_tri_staging = (float *)malloc(sizeof(float) * 4 * 1024 * DDGI_LEVEL_ROWS);
     s_ddgi_level_node_staging = (float *)malloc(sizeof(float) * 4 * 1024 * DDGI_LEVEL_ROWS);
+    s_ddgi_level_emission_game = (float (*)[3])calloc(DDGI_LEVEL_TRIS, sizeof(float) * 3);
+    s_ddgi_level_emission_incoming = (float (*)[3])calloc(DDGI_LEVEL_TRIS, sizeof(float) * 3);
+    s_ddgi_level_emission = (float (*)[3])calloc(DDGI_LEVEL_TRIS, sizeof(float) * 3);
     if (s_ddgi_level_mutex && s_ddgi_level_cond && s_ddgi_level && s_ddgi_level_incoming && s_ddgi_level_faces &&
-        s_ddgi_level_nodes && s_ddgi_level_tri_staging && s_ddgi_level_node_staging) {
+        s_ddgi_level_nodes && s_ddgi_level_tri_staging && s_ddgi_level_node_staging && s_ddgi_level_emission_game &&
+        s_ddgi_level_emission_incoming && s_ddgi_level_emission) {
         s_ddgi_level_run = 1;
         s_ddgi_level_thread = SDL_CreateThread(ddgi_level_main, "psx-gl-level", NULL);
     }
@@ -880,7 +897,6 @@ static int ddgi_level_start(void) {
 
 /* Game thread: the faces are copied, the level thread makes their BVH. 0 when they could not be taken. */
 int gpu_ddgi_set_level(const GpuDdgiTriangle *tris, int count) {
-    GL_RT_SYNC(__func__);
     if (count < 0 || (!tris && count)) return 0;
     if (count > DDGI_LEVEL_TRIS) {
         fprintf(stdout, "psxrecomp: GL probe lighting got a level of %d faces, more than %d, the sun sees only the frame\n", count,
@@ -888,8 +904,36 @@ int gpu_ddgi_set_level(const GpuDdgiTriangle *tris, int count) {
         return 0;
     }
     if (!ddgi_level_start()) return 0;
+    uint64_t shape = 1469598103934665603ull ^ (uint64_t)count;
+    for (int i = 0; i < count; ++i) {
+        uint32_t bits[9];
+        memcpy(bits, tris[i].world, sizeof bits);
+        for (int k = 0; k < 9; ++k) shape = (shape ^ bits[k]) * 1099511628211ull;
+    }
+    /* VRAM is the game thread's: a lamp's texels are read here, only when the corners change. */
+    const int fresh = shape != s_ddgi_level_shape;
+    if (fresh) gpu_ddgi_level_emission(tris, count, s_ddgi_level_emission_game);
+    s_ddgi_level_shape = shape;
+    float sun[4] = {0.0f, 0.0f, 0.0f, 0.0f};
+    const int mission = s_ddgi_mission_game;
+    if (mission >= 0 && mission < 16 && s_ddgi_suns[mission].strength > 0.0f) {
+        const float az = s_ddgi_suns[mission].azimuth * 0.017453293f, el = s_ddgi_suns[mission].elevation * 0.017453293f;
+        sun[0] = cosf(el) * sinf(az);
+        sun[1] = -sinf(el);
+        sun[2] = cosf(el) * cosf(az);
+        sun[3] = 1.0f;
+    }
     SDL_LockMutex(s_ddgi_level_mutex);
     if (count) memcpy(s_ddgi_level_incoming, tris, sizeof(GpuDdgiTriangle) * (size_t)count);
+    if (fresh) {
+        if (count) memcpy(s_ddgi_level_emission_incoming, s_ddgi_level_emission_game, sizeof(float) * 3 * (size_t)count);
+        s_ddgi_level_emission_fresh = 1;
+    }
+    if (fresh || memcmp(sun, s_ddgi_level_sun_given, sizeof sun)) {
+        memcpy(s_ddgi_level_sun_incoming, sun, sizeof sun);
+        memcpy(s_ddgi_level_sun_given, sun, sizeof sun);
+        s_ddgi_level_sun_fresh = 1;
+    }
     s_ddgi_level_incoming_count = count;
     SDL_CondBroadcast(s_ddgi_level_cond);
     SDL_UnlockMutex(s_ddgi_level_mutex);
@@ -930,7 +974,10 @@ static void ddgi_level_update(void) {
     }
     SDL_LockMutex(s_ddgi_level_mutex);
     const int staged = s_ddgi_level_staged, faces = s_ddgi_level_staged_faces, nodes = s_ddgi_level_staged_nodes,
-              generation = s_ddgi_level_staged_generation;
+              generation = s_ddgi_level_staged_generation, fit = staged && s_ddgi_fit_staged_fresh;
+    static DdgiFit taken;
+    if (fit) taken = s_ddgi_fit_staged;
+    if (staged) s_ddgi_fit_staged_fresh = 0;
     s_ddgi_level_uploading = staged;
     s_ddgi_level_staged = 0;
     SDL_UnlockMutex(s_ddgi_level_mutex);
@@ -947,6 +994,10 @@ static void ddgi_level_update(void) {
     if (generation == s_ddgi_level_generation) {
         s_ddgi_level_built = faces ? target : -1;
         if (faces) s_ddgi_level_next ^= 1;
+        if (fit) {
+            s_ddgi_fit_now = taken;
+            memset(s_ddgi_level_weight, 0, sizeof s_ddgi_level_weight);
+        }
     }
     s_ddgi_level_uploading = 0;
     SDL_CondBroadcast(s_ddgi_level_cond);
@@ -976,8 +1027,6 @@ static void ddgi_draw(GLuint fbo, int w, int h) {
 
 void gl_renderer_set_ddgi(int enabled);
 void gl_renderer_set_ddgi_strength(float strength);
-void gl_renderer_set_ddgi_bounce(float bounce);
-void gl_renderer_set_ddgi_glow(float glow);
 void gl_renderer_set_ddgi_shadows(int enabled);
 void gl_renderer_set_ddgi_lamps(int enabled);
 void gl_renderer_set_ddgi_shadow_strength(float strength);
@@ -987,15 +1036,253 @@ void gl_renderer_set_ddgi_lamp_strength(float strength);
 static int s_ddgi_environment = 1;
 void gl_renderer_set_ddgi_environment(int taken) { GL_RT_SYNC(__func__); s_ddgi_environment = taken != 0; }
 
-static void ddgi_update(GLuint frame, float w, float h, float cx, float cy) {
+/* The fitted lamps nearest the eye after the scene's added lights, each fading in and out of the set. */
+static void ddgi_level_lamps(DdgiFrame *now) {
+    GpuDdgiScene *scene = &now->scene;
+    const int room = GPU_DDGI_LAMPS - scene->lamps;
+    float score[DDGI_FIT_LAMPS];
+    int chosen[DDGI_FIT_LAMPS] = {0};
+    for (int i = 0; i < s_ddgi_fit_now.lamps; ++i) {
+        const DdgiLevelLamp *l = &s_ddgi_fit_now.lamp[i];
+        const float d[3] = {l->position[0] - now->eye[0], l->position[1] - now->eye[1], l->position[2] - now->eye[2]};
+        const float d2 = d[0] * d[0] + d[1] * d[1] + d[2] * d[2];
+        score[i] = l->power > 0.0f && d2 < DDGI_FIT_REACH * DDGI_FIT_REACH ? l->power / (d2 + 2000.0f * 2000.0f) : 0.0f;
+    }
+    for (int taken = 0; taken < room; ++taken) {
+        int best = -1;
+        for (int i = 0; i < s_ddgi_fit_now.lamps; ++i)
+            if (score[i] > 0.0f && (best < 0 || score[i] > score[best])) best = i;
+        if (best < 0) break;
+        chosen[best] = 1;
+        score[best] = 0.0f;
+    }
+    for (int i = 0; i < s_ddgi_fit_now.lamps; ++i) {
+        float *w = &s_ddgi_level_weight[i];
+        *w = chosen[i] ? fminf(1.0f, *w + 0.25f) : fmaxf(0.0f, *w - 0.25f);
+        if (*w <= 0.0f || scene->lamps >= GPU_DDGI_LAMPS) continue;
+        const DdgiLevelLamp *l = &s_ddgi_fit_now.lamp[i];
+        GpuDdgiLamp *lamp = &scene->lamp[scene->lamps++];
+        memset(lamp, 0, sizeof *lamp);
+        memcpy(lamp->position, l->position, sizeof lamp->position);
+        memcpy(lamp->colour, l->colour, sizeof lamp->colour);
+        memcpy(lamp->normal, l->normal, sizeof lamp->normal);
+        lamp->size = l->size;
+        lamp->power = l->power;
+        lamp->weight = *w;
+        lamp->key = (uint32_t)i;
+        lamp->previous = -1;
+    }
+    now->ambient = s_ddgi_fit_now.samples ? s_ddgi_fit_now.ambient : 0.03f;
+}
+
+/* The probes' rays and atlases for the frame's added lights, nothing once none has been near for a while. */
+static void ddgi_probe_update(const DdgiFrame *now) {
+    if (s_ddgi_probe_reset) {
+        if (s_interp_mutex) SDL_LockMutex(s_interp_mutex);
+        if (s_interp_draw_fence) gz_wait(0, s_interp_draw_fence);
+        GLfloat clear_colour[4];
+        glGetFloatv(GL_COLOR_CLEAR_VALUE, clear_colour);
+        glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
+        p_glBindFramebuffer(PSXGL_FRAMEBUFFER, s_ddgi_irr_fbo);
+        glClear(GL_COLOR_BUFFER_BIT);
+        p_glBindFramebuffer(PSXGL_FRAMEBUFFER, s_ddgi_dist_fbo);
+        glClear(GL_COLOR_BUFFER_BIT);
+        glClearColor(1.0f, 1.0f, 1.0f, 1.0f); /* a probe never traced stands in the open, its light none */
+        p_glBindFramebuffer(PSXGL_FRAMEBUFFER, s_ddgi_state_fbo);
+        glClear(GL_COLOR_BUFFER_BIT);
+        glClearColor(clear_colour[0], clear_colour[1], clear_colour[2], clear_colour[3]);
+        if (s_ddgi_probe_fence) p_glDeleteSync(s_ddgi_probe_fence);
+        s_ddgi_probe_fence = p_glFenceSync(PSXGL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+        glFlush();
+        if (s_interp_mutex) SDL_UnlockMutex(s_interp_mutex);
+        s_ddgi_slots_known = 0;
+        s_ddgi_probe_seconds = -1.0f;
+        s_ddgi_updates = 0;
+        s_ddgi_applies = 0;
+        s_ddgi_probe_reset = 0;
+    }
+    const uint64_t clock = SDL_GetPerformanceCounter();
+    float dt = s_ddgi_update_clock ? (float)((double)(clock - s_ddgi_update_clock) / (double)SDL_GetPerformanceFrequency())
+                                   : 1.0f / 30.0f;
+    s_ddgi_update_clock = clock;
+    dt = dt < 1.0f / 240.0f ? 1.0f / 240.0f : dt > 0.25f ? 0.25f : dt;
+    float lamps[GPU_DDGI_LAMPS * 3 * 4];
+    int lamp_count = 0;
+    for (int i = 0; i < now->scene.lamps && s_ddgi_lamps; ++i) {
+        const GpuDdgiLamp *l = &now->scene.lamp[i];
+        if (!l->dynamic) continue;
+        float *at = &lamps[lamp_count++ * 12];
+        memcpy(at, l->position, sizeof l->position);
+        at[3] = l->size;
+        memcpy(at + 4, l->colour, sizeof l->colour);
+        at[7] = l->power;
+        memcpy(at + 8, l->normal, sizeof l->normal);
+        at[11] = -l->weight;
+    }
+    if (lamp_count) s_ddgi_probe_seconds = 0.0f;
+    else if (s_ddgi_probe_seconds >= 0.0f) s_ddgi_probe_seconds += dt;
+    if (s_ddgi_probe_seconds > 8.0f * DDGI_RESPONSE) s_ddgi_probe_seconds = -1.0f; /* e^-8 of the last light is left */
+    if (s_ddgi_probe_seconds < 0.0f) return;
+
+    const int dims[3] = {DDGI_NX, DDGI_NY, DDGI_NZ};
+    for (int a = 0; a < 3; ++a) s_ddgi_origin[a] = (int)floorf(now->eye[a] / DDGI_SPACING) - dims[a] / 2;
+    memset(s_ddgi_fresh, 0, sizeof s_ddgi_fresh);
+    for (int sy = 0; sy < DDGI_NY; ++sy)
+        for (int sz = 0; sz < DDGI_NZ; ++sz)
+            for (int sx = 0; sx < DDGI_NX; ++sx) {
+                const int probe = sx + DDGI_NX * (sz + DDGI_NZ * sy), slot[3] = {sx, sy, sz};
+                int changed = !s_ddgi_slots_known;
+                for (int a = 0; a < 3; ++a) {
+                    const int cell = s_ddgi_origin[a] + ddgi_posmod(slot[a] - s_ddgi_origin[a], dims[a]);
+                    if (cell != s_ddgi_slot_cell[probe][a]) changed = 1;
+                    s_ddgi_slot_cell[probe][a] = cell;
+                }
+                if (changed) s_ddgi_pending[probe] = 1;
+                s_ddgi_fresh[probe] = s_ddgi_pending[probe] ? 255 : 0;
+                if ((probe & 1) == (int)((s_ddgi_updates + 1u) & 1u)) s_ddgi_pending[probe] = 0;
+            }
+    s_ddgi_slots_known = 1;
+    glBindTexture(GL_TEXTURE_2D, s_ddgi_fresh_tex);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 64, 64, GL_RED, GL_UNSIGNED_BYTE, s_ddgi_fresh);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
+
+    float rot[3][3];
+    ddgi_turn(rot, ++s_ddgi_updates * 2654435761u);
+    const int half = (int)(s_ddgi_updates & 1u);
+    const float keep = expf(-2.0f * dt / DDGI_RESPONSE); /* each half of the probes is traced every other update */
+    p_glBindVertexArray(s_present_vao);
+
+    /* The presenter samples the probes: these writes wait for its queued draws, and its next draws wait for s_ddgi_probe_fence. */
+    if (s_interp_mutex) SDL_LockMutex(s_interp_mutex);
+    if (s_interp_draw_fence) gz_wait(0, s_interp_draw_fence);
+
+    glDisable(GL_BLEND);
+    p_glUseProgram(s_ddgi_trace_prog);
+    p_glActiveTexture(PSXGL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, s_ddgi_nodes_tex[now->bvh]);
+    p_glActiveTexture(PSXGL_TEXTURE0 + 1);
+    glBindTexture(GL_TEXTURE_2D, s_ddgi_tris_tex[now->bvh]);
+    p_glActiveTexture(PSXGL_TEXTURE0 + 2);
+    glBindTexture(GL_TEXTURE_2D, s_raw_tex);
+    p_glActiveTexture(PSXGL_TEXTURE0 + 6);
+    glBindTexture(GL_TEXTURE_2D, now->level >= 0 ? s_ddgi_level_nodes_tex[now->level] : 0);
+    p_glActiveTexture(PSXGL_TEXTURE0 + 7);
+    glBindTexture(GL_TEXTURE_2D, now->level >= 0 ? s_ddgi_level_tris_tex[now->level] : 0);
+    p_glActiveTexture(PSXGL_TEXTURE0);
+    p_glUniform1i(s_ddgi_tu.nodes, 0);
+    p_glUniform1i(s_ddgi_tu.tris, 1);
+    p_glUniform1i(s_ddgi_tu.vram, 2);
+    p_glUniform1i(s_ddgi_tu.level_nodes, 6);
+    p_glUniform1i(s_ddgi_tu.level_tris, 7);
+    p_glUniform4f(s_ddgi_tu.level, now->level >= 0 ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
+    p_glUniform4f(s_ddgi_tu.origin, (float)s_ddgi_origin[0], (float)s_ddgi_origin[1], (float)s_ddgi_origin[2], DDGI_SPACING);
+    p_glUniform4f(s_ddgi_tu.rot0, rot[0][0], rot[1][0], rot[2][0], 0.0f);
+    p_glUniform4f(s_ddgi_tu.rot1, rot[0][1], rot[1][1], rot[2][1], 0.0f);
+    p_glUniform4f(s_ddgi_tu.rot2, rot[0][2], rot[1][2], rot[2][2], 0.0f);
+    p_glUniform4f(s_ddgi_tu.camera, now->eye[0], now->eye[1], now->eye[2], DDGI_FRONT);
+    p_glUniform4f(s_ddgi_tu.sky, 0.0f, 0.0f, 0.0f, DDGI_FARTHEST);
+    p_glUniform4f(s_ddgi_tu.view, 0.0f, 0.0f, 0.0f, (float)half);
+    p_glUniform4f(s_ddgi_tu.lamps, (float)lamp_count, s_ddgi_lamp_strength, 0.0f, 0.0f);
+    if (lamp_count) p_glUniform4fv(s_ddgi_tu.lamp, lamp_count * 3, lamps);
+    ddgi_draw(s_ddgi_rays_fbo, DDGI_RAYS, DDGI_PROBES / 2);
+    p_glUseProgram(s_ddgi_classify_prog);
+    p_glActiveTexture(PSXGL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, s_ddgi_rays_tex);
+    p_glUniform1i(s_ddgi_classify_rays, 0);
+    p_glUniform1f(s_ddgi_classify_half, (float)half);
+    glEnable(GL_BLEND);
+    p_glBlendEquationSeparate(DDGI_GL_FUNC_ADD, DDGI_GL_FUNC_ADD);
+    p_glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ZERO);
+    ddgi_draw(s_ddgi_state_fbo, 64, 64);
+
+    /* Irradiance and distances, blended by each fragment's alpha. */
+    p_glUseProgram(s_ddgi_update_prog);
+    p_glActiveTexture(PSXGL_TEXTURE0);
+    glBindTexture(GL_TEXTURE_2D, s_ddgi_rays_tex);
+    p_glActiveTexture(PSXGL_TEXTURE0 + 1);
+    glBindTexture(GL_TEXTURE_2D, s_ddgi_fresh_tex);
+    p_glUniform1i(s_ddgi_uu.rays, 0);
+    p_glUniform1i(s_ddgi_uu.fresh, 1);
+    p_glUniform1f(s_ddgi_uu.half, (float)half);
+    p_glUniform4f(s_ddgi_uu.rot0, rot[0][0], rot[1][0], rot[2][0], 0.0f);
+    p_glUniform4f(s_ddgi_uu.rot1, rot[0][1], rot[1][1], rot[2][1], 0.0f);
+    p_glUniform4f(s_ddgi_uu.rot2, rot[0][2], rot[1][2], rot[2][2], 0.0f);
+    p_glUniform4f(s_ddgi_uu.mode, (float)DDGI_IRR, 0.0f, keep, DDGI_FARTHEST);
+    ddgi_draw(s_ddgi_irr_fbo, DDGI_NX * DDGI_NZ * (DDGI_IRR + 2), DDGI_NY * (DDGI_IRR + 2));
+    p_glUniform4f(s_ddgi_uu.mode, (float)DDGI_DIST, 1.0f, keep, DDGI_FARTHEST);
+    ddgi_draw(s_ddgi_dist_fbo, DDGI_NX * DDGI_NZ * (DDGI_DIST + 2), DDGI_NY * (DDGI_DIST + 2));
+    if (s_ddgi_probe_fence) p_glDeleteSync(s_ddgi_probe_fence);
+    s_ddgi_probe_fence = p_glFenceSync(PSXGL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+    glFlush();
+    if (s_interp_mutex) SDL_UnlockMutex(s_interp_mutex);
+    s_ddgi_applies = s_ddgi_updates > 2;
+}
+
+/* What an update needs of one shown world draw, taken on the game's thread: at the present itself, or when the present is
+ * recorded for the render thread, which reads it up to two frames later. */
+typedef struct {
+    uint32_t pose;
+    int count, scene_ok;
+    GteCameraPose cam;
+    float turn;
+    const GpuDdgiTriangle *tris;
+    GpuDdgiTriangle *kept; /* a recorded shot's own copy */
+    GpuDdgiScene scene;
+} DdgiShot;
+#define DDGI_SHOTS 4
+static DdgiShot s_ddgi_shots[DDGI_SHOTS], s_ddgi_shot_live;
+static unsigned s_ddgi_shot_next;
+static uint32_t s_ddgi_shot_pose; /* the last world draw taken */
+
+static int ddgi_wanted(void) { return s_ddgi_light || s_ddgi_shadows || s_ddgi_lamps || ddgi_sun_active(); }
+
+/* 0 when the frame shows no world draw newer than the last one taken; copy keeps its triangles. cy picks the draw shown. */
+static int ddgi_shot_take(DdgiShot *shot, float cy, int copy) {
+    const GpuDdgiTriangle *tris;
+    int count;
+    GteCameraPose cam;
+    if (!gpu_ddgi_shown((int)cy, &tris, &count, &cam) || cam.sequence == s_ddgi_shot_pose) return 0;
+    if (count > DDGI_MAX_TRIS) count = DDGI_MAX_TRIS;
+    if (copy) {
+        if (!shot->kept) shot->kept = (GpuDdgiTriangle *)malloc(sizeof(GpuDdgiTriangle) * DDGI_MAX_TRIS);
+        if (!shot->kept) return 0;
+        if (count) memcpy(shot->kept, tris, sizeof(GpuDdgiTriangle) * (size_t)count);
+        tris = shot->kept;
+    }
+    s_ddgi_shot_pose = cam.sequence;
+    shot->pose = cam.sequence;
+    shot->count = count;
+    shot->cam = cam;
+    shot->tris = tris;
+    shot->turn = gpu_ddgi_turn(cam.sequence);
+    shot->scene_ok = gpu_ddgi_scene(cam.sequence, &shot->scene);
+    return 1;
+}
+
+/* Game thread, recording a present for the render thread: the shot rides in the command list just before it. */
+static void ddgi_record_shot(float cy) {
+    if (!ddgi_wanted() || s_ddgi_failed) return;
+    const int slot = (int)(s_ddgi_shot_next % DDGI_SHOTS);
+    if (!ddgi_shot_take(&s_ddgi_shots[slot], cy, 1)) return;
+    ++s_ddgi_shot_next;
+    const int32_t v[] = {slot};
+    rth_rec_call(RTH_DDGI_SHOT, v, 1);
+}
+
+/* At a present: the frame's BVH, the scene's casters and added lights, the level's fitted lamps, the probes. cy is the
+ * picture's shown centre row in native pixels. */
+static void ddgi_update(float cy) {
+    const DdgiShot *shot = NULL;
+    if (rth_replaying()) {
+        if (s_rthx_ddgi_shot >= 0 && s_rthx_ddgi_shot < DDGI_SHOTS) shot = &s_ddgi_shots[s_rthx_ddgi_shot];
+        s_rthx_ddgi_shot = -1;
+    }
     static int asked;
     if (!asked && s_ddgi_environment) {
         asked = 1;
-        const char *light = getenv("PSX_DDGI_LIGHT"), *strength = getenv("PSX_DDGI_STRENGTH"), *bounce = getenv("PSX_DDGI_BOUNCE");
-        if (getenv("PSX_DDGI_GLOW")) gl_renderer_set_ddgi_glow((float)atof(getenv("PSX_DDGI_GLOW")));
+        const char *light = getenv("PSX_DDGI_LIGHT"), *strength = getenv("PSX_DDGI_STRENGTH");
         if (strength) gl_renderer_set_ddgi_strength((float)atof(strength));
-        if (bounce) gl_renderer_set_ddgi_bounce((float)atof(bounce));
-        if (getenv("PSX_DDGI_VIEW")) s_ddgi_light_view = atoi(getenv("PSX_DDGI_VIEW")) != 0;
         if (light && light[0] == '1') gl_renderer_set_ddgi(1);
         if (getenv("PSX_DDGI_SHADOW_STRENGTH")) gl_renderer_set_ddgi_shadow_strength((float)atof(getenv("PSX_DDGI_SHADOW_STRENGTH")));
         if (getenv("PSX_DDGI_LAMP_STRENGTH")) gl_renderer_set_ddgi_lamp_strength((float)atof(getenv("PSX_DDGI_LAMP_STRENGTH")));
@@ -1007,11 +1294,11 @@ static void ddgi_update(GLuint frame, float w, float h, float cx, float cy) {
     }
     const int probes = s_ddgi_light, sun = ddgi_sun_active(), lamps = s_ddgi_shadows || s_ddgi_lamps || sun;
     if ((!probes && !lamps) || s_ddgi_failed || !s_raster_ok) return;
-    const GpuDdgiTriangle *tris;
-    int count;
-    GteCameraPose cam;
-    if (!gpu_ddgi_shown((int)cy, &tris, &count, &cam) || cam.sequence == s_ddgi_last_pose) return;
-    s_ddgi_last_pose = cam.sequence;
+    if (!rth_replaying() && ddgi_shot_take(&s_ddgi_shot_live, cy, 0)) shot = &s_ddgi_shot_live;
+    if (!shot) return;
+    const GpuDdgiTriangle *tris = shot->tris;
+    const int count = shot->count;
+    const GteCameraPose cam = shot->cam;
 
     GLint draw_fbo, read_fbo, viewport[4], program, vao, active, bound[8], blend_src[2], blend_dst[2], blend_eq[2];
     GLfloat blend_colour[4], clear_colour[4];
@@ -1075,157 +1362,47 @@ static void ddgi_update(GLuint frame, float w, float h, float cx, float cy) {
             now->rows[r][3] = (float)cam.translation[r];
         }
         /* The picture was drawn turned about the eye by the smooth turn's part of a step: the rows that read it are too. */
-        psx_ddgi_turn_rows(now->rows, gpu_ddgi_turn(cam.sequence));
+        psx_ddgi_turn_rows(now->rows, shot->turn);
         for (int a = 0; a < 3; ++a) now->offset[a] = (float)cam.offset[a];
         psx_ddgi_camera_back(now->rows, now->offset, now->back, now->eye);
         ddgi_build(tris, count, bvh, now->eye);
-        if (!lamps || !gpu_ddgi_scene(cam.sequence, &now->scene)) memset(&now->scene, 0, sizeof now->scene);
-        if (sun) ddgi_level_update();
-        now->level = sun ? s_ddgi_level_built : -1;
+        if (shot->scene_ok) now->scene = shot->scene;
+        else memset(&now->scene, 0, sizeof now->scene);
+        ddgi_level_update();
+        now->level = s_ddgi_level_built;
+        ddgi_level_lamps(now);
         memset(now->sun, 0, sizeof now->sun);
         memset(now->sun_colour, 0, sizeof now->sun_colour);
-        if (sun) {
+        if (sun && s_ddgi_fit_now.samples) {
             const DdgiSun *s = &s_ddgi_suns[s_ddgi_mission];
             const float az = s->azimuth * 0.017453293f, el = s->elevation * 0.017453293f;
             /* World y grows downward. */
             now->sun[0] = cosf(el) * sinf(az);
             now->sun[1] = -sinf(el);
             now->sun[2] = cosf(el) * cosf(az);
-            now->sun[3] = s->strength;
+            now->sun[3] = s_ddgi_fit_now.sun;
             for (int k = 0; k < 3; ++k) now->sun_colour[k] = powf(s->colour[k], 2.2f);
-            now->sun_colour[3] = s->shade;
         }
         s_ddgi_ctx[0].frame = *now;
-        const float *camera = now->eye;
-        if (probes) {
-        const int dims[3] = {DDGI_NX, DDGI_NY, DDGI_NZ};
-        for (int a = 0; a < 3; ++a) s_ddgi_origin[a] = (int)floorf(camera[a] / DDGI_SPACING) - dims[a] / 2;
-        memset(s_ddgi_fresh, 0, sizeof s_ddgi_fresh);
-        for (int sy = 0; sy < DDGI_NY; ++sy)
-            for (int sz = 0; sz < DDGI_NZ; ++sz)
-                for (int sx = 0; sx < DDGI_NX; ++sx) {
-                    const int probe = sx + DDGI_NX * (sz + DDGI_NZ * sy), slot[3] = {sx, sy, sz};
-                    int changed = !s_ddgi_slots_known;
-                    for (int a = 0; a < 3; ++a) {
-                        const int cell = s_ddgi_origin[a] + ddgi_posmod(slot[a] - s_ddgi_origin[a], dims[a]);
-                        if (cell != s_ddgi_slot_cell[probe][a]) changed = 1;
-                        s_ddgi_slot_cell[probe][a] = cell;
-                    }
-                    if (changed) s_ddgi_pending[probe] = 1;
-                    s_ddgi_fresh[probe] = s_ddgi_pending[probe] ? 255 : 0;
-                    if ((probe & 1) == (int)((s_ddgi_updates + 1u) & 1u)) s_ddgi_pending[probe] = 0;
-                }
-        s_ddgi_slots_known = 1;
-        glBindTexture(GL_TEXTURE_2D, s_ddgi_fresh_tex);
-        glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
-        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 64, 64, GL_RED, GL_UNSIGNED_BYTE, s_ddgi_fresh);
-        glPixelStorei(GL_UNPACK_ALIGNMENT, 4);
-
-        float rot[3][3];
-        ddgi_turn(rot, ++s_ddgi_updates * 2654435761u);
-        const int half = (int)(s_ddgi_updates & 1u);
-        p_glBindVertexArray(s_present_vao);
-
-        /* The presenter samples the probes: these writes wait for its queued draws, and its next draws wait for s_ddgi_probe_fence. */
-        if (s_interp_mutex) SDL_LockMutex(s_interp_mutex);
-        if (s_interp_draw_fence) gz_wait(0, s_interp_draw_fence);
-
-        /* Rays. */
-        glDisable(GL_BLEND);
-        p_glUseProgram(s_ddgi_trace_prog);
-        p_glActiveTexture(PSXGL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, s_ddgi_nodes_tex[bvh]);
-        p_glActiveTexture(PSXGL_TEXTURE0 + 1);
-        glBindTexture(GL_TEXTURE_2D, s_ddgi_tris_tex[bvh]);
-        p_glActiveTexture(PSXGL_TEXTURE0 + 2);
-        glBindTexture(GL_TEXTURE_2D, s_raw_tex);
-        p_glActiveTexture(PSXGL_TEXTURE0 + 3);
-        glBindTexture(GL_TEXTURE_2D, s_ddgi_irr_tex);
-        p_glActiveTexture(PSXGL_TEXTURE0 + 4);
-        glBindTexture(GL_TEXTURE_2D, frame);
-        p_glUniform1i(s_ddgi_tu.frame, 4);
-        p_glActiveTexture(PSXGL_TEXTURE0 + 5);
-        glBindTexture(GL_TEXTURE_2D, s_ddgi_state_tex);
-        p_glUniform1i(s_ddgi_tu.state, 5);
-        p_glUniform4f(s_ddgi_tu.frame_at, w, h, cx, cy);
-        p_glUniform1i(s_ddgi_tu.nodes, 0);
-        p_glUniform1i(s_ddgi_tu.tris, 1);
-        p_glUniform1i(s_ddgi_tu.vram, 2);
-        p_glUniform1i(s_ddgi_tu.irr, 3);
-        p_glUniform4f(s_ddgi_tu.origin, (float)s_ddgi_origin[0], (float)s_ddgi_origin[1], (float)s_ddgi_origin[2], DDGI_SPACING);
-        p_glUniform4f(s_ddgi_tu.rot0, rot[0][0], rot[1][0], rot[2][0], 0.0f);
-        p_glUniform4f(s_ddgi_tu.rot1, rot[0][1], rot[1][1], rot[2][1], 0.0f);
-        p_glUniform4f(s_ddgi_tu.rot2, rot[0][2], rot[1][2], rot[2][2], 0.0f);
-        p_glUniform4f(s_ddgi_tu.camera, camera[0], camera[1], camera[2], s_ddgi_updates > 8 ? s_ddgi_bounce : 0.0f);
-        p_glUniform4f(s_ddgi_tu.sky, s_ddgi_glow, 0.0f, 0.0f, DDGI_FARTHEST);
-        p_glActiveTexture(PSXGL_TEXTURE0 + 6);
-        glBindTexture(GL_TEXTURE_2D, now->level >= 0 ? s_ddgi_level_nodes_tex[now->level] : 0);
-        p_glActiveTexture(PSXGL_TEXTURE0 + 7);
-        glBindTexture(GL_TEXTURE_2D, now->level >= 0 ? s_ddgi_level_tris_tex[now->level] : 0);
-        p_glActiveTexture(PSXGL_TEXTURE0);
-        p_glUniform1i(s_ddgi_tu.level_nodes, 6);
-        p_glUniform1i(s_ddgi_tu.level_tris, 7);
-        p_glUniform4f(s_ddgi_tu.level, now->level >= 0 ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
-        p_glUniform4f(s_ddgi_tu.sun, now->sun[0], now->sun[1], now->sun[2], now->sun[3]);
-        p_glUniform4f(s_ddgi_tu.sun_colour, now->sun_colour[0], now->sun_colour[1], now->sun_colour[2], now->sun_colour[3]);
-        p_glUniform4f(s_ddgi_tu.row0, now->rows[0][0], now->rows[0][1], now->rows[0][2], now->rows[0][3]);
-        p_glUniform4f(s_ddgi_tu.row1, now->rows[1][0], now->rows[1][1], now->rows[1][2], now->rows[1][3]);
-        p_glUniform4f(s_ddgi_tu.row2, now->rows[2][0], now->rows[2][1], now->rows[2][2], now->rows[2][3]);
-        p_glUniform4f(s_ddgi_tu.offset, now->offset[0], now->offset[1], now->offset[2], 0.0f);
-        p_glUniform4f(s_ddgi_tu.view, (float)cam.focal, (g_wide_w > 0 ? (float)g_wide_w : 320.0f) * 0.5f + 16.0f, 136.0f,
-                      (float)half);
-        ddgi_draw(s_ddgi_rays_fbo, DDGI_RAYS, DDGI_PROBES / 2);
-        p_glUseProgram(s_ddgi_classify_prog);
-        p_glActiveTexture(PSXGL_TEXTURE0 + 5);
-        glBindTexture(GL_TEXTURE_2D, 0);
-        p_glActiveTexture(PSXGL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, s_ddgi_rays_tex);
-        p_glUniform1i(s_ddgi_classify_rays, 0);
-        p_glUniform1f(s_ddgi_classify_half, (float)half);
-        glEnable(GL_BLEND);
-        p_glBlendEquationSeparate(DDGI_GL_FUNC_ADD, DDGI_GL_FUNC_ADD);
-        p_glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ZERO);
-        ddgi_draw(s_ddgi_state_fbo, 64, 64);
-
-        /* Irradiance and distances, blended by each fragment's alpha. */
-        glEnable(GL_BLEND);
-        p_glBlendEquationSeparate(DDGI_GL_FUNC_ADD, DDGI_GL_FUNC_ADD);
-        p_glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ZERO);
-        p_glUseProgram(s_ddgi_update_prog);
-        p_glActiveTexture(PSXGL_TEXTURE0);
-        glBindTexture(GL_TEXTURE_2D, s_ddgi_rays_tex);
-        p_glActiveTexture(PSXGL_TEXTURE0 + 1);
-        glBindTexture(GL_TEXTURE_2D, s_ddgi_fresh_tex);
-        p_glUniform1i(s_ddgi_uu.rays, 0);
-        p_glUniform1i(s_ddgi_uu.fresh, 1);
-        p_glUniform1f(s_ddgi_uu.half, (float)half);
-        p_glUniform4f(s_ddgi_uu.rot0, rot[0][0], rot[1][0], rot[2][0], 0.0f);
-        p_glUniform4f(s_ddgi_uu.rot1, rot[0][1], rot[1][1], rot[2][1], 0.0f);
-        p_glUniform4f(s_ddgi_uu.rot2, rot[0][2], rot[1][2], rot[2][2], 0.0f);
-        p_glUniform4f(s_ddgi_uu.mode, (float)DDGI_IRR, 0.0f, 0.96f, DDGI_FARTHEST);
-        ddgi_draw(s_ddgi_irr_fbo, DDGI_NX * DDGI_NZ * (DDGI_IRR + 2), DDGI_NY * (DDGI_IRR + 2));
-        p_glUniform4f(s_ddgi_uu.mode, (float)DDGI_DIST, 1.0f, 0.96f, DDGI_FARTHEST);
-        ddgi_draw(s_ddgi_dist_fbo, DDGI_NX * DDGI_NZ * (DDGI_DIST + 2), DDGI_NY * (DDGI_DIST + 2));
-        if (s_ddgi_probe_fence) p_glDeleteSync(s_ddgi_probe_fence);
-        s_ddgi_probe_fence = p_glFenceSync(PSXGL_SYNC_GPU_COMMANDS_COMPLETE, 0);
-        glFlush();
-        if (s_interp_mutex) SDL_UnlockMutex(s_interp_mutex);
-
-        s_ddgi_applies = s_ddgi_updates > 2;
-        }
+        if (probes) ddgi_probe_update(now);
         if (timing) {
             p_glEndQuery(GL_TIME_ELAPSED);
             s_ddgi_query_open = 1;
         }
-        if (s_ddgi_updates % 60u == 30u && getenv("PSX_DDGI")) {
-            float average[4] = {0.0f, 0.0f, 0.0f, 0.0f};
-            if (s_ddgi_ctx[0].screen.average_tex) {
-                glBindTexture(GL_TEXTURE_2D, s_ddgi_ctx[0].screen.average_tex);
-                glGetTexImage(GL_TEXTURE_2D, 0, GL_RGBA, GL_FLOAT, average);
+        static unsigned logged;
+        if (timing && ++logged % 60u == 30u) {
+            int toward = 0, faces = 0;
+            for (int i = 0; i < count; ++i) {
+                float n[3];
+                if (psx_ddgi_face_normal(&tris[i], 1.0f, n) < 1e-3f) continue;
+                const float to[3] = {now->eye[0] - tris[i].world[0][0], now->eye[1] - tris[i].world[0][1], now->eye[2] - tris[i].world[0][2]};
+                toward += psx_ddgi_dot3(n, to) > 0.0f;
+                ++faces;
             }
-            fprintf(stderr, "ddgi light: update %u triangles %d average %.3f %.3f %.3f weight %.3f fade %.0f..%.0f camera %.0f %.0f %.0f\n",
-                    s_ddgi_updates, count, average[0], average[1], average[2], average[3], s_ssao_fade_from, s_ssao_fade_to, camera[0],
-                    camera[1], camera[2]);
+            fprintf(stderr, "ddgi light: update %u, %d of %d drawn faces wind toward the eye, fit lamps %d ambient %.4f sun %.4f, "
+                            "%d lamps, probes %s, camera %.0f %.0f %.0f\n",
+                    s_ddgi_updates, toward, faces, s_ddgi_fit_now.lamps, s_ddgi_fit_now.ambient, s_ddgi_fit_now.sun, now->scene.lamps,
+                    ddgi_probes_live() ? "live" : "dark", now->eye[0], now->eye[1], now->eye[2]);
         }
         glFlush();
     }
@@ -1258,7 +1435,7 @@ static void ddgi_apply_set(const DdgiApplyUniforms *u, const DdgiFrame *f, float
     p_glUniform1i(u->irr, 3);
     p_glUniform1i(u->dist, 4);
     p_glUniform1i(u->state, 6);
-    p_glUniform4f(u->ddgi, s_ddgi_strength, s_ddgi_light_view ? 1.0f : 0.0f, DDGI_SPACING, DDGI_FARTHEST);
+    p_glUniform4f(u->ddgi, ddgi_probes_live() ? s_ddgi_strength : 0.0f, s_ddgi_light_view ? 1.0f : 0.0f, DDGI_SPACING, DDGI_FARTHEST);
     p_glUniform4f(u->proj, focal_x, focal_y, centre_x, centre_y);
     p_glUniform4f(u->texel, 1.0f / (float)w, 1.0f / (float)h, 0.0f, (float)scale);
     p_glUniform4f(u->back0, f->back[0][0], f->back[0][1], f->back[0][2], f->rows[0][3]);
@@ -1287,19 +1464,15 @@ static DdgiContext *ddgi_context(int thread) {
     DdgiContext *ctx = &s_ddgi_ctx[thread ? 1 : 0];
     if (ctx->failed) return NULL;
     if (ctx->built) return ctx;
-    ctx->sample_prog = build_program(DDGI_VS, DDGI_SAMPLE_FS);
-    ctx->average_prog = build_program(DDGI_VS, DDGI_AVERAGE_FS);
     ctx->mix_prog = build_program(PRESENT_VS, DDGI_MIX_FS);
     ctx->lamp_prog = build_program(DDGI_VS, DDGI_LAMP_FS);
-    if (!ctx->sample_prog || !ctx->average_prog || !ctx->mix_prog || !ctx->lamp_prog) {
+    if (!ctx->mix_prog || !ctx->lamp_prog) {
         fprintf(stdout, "psxrecomp: GL probe lighting programs could not be made in a context\n");
         ctx->failed = 1;
         return NULL;
     }
-    ctx->su = ddgi_apply_locations(ctx->sample_prog);
     ctx->mu = ddgi_apply_locations(ctx->mix_prog);
     ctx->lu = ddgi_apply_locations(ctx->lamp_prog);
-    ctx->average_samples = ddgi_uniform(ctx->average_prog, "u_samples");
     ctx->mix_lamps = ddgi_uniform(ctx->mix_prog, "u_lamps");
     ctx->mix_lit = ddgi_uniform(ctx->mix_prog, "u_lit");
     ctx->mix_fog = ddgi_uniform(ctx->mix_prog, "u_fog");
@@ -1314,71 +1487,13 @@ static DdgiContext *ddgi_context(int thread) {
     return ctx;
 }
 
-/* Measures the probes' light over the picture about to be mixed, in the context that mixes it: its average is what the mix
- * divides by, so the picture keeps its brightness on the whole. Runs before the mix's target is bound. */
-static void ddgi_screen_measure(int thread, GLuint color, GLuint depth, float focal_x, float focal_y, float centre_x,
-                                float centre_y, int w, int h, int scale, float u0, float v0, float u1, float v1) {
-    if (!s_ddgi_light || !s_ddgi_ready || !s_ddgi_applies) return;
-    DdgiContext *ctx = ddgi_context(thread);
-    if (!ctx || !ctx->frame.valid) return;
-    DdgiScreen *screen = &ctx->screen;
-    GLfloat clear_colour[4];
-    glGetFloatv(GL_COLOR_CLEAR_VALUE, clear_colour);
-    if (!screen->samples_fbo) {
-        const int made =
-            ddgi_target(&screen->samples_tex, &screen->samples_fbo, DDGI_GL_RGBA16F, DDGI_SAMPLES_X, DDGI_SAMPLES_Y, GL_RGBA, 0) &&
-            ddgi_target(&screen->average_tex, &screen->average_fbo, DDGI_GL_RGBA16F, 1, 1, GL_RGBA, 0);
-        glClearColor(clear_colour[0], clear_colour[1], clear_colour[2], clear_colour[3]);
-        if (!made) {
-            fprintf(stdout, "psxrecomp: GL probe lighting has no measuring targets, switched off\n");
-            s_ddgi_failed = 1;
-            gl_renderer_set_ddgi(0);
-            return;
-        }
-    }
-    if (!screen->frames) {
-        p_glBindFramebuffer(PSXGL_FRAMEBUFFER, screen->average_fbo);
-        glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
-        glClear(GL_COLOR_BUFFER_BIT);
-        glClearColor(clear_colour[0], clear_colour[1], clear_colour[2], clear_colour[3]);
-    }
-    GLint blend_src[2], blend_dst[2], blend_eq[2];
-    GLfloat blend_colour[4];
-    glGetIntegerv(DDGI_GL_BLEND_EQUATION_RGB, &blend_eq[0]);
-    glGetIntegerv(DDGI_GL_BLEND_EQUATION_ALPHA, &blend_eq[1]);
-    glGetIntegerv(DDGI_GL_BLEND_SRC_RGB, &blend_src[0]);
-    glGetIntegerv(DDGI_GL_BLEND_SRC_ALPHA, &blend_src[1]);
-    glGetIntegerv(DDGI_GL_BLEND_DST_RGB, &blend_dst[0]);
-    glGetIntegerv(DDGI_GL_BLEND_DST_ALPHA, &blend_dst[1]);
-    glGetFloatv(DDGI_GL_BLEND_COLOR, blend_colour);
-    glDisable(GL_BLEND);
-    ddgi_bind_probes(color, depth);
-    p_glUseProgram(ctx->sample_prog);
-    ddgi_apply_set(&ctx->su, &ctx->frame, focal_x, focal_y, centre_x, centre_y, w, h, scale);
-    p_glUniform4f(ctx->su.rect, u0, v0, u1, v1);
-    ddgi_draw(screen->samples_fbo, DDGI_SAMPLES_X, DDGI_SAMPLES_Y);
-    glEnable(GL_BLEND);
-    p_glBlendEquationSeparate(DDGI_GL_FUNC_ADD, DDGI_GL_FUNC_ADD);
-    p_glBlendFuncSeparate(DDGI_GL_CONSTANT_ALPHA, DDGI_GL_ONE_MINUS_CONSTANT_ALPHA, DDGI_GL_CONSTANT_ALPHA,
-                          DDGI_GL_ONE_MINUS_CONSTANT_ALPHA);
-    p_glBlendColor(0.0f, 0.0f, 0.0f, 0.08f);
-    p_glUseProgram(ctx->average_prog);
-    glBindTexture(GL_TEXTURE_2D, screen->samples_tex);
-    p_glUniform1i(ctx->average_samples, 0);
-    ddgi_draw(screen->average_fbo, 1, 1);
-    glDisable(GL_BLEND);
-    p_glBlendEquationSeparate((GLenum)blend_eq[0], (GLenum)blend_eq[1]);
-    p_glBlendFuncSeparate((GLenum)blend_src[0], (GLenum)blend_dst[0], (GLenum)blend_src[1], (GLenum)blend_dst[1]);
-    p_glBlendColor(blend_colour[0], blend_colour[1], blend_colour[2], blend_colour[3]);
-    ++screen->frames;
-}
-
 /* The casters' shadows and the dynamic lights' light at half the picture's size, before the mix's target is bound. */
 static void ddgi_lamp_pass(int thread, GLuint color, GLuint depth, float focal_x, float focal_y, float centre_x, float centre_y,
                            int w, int h, int scale, float u0, float v0, float u1, float v1, int shown_w, int shown_h) {
     DdgiContext *ctx = s_ddgi_ready ? ddgi_context(thread) : NULL;
     if (ctx) ctx->lamp_ready = 0;
-    if (!ctx || !ctx->frame.valid || !(s_ddgi_shadows || s_ddgi_lamps || ddgi_sun_active())) return;
+    if (!ctx || !ctx->frame.valid || !(s_ddgi_shadows || s_ddgi_lamps || ddgi_sun_active() || ddgi_probes_live())) return;
+    if (thread && s_ddgi_probe_fence) gz_wait(1, s_ddgi_probe_fence); /* the probes it samples were written in the other context */
     const DdgiFrame *f = &ctx->frame;
     int lw = (int)((u1 - u0) * (float)w * 0.5f + 0.5f), lh = (int)((v1 - v0) * (float)h * 0.5f + 0.5f);
     static int full = -1;
@@ -1476,8 +1591,7 @@ static void ddgi_lamp_pass(int thread, GLuint color, GLuint depth, float focal_x
     p_glUniform4f(ctx->la.rect, u0, v0, u1, v1);
     p_glUniform4f(ctx->la.size, (float)lw, (float)lh, 0.0f, 0.0f);
     p_glUniform4f(ctx->la.eye, f->eye[0], f->eye[1], f->eye[2], 0.0f);
-    /* The light a pixel has from elsewhere, against which a lamp's share is taken: tuned by eye, about a lamp 300 units off. */
-    p_glUniform4f(ctx->la.count, (float)caster_count, (float)lamp_count, 0.0f, 0.03f);
+    p_glUniform4f(ctx->la.count, (float)caster_count, (float)lamp_count, 0.0f, f->ambient * DDGI_SHADOW_AMBIENT);
     p_glUniform4f(ctx->la.shadow, shadows ? 0.85f * s_ddgi_shadow_strength : 0.0f, shadows ? 0.45f * s_ddgi_contact : 0.0f, 0.8f,
                   lit ? s_ddgi_lamp_strength : 0.0f);
     if (caster_count) p_glUniform4fv(ctx->la.caster, caster_count * 2, casters);
@@ -1523,22 +1637,16 @@ static int ddgi_mix_begin(int thread, GLuint color, GLuint depth, float focal_x,
                           float grown) {
     DdgiContext *ctx = s_ddgi_ready ? ddgi_context(thread) : NULL;
     if (!ctx || !ctx->frame.valid) return 0;
-    const int probes = s_ddgi_light && s_ddgi_applies && ctx->screen.frames,
-              lamps = ctx->lamp_ready && (s_ddgi_shadows || s_ddgi_lamps || ddgi_sun_active());
-    if (!probes && !lamps) return 0;
-    if (thread && s_ddgi_probe_fence) gz_wait(1, s_ddgi_probe_fence);
+    if (!ctx->lamp_ready) return 0;
     ddgi_bind_probes(color, depth);
-    p_glActiveTexture(PSXGL_TEXTURE0 + 5);
-    glBindTexture(GL_TEXTURE_2D, ctx->screen.average_tex);
     p_glActiveTexture(PSXGL_TEXTURE0 + 7);
-    glBindTexture(GL_TEXTURE_2D, lamps ? ctx->lamp_tex : 0);
+    glBindTexture(GL_TEXTURE_2D, ctx->lamp_tex);
     p_glActiveTexture(PSXGL_TEXTURE0);
     p_glUseProgram(ctx->mix_prog);
     ddgi_apply_set(&ctx->mu, &ctx->frame, focal_x, focal_y, centre_x, centre_y, w, h, scale);
     p_glUniform1i(ctx->mu.shade, 1);
-    p_glUniform1i(ctx->mu.exposure, 5);
     p_glUniform1i(ctx->mix_lamps, 7);
-    p_glUniform4f(ctx->mix_lit, lamps ? 1.0f : 0.0f, lamps && s_ddgi_lamp_view ? 1.0f : 0.0f, probes ? 1.0f : 0.0f, 0.0f);
+    p_glUniform4f(ctx->mix_lit, 1.0f, s_ddgi_lamp_view ? 1.0f : 0.0f, 0.0f, 0.0f);
     const float fog_length = s_fade_step * (float)s_fade_rows;
     p_glUniform4f(ctx->mix_fog, s_fade_start, fog_length, s_fade_side, s_fade_rows > 1 && fog_length > 0.0f ? 1.0f : 0.0f);
     p_glUniform4f(ctx->mu.uv_rect, u0, v0, u1, v1);
@@ -1578,13 +1686,12 @@ static void ddgi_present_between(const DdgiFrame *before, const DdgiFrame *after
 static void ddgi_capture_set(void) {
     gpu_ddgi_set_capture(s_ddgi_light || s_ddgi_shadows || s_ddgi_lamps || s_ddgi_sun);
     gpu_ddgi_set_shadowing(s_ddgi_shadows);
-    s_ddgi_last_pose = 0;
+    s_ddgi_shot_pose = 0;
 }
 
 void gl_renderer_set_ddgi(int enabled) {
     GL_RT_SYNC(__func__);
     s_ddgi_light = enabled != 0 && !s_ddgi_failed;
-    s_ddgi_ctx[0].screen.frames = s_ddgi_ctx[1].screen.frames = 0;
     ddgi_capture_set();
     if (!s_ddgi_light) {
         s_ddgi_applies = 0;
@@ -1598,10 +1705,6 @@ void gl_renderer_set_ddgi_strength(float strength) { GL_RT_SYNC(__func__); s_ddg
 float gl_renderer_ddgi_strength(void) { return s_ddgi_strength; }
 void gl_renderer_set_ddgi_view(int enabled) { GL_RT_SYNC(__func__); s_ddgi_light_view = enabled != 0; }
 int gl_renderer_ddgi_view(void) { return s_ddgi_light_view; }
-void gl_renderer_set_ddgi_bounce(float bounce) { GL_RT_SYNC(__func__); s_ddgi_bounce = bounce < 0.0f ? 0.0f : bounce > 1.0f ? 1.0f : bounce; }
-float gl_renderer_ddgi_bounce(void) { return s_ddgi_bounce; }
-void gl_renderer_set_ddgi_glow(float glow) { GL_RT_SYNC(__func__); s_ddgi_glow = glow < 0.0f ? 0.0f : glow > 4.0f ? 4.0f : glow; }
-float gl_renderer_ddgi_glow(void) { return s_ddgi_glow; }
 void gl_renderer_set_ddgi_shadows(int enabled) {
     GL_RT_SYNC(__func__);
     s_ddgi_shadows = enabled != 0 && !s_ddgi_failed;
@@ -1638,13 +1741,22 @@ void gl_renderer_set_ddgi_sun(int enabled) {
 }
 int gl_renderer_ddgi_sun(void) { return s_ddgi_sun; }
 void gl_renderer_set_ddgi_mission(int mission) {
+    /* The game's thread: its level hand-overs and scene caches start again before the next hand-over, not when the render
+     * thread replays this call. */
+    if (mission != s_ddgi_mission_game) {
+        s_ddgi_mission_game = mission;
+        ddgi_level_clear();
+        gpu_ddgi_forget_level();
+    }
     const int32_t v[] = {mission};
     if (rth_rec_call(RTH_DDGI_MISSION, v, 1)) return;
     if (mission == s_ddgi_mission) return;
     s_ddgi_mission = mission;
     if (getenv("PSX_DDGI")) fprintf(stdout, "psxrecomp: DDGI mission %d\n", mission);
-    ddgi_level_clear();
-    gpu_ddgi_forget_level();
+    s_ddgi_level_built = -1;
+    memset(&s_ddgi_fit_now, 0, sizeof s_ddgi_fit_now);
+    memset(s_ddgi_level_weight, 0, sizeof s_ddgi_level_weight);
+    s_ddgi_probe_reset = 1;
     ssao_mode();
 }
 int gl_renderer_ddgi_sun_here(void) { return s_ddgi_mission >= 0 && s_ddgi_mission < 16 && s_ddgi_suns[s_ddgi_mission].strength > 0.0f; }
@@ -1665,5 +1777,5 @@ void gl_renderer_ddgi_sun_set_mission(int mission, const float sun[4]) {
     s->elevation = sun[1] < 1.0f ? 1.0f : sun[1] > 89.0f ? 89.0f : sun[1];
     s->strength = sun[2] < 0.01f ? 0.01f : sun[2] > 4.0f ? 4.0f : sun[2];
     s->shade = sun[3] < 0.0f ? 0.0f : sun[3] > 0.9f ? 0.9f : sun[3];
-    ssao_mode(); /* a shade of 0 takes the sun out of the path, a shade above 0 puts it back */
+    ssao_mode();
 }

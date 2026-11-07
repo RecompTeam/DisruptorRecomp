@@ -240,7 +240,7 @@ void mark_gap_filling(bool value);
 void mark_world_depth(bool value);
 void mark_facing_sprites(bool value);
 void mark_lighting();
-void mark_sun(const int amounts[4]);
+void mark_sun(const int amounts[2]);
 void apply_diagnostic_view(int view);
 void mark_diagnostic_view(int value);
 void apply_smooth_turn(bool enabled);

@@ -190,8 +190,6 @@ void mark_lighting() {
     const auto percent = [](float amount) { return static_cast<int>(std::lround(amount * 100.0f)); };
     mark("disruptor.probe_lighting", gl_renderer_ddgi() != 0);
     mark("disruptor.probe_strength", percent(gl_renderer_ddgi_strength()));
-    mark("disruptor.probe_bounce", percent(gl_renderer_ddgi_bounce()));
-    mark("disruptor.probe_glow", percent(gl_renderer_ddgi_glow()));
     mark("disruptor.dynamic_shadows", gl_renderer_ddgi_shadows() != 0);
     mark("disruptor.shadow_strength", percent(gl_renderer_ddgi_shadow_strength()));
     mark("disruptor.shadow_underneath", percent(gl_renderer_ddgi_contact()));
@@ -200,11 +198,9 @@ void mark_lighting() {
     mark("disruptor.sun_lighting", gl_renderer_ddgi_sun() != 0);
 }
 
-void mark_sun(const int amounts[4]) {
+void mark_sun(const int amounts[2]) {
     mark("disruptor.sun_direction", amounts[0]);
     mark("disruptor.sun_height", amounts[1]);
-    mark("disruptor.sun_strength", amounts[2]);
-    mark("disruptor.sun_shade", amounts[3]);
 }
 
 namespace {
@@ -220,8 +216,6 @@ void apply_lighting(const PSXRecompV4::UserSettings &settings) {
     const auto value = [&](const char *key) { return kDeveloperBuild ? stored(settings, *find_option(key)) : 0; };
     gl_renderer_set_ddgi_environment(kDeveloperBuild);
     gl_renderer_set_ddgi_strength(value("disruptor.probe_strength") / 100.0f);
-    gl_renderer_set_ddgi_bounce(value("disruptor.probe_bounce") / 100.0f);
-    gl_renderer_set_ddgi_glow(value("disruptor.probe_glow") / 100.0f);
     gl_renderer_set_ddgi_shadow_strength(value("disruptor.shadow_strength") / 100.0f);
     gl_renderer_set_ddgi_contact(value("disruptor.shadow_underneath") / 100.0f);
     gl_renderer_set_ddgi_lamp_strength(value("disruptor.shot_light_strength") / 100.0f);
@@ -237,11 +231,11 @@ void apply_sticks(const PSXRecompV4::UserSettings &settings) {
                              value("disruptor.look_deadzone"), value("disruptor.invert_look") != 0});
 }
 
-// Only the second mission has a sun.
+// Only the second mission has a sun. Its strength comes from the fit to the level's light, the renderer's 1 only marks one.
 void apply_sun(const PSXRecompV4::UserSettings &settings) {
     const auto value = [&](const char *key) { return stored(settings, *find_option(key)); };
-    const float sun[4] = {static_cast<float>(value("disruptor.sun_direction")), static_cast<float>(value("disruptor.sun_height")),
-                          value("disruptor.sun_strength") / 100.0f, value("disruptor.sun_shade") / 100.0f};
+    const float sun[4] = {static_cast<float>(value("disruptor.sun_direction")), static_cast<float>(value("disruptor.sun_height")), 1.0f,
+                          0.5f};
     gl_renderer_ddgi_sun_set_mission(2, sun);
 }
 
@@ -563,13 +557,12 @@ void apply_pending_preferences() {
         gl_renderer_set_world_depth(pending.depth_sorted_world ? 1 : 0);
     if (changed("disruptor.facing_sprites"))
         gpu_facing_sprites_set(pending.facing_sprites ? 1 : 0);
-    if (changed("disruptor.probe_lighting") || changed("disruptor.probe_strength") || changed("disruptor.probe_bounce") ||
-        changed("disruptor.probe_glow") || changed("disruptor.dynamic_shadows") || changed("disruptor.shadow_strength") ||
+    if (changed("disruptor.probe_lighting") || changed("disruptor.probe_strength") || changed("disruptor.dynamic_shadows") ||
+        changed("disruptor.shadow_strength") ||
         changed("disruptor.shadow_underneath") || changed("disruptor.shot_lights") ||
         changed("disruptor.shot_light_strength") || changed("disruptor.sun_lighting"))
         apply_lighting(pending);
-    if (changed("disruptor.sun_direction") || changed("disruptor.sun_height") || changed("disruptor.sun_strength") ||
-        changed("disruptor.sun_shade"))
+    if (changed("disruptor.sun_direction") || changed("disruptor.sun_height"))
         apply_sun(pending);
     if (g_preferences.diagnostic_view_changed)
         apply_diagnostic_view(pending.diagnostic_view);

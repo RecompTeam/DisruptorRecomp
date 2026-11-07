@@ -340,20 +340,6 @@ void read_game_user_settings(const toml::value& doc, UserSettings& s) {
                 s.has_probe_strength = true;
             }
         });
-        if (d.contains("probe_bounce")) try_get([&]{
-            const int amount = toml::find<int>(d, "probe_bounce");
-            if (amount >= 0 && amount <= 100) {
-                s.probe_bounce = amount;
-                s.has_probe_bounce = true;
-            }
-        });
-        if (d.contains("probe_glow")) try_get([&]{
-            const int amount = toml::find<int>(d, "probe_glow");
-            if (amount >= 0 && amount <= 400) {
-                s.probe_glow = amount;
-                s.has_probe_glow = true;
-            }
-        });
         if (d.contains("dynamic_shadows")) try_get([&]{
             s.dynamic_shadows = toml::find<bool>(d, "dynamic_shadows");
             s.has_dynamic_shadows = true;
@@ -399,20 +385,6 @@ void read_game_user_settings(const toml::value& doc, UserSettings& s) {
             if (amount >= 1 && amount <= 89) {
                 s.sun_height = amount;
                 s.has_sun_height = true;
-            }
-        });
-        if (d.contains("sun_strength")) try_get([&]{
-            const int amount = toml::find<int>(d, "sun_strength");
-            if (amount >= 1 && amount <= 400) {
-                s.sun_strength = amount;
-                s.has_sun_strength = true;
-            }
-        });
-        if (d.contains("sun_shade")) try_get([&]{
-            const int amount = toml::find<int>(d, "sun_shade");
-            if (amount >= 0 && amount <= 90) {
-                s.sun_shade = amount;
-                s.has_sun_shade = true;
             }
         });
         /* The switch movie_filter replaced: off keeps the movies as they are, on takes the filter's default. */
@@ -482,10 +454,10 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
         s.has_invert_vertical || s.has_auto_aim || s.has_crosshair || s.has_crosshair_shape || s.has_crosshair_size ||
         s.has_crosshair_colour || s.has_crosshair_opacity || s.has_separate_vertical_speed ||
         s.has_stick_layout || s.has_look_speed || s.has_look_deadzone || s.has_invert_look ||
-        s.has_probe_lighting || s.has_probe_strength || s.has_probe_bounce || s.has_probe_glow ||
+        s.has_probe_lighting || s.has_probe_strength ||
         s.has_dynamic_shadows || s.has_shadow_strength || s.has_shadow_underneath ||
         s.has_shot_lights || s.has_shot_light_strength || s.has_sun_lighting || s.has_sun_direction ||
-        s.has_sun_height || s.has_sun_strength || s.has_sun_shade || s.has_dynamic_resolution || s.has_resolution || s.has_render_thread ||
+        s.has_sun_height || s.has_dynamic_resolution || s.has_resolution || s.has_render_thread ||
         s.has_high_precision_camera || s.has_geometry_correction ||
         s.has_perspective_textures || s.has_frame_unlock ||
         s.has_ambient_occlusion || s.has_occlusion_reach || s.has_occlusion_strength || s.has_smooth_fade ||
@@ -641,10 +613,6 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
             f << "probe_lighting = " << (s.probe_lighting ? "true" : "false") << "\n";
         if (s.has_probe_strength && s.probe_strength >= 0 && s.probe_strength <= 200)
             f << "probe_strength = " << s.probe_strength << "\n";
-        if (s.has_probe_bounce && s.probe_bounce >= 0 && s.probe_bounce <= 100)
-            f << "probe_bounce = " << s.probe_bounce << "\n";
-        if (s.has_probe_glow && s.probe_glow >= 0 && s.probe_glow <= 400)
-            f << "probe_glow = " << s.probe_glow << "\n";
         if (s.has_dynamic_shadows)
             f << "dynamic_shadows = " << (s.dynamic_shadows ? "true" : "false") << "\n";
         if (s.has_shadow_strength && s.shadow_strength >= 0 && s.shadow_strength <= 200)
@@ -661,10 +629,6 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
             f << "sun_direction = " << s.sun_direction << "\n";
         if (s.has_sun_height && s.sun_height >= 1 && s.sun_height <= 89)
             f << "sun_height = " << s.sun_height << "\n";
-        if (s.has_sun_strength && s.sun_strength >= 1 && s.sun_strength <= 400)
-            f << "sun_strength = " << s.sun_strength << "\n";
-        if (s.has_sun_shade && s.sun_shade >= 0 && s.sun_shade <= 90)
-            f << "sun_shade = " << s.sun_shade << "\n";
         if (s.has_movie_filter && s.movie_filter >= 0 && s.movie_filter < kDisruptorMovieFilterCount)
             f << "movie_filter = " << quoted(kDisruptorMovieFilters[s.movie_filter]) << "\n";
         if (s.has_draw_distance &&

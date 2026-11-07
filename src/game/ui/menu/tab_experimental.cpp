@@ -25,24 +25,12 @@ void draw_lighting() {
     if (!lighting_applies) ImGui::EndDisabled();
     draw_status_badge("EXPERIMENTAL", kExperimental);
     ImGui::Indent();
-    const bool probes_apply =
-        applies("disruptor.probe_strength") && applies("disruptor.probe_bounce") && applies("disruptor.probe_glow");
+    const bool probes_apply = applies("disruptor.probe_strength");
     if (!probes_apply) ImGui::BeginDisabled();
     int strength = percent(gl_renderer_ddgi_strength());
     ImGui::SetNextItemWidth(260.0f);
     if (option_slider("disruptor.probe_strength", &strength)) set_amount(gl_renderer_set_ddgi_strength, strength);
-    int bounce = percent(gl_renderer_ddgi_bounce());
-    ImGui::SetNextItemWidth(260.0f);
-    if (option_slider("disruptor.probe_bounce", &bounce)) set_amount(gl_renderer_set_ddgi_bounce, bounce);
-    int glow = percent(gl_renderer_ddgi_glow());
-    ImGui::SetNextItemWidth(260.0f);
-    if (option_slider("disruptor.probe_glow", &glow)) set_amount(gl_renderer_set_ddgi_glow, glow);
     if (!probes_apply) ImGui::EndDisabled();
-    if (lighting) {
-        bool alone = gl_renderer_ddgi_view() != 0;
-        if (ImGui::Checkbox("Probe light alone", &alone)) gl_renderer_set_ddgi_view(alone ? 1 : 0);
-        ImGui::TextDisabled("Grey is the average light, brighter and darker around it");
-    }
     ImGui::Unindent();
 
     bool shadows = gl_renderer_ddgi_shadows() != 0;
@@ -91,23 +79,16 @@ void draw_lighting() {
     } else {
         float place[4];
         gl_renderer_ddgi_sun_get(place);
-        int amounts[4] = {static_cast<int>(std::lround(place[0])), static_cast<int>(std::lround(place[1])), percent(place[2]),
-                          percent(place[3])};
-        const bool placement_applies = applies("disruptor.sun_direction") && applies("disruptor.sun_height") &&
-                                       applies("disruptor.sun_strength") && applies("disruptor.sun_shade");
+        int amounts[2] = {static_cast<int>(std::lround(place[0])), static_cast<int>(std::lround(place[1]))};
+        const bool placement_applies = applies("disruptor.sun_direction") && applies("disruptor.sun_height");
         if (!placement_applies) ImGui::BeginDisabled();
         ImGui::SetNextItemWidth(260.0f);
         const bool direction_moved = option_slider("disruptor.sun_direction", &amounts[0]);
         ImGui::SetNextItemWidth(260.0f);
         const bool height_moved = option_slider("disruptor.sun_height", &amounts[1]);
-        ImGui::SetNextItemWidth(260.0f);
-        const bool strength_moved = option_slider("disruptor.sun_strength", &amounts[2]);
-        ImGui::SetNextItemWidth(260.0f);
-        const bool shade_moved = option_slider("disruptor.sun_shade", &amounts[3]);
         if (!placement_applies) ImGui::EndDisabled();
-        if (direction_moved || height_moved || strength_moved || shade_moved) {
-            const float sun_now[4] = {static_cast<float>(amounts[0]), static_cast<float>(amounts[1]), amounts[2] / 100.0f,
-                                      amounts[3] / 100.0f};
+        if (direction_moved || height_moved) {
+            const float sun_now[4] = {static_cast<float>(amounts[0]), static_cast<float>(amounts[1]), place[2], place[3]};
             gl_renderer_ddgi_sun_set(sun_now);
             mark_sun(amounts);
         }

@@ -626,6 +626,7 @@ disruptor_unit_test(disruptor_bass_cut tests/unit/disruptor_bass_cut_test.cpp
     disruptor_unit_test(disruptor_gpu_ddgi_turn tests/unit/gpu_ddgi_turn_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_gpu_ddgi_bvh tests/unit/gpu_ddgi_bvh_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_gpu_ddgi_mask tests/unit/gpu_ddgi_mask_test.cpp RUNTIME_HEADERS)
+    disruptor_unit_test(disruptor_gpu_ddgi_fit tests/unit/gpu_ddgi_fit_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_ddgi_level tests/unit/disruptor_ddgi_level_test.cpp RUNTIME_HEADERS INCLUDES src)
     disruptor_unit_test(disruptor_movie_filter tests/unit/movie_filter_test.cpp RUNTIME_HEADERS)
     disruptor_unit_test(disruptor_gpu_world_depth tests/unit/gpu_world_depth_test.cpp RUNTIME_HEADERS)

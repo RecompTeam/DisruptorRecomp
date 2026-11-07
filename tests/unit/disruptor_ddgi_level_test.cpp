@@ -10,7 +10,7 @@
 namespace {
 
 std::array<std::uint8_t, 2 * 1024 * 1024> g_ram{};
-int g_sun = 1, g_here = 1, g_accept = 1, g_calls = 0, g_reads = 0;
+int g_sun = 1, g_accept = 1, g_calls = 0, g_reads = 0; /* g_sun: some lighting is on */
 std::vector<GpuDdgiTriangle> g_level;
 int g_failures = 0;
 
@@ -41,8 +41,9 @@ std::uint32_t psx_mod_read_word(std::uint32_t address) {
            static_cast<std::uint32_t>(g_ram[p + 2]) << 16 | static_cast<std::uint32_t>(g_ram[p + 3]) << 24;
 }
 
-int gl_renderer_ddgi_sun(void) { return g_sun; }
-int gl_renderer_ddgi_sun_here(void) { return g_here; }
+int gl_renderer_ddgi(void) { return 0; }
+int gl_renderer_ddgi_shadows(void) { return g_sun; }
+int gl_renderer_ddgi_lamps(void) { return 0; }
 
 int gpu_ddgi_set_level(const GpuDdgiTriangle *tris, int count) {
     ++g_calls;
@@ -62,6 +63,8 @@ constexpr std::uint32_t kTable = 0x80120000u;
 struct Chunk {
     std::vector<std::uint32_t> corners;
     std::vector<std::array<std::uint32_t, 5>> quads; /* corner indices A B C D and the texture */
+    std::vector<std::uint8_t> light = {};             /* a byte a record, 64 (neutral) for every record when empty */
+    std::vector<std::uint16_t> table = {};            /* the colours of light bytes 128, 129, ... */
 };
 
 std::uint32_t corner(std::uint32_t a, std::uint32_t b, std::uint32_t c, std::uint32_t copies = 0) {
@@ -71,11 +74,20 @@ std::uint32_t corner(std::uint32_t a, std::uint32_t b, std::uint32_t c, std::uin
 // Writes a mesh at the address, returns the address past its end mark.
 std::uint32_t write_mesh(std::uint32_t at, const std::vector<Chunk> &chunks) {
     for (const Chunk &chunk : chunks) {
-        const std::uint32_t size = 8 + 4 * static_cast<std::uint32_t>(chunk.corners.size()) + 4 +
+        std::uint32_t records = 0;
+        for (const std::uint32_t c : chunk.corners) records += (c >> 30) + 1;
+        const std::uint32_t lights = (records + 2 * static_cast<std::uint32_t>(chunk.table.size()) + 3) & ~3u;
+        const std::uint32_t size = 8 + lights + 4 * static_cast<std::uint32_t>(chunk.corners.size()) + 4 +
                                    8 * static_cast<std::uint32_t>(chunk.quads.size()) + 4;
         seed_word(at, size << 8);
-        seed_word(at + 4, 0);
-        std::uint32_t word = at + 8;
+        seed_word(at + 4, lights);
+        for (std::uint32_t r = 0; r < records; ++r) seed_byte(at + 8 + r, chunk.light.empty() ? 64 : chunk.light[r]);
+        for (std::size_t i = 0; i < chunk.table.size(); ++i) {
+            const std::uint32_t entry = at + 8 + lights - 2 - 2 * static_cast<std::uint32_t>(i);
+            seed_byte(entry, static_cast<std::uint8_t>(chunk.table[i]));
+            seed_byte(entry + 1, static_cast<std::uint8_t>(chunk.table[i] >> 8));
+        }
+        std::uint32_t word = at + 8 + lights;
         for (const std::uint32_t c : chunk.corners) seed_word(word, c), word += 4;
         seed_word(word, 0xFFFFFFFFu), word += 4;
         for (const auto &q : chunk.quads) {
@@ -138,14 +150,58 @@ void reads_the_rooms_faces() {
     // A corner is (-(y*8 + b*16), -(z*8 + c*16), x*8 + a*16), and the game's quad is A B D C.
     expect(corner_is(first, 0, 8, -72, 96) && corner_is(first, 1, 8, -72, 160) && corner_is(first, 2, 8, -136, 96),
            "the first triangle is A B D in world units");
-    expect(corner_is(second, 0, 8, -72, 160) && corner_is(second, 1, 8, -136, 96) && corner_is(second, 2, 8, -136, 160),
-           "the second is B D C");
+    expect(corner_is(second, 0, 8, -136, 96) && corner_is(second, 1, 8, -72, 160) && corner_is(second, 2, 8, -136, 160),
+           "the second is D B C, wound as the frame recorder's quads");
     expect(first.uv[0][0] == 32 && first.uv[0][1] == 64 && first.uv[1][0] == 63 && first.uv[1][1] == 64 && first.uv[2][0] == 32 &&
                first.uv[2][1] == 95,
            "A takes the table's first uv, B its second, D the first 31 down");
     expect(second.uv[2][0] == 63 && second.uv[2][1] == 95, "C is the first uv 31 across and 31 down");
     expect(first.clut == 0x7A40 && first.texpage == 0x0089 && first.flags == 1, "the table's CLUT and page, textured");
-    expect(first.colour[0][0] == 128 && second.colour[2][2] == 128, "lit as drawn: the neutral vertex colour");
+    expect(first.colour[0][0] == 128 && second.colour[2][2] == 128, "light byte 64 is the neutral vertex colour 128");
+}
+
+// The (y, z) cross product of a triangle of the face's plane: its winding.
+float winding(const GpuDdgiTriangle &t) {
+    return (t.world[1][1] - t.world[0][1]) * (t.world[2][2] - t.world[0][2]) -
+           (t.world[1][2] - t.world[0][2]) * (t.world[2][1] - t.world[0][1]);
+}
+
+void halves_wound_alike() {
+    one_room();
+    draws(1);
+    expect(g_level.size() == 2 && winding(g_level[0]) * winding(g_level[1]) > 0.0f, "both triangles of a quad face one way");
+}
+
+void lit_as_the_game_lights_it() {
+    one_room();
+    // Records A B D C get bytes 10, 127, 128, 130, the table entries for 128, 129, 130.
+    Chunk lit = square();
+    lit.light = {10, 127, 128, 130};
+    lit.table = {0x7C1F, 0x0000, 0x03E0};  /* 128: blue 31 and red 31, 130: green 31 */
+    write_mesh(0x80110000u, {lit});
+    g_sun = 0;
+    draws(1);
+    g_sun = 1;
+    draws(1);
+    expect(g_level.size() == 2, "the lit square reads");
+    if (g_level.size() != 2) return;
+    const GpuDdgiTriangle &first = g_level[0], &second = g_level[1];
+    expect(first.colour[0][0] == 20 && first.colour[0][1] == 20 && first.colour[0][2] == 20, "A: a byte below 128 is twice it, grey");
+    expect(first.colour[1][0] == 254 && first.colour[1][2] == 254, "B: 127 is 254");
+    expect(first.colour[2][0] == 248 && first.colour[2][1] == 0 && first.colour[2][2] == 248,
+           "D (record 2, byte 128): the last entry before the vertex words, red and blue 31 are 248");
+    expect(second.colour[2][0] == 0 && second.colour[2][1] == 248 && second.colour[2][2] == 0,
+           "C (record 3, byte 130): the third entry down, green");
+
+    Chunk short_table = square();
+    short_table.light = {64, 64, 64, 255};
+    write_mesh(0x80110000u, {short_table});
+    g_sun = 0;
+    draws(1);
+    g_sun = 1;
+    g_calls = 0;
+    draws(1);
+    expect(g_calls == 0, "a byte whose entry lies before the light block refuses the level");
 }
 
 // Inside a triangle of the face's plane (x is the same for all corners), by the sides of its three edges in (y, z).
@@ -223,21 +279,16 @@ void a_refused_level_is_offered_again() {
     expect(g_calls == 3, "then kept until it changes");
 }
 
-void sun_off_forgets() {
+void lighting_off_forgets() {
     one_room();
     draws(30);
     g_calls = 0;
     g_sun = 0;
     draws(45);
-    expect(g_calls == 0, "with the sun off nothing is read");
+    expect(g_calls == 0, "with lighting off nothing is read");
     g_sun = 1;
     draws(1);
     expect(g_calls == 1, "turned on again, the level is read and handed over at once");
-    g_here = 0;
-    draws(45);
-    expect(g_calls == 1, "a mission without a sun reads nothing");
-    g_here = 1;
-    draws(1);
 }
 
 void copies_and_order() {
@@ -309,10 +360,12 @@ void malformed_levels() {
 
 int main() {
     reads_the_rooms_faces();
+    halves_wound_alike();
+    lit_as_the_game_lights_it();
     covers_the_face_once();
     reads_again_every_thirty_draws();
     a_refused_level_is_offered_again();
-    sun_off_forgets();
+    lighting_off_forgets();
     copies_and_order();
     malformed_levels();
     if (g_failures) {

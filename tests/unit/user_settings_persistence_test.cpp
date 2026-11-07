@@ -172,10 +172,6 @@ int main() {
         written.probe_lighting = true;
         written.has_probe_strength = true;
         written.probe_strength = 80;
-        written.has_probe_bounce = true;
-        written.probe_bounce = 30;
-        written.has_probe_glow = true;
-        written.probe_glow = 250;
         written.has_dynamic_shadows = true;
         written.dynamic_shadows = true;
         written.has_shadow_strength = true;
@@ -192,10 +188,6 @@ int main() {
         written.sun_direction = 270;
         written.has_sun_height = true;
         written.sun_height = 20;
-        written.has_sun_strength = true;
-        written.sun_strength = 90;
-        written.has_sun_shade = true;
-        written.sun_shade = 40;
         written.has_language = true;
         written.language = "en";
 
@@ -275,8 +267,6 @@ int main() {
                 "Disruptor preferences did not round-trip");
         require(loaded.has_probe_lighting && loaded.probe_lighting &&
                     loaded.has_probe_strength && loaded.probe_strength == 80 &&
-                    loaded.has_probe_bounce && loaded.probe_bounce == 30 &&
-                    loaded.has_probe_glow && loaded.probe_glow == 250 &&
                     loaded.has_dynamic_shadows && loaded.dynamic_shadows &&
                     loaded.has_shadow_strength && loaded.shadow_strength == 140 &&
                     loaded.has_shadow_underneath && loaded.shadow_underneath == 60 &&
@@ -284,9 +274,7 @@ int main() {
                     loaded.has_shot_light_strength && loaded.shot_light_strength == 200 &&
                     loaded.has_sun_lighting && loaded.sun_lighting &&
                     loaded.has_sun_direction && loaded.sun_direction == 270 &&
-                    loaded.has_sun_height && loaded.sun_height == 20 &&
-                    loaded.has_sun_strength && loaded.sun_strength == 90 &&
-                    loaded.has_sun_shade && loaded.sun_shade == 40,
+                    loaded.has_sun_height && loaded.sun_height == 20,
                 "lighting preferences did not round-trip");
         require(loaded.has_language && loaded.language == "en",
                 "merge-save dropped an unrelated known setting");
@@ -466,13 +454,12 @@ int main() {
             const fs::path lighting = root / "lighting.toml";
             {
                 std::ofstream out(lighting, std::ios::trunc);
-                out << "[disruptor]\nprobe_strength = 201\nsun_height = 0\nsun_strength = 0\nsun_shade = 91\n"
+                out << "[disruptor]\nprobe_strength = 201\nsun_height = 0\n"
                        "shot_light_strength = -1\nprobe_lighting = 1\n";
             }
             const UserSettings rejected = PSXRecompV4::load_user_settings(lighting);
             require(!rejected.parse_error && !rejected.has_probe_strength && !rejected.has_sun_height &&
-                        !rejected.has_sun_strength && !rejected.has_sun_shade && !rejected.has_shot_light_strength &&
-                        !rejected.has_probe_lighting,
+                        !rejected.has_shot_light_strength && !rejected.has_probe_lighting,
                     "a lighting value out of its range was accepted on load");
             UserSettings preference;
             preference.has_sun_height = true;

@@ -72,8 +72,6 @@ struct GameUserSettings {
     // The Experimental tab's lighting, amounts in percent. The sun is the second mission's, the one open level with one.
     bool has_probe_lighting = false; bool probe_lighting = false;
     bool has_probe_strength = false; int probe_strength = 100;
-    bool has_probe_bounce = false; int probe_bounce = 0;
-    bool has_probe_glow = false; int probe_glow = 200;
     bool has_dynamic_shadows = false; bool dynamic_shadows = false;
     bool has_shadow_strength = false; int shadow_strength = 100;
     bool has_shadow_underneath = false; int shadow_underneath = 100;
@@ -82,8 +80,6 @@ struct GameUserSettings {
     bool has_sun_lighting = false; bool sun_lighting = false;
     bool has_sun_direction = false; int sun_direction = 35;   // degrees round from +z
     bool has_sun_height = false; int sun_height = 50;         // degrees up, 1..89
-    bool has_sun_strength = false; int sun_strength = 110;
-    bool has_sun_shade = false; int sun_shade = 50;
     // An index into kDisruptorDiagnosticViews. A session's own: at start only a capsule's replay takes it from the file.
     bool has_diagnostic_view = false; int diagnostic_view = 0;
 };

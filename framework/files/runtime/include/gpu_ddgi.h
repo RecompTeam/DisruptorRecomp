@@ -98,21 +98,16 @@ void gpu_ddgi_stats(GpuDdgiStats *stats);
 /* Draws the probe grid around the camera into the frame the last triangles went to. */
 void gpu_ddgi_draw_probes(void);
 
-/* The OpenGL renderer's probe lighting: light from the probes multiplies the picture, the average kept. */
+/* The OpenGL renderer's probe lighting: the added lights' light bounced off the surfaces round them. */
 void gl_renderer_set_ddgi(int enabled);
 /* Whether the first update takes the PSX_DDGI_* variables, on until a game that does not offer the lighting says. */
 void gl_renderer_set_ddgi_environment(int taken);
 int gl_renderer_ddgi(void);
 void gl_renderer_set_ddgi_strength(float strength);
 float gl_renderer_ddgi_strength(void);
-void gl_renderer_set_ddgi_view(int enabled); /* the probes' light alone, grey where it is the average */
+void gl_renderer_set_ddgi_view(int enabled);
 int gl_renderer_ddgi_view(void);
-void gl_renderer_set_ddgi_bounce(float bounce);
-float gl_renderer_ddgi_bounce(void);
-/* How much bright surfaces light their surroundings beyond what they show. */
-void gl_renderer_set_ddgi_glow(float glow);
-float gl_renderer_ddgi_glow(void);
-/* Shadows of enemies, bodies and pickups from the level's lights, and a contact shadow under them. */
+/* Shadows of enemies, bodies and pickups from the level's lights fitted to its baked light, and a contact shadow under them. */
 void gl_renderer_set_ddgi_shadows(int enabled);
 int gl_renderer_ddgi_shadows(void);
 void gl_renderer_set_ddgi_shadow_strength(float strength);
@@ -127,15 +122,16 @@ float gl_renderer_ddgi_lamp_strength(void);
 /* The shadows grey and the added light alone. */
 void gl_renderer_set_ddgi_lamp_view(int enabled);
 int gl_renderer_ddgi_lamp_view(void);
-/* Sunlight with shadows on missions with open sky, the level's faces learned as they are drawn. */
+/* Shadows from the sun on missions with open sky. */
 void gl_renderer_set_ddgi_sun(int enabled);
 int gl_renderer_ddgi_sun(void);
-/* Every face of the level, from the game whenever it changed: the sun's rays meet walls the frame did not draw. */
+/* Every face of the level lit as the game lights it near, from the game whenever it changed: the fit, the probes' rays. */
 int gpu_ddgi_set_level(const GpuDdgiTriangle *tris, int count); /* 0 when it could not be taken */
+void gpu_ddgi_level_emission(const GpuDdgiTriangle *tris, int count, float (*emission)[3]); /* linear, from VRAM */
 /* The mission being played, from the game each world draw: a new one forgets the level's faces. */
 void gl_renderer_set_ddgi_mission(int mission);
 int gl_renderer_ddgi_sun_here(void);
-/* The current mission's sun: degrees round, degrees up, strength, the share of baked light its shade takes. */
+/* The current mission's sun: degrees round, degrees up; above 0 in the third for a mission that has one, the fourth unused. */
 void gl_renderer_ddgi_sun_get(float sun[4]);
 void gl_renderer_ddgi_sun_set(const float sun[4]);
 void gl_renderer_ddgi_sun_set_mission(int mission, const float sun[4]);

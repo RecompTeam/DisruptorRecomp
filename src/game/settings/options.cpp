@@ -138,6 +138,8 @@ constexpr const char* needs_probes[] = {probes_key};
 constexpr const char* needs_shadows[] = {shadows_key};
 constexpr const char* needs_shots[] = {shots_key};
 constexpr const char* needs_sun[] = {sun_key};
+constexpr const char* needs_geometry_shots[] = {geometry_key, shots_key};
+constexpr const char* needs_geometry_shadows[] = {geometry_key, shadows_key};
 constexpr const char* needs_geometry[] = {geometry_key};
 constexpr const char* needs_frames[] = {frames_key};
 constexpr const char* needs_occlusion[] = {occlusion_key};
@@ -439,17 +441,11 @@ constexpr Option option_list[] = {
            draw_distances, saved<&Settings::has_draw_distance>, draw_distance, set_draw_distance, {}, distances_offered),
     toggle<&Settings::has_probe_lighting, &Settings::probe_lighting>(
         "disruptor.probe_lighting", "Probe lighting", 0,
-        "Light bounced from the walls around you", needs_geometry),
+        "Light from shots and blasts bounces off the walls round them\nNeeds Light from shots and blasts", needs_geometry_shots),
     slider("disruptor.probe_strength", "Probe light strength", 100,
            "", 0, 200, Unit::percent,
            saved<&Settings::has_probe_strength>, read<&Settings::probe_strength>,
            write<&Settings::has_probe_strength, &Settings::probe_strength>, needs_probes),
-    slider("disruptor.probe_bounce", "Second bounce", 0, "Light that bounced twice", 0, 100, Unit::percent,
-           saved<&Settings::has_probe_bounce>, read<&Settings::probe_bounce>,
-           write<&Settings::has_probe_bounce, &Settings::probe_bounce>, needs_probes),
-    slider("disruptor.probe_glow", "Glow of bright surfaces", 200, "How much lamps and screens light round them", 0, 400,
-           Unit::percent, saved<&Settings::has_probe_glow>, read<&Settings::probe_glow>,
-           write<&Settings::has_probe_glow, &Settings::probe_glow>, needs_probes),
     toggle<&Settings::has_dynamic_shadows, &Settings::dynamic_shadows>(
         "disruptor.dynamic_shadows", "Dynamic shadows", 0,
         "Enemies, bodies and pickups cast shadows from the level's lights\nA soft shadow under each of them",
@@ -467,19 +463,14 @@ constexpr Option option_list[] = {
            Unit::percent, saved<&Settings::has_shot_light_strength>, read<&Settings::shot_light_strength>,
            write<&Settings::has_shot_light_strength, &Settings::shot_light_strength>, needs_shots),
     toggle<&Settings::has_sun_lighting, &Settings::sun_lighting>(
-        "disruptor.sun_lighting", "Sun on open levels", 0, "Sunlight and shadows on the second mission for now", needs_geometry),
+        "disruptor.sun_lighting", "Sun on open levels", 0, "Enemies cast shadows from the sun\nThe second mission for now\nNeeds Dynamic shadows",
+        needs_geometry_shadows),
     slider("disruptor.sun_direction", "Sun direction", 35, "", 0, 360, Unit::degrees,
            saved<&Settings::has_sun_direction>, read<&Settings::sun_direction>,
            write<&Settings::has_sun_direction, &Settings::sun_direction>, needs_sun),
     slider("disruptor.sun_height", "Sun height", 50, "", 1, 89, Unit::degrees,
            saved<&Settings::has_sun_height>, read<&Settings::sun_height>,
            write<&Settings::has_sun_height, &Settings::sun_height>, needs_sun),
-    slider("disruptor.sun_strength", "Sun strength", 110, "100% keeps sunlit ground as the game lights it", 1, 400,
-           Unit::percent, saved<&Settings::has_sun_strength>, read<&Settings::sun_strength>,
-           write<&Settings::has_sun_strength, &Settings::sun_strength>, needs_sun),
-    slider("disruptor.sun_shade", "Shade", 50, "How much darker what the sun does not reach is", 0, 90, Unit::percent,
-           saved<&Settings::has_sun_shade>, read<&Settings::sun_shade>,
-           write<&Settings::has_sun_shade, &Settings::sun_shade>, needs_sun),
     choice("disruptor.fog_shape", "Fog shape", 0,
            "How the smooth distance fade thickens\n"
            "Original: at one pace, as the game's own",

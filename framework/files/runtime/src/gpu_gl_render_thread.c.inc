@@ -48,7 +48,7 @@ static void ctx_x_squash(int32_t *num, int32_t *den) {
 static int gl_rth_eligible(void) {
     extern int psx_netplay_active(void);
     return s_raster_ok && s_ctx && !gpu_display_is_depth24() && !psx_netplay_active() &&
-           !psx_host_ui_gl_visible() && !s_ddgi_light && !s_ddgi_shadows && !s_ddgi_lamps && !ddgi_sun_active();
+           !psx_host_ui_gl_visible();
 }
 
 static void gl_rth_acquire(const char *reason) {
@@ -596,6 +596,7 @@ static void gl_rth_exec(void *user, const RtCmd *c, const void *payload) {
     case RTH_INTERP_SUSPENDED: gl_renderer_set_interpolation_suspended(v[0]); break;
     case RTH_UI_SUSPENDED: gl_renderer_set_host_ui_suspended(v[0]); break;
     case RTH_DDGI_MISSION: gl_renderer_set_ddgi_mission(v[0]); break;
+    case RTH_DDGI_SHOT: s_rthx_ddgi_shot = v[0]; break;
     case RTH_INVALIDATE_PRESENT: gl_renderer_invalidate_present(); break;
     case RTH_GROUP:
         for (uint32_t at = 0; at + sizeof(RtCmd) <= c->payload;) {

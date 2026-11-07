@@ -1,5 +1,4 @@
-/* Shadow casters and lights of a world draw, included once by gpu_ddgi.c.inc: textures read from the CPU copy of VRAM, the
- * level's emitting faces kept across frames by their world place. */
+/* Shadow casters and added lights of a world draw, included once by gpu_ddgi.c.inc: textures read from the CPU copy of VRAM. */
 
 static int s_ddgi_hide_blobs = 1, s_ddgi_shadowing;
 void gpu_ddgi_set_hide_blobs(int enabled) { s_ddgi_hide_blobs = enabled != 0; }
@@ -17,46 +16,6 @@ static void ddgi_colour5(uint16_t raw, float out[3]) {
 static float ddgi_lum(const float c[3]) { return 0.2126f * c[0] + 0.7152f * c[1] + 0.0722f * c[2]; }
 static float ddgi_linear(float c) { return powf(c > 0.0f ? c : 0.0f, 2.2f); }
 
-/* An emitting face of the level, kept by its world place: the brightest it was seen (a far one shows a faded palette row). */
-typedef struct DdgiEmitter {
-    uint64_t key;
-    float centre[3], normal[3], area, colour[3], lum;
-    uint32_t seen;
-} DdgiEmitter;
-
-#define DDGI_EMITTERS 8192
-#define DDGI_EMITTER_PROBES 8
-#define DDGI_EMITTER_KEPT 3600u
-static DdgiEmitter s_ddgi_emitters[DDGI_EMITTERS];
-
-static void ddgi_keep_emitter(const float centre[3], const float normal[3], float area, const float colour[3]) {
-    const int64_t q[3] = {(int64_t)floorf(centre[0] / 8.0f), (int64_t)floorf(centre[1] / 8.0f), (int64_t)floorf(centre[2] / 8.0f)};
-    const uint64_t key = 1u + ((uint64_t)(q[0] & 0x1FFFFF) | (uint64_t)(q[1] & 0x1FFFFF) << 21 | (uint64_t)(q[2] & 0x1FFFFF) << 42);
-    const uint32_t now = (uint32_t)s_frame_count, first = (uint32_t)((key * 0x9E3779B97F4A7C15ull) >> 51);
-    DdgiEmitter *slot = NULL;
-    for (uint32_t i = 0; i < DDGI_EMITTER_PROBES; ++i) {
-        DdgiEmitter *e = &s_ddgi_emitters[(first + i) & (DDGI_EMITTERS - 1)];
-        if (e->key == key) {
-            slot = e;
-            break;
-        }
-        if (!slot || !e->key || now - e->seen > now - slot->seen) slot = e;
-    }
-    const float lum = ddgi_lum(colour);
-    if (slot->key != key || now - slot->seen > DDGI_EMITTER_KEPT) {
-        slot->key = key;
-        slot->lum = -1.0f;
-    }
-    memcpy(slot->centre, centre, sizeof slot->centre);
-    memcpy(slot->normal, normal, sizeof slot->normal);
-    slot->area = area;
-    slot->seen = now;
-    if (lum > slot->lum) {
-        memcpy(slot->colour, colour, sizeof slot->colour);
-        slot->lum = lum;
-    }
-}
-
 /* What a world face gives off of its own, linear, kept by its picture: the same face is drawn again every frame. */
 typedef struct DdgiFace {
     uint64_t key;
@@ -68,20 +27,9 @@ typedef struct DdgiFace {
 #define DDGI_FACE_STEPS 8
 static DdgiFace s_ddgi_faces[DDGI_FACES];
 
-/* An added blend's colour, or the bright texels' share of the face: a lamp is often a spot in a larger picture. 0 for none. */
-static int ddgi_emission(const GpuDdgiTriangle *t, float out[3]) {
-    uint64_t key = 1469598103934665603ull;
-    const uint8_t *bytes[4] = {(const uint8_t *)t->uv, (const uint8_t *)t->colour, (const uint8_t *)&t->clut,
-                               (const uint8_t *)&t->texpage};
-    const size_t sizes[4] = {sizeof t->uv, sizeof t->colour, sizeof t->clut, sizeof t->texpage};
-    for (int part = 0; part < 4; ++part)
-        for (size_t b = 0; b < sizes[part]; ++b) key = (key ^ bytes[part][b]) * 1099511628211ull;
-    key = (key ^ t->flags) * 1099511628211ull;
-    const uint32_t now = (uint32_t)s_frame_count;
-    DdgiFace *face = &s_ddgi_faces[(key >> 7) & (DDGI_FACES - 1)];
-    if (face->key != key || now - face->stamp > 600u) {
-        face->key = key;
-        face->stamp = now;
+/* An added blend's colour, or the bright texels' share of the face: a lamp is often a spot in a larger picture. */
+static void ddgi_emission_of(const GpuDdgiTriangle *t, float emission[3]) {
+    {
         const int textured = t->flags & 1, raw = t->flags & 4, abr = (t->texpage >> 5) & 3;
         const int added = textured && (t->flags & 2) && (abr == 1 || abr == 3);
         float sum[3] = {0.0f, 0.0f, 0.0f}, glow[3] = {0.0f, 0.0f, 0.0f};
@@ -107,9 +55,8 @@ static int ddgi_emission(const GpuDdgiTriangle *t, float out[3]) {
             most = raw ? palette : palette * most * 2.0f;
         }
         if (!added && most < 0.749f) {
-            memset(face->emission, 0, sizeof face->emission);
-            memset(out, 0, sizeof face->emission);
-            return 0;
+            memset(emission, 0, sizeof(float) * 3);
+            return;
         }
         for (int a = 0; a < DDGI_FACE_STEPS; ++a)
             for (int b = 0; a + b < DDGI_FACE_STEPS; ++b) {
@@ -140,27 +87,45 @@ static int ddgi_emission(const GpuDdgiTriangle *t, float out[3]) {
                     for (int k = 0; k < 3; ++k) glow[k] += ddgi_linear(fminf(lit[k], 1.0f)) * share;
             }
         for (int k = 0; k < 3; ++k)
-            face->emission[k] = !seen ? 0.0f : added ? sum[k] / (float)seen * (abr == 3 ? 0.25f : 1.0f) : glow[k] / (float)seen;
+            emission[k] = !seen ? 0.0f : added ? sum[k] / (float)seen * (abr == 3 ? 0.25f : 1.0f) : glow[k] / (float)seen;
+    }
+}
+
+/* ddgi_emission_of kept by the face's picture: the same face is drawn again every frame. 0 for none. */
+static int ddgi_emission(const GpuDdgiTriangle *t, float out[3]) {
+    uint64_t key = 1469598103934665603ull;
+    const uint8_t *bytes[4] = {(const uint8_t *)t->uv, (const uint8_t *)t->colour, (const uint8_t *)&t->clut,
+                               (const uint8_t *)&t->texpage};
+    const size_t sizes[4] = {sizeof t->uv, sizeof t->colour, sizeof t->clut, sizeof t->texpage};
+    for (int part = 0; part < 4; ++part)
+        for (size_t b = 0; b < sizes[part]; ++b) key = (key ^ bytes[part][b]) * 1099511628211ull;
+    key = (key ^ t->flags) * 1099511628211ull;
+    const uint32_t now = (uint32_t)s_frame_count;
+    DdgiFace *face = &s_ddgi_faces[(key >> 7) & (DDGI_FACES - 1)];
+    if (face->key != key || now - face->stamp > 600u) {
+        face->key = key;
+        face->stamp = now;
+        ddgi_emission_of(t, face->emission);
     }
     memcpy(out, face->emission, sizeof face->emission);
     return ddgi_lum(out) > 0.01f;
 }
 
-typedef struct DdgiCluster {
-    uint64_t key;
-    float place[3], colour[3], normal[3], lo[3], hi[3], power, area;
-} DdgiCluster;
+/* Game thread: what each of the level's faces gives off under neutral light, read from VRAM as it stands. Its baked light
+ * would make every texture near a bright corner glow. */
+void gpu_ddgi_level_emission(const GpuDdgiTriangle *tris, int count, float (*emission)[3]) {
+    for (int i = 0; i < count; ++i) {
+        GpuDdgiTriangle neutral = tris[i];
+        memset(neutral.colour, 128, sizeof neutral.colour);
+        ddgi_emission_of(&neutral, emission[i]);
+    }
+}
 
-#define DDGI_CLUSTERS 512
-/* World units: an enemy stands about 1400 tall. */
-#define DDGI_CLUSTER_SIZE 600.0f
-#define DDGI_LAMP_RANGE 12000.0f
 #define DDGI_DYNAMIC_GROUPS 32
 
 static GpuDdgiScene s_ddgi_scene_before;
 
 void gpu_ddgi_forget_level(void) {
-    memset(s_ddgi_emitters, 0, sizeof s_ddgi_emitters);
     memset(s_ddgi_faces, 0, sizeof s_ddgi_faces);
     memset(&s_ddgi_scene_before, 0, sizeof s_ddgi_scene_before);
 }
@@ -221,124 +186,6 @@ static void ddgi_scene_casters(const DdgiList *list, const float eye[3], GpuDdgi
             c->tall = 0.65f * was->tall + 0.35f * c->tall;
         }
         ++scene->casters;
-    }
-}
-
-static void ddgi_scene_static_lamps(const DdgiList *list, const GteCameraPose *camera, const float eye[3], GpuDdgiScene *scene,
-                                    int room) {
-    for (int i = 0; i < list->count; ++i) {
-        const GpuDdgiTriangle *t = &list->triangles[i];
-        float colour[3];
-        if (!ddgi_emission(t, colour)) continue;
-        float e1[3], e2[3], n[3], centre[3];
-        for (int a = 0; a < 3; ++a) {
-            e1[a] = t->world[1][a] - t->world[0][a];
-            e2[a] = t->world[2][a] - t->world[0][a];
-            centre[a] = (t->world[0][a] + t->world[1][a] + t->world[2][a]) / 3.0f;
-        }
-        n[0] = e1[1] * e2[2] - e1[2] * e2[1];
-        n[1] = e1[2] * e2[0] - e1[0] * e2[2];
-        n[2] = e1[0] * e2[1] - e1[1] * e2[0];
-        const float twice = sqrtf(n[0] * n[0] + n[1] * n[1] + n[2] * n[2]);
-        if (twice < 1e-3f) continue;
-        const float area = twice * 0.5f;
-        if (!(t->flags & 2) && area > 1.5e6f) continue;
-        float toward = 0.0f;
-        for (int a = 0; a < 3; ++a) {
-            n[a] /= twice;
-            toward += n[a] * (eye[a] - t->world[0][a]);
-        }
-        if (toward < 0.0f)
-            for (int a = 0; a < 3; ++a) n[a] = -n[a];
-        ddgi_keep_emitter(centre, n, area, colour);
-    }
-    (void)camera;
-    static DdgiCluster clusters[DDGI_CLUSTERS];
-    int count = 0;
-    const uint32_t now = (uint32_t)s_frame_count;
-    for (int i = 0; i < DDGI_EMITTERS; ++i) {
-        const DdgiEmitter *e = &s_ddgi_emitters[i];
-        if (!e->key || now - e->seen > DDGI_EMITTER_KEPT || ddgi_distance2(e->centre, eye) > DDGI_LAMP_RANGE * DDGI_LAMP_RANGE)
-            continue;
-        const int64_t q[3] = {(int64_t)floorf(e->centre[0] / DDGI_CLUSTER_SIZE), (int64_t)floorf(e->centre[1] / DDGI_CLUSTER_SIZE),
-                              (int64_t)floorf(e->centre[2] / DDGI_CLUSTER_SIZE)};
-        const uint64_t key = 1u + ((uint64_t)(q[0] & 0x1FFFFF) | (uint64_t)(q[1] & 0x1FFFFF) << 21 | (uint64_t)(q[2] & 0x1FFFFF) << 42);
-        DdgiCluster *c = NULL;
-        for (int k = 0; k < count; ++k)
-            if (clusters[k].key == key) {
-                c = &clusters[k];
-                break;
-            }
-        if (!c) {
-            if (count == DDGI_CLUSTERS) continue;
-            c = &clusters[count++];
-            memset(c, 0, sizeof *c);
-            c->key = key;
-            for (int a = 0; a < 3; ++a) c->lo[a] = c->hi[a] = e->centre[a];
-        }
-        const float power = e->lum * e->area;
-        for (int a = 0; a < 3; ++a) {
-            c->place[a] += e->centre[a] * power;
-            c->colour[a] += e->colour[a] * e->area;
-            c->normal[a] += e->normal[a] * power;
-            c->lo[a] = fminf(c->lo[a], e->centre[a]);
-            c->hi[a] = fmaxf(c->hi[a], e->centre[a]);
-        }
-        c->power += power;
-        c->area += e->area;
-    }
-    /* The strongest where the camera is, a light already shown kept a while longer so the set does not flicker. */
-    float score[DDGI_CLUSTERS];
-    for (int k = 0; k < count; ++k) {
-        const DdgiCluster *c = &clusters[k];
-        float place[3];
-        for (int a = 0; a < 3; ++a) place[a] = c->place[a] / fmaxf(c->power, 1e-6f);
-        score[k] = c->power / (ddgi_distance2(place, eye) + 2000.0f * 2000.0f);
-        for (int p = 0; p < s_ddgi_scene_before.lamps; ++p)
-            if (!s_ddgi_scene_before.lamp[p].dynamic && s_ddgi_scene_before.lamp[p].key == (uint32_t)(c->key ^ (c->key >> 32)))
-                score[k] *= 1.5f;
-    }
-    for (int taken = 0; taken < room && taken < count; ++taken) {
-        int best = -1;
-        for (int k = 0; k < count; ++k)
-            if (score[k] > 0.0f && (best < 0 || score[k] > score[best])) best = k;
-        if (best < 0 || score[best] < 1e-4f) break;
-        const DdgiCluster *c = &clusters[best];
-        score[best] = 0.0f;
-        GpuDdgiLamp *lamp = &scene->lamp[scene->lamps++];
-        memset(lamp, 0, sizeof *lamp);
-        float spread = 0.0f, normal = 0.0f;
-        for (int a = 0; a < 3; ++a) {
-            lamp->position[a] = c->place[a] / fmaxf(c->power, 1e-6f);
-            lamp->colour[a] = c->colour[a] / fmaxf(c->area, 1e-6f);
-            spread += (c->hi[a] - c->lo[a]) * (c->hi[a] - c->lo[a]);
-            normal += c->normal[a] * c->normal[a];
-        }
-        normal = sqrtf(normal);
-        /* Faces turned every way, a lamp seen round: no side it lights alone. */
-        for (int a = 0; a < 3; ++a) lamp->normal[a] = normal > 0.5f * c->power ? c->normal[a] / normal : 0.0f;
-        lamp->size = fmaxf(60.0f, 0.5f * sqrtf(spread) + 0.5f * sqrtf(c->area));
-        lamp->power = c->power;
-        lamp->key = (uint32_t)(c->key ^ (c->key >> 32));
-        lamp->previous = -1;
-        lamp->weight = 0.25f;
-        for (int p = 0; p < s_ddgi_scene_before.lamps; ++p)
-            if (!s_ddgi_scene_before.lamp[p].dynamic && s_ddgi_scene_before.lamp[p].key == lamp->key) {
-                lamp->previous = p;
-                lamp->weight = fminf(1.0f, s_ddgi_scene_before.lamp[p].weight + 0.25f);
-            }
-    }
-    /* A light that left the set fades out. */
-    for (int p = 0; p < s_ddgi_scene_before.lamps && scene->lamps < room; ++p) {
-        const GpuDdgiLamp *was = &s_ddgi_scene_before.lamp[p];
-        if (was->dynamic || was->weight <= 0.25f) continue;
-        int kept = 0;
-        for (int k = 0; k < scene->lamps; ++k) kept |= scene->lamp[k].key == was->key;
-        if (kept) continue;
-        GpuDdgiLamp *lamp = &scene->lamp[scene->lamps++];
-        *lamp = *was;
-        lamp->previous = p;
-        lamp->weight = was->weight - 0.25f;
     }
 }
 
@@ -479,15 +326,11 @@ int gpu_ddgi_scene(uint32_t pose, GpuDdgiScene *scene) {
         eye[a] = (float)(v + camera.offset[a]);
     }
     ddgi_scene_casters(list, eye, scene);
-    ddgi_scene_static_lamps(list, &camera, eye, scene, GPU_DDGI_LAMPS - GPU_DDGI_DYNAMIC_LAMPS);
     ddgi_scene_dynamic_lamps(list, &camera, eye, scene);
     s_ddgi_scene_before = *scene;
     if (ddgi_logging() && s_ddgi_stats.frames % 60u == 2u) {
-        int dynamic = 0, emitters = 0;
-        for (int i = 0; i < scene->lamps; ++i) dynamic += scene->lamp[i].dynamic;
-        for (int i = 0; i < DDGI_EMITTERS; ++i) emitters += s_ddgi_emitters[i].key != 0;
-        fprintf(stderr, "ddgi scene: pose %u cards %d casters %d lamps %d (dynamic %d) emitters kept %d flash %.0f\n", pose,
-                list->card_count, scene->casters, scene->lamps, dynamic, emitters, list->flash_strength);
+        fprintf(stderr, "ddgi scene: pose %u cards %d casters %d dynamic lamps %d flash %.0f\n", pose, list->card_count,
+                scene->casters, scene->lamps, list->flash_strength);
     }
     return 1;
 }

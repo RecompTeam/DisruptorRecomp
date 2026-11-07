@@ -123,7 +123,7 @@ require(
 )
 require(
     "    const int thread = t == &s_ssao_thread;\n    glDisable(GL_SCISSOR_TEST);\n" in renderer
-    and "    gz_begin_at(thread, GZ_SHADE_MEASURE);\n    ddgi_screen_measure(thread, " in renderer
+    and "    gz_begin_at(thread, GZ_SHADE_LAMPS);\n    ddgi_lamp_pass(thread, " in renderer
     and "                   u0, v0, u1, v1, lw, lh);\n    gz_end_at(thread);\n    gz_begin_at(thread, GZ_SHADE_MIX);\n"
     "    const int grown = aa_begin(thread, (int)((v1 - v0) * (float)h + 0.5f), 1, lx, ly, lw, lh);\n"
     in renderer
