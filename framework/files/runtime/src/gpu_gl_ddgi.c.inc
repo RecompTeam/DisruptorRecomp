@@ -280,7 +280,7 @@ static const char *DDGI_CLASSIFY_FS =
 static const char *DDGI_MIX_FS =
     "#version 330\n" DDGI_GLSL_COMMON DDGI_GLSL_APPLY
     "in vec2 v_uv; out vec4 frag;\n"
-    "uniform sampler2D u_shade, u_lamps;\n"
+    "uniform sampler2D u_shade, u_lamps, u_lamp_geo;\n"
     "uniform vec4 u_span, u_uv_rect;\n"
     "uniform vec4 u_lit;  /* 1 with the lamps' texture, 1 to show it alone, 1 with the probes' light */\n"
     "uniform vec4 u_fog;  /* the game's fog as in the lamp pass */\n"
@@ -289,17 +289,26 @@ static const char *DDGI_MIX_FS =
     "  float side = abs(2.0*(uv.x - u_uv_rect.x)/(u_uv_rect.z - u_uv_rect.x) - 1.0);\n"
     "  return clamp((d*(1.0 + u_fog.z*side) - u_fog.x)/u_fog.y, 0.0, 1.0); }\n"
     "vec3 soft(vec3 r){ return mix(r, 1.0 + (r - 1.0)/(1.0 + 0.5*(r - 1.0)), step(1.0, r)); }\n"
-    "/* The half-size lamp texture at uv, its four texels weighed by how near their depth is to the pixel's. */\n"
+    "/* The small lamp texture at uv: nine texels round it weighed by distance, depth and how alike their surface faces, so a\n"
+    "   wall's light stays off the floor at its foot, where the depths agree and a depth test alone drew the texels' steps. */\n"
     "vec4 lamp_at(vec2 uv){\n"
     "  float d = cam(uv);\n"
+    "  vec3 n = vec3(0.0);\n"
+    "  float fd = flat_surf(uv);\n"
+    "  if (fd > 0.0) {\n"
+    "    vec3 pc = at(uv, fd), nc = cross(edge(uv, vec2(0.0, u_texel.w*u_texel.y), pc, fd), edge(uv, vec2(u_texel.w*u_texel.x, 0.0), pc, fd));\n"
+    "    if (dot(nc, nc) > 1e-12) { n = normalize(nc); if (dot(n, pc) > 0.0) n = -n; } }\n"
     "  vec2 size = vec2(textureSize(u_lamps, 0)), span = u_uv_rect.zw - u_uv_rect.xy;\n"
-    "  vec2 place = (uv - u_uv_rect.xy)/span*size - 0.5; ivec2 base = ivec2(floor(place)); vec2 f = place - vec2(base);\n"
+    "  vec2 place = (uv - u_uv_rect.xy)/span*size - 0.5; ivec2 base = ivec2(floor(place + 0.5));\n"
     "  vec4 sum = vec4(0.0); float ws = 0.0;\n"
-    "  for (int i = 0; i < 4; ++i) {\n"
-    "    ivec2 q = clamp(base + ivec2(i & 1, i >> 1), ivec2(0), ivec2(size) - 1);\n"
-    "    float dq = cam(u_uv_rect.xy + (vec2(q) + 0.5)/size*span);\n"
-    "    float w = ((i & 1) != 0 ? f.x : 1.0 - f.x)*((i >> 1) != 0 ? f.y : 1.0 - f.y) + 1e-3;\n"
-    "    w *= (d > 0.0 && dq > 0.0) ? exp(-abs(dq - d)/(0.02*d + 2.0)) : (d <= 0.0 && dq <= 0.0 ? 1.0 : 1e-3);\n"
+    "  for (int y = -1; y <= 1; ++y) for (int x = -1; x <= 1; ++x) {\n"
+    "    ivec2 q = clamp(base + ivec2(x, y), ivec2(0), ivec2(size) - 1);\n"
+    "    vec4 g = texelFetch(u_lamp_geo, q, 0);\n"
+    "    vec2 off = vec2(q) - place; float w = exp(-1.5*dot(off, off)) + 1e-6;\n"
+    "    if (d > 0.0 && g.w > 0.0) {\n"
+    "      w *= exp(-abs(g.w - d)/(0.02*d + 2.0));\n"
+    "      if (dot(n, n) > 0.5 && dot(g.xyz, g.xyz) > 0.5) w *= pow(max(dot(n, g.xyz), 0.0), 8.0) + 1e-4; }\n"
+    "    else if ((d > 0.0) != (g.w > 0.0)) w *= 1e-3;\n"
     "    sum += texelFetch(u_lamps, q, 0)*w; ws += w; }\n"
     "  return sum/ws; }\n"
     "/* The fog's share of a pixel cannot be taken out of it (the game's vertex light scales the fog colour too, and a\n"
@@ -337,7 +346,8 @@ static const char *DDGI_MIX_FS =
 static const char *DDGI_LAMP_FS =
     "#version 330\n" DDGI_GLSL_COMMON DDGI_GLSL_APPLY DDGI_GLSL_BVH
     "#define CASTERS " DDGI_STR(GPU_DDGI_CASTERS) "\n#define LAMPS " DDGI_STR(GPU_DDGI_LAMPS) "\n"
-    "out vec4 frag;\n"
+    "layout(location = 0) out vec4 frag;\n"
+    "layout(location = 1) out vec4 geo;  /* the camera normal the light was worked out for (0 for a sprite) and its depth */\n"
     "uniform vec4 u_rect, u_size, u_eye;  /* the part shown, this target's size, the camera's world place */\n"
     "uniform vec4 u_count;   /* casters, lamps, unused, the light every pixel has besides the lamps */\n"
     "uniform vec4 u_shadow;  /* shadow strength, contact strength, the most a shadow takes, the dynamic lights' strength */\n"
@@ -453,6 +463,7 @@ static const char *DDGI_LAMP_FS =
     "  bool sprite = mark > 0.4 && mark < 0.6;\n"
     "  float d = sprite ? cam(uv) : flat_surf(uv);\n"
     "  frag = vec4(0.0, 0.0, 0.0, 1.0);\n"
+    "  geo = vec4(0.0, 0.0, 0.0, max(d, 0.0));\n"
     "  if (d <= 0.0) return;\n"
     "  float fog = 0.0;\n"
     "  if (u_fog.w > 0.5) fog = clamp((d*(1.0 + u_fog.z*abs(2.0*(uv.x - u_rect.x)/(u_rect.z - u_rect.x) - 1.0)) - u_fog.x)/u_fog.y, 0.0, 1.0);\n"
@@ -463,6 +474,7 @@ static const char *DDGI_LAMP_FS =
     "    vec3 nc = cross(edge(uv, vec2(0.0, u_texel.w*u_texel.y), pc, d), edge(uv, vec2(u_texel.w*u_texel.x, 0.0), pc, d));\n"
     "    if (dot(nc, nc) <= 1e-12) return;\n"
     "    nc = normalize(nc); if (dot(nc, pc) > 0.0) nc = -nc;\n"
+    "    geo.xyz = nc;\n"
     "    n = normalize(back_turn(nc)); }\n"
     "  int casters = int(u_count.x), lamps = int(u_count.y), near[CASTERS], nearby = 0;\n"
     "  for (int j = 0; j < casters; ++j) { vec3 to = u_caster[2*j].xyz - p; if (dot(to, to) < 1.6e7) near[nearby++] = j; }\n"
@@ -560,8 +572,8 @@ typedef struct {
     GLuint mix_prog, lamp_prog;
     DdgiApplyUniforms mu, lu;
     DdgiLampUniforms la;
-    GLint mix_lamps, mix_lit, mix_fog;
-    GLuint lamp_tex, lamp_fbo, cast_tex, mask_tex;
+    GLint mix_lamps, mix_lit, mix_fog, mix_geo;
+    GLuint lamp_tex, lamp_fbo, cast_tex, mask_tex, geo_tex;
     int lamp_w, lamp_h, lamp_ready;
     DdgiFrame frame;
 } DdgiContext;
@@ -1662,6 +1674,7 @@ static DdgiContext *ddgi_context(int thread) {
     ctx->mix_lamps = ddgi_uniform(ctx->mix_prog, "u_lamps");
     ctx->mix_lit = ddgi_uniform(ctx->mix_prog, "u_lit");
     ctx->mix_fog = ddgi_uniform(ctx->mix_prog, "u_fog");
+    ctx->mix_geo = ddgi_uniform(ctx->mix_prog, "u_lamp_geo");
     const GLuint l = ctx->lamp_prog;
     ctx->la = (DdgiLampUniforms){ddgi_uniform(l, "u_nodes"), ddgi_uniform(l, "u_tris"),   ddgi_uniform(l, "u_vram"),
                                  ddgi_uniform(l, "u_rect"),  ddgi_uniform(l, "u_size"),   ddgi_uniform(l, "u_eye"),
@@ -1696,10 +1709,22 @@ static void ddgi_lamp_pass(int thread, GLuint color, GLuint depth, float focal_x
     if (!ctx->lamp_fbo || ctx->lamp_w != lw || ctx->lamp_h != lh) {
         if (ctx->lamp_fbo) p_glDeleteFramebuffers(1, &ctx->lamp_fbo);
         if (ctx->lamp_tex) glDeleteTextures(1, &ctx->lamp_tex);
-        ctx->lamp_fbo = ctx->lamp_tex = 0;
+        if (ctx->geo_tex) glDeleteTextures(1, &ctx->geo_tex);
+        ctx->lamp_fbo = ctx->lamp_tex = ctx->geo_tex = 0;
         GLfloat clear_colour[4];
         glGetFloatv(GL_COLOR_CLEAR_VALUE, clear_colour);
-        const int made = ddgi_target(&ctx->lamp_tex, &ctx->lamp_fbo, DDGI_GL_RGBA16F, lw, lh, GL_RGBA, 0);
+        int made = ddgi_target(&ctx->lamp_tex, &ctx->lamp_fbo, DDGI_GL_RGBA16F, lw, lh, GL_RGBA, 0);
+        if (made) {
+            ctx->geo_tex = make_tex(DDGI_GL_RGBA16F, lw, lh, GL_RGBA, GL_FLOAT);
+            glBindTexture(GL_TEXTURE_2D, ctx->geo_tex);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            p_glBindFramebuffer(PSXGL_FRAMEBUFFER, ctx->lamp_fbo);
+            p_glFramebufferTexture2D(PSXGL_FRAMEBUFFER, PSXGL_COLOR_ATTACHMENT0 + 1, GL_TEXTURE_2D, ctx->geo_tex, 0);
+            static const GLenum both[2] = {PSXGL_COLOR_ATTACHMENT0, PSXGL_COLOR_ATTACHMENT0 + 1};
+            p_glDrawBuffers(2, both);
+            made = ctx->geo_tex && p_glCheckFramebufferStatus(PSXGL_FRAMEBUFFER) == PSXGL_FRAMEBUFFER_COMPLETE;
+        }
         glClearColor(clear_colour[0], clear_colour[1], clear_colour[2], clear_colour[3]);
         if (!made) return;
         ctx->lamp_w = lw;
@@ -1849,11 +1874,14 @@ static int ddgi_mix_begin(int thread, GLuint color, GLuint depth, float focal_x,
     ddgi_bind_probes(color, depth);
     p_glActiveTexture(PSXGL_TEXTURE0 + 7);
     glBindTexture(GL_TEXTURE_2D, ctx->lamp_tex);
+    p_glActiveTexture(PSXGL_TEXTURE0 + 8);
+    glBindTexture(GL_TEXTURE_2D, ctx->geo_tex);
     p_glActiveTexture(PSXGL_TEXTURE0);
     p_glUseProgram(ctx->mix_prog);
     ddgi_apply_set(&ctx->mu, &ctx->frame, focal_x, focal_y, centre_x, centre_y, w, h, scale);
     p_glUniform1i(ctx->mu.shade, 1);
     p_glUniform1i(ctx->mix_lamps, 7);
+    p_glUniform1i(ctx->mix_geo, 8);
     p_glUniform4f(ctx->mix_lit, 1.0f, s_ddgi_lamp_view ? 1.0f : 0.0f, 0.0f, 0.0f);
     const float fog_length = s_fade_step * (float)s_fade_rows;
     p_glUniform4f(ctx->mix_fog, s_fade_start, fog_length, s_fade_side, s_fade_rows > 1 && fog_length > 0.0f ? 1.0f : 0.0f);
