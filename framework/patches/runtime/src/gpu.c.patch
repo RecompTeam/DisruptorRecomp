@@ -1,5 +1,5 @@
 diff --git a/runtime/src/gpu.c b/runtime/src/gpu.c
-index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..4730a574680a9207540e6f364830b16a2549a60d 100644
+index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..446253d0d2a9a0a0925b821acad051b9178e8356 100644
 --- a/runtime/src/gpu.c
 +++ b/runtime/src/gpu.c
 @@ -11,6 +11,7 @@
@@ -763,10 +763,10 @@ index 2d3ef4a7441419138f44092a3a7cd507c44a03a6..4730a574680a9207540e6f364830b16a
 +    ws_hud_text_page_y = page_y;
 +}
 +int gpu_current_hud_glyph(void) { return ws_hud_glyph; }
-+int gpu_current_effect_sprite(void) {
++int gpu_current_world_sprite(void) {
 +#ifndef PSX_DISABLE_FRAME_INTERPOLATION
 +    const WsTag *t = temporal_sprite_tag();
-+    return t && t->effect;
++    return t ? 1 | (t->effect ? 2 : 0) : 0;
 +#else
 +    return 0;
 +#endif

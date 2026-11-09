@@ -1,5 +1,5 @@
 diff --git a/runtime/include/gpu.h b/runtime/include/gpu.h
-index 12e9533d7a880b9de3d42a11187216f44b8d217c..bc54ef5bb33edaed10982964a950d98b5824382f 100644
+index 12e9533d7a880b9de3d42a11187216f44b8d217c..e2c54a30e637a4c161d8cf0bc16ae385030fea87 100644
 --- a/runtime/include/gpu.h
 +++ b/runtime/include/gpu.h
 @@ -1,4 +1,4 @@
@@ -202,8 +202,8 @@ index 12e9533d7a880b9de3d42a11187216f44b8d217c..bc54ef5bb33edaed10982964a950d98b
 +void gpu_ws_set_hud_text_source(int clut_x, int clut_y, int page_x, int page_y);
 +/* psx_ws_hud_glyph_code of the rectangle being drawn, 0 for any other. */
 +int gpu_current_hud_glyph(void);
-+/* The packet being drawn is a world effect a title marked (gpu_temporal_effect_sprite): its texture is smoothed. */
-+int gpu_current_effect_sprite(void);
++/* The packet being drawn: 1 a world sprite a title noted (gpu_temporal_note_sprite), 3 one it marked an effect. */
++int gpu_current_world_sprite(void);
 +/* The texture page (two indices) holding the held weapon's picture, negative for none. Its sprites in a HUD layer keep their size and squash about one column, psx_ws_hud_held_pivot of the first. */
 +void gpu_ws_set_hud_held_page(int page_x, int page_y);
  /* [widescreen] full_2d: opt a pure-2D sprite game into the widescreen present

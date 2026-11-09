@@ -8,7 +8,8 @@
 #define RTHF_BD_SHIFT 2
 #define RTHF_FLAT    0x0010u
 #define RTHF_SKY     0x0020u
-#define RTHF_EFFECT  0x0040u
+#define RTHF_SPRITE  0x0040u
+#define RTHF_EFFECT  0x0080u
 
 static uint16_t *s_rth_vram_pub = NULL, *s_rth_vram_priv = NULL;
 static int s_rthm_area[4] = {0, 0, VRAM_W - 1, VRAM_H - 1};
@@ -40,7 +41,7 @@ static int ctx_drawing_flat(void) { return rth_replaying() ? s_rthx_flat : gpu_w
 static int ctx_packet_fade(void) { return rth_replaying() ? s_rthx_fade : gpu_current_packet_fade(); }
 static int ctx_hud_glyph(void) { return rth_replaying() ? s_rthx_glyph : gpu_current_hud_glyph(); }
 static int ctx_sky_fogged(void) { return rth_replaying() ? s_rthx_sky : gpu_sky_fogged(); }
-static int ctx_effect_sprite(void) { return rth_replaying() ? s_rthx_effect : gpu_current_effect_sprite(); }
+static int ctx_world_sprite(void) { return rth_replaying() ? s_rthx_world_sprite : gpu_current_world_sprite(); }
 static int ctx_depth24(void) { return rth_replaying() ? 0 : gpu_display_is_depth24(); }
 static void ctx_x_squash(int32_t *num, int32_t *den) {
     if (rth_replaying()) { *num = s_rthx_squash[0]; *den = s_rthx_squash[1]; return; }
@@ -126,7 +127,10 @@ static uint16_t rth_prim_flags(void) {
     if (gpu_sky_fogged()) flags |= RTHF_SKY;
     return flags;
 }
-static uint16_t rth_tex_flags(void) { return (uint16_t)(rth_prim_flags() | (gpu_current_effect_sprite() ? RTHF_EFFECT : 0)); }
+static uint16_t rth_tex_flags(void) {
+    const int kind = gpu_current_world_sprite();
+    return (uint16_t)(rth_prim_flags() | (kind & 1 ? RTHF_SPRITE : 0) | (kind & 2 ? RTHF_EFFECT : 0));
+}
 
 /* ---- the recording backend ------------------------------------------------ */
 static void rtb_init(uint16_t *vram) { GL_RT_SYNC("init"); glb_init(vram); }
@@ -469,7 +473,7 @@ static void rth_prim_begin(uint16_t flags, int fade, int glyph) {
     s_rthx_backdrop = (flags >> RTHF_BD_SHIFT) & 3;
     s_rthx_flat = (flags & RTHF_FLAT) != 0;
     s_rthx_sky = (flags & RTHF_SKY) != 0;
-    s_rthx_effect = (flags & RTHF_EFFECT) != 0;
+    s_rthx_world_sprite = ((flags & RTHF_SPRITE) ? 1 : 0) | ((flags & RTHF_EFFECT) ? 2 : 0);
     s_rthx_fade = fade;
     s_rthx_glyph = glyph;
 }
