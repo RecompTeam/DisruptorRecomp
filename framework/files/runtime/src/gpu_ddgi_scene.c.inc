@@ -151,11 +151,12 @@ static void ddgi_scene_casters(const DdgiList *list, const float eye[3], GpuDdgi
         const GpuDdgiCard *card = &list->cards[order[n]];
         if (psx_ddgi_card_blocking(card) < 0.02f || card->bounds[2] <= card->bounds[0] || card->bounds[3] <= card->bounds[1])
             continue;
-        /* No shadow from an added picture or a white flash: a drone's bright frame (0.71) must not blink its shadow. */
+        /* No shadow from a glow: an added picture bright or nearly all blended, or a white flash. A drone's bright frame (0.71)
+         * keeps its shadow, so do mission 2's fliers: added a quarter, half their texels blended, under 0.33 bright. */
         float shown[3];
         for (int k = 0; k < 3; ++k) shown[k] = card->texels[k] * ((card->flags & 2) ? 1.0f : card->colour[k] * 2.0f / 255.0f);
-        const int abr = (card->texpage >> 5) & 3;
-        if (((card->flags & 1) && (abr == 1 || abr == 3)) || ddgi_lum(shown) > 0.9f) continue;
+        const int abr = (card->texpage >> 5) & 3, added = (card->flags & 1) && (abr == 1 || abr == 3);
+        if ((added && (card->blended > 0.8f || ddgi_lum(shown) > 0.6f)) || ddgi_lum(shown) > 0.9f) continue;
         const float x0 = 2.0f * card->bounds[0] - 1.0f, x1 = 2.0f * card->bounds[2] - 1.0f;
         const float y0 = 2.0f * card->bounds[1] - 1.0f, y1 = 2.0f * card->bounds[3] - 1.0f;
         const float wide = sqrtf(card->across[0] * card->across[0] + card->across[1] * card->across[1] +
