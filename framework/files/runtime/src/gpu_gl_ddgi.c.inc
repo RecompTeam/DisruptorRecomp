@@ -22,6 +22,8 @@
 #define DDGI_GL_R32UI 0x8236
 #define DDGI_GL_RED_INTEGER 0x8D94
 #define DDGI_GL_RGBA16F 0x881A
+#define DDGI_SUN_UNIT 16 /* the sun map and the sky maps: unit 14 holds the sky grown above the panorama, bound once a level */
+#define DDGI_SKY_UNIT 17
 #define DDGI_GL_RG32F 0x8230
 #define DDGI_GL_RG 0x8227
 #define DDGI_GL_R8 0x8229
@@ -1795,15 +1797,15 @@ static void ddgi_lamp_pass(int thread, GLuint color, GLuint depth, float focal_x
     p_glActiveTexture(PSXGL_TEXTURE0);
     p_glUniform1i(ctx->la.cast, 12);
     p_glUniform1i(ctx->la.mask, 13);
-    p_glActiveTexture(PSXGL_TEXTURE0 + 14);
+    p_glActiveTexture(PSXGL_TEXTURE0 + DDGI_SUN_UNIT);
     int maps = 1;
     for (int m = 0; m <= DDGI_SKY_MAPS; ++m) maps &= s_ddgi_sunmap_ready[m];
     glBindTexture(GL_TEXTURE_2D, maps ? s_ddgi_sunmap_tex[0] : 0);
-    p_glActiveTexture(PSXGL_TEXTURE0 + 15);
+    p_glActiveTexture(PSXGL_TEXTURE0 + DDGI_SKY_UNIT);
     glBindTexture(GL_TEXTURE_2D, maps ? s_ddgi_sunmap_tex[1] : 0);
     p_glActiveTexture(PSXGL_TEXTURE0);
-    p_glUniform1i(ctx->la.sunmap, 14);
-    p_glUniform1i(ctx->la.skymap, 15);
+    p_glUniform1i(ctx->la.sunmap, DDGI_SUN_UNIT);
+    p_glUniform1i(ctx->la.skymap, DDGI_SKY_UNIT);
     const GLint sun_rows[3] = {ctx->la.sunrow0, ctx->la.sunrow1, ctx->la.sunrow2};
     for (int r = 0; r < 3; ++r)
         p_glUniform4f(sun_rows[r], s_ddgi_sunmap_rows[0][r][0], s_ddgi_sunmap_rows[0][r][1], s_ddgi_sunmap_rows[0][r][2],
@@ -1856,9 +1858,9 @@ static void ddgi_lamp_pass(int thread, GLuint color, GLuint depth, float focal_x
     glBindTexture(GL_TEXTURE_2D, 0);
     p_glActiveTexture(PSXGL_TEXTURE0 + 13);
     glBindTexture(GL_TEXTURE_2D, 0);
-    p_glActiveTexture(PSXGL_TEXTURE0 + 14);
+    p_glActiveTexture(PSXGL_TEXTURE0 + DDGI_SUN_UNIT);
     glBindTexture(GL_TEXTURE_2D, 0);
-    p_glActiveTexture(PSXGL_TEXTURE0 + 15);
+    p_glActiveTexture(PSXGL_TEXTURE0 + DDGI_SKY_UNIT);
     glBindTexture(GL_TEXTURE_2D, 0);
     p_glActiveTexture(PSXGL_TEXTURE0);
     ctx->lamp_ready = 1;
