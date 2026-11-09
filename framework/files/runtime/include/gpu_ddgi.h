@@ -119,6 +119,20 @@ void gl_renderer_set_ddgi_lamps(int enabled);
 int gl_renderer_ddgi_lamps(void);
 void gl_renderer_set_ddgi_lamp_strength(float strength);
 float gl_renderer_ddgi_lamp_strength(void);
+/* Light scattered in the air: the sun's through openings, the glow of lamps and shots; amounts as times their base. */
+void gl_renderer_set_ddgi_air(int enabled);
+int gl_renderer_ddgi_air(void);
+/* Sunlit air out in the open as haze too; off, the sun shows only in air under cover. */
+void gl_renderer_set_ddgi_air_open(int enabled);
+int gl_renderer_ddgi_air_open(void);
+void gl_renderer_set_ddgi_air_haze(float amount);
+float gl_renderer_ddgi_air_haze(void);
+void gl_renderer_set_ddgi_air_sun(float amount);
+float gl_renderer_ddgi_air_sun(void);
+void gl_renderer_set_ddgi_air_lamps(float amount);
+float gl_renderer_ddgi_air_lamps(void);
+void gl_renderer_set_ddgi_air_shots(float amount);
+float gl_renderer_ddgi_air_shots(void);
 /* The shadows grey and the added light alone. */
 void gl_renderer_set_ddgi_lamp_view(int enabled);
 int gl_renderer_ddgi_lamp_view(void);

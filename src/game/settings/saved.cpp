@@ -387,6 +387,42 @@ void read_game_user_settings(const toml::value& doc, UserSettings& s) {
                 s.has_sun_raise = true;
             }
         });
+        if (d.contains("air_light")) try_get([&]{
+            s.air_light = toml::find<bool>(d, "air_light");
+            s.has_air_light = true;
+        });
+        if (d.contains("air_open")) try_get([&]{
+            s.air_open = toml::find<bool>(d, "air_open");
+            s.has_air_open = true;
+        });
+        if (d.contains("air_haze")) try_get([&]{
+            const int amount = toml::find<int>(d, "air_haze");
+            if (amount >= 0 && amount <= 400) {
+                s.air_haze = amount;
+                s.has_air_haze = true;
+            }
+        });
+        if (d.contains("air_sun")) try_get([&]{
+            const int amount = toml::find<int>(d, "air_sun");
+            if (amount >= 0 && amount <= 400) {
+                s.air_sun = amount;
+                s.has_air_sun = true;
+            }
+        });
+        if (d.contains("air_lamps")) try_get([&]{
+            const int amount = toml::find<int>(d, "air_lamps");
+            if (amount >= 0 && amount <= 400) {
+                s.air_lamps = amount;
+                s.has_air_lamps = true;
+            }
+        });
+        if (d.contains("air_shots")) try_get([&]{
+            const int amount = toml::find<int>(d, "air_shots");
+            if (amount >= 0 && amount <= 400) {
+                s.air_shots = amount;
+                s.has_air_shots = true;
+            }
+        });
         /* The switch movie_filter replaced: off keeps the movies as they are, on takes the filter's default. */
         if (d.contains("smooth_movies") && !d.contains("movie_filter")) try_get([&]{
             if (!toml::find<bool>(d, "smooth_movies")) {
@@ -457,7 +493,8 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
         s.has_probe_lighting || s.has_probe_strength ||
         s.has_dynamic_shadows || s.has_shadow_strength || s.has_shadow_underneath ||
         s.has_shot_lights || s.has_shot_light_strength || s.has_sun_lighting || s.has_sun_turn ||
-        s.has_sun_raise || s.has_dynamic_resolution || s.has_resolution || s.has_render_thread ||
+        s.has_sun_raise || s.has_air_light || s.has_air_open || s.has_air_haze || s.has_air_sun || s.has_air_lamps || s.has_air_shots ||
+        s.has_dynamic_resolution || s.has_resolution || s.has_render_thread ||
         s.has_high_precision_camera || s.has_geometry_correction ||
         s.has_perspective_textures || s.has_frame_unlock ||
         s.has_ambient_occlusion || s.has_occlusion_reach || s.has_occlusion_strength || s.has_smooth_fade ||
@@ -629,6 +666,18 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
             f << "sun_turn = " << s.sun_turn << "\n";
         if (s.has_sun_raise && s.sun_raise >= -45 && s.sun_raise <= 45)
             f << "sun_raise = " << s.sun_raise << "\n";
+        if (s.has_air_light)
+            f << "air_light = " << (s.air_light ? "true" : "false") << "\n";
+        if (s.has_air_open)
+            f << "air_open = " << (s.air_open ? "true" : "false") << "\n";
+        if (s.has_air_haze && s.air_haze >= 0 && s.air_haze <= 400)
+            f << "air_haze = " << s.air_haze << "\n";
+        if (s.has_air_sun && s.air_sun >= 0 && s.air_sun <= 400)
+            f << "air_sun = " << s.air_sun << "\n";
+        if (s.has_air_lamps && s.air_lamps >= 0 && s.air_lamps <= 400)
+            f << "air_lamps = " << s.air_lamps << "\n";
+        if (s.has_air_shots && s.air_shots >= 0 && s.air_shots <= 400)
+            f << "air_shots = " << s.air_shots << "\n";
         if (s.has_movie_filter && s.movie_filter >= 0 && s.movie_filter < kDisruptorMovieFilterCount)
             f << "movie_filter = " << quoted(kDisruptorMovieFilters[s.movie_filter]) << "\n";
         if (s.has_draw_distance &&

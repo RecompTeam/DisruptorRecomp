@@ -80,6 +80,12 @@ struct GameUserSettings {
     bool has_sun_lighting = false; bool sun_lighting = false;
     bool has_sun_turn = false; int sun_turn = 0;              // degrees the found sun is turned round, 0..360
     bool has_sun_raise = false; int sun_raise = 0;            // degrees it is raised, -45..45
+    bool has_air_light = false; bool air_light = false;       // light scattered in the air
+    bool has_air_open = false; bool air_open = false;         // sunlit air in the open as haze too
+    bool has_air_haze = false; int air_haze = 200;            // percent, 0..400, as the next three
+    bool has_air_sun = false; int air_sun = 200;
+    bool has_air_lamps = false; int air_lamps = 50;
+    bool has_air_shots = false; int air_shots = 100;
     // An index into kDisruptorDiagnosticViews. A session's own: at start only a capsule's replay takes it from the file.
     bool has_diagnostic_view = false; int diagnostic_view = 0;
 };

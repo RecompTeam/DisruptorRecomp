@@ -24,6 +24,10 @@
 #define DDGI_GL_RGBA16F 0x881A
 #define DDGI_SUN_UNIT 16 /* the sun map and the sky maps: unit 14 holds the sky grown above the panorama, bound once a level */
 #define DDGI_SKY_UNIT 17
+#define DDGI_AIR_W 64
+#define DDGI_AIR_H 16
+#define DDGI_AIR_D 64
+#define DDGI_AIR_CELL 256.0f /* 0.13..0.23 ms a game frame at a 4090, lamp light is broad and the sun goes by its map */
 #define DDGI_GL_RG32F 0x8230
 #define DDGI_GL_RG 0x8227
 #define DDGI_GL_R8 0x8229
@@ -282,7 +286,7 @@ static const char *DDGI_CLASSIFY_FS =
 static const char *DDGI_MIX_FS =
     "#version 330\n" DDGI_GLSL_COMMON DDGI_GLSL_APPLY
     "in vec2 v_uv; out vec4 frag;\n"
-    "uniform sampler2D u_shade, u_lamps, u_lamp_geo;\n"
+    "uniform sampler2D u_shade, u_lamps, u_lamp_geo, u_lamp_air;\n"
     "uniform vec4 u_span, u_uv_rect;\n"
     "uniform vec4 u_lit;  /* 1 with the lamps' texture, 1 to show it alone, 1 with the probes' light */\n"
     "uniform vec4 u_fog;  /* the game's fog as in the lamp pass */\n"
@@ -293,7 +297,7 @@ static const char *DDGI_MIX_FS =
     "vec3 soft(vec3 r){ return mix(r, 1.0 + (r - 1.0)/(1.0 + 0.5*(r - 1.0)), step(1.0, r)); }\n"
     "/* The small lamp texture at uv: nine texels round it weighed by distance, depth and how alike their surface faces, so a\n"
     "   wall's light stays off the floor at its foot, where the depths agree and a depth test alone drew the texels' steps. */\n"
-    "vec4 lamp_at(vec2 uv){\n"
+    "vec4 lamp_at(vec2 uv, out vec3 air){\n"
     "  float d = cam(uv);\n"
     "  vec3 n = vec3(0.0);\n"
     "  float fd = flat_surf(uv);\n"
@@ -302,7 +306,7 @@ static const char *DDGI_MIX_FS =
     "    if (dot(nc, nc) > 1e-12) { n = normalize(nc); if (dot(n, pc) > 0.0) n = -n; } }\n"
     "  vec2 size = vec2(textureSize(u_lamps, 0)), span = u_uv_rect.zw - u_uv_rect.xy;\n"
     "  vec2 place = (uv - u_uv_rect.xy)/span*size - 0.5; ivec2 base = ivec2(floor(place + 0.5));\n"
-    "  vec4 sum = vec4(0.0); float ws = 0.0;\n"
+    "  vec4 sum = vec4(0.0); float ws = 0.0; air = vec3(0.0);\n"
     "  for (int y = -1; y <= 1; ++y) for (int x = -1; x <= 1; ++x) {\n"
     "    ivec2 q = clamp(base + ivec2(x, y), ivec2(0), ivec2(size) - 1);\n"
     "    vec4 g = texelFetch(u_lamp_geo, q, 0);\n"
@@ -311,14 +315,15 @@ static const char *DDGI_MIX_FS =
     "      w *= exp(-abs(g.w - d)/(0.02*d + 2.0));\n"
     "      if (dot(n, n) > 0.5 && dot(g.xyz, g.xyz) > 0.5) w *= pow(max(dot(n, g.xyz), 0.0), 8.0) + 1e-4; }\n"
     "    else if ((d > 0.0) != (g.w > 0.0)) w *= 1e-3;\n"
-    "    sum += texelFetch(u_lamps, q, 0)*w; ws += w; }\n"
+    "    sum += texelFetch(u_lamps, q, 0)*w; air += texelFetch(u_lamp_air, q, 0).rgb*w; ws += w; }\n"
+    "  air /= ws;\n"
     "  return sum/ws; }\n"
     "/* The fog's share of a pixel cannot be taken out of it (the game's vertex light scales the fog colour too, and a\n"
     "   * subtraction flattened half-fogged walls), so the lamps' factor and light fade out with the fog instead. */\n"
-    "vec3 lamped(vec3 c, vec3 gain, vec4 lamp, float f){\n"
+    "vec3 lamped(vec3 c, vec3 gain, vec4 lamp, float f, vec3 air){\n"
     "  c = max(c, vec3(0.0))*max(gain, vec3(0.0));\n"
     "  float a = mix(1.0, lamp.a >= 0.2 ? min(lamp.a, 2.0) : (lamp.a < 0.2 ? 0.2 : 1.0), 1.0 - f);\n"
-    "  return pow(max(pow(c, vec3(2.2))*a + lamp.rgb*(1.0 - f), vec3(0.0)), vec3(1.0/2.2)); }\n"
+    "  return pow(max(pow(c, vec3(2.2))*a + lamp.rgb*(1.0 - f) + air, vec3(0.0)), vec3(1.0/2.2)); }\n"
     "void main(){\n"
     "  ivec2 at_shade = ivec2((gl_FragCoord.xy - u_span.xy) / max(u_span.w, 1.0)), most = textureSize(u_shade, 0) - 1;\n"
     "  vec4 here = texelFetch(u_shade, clamp(at_shade, ivec2(0), most), 0);\n"
@@ -328,11 +333,13 @@ static const char *DDGI_MIX_FS =
     "  if (u_span.z > 2.5) { frag = vec4(here.g == 0.0 ? vec3(0.0, 0.0, 0.25) : here.rgb, 1.0); return; }\n"
     "  /* A flat picture over the world (the weapon in hand, the HUD) is no surface of it: it keeps its colours. */\n"
     "  bool over = flat_picture(seen.a);\n"
-    "  vec4 lamp = u_lit.x > 0.5 && !over ? lamp_at(v_uv) : vec4(0.0, 0.0, 0.0, 1.0);\n"
-    "  if (u_lit.y > 0.5) { frag = vec4(vec3(lamp.a*0.5) + pow(max(lamp.rgb, vec3(0.0)), vec3(1.0/2.2)), 1.0); return; }\n"
+    "  vec3 air = vec3(0.0);\n"
+    "  vec4 lamp = u_lit.x > 0.5 && !over ? lamp_at(v_uv, air) : vec4(0.0, 0.0, 0.0, 1.0);\n"
+    "  if (u_lit.z > 0.5) { frag = vec4(pow(max(air, vec3(0.0)), vec3(1.0/2.2)), 1.0); return; }\n"
+    "  if (u_lit.y > 0.5) { frag = vec4(vec3(lamp.a*0.5) + pow(max(lamp.rgb + air, vec3(0.0)), vec3(1.0/2.2)), 1.0); return; }\n"
     "  if (over && u_span.z < 1.5) { frag = seen; return; }\n"
     "  float f = u_lit.x > 0.5 ? fog_at(v_uv, cam(v_uv)) : 0.0;\n"
-    "  frag = vec4(u_span.z > 1.5 ? vec3(0.0, 0.0, 0.25) : lamped(c, vec3(1.0), lamp, f), seen.a);\n"
+    "  frag = vec4(u_span.z > 1.5 ? vec3(0.0, 0.0, 0.25) : lamped(c, vec3(1.0), lamp, f, air), seen.a);\n"
     "  if (here.g == 0.0) { if (u_ddgi.y > 0.5) frag = vec4(0.0, 0.0, 0.25, seen.a); return; }\n"
     "  float lit = 0.0, count = 0.0;\n"
     "  for (int y = -2; y < 2; ++y) for (int x = -2; x < 2; ++x) {\n"
@@ -340,7 +347,7 @@ static const char *DDGI_MIX_FS =
     "    if (near.g == 0.0 || abs(near.g - here.g) > 2.5/255.0) continue;\n"
     "    lit += near.r; count += 1.0; }\n"
     "  lit = count > 0.0 ? lit/count : here.r;\n"
-    "  frag = vec4(u_span.z > 1.5 ? vec3(lit) : lamped(c, vec3(lit), lamp, f), seen.a); }\n";
+    "  frag = vec4(u_span.z > 1.5 ? vec3(lit) : lamped(c, vec3(lit), lamp, f, air), seen.a); }\n";
 
 /* Half size: the casters' shadow from the level's lights and under themselves (a), the dynamic lights' light times the
  * surface's own colour (rgb, linear). A caster is an ellipsoid for the shade under it and its own picture, turned to face the
@@ -350,6 +357,8 @@ static const char *DDGI_LAMP_FS =
     "#define CASTERS " DDGI_STR(GPU_DDGI_CASTERS) "\n#define LAMPS " DDGI_STR(GPU_DDGI_LAMPS) "\n"
     "layout(location = 0) out vec4 frag;\n"
     "layout(location = 1) out vec4 geo;  /* the camera normal the light was worked out for (0 for a sprite) and its depth */\n"
+    "layout(location = 2) out vec4 air;  /* the light the air before it scatters toward the eye, linear */\n"
+    "#define AIR_W " DDGI_STR(DDGI_AIR_W) "\n#define AIR_H " DDGI_STR(DDGI_AIR_H) "\n#define AIR_D " DDGI_STR(DDGI_AIR_D) "\n"
     "uniform vec4 u_rect, u_size, u_eye;  /* the part shown, this target's size, the camera's world place */\n"
     "uniform vec4 u_count;   /* casters, lamps, unused, the light every pixel has besides the lamps */\n"
     "uniform vec4 u_shadow;  /* shadow strength, contact strength, the most a shadow takes, the dynamic lights' strength */\n"
@@ -453,6 +462,54 @@ static const char *DDGI_LAMP_FS =
     "  if (bvh_hit(o, d, 2.0, best, hu, hv, true, true) >= 0) return true;\n"
     "  best = len*0.95 - 16.0;\n"
     "  return u_level.x > 0.5 && bvh_hit_in(u_level_nodes, u_level_tris, o, d, 2.0, best, hu, hv, true, true) >= 0; }\n"
+    "uniform sampler2D u_air, u_airshot;\n"
+    "/* The air atlas: layer y of the volume at x + y*AIR_W; c in cells, centres at .5. Two taps, x kept off the tiles' edges. */\n"
+    "vec4 air_fetch(sampler2D t, vec3 c){\n"
+    "  c = clamp(c, vec3(0.5), vec3(AIR_W, AIR_H, AIR_D) - 0.5);\n"
+    "  float l0 = floor(c.y - 0.5), f = c.y - 0.5 - l0, l1 = min(l0 + 1.0, float(AIR_H) - 1.0);\n"
+    "  vec2 size = vec2(float(AIR_W*AIR_H), float(AIR_D));\n"
+    "  return mix(texture(t, vec2(c.x + l0*float(AIR_W), c.z)/size), texture(t, vec2(c.x + l1*float(AIR_W), c.z)/size), f); }\n"
+    "uniform vec4 u_airbox, u_airlook, u_airtint;  /* the air volume's corner and cell; density a 1000 units, sun, steps, far; the fog's hue */\n"
+    "uniform vec4 u_airmode;  /* 1 for haze in the open, the sun's forward lobe g */\n"
+    "/* The light the air between the eye and p scatters toward it, each step as much as the game's fog leaves of it there: the\n"
+    "   sun by its map at the step (from the volume's cells it lit a corridor exact casts leave dark), lamps and shots by the volume. */\n"
+    "vec3 air_light(vec3 p, float depth_end, vec2 uv){\n"
+    "  vec3 ray = p - u_eye.xyz; float len = length(ray); vec3 dir = ray/max(len, 1.0);\n"
+    "  float side = abs(2.0*(uv.x - u_rect.x)/(u_rect.z - u_rect.x) - 1.0), fog_per = depth_end*(1.0 + u_fog.z*side)/max(len, 1.0);\n"
+    "  float reach = u_fog.w > 0.5 && fog_per > 0.0 ? min(len, (u_fog.x + u_fog.y)/fog_per) : len;  /* past it the fog hides all */\n"
+    "  int steps = int(u_airlook.z); float dt = reach/float(max(steps, 1)), sigma = u_airlook.x/1000.0;\n"
+    "  float jitter = fract(52.9829189*fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));\n"
+    "  /* Light in the game's units, 1 shows a texel as it is, so a surface's E stands for pi times a radiance: the sun scatters by\n"
+    "     Henyey-Greenstein (g 0.5 glared in the eyes looking toward the sun, now 0.25), the lamps evenly, pi/4pi. */\n"
+    "  float g = u_airmode.y, cosine = dot(dir, u_sun.xyz), hg = (1.0 - g*g)/(12.566371*pow(1.0 + g*g - 2.0*g*cosine, 1.5));\n"
+    "  vec3 sun = vec3(1.0, 0.94, 0.82)*(3.14159265*u_airlook.y*hg), size = u_airbox.w*vec3(AIR_W, AIR_H, AIR_D), sum = vec3(0.0);\n"
+    "  float bias = length(u_sunrow2.xyz)/(2048.0*length(u_sunrow0.xyz));  /* a texel in depth, held against: by a wall the sun grazes air was lit */\n"
+    "  for (int k = 0; k < 48 && k < steps; ++k) {\n"
+    "    float t = (float(k) + jitter)*dt; vec3 s = u_eye.xyz + dir*t, c = (s - u_airbox.xyz)/max(size, vec3(1.0)), local = vec3(0.0);\n"
+    "    if (u_airbox.w > 0.0 && all(greaterThanEqual(c, vec3(0.0))) && all(lessThanEqual(c, vec3(1.0))))\n"
+    "      local = air_fetch(u_air, c*vec3(AIR_W, AIR_H, AIR_D)).rgb + air_fetch(u_airshot, c*vec3(AIR_W, AIR_H, AIR_D)).rgb;\n"
+    "    float lit = 0.0;\n"
+    "    if (u_airlook.y > 0.0) {\n"
+    "      vec3 q = vec3(dot(u_sunrow0.xyz, s) + u_sunrow0.w, dot(u_sunrow1.xyz, s) + u_sunrow1.w, dot(u_sunrow2.xyz, s) + u_sunrow2.w);\n"
+    "      float map = texture(u_sunmap, clamp(q.xy, 0.0, 1.0)).r;  /* past the far plane only a column with no face is lit */\n"
+    "      lit = any(lessThan(q.xy, vec2(0.0))) || any(greaterThan(q.xy, vec2(1.0))) || q.z < 0.0 || (q.z > 1.0 ? map >= 1.0 : map >= q.z + bias) ? 1.0 : 0.0;\n"
+    "      if (lit > 0.0 && u_airmode.x < 0.5) {  /* no haze in the open: lit air counts as much as the five sky ways are shut over it */\n"
+    "        float open = 0.0;\n"
+    "        for (int k = 0; k < 5; ++k) {\n"
+    "          vec4 r0 = u_skyrow[3*k], r1 = u_skyrow[3*k + 1], r2 = u_skyrow[3*k + 2];\n"
+    "          vec3 w = vec3(dot(r0.xyz, s) + r0.w, dot(r1.xyz, s) + r1.w, dot(r2.xyz, s) + r2.w);\n"
+    "          float above = length(r2.xyz)/(1024.0*length(r0.xyz));\n"
+    "          open += any(lessThan(w, vec3(0.0))) || any(greaterThan(w, vec3(1.0))) ||\n"
+    "                  texture(u_skymap, vec2((float(k) + w.x)/5.0, w.y)).r >= w.z - above ? 0.2 : 0.0; }\n"
+    "        lit *= 1.0 - open; } }\n"
+    "    float fog = u_fog.w > 0.5 ? clamp((t*fog_per - u_fog.x)/u_fog.y, 0.0, 1.0) : 0.0;\n"
+    "    sum += (sun*lit + local*0.25)*(1.0 - fog)*exp(-sigma*t); }\n"
+    "  return sum*sigma*dt*u_airtint.rgb; }\n"
+    "/* For the offline reference (u_airtint.w 2): where the ray ends from the eye and the fog's depth scale there, a sixteenth. */\n"
+    "vec4 air_at(vec3 e, float depth_end, vec2 uv){\n"
+    "  if (u_airtint.w < 1.5) return vec4(air_light(e, depth_end, uv), 1.0);\n"
+    "  float side = abs(2.0*(uv.x - u_rect.x)/(u_rect.z - u_rect.x) - 1.0);\n"
+    "  return vec4(e - u_eye.xyz, depth_end*(1.0 + u_fog.z*side))/16.0; }\n"
     "/* What the frame drew alone: an added light's every pixel asks, the level's BVH too doubled the pass's cost. */\n"
     "bool blocked_frame(vec3 o, vec3 q){\n"
     "  vec3 d = q - o; float len = length(d); if (len < 40.0) return false;\n"
@@ -466,11 +523,20 @@ static const char *DDGI_LAMP_FS =
     "  float d = sprite ? cam(uv) : flat_surf(uv);\n"
     "  frag = vec4(0.0, 0.0, 0.0, 1.0);\n"
     "  geo = vec4(0.0, 0.0, 0.0, max(d, 0.0));\n"
-    "  if (d <= 0.0) return;\n"
+    "  air = vec4(0.0, 0.0, 0.0, 1.0);\n"
+    "  bool airy = u_airlook.x > 0.0 && !flat_picture(mark);  /* the HUD and the weapon take none, the mix leaves them alone */\n"
+    "  if (d <= 0.0) {  /* the sky: the air on the way to it, as far as u_airlook.w or a level face (a crack in a closed room) */\n"
+    "    if (airy) {\n"
+    "      vec3 e = back_turn(at(uv, u_airlook.w) - vec3(u_back0.w, u_back1.w, u_back2.w)) + u_offset.xyz, ray = e - u_eye.xyz;\n"
+    "      float len = length(ray), best = len, hu, hv;\n"
+    "      if (u_level.x > 0.5) bvh_hit_in(u_level_nodes, u_level_tris, u_eye.xyz, ray/len, 1.0, best, hu, hv, true, false);\n"
+    "      air = air_at(u_eye.xyz + ray*(best/len), u_airlook.w*best/len, uv); }\n"
+    "    return; }\n"
     "  float fog = 0.0;\n"
     "  if (u_fog.w > 0.5) fog = clamp((d*(1.0 + u_fog.z*abs(2.0*(uv.x - u_rect.x)/(u_rect.z - u_rect.x) - 1.0)) - u_fog.x)/u_fog.y, 0.0, 1.0);\n"
-    "  if (fog >= 1.0) return;\n"
     "  vec3 pc = at(uv, d), p = back_turn(pc - vec3(u_back0.w, u_back1.w, u_back2.w)) + u_offset.xyz, n;\n"
+    "  if (airy) air = air_at(p, d, uv);\n"
+    "  if (fog >= 1.0) return;\n"
     "  if (sprite) n = normalize(u_eye.xyz - p);\n"
     "  else {\n"
     "    vec3 nc = cross(edge(uv, vec2(0.0, u_texel.w*u_texel.y), pc, d), edge(uv, vec2(u_texel.w*u_texel.x, 0.0), pc, d));\n"
@@ -554,7 +620,7 @@ typedef struct {
 } DdgiApplyUniforms;
 typedef struct {
     GLint nodes, tris, vram, rect, size, eye, count, shadow, caster, lamp, level_nodes, level_tris, sun, sun_colour, level, fog,
-        cast, mask, sunmap, sunrow0, sunrow1, sunrow2, sunlook, skymap, skyrow;
+        cast, mask, sunmap, sunrow0, sunrow1, sunrow2, sunlook, skymap, skyrow, air, airshot, airbox, airlook, airtint, airmode;
 } DdgiLampUniforms;
 /* A camera, the BVH drawn under it and its casters and lights: what one context shows. */
 typedef struct DdgiFrame {
@@ -566,6 +632,8 @@ typedef struct DdgiFrame {
     float sun[4], sun_colour[4]; /* as the shaders' u_sun and u_sun_colour, the fit's weight 0 for no sun */
     float ambient;               /* the fit's light every surface has besides the lamps */
     float centre_y, focal;       /* the projection's centre row (a vertical look moves it off the middle) and its focal */
+    int air;                     /* the air volume this frame reads, -1 for none */
+    float air_box[4];            /* its corner and cell */
     GpuDdgiScene scene;
 } DdgiFrame;
 /* Programs are made in each context: a program's uniforms are shared between contexts with it. */
@@ -574,8 +642,8 @@ typedef struct {
     GLuint mix_prog, lamp_prog;
     DdgiApplyUniforms mu, lu;
     DdgiLampUniforms la;
-    GLint mix_lamps, mix_lit, mix_fog, mix_geo;
-    GLuint lamp_tex, lamp_fbo, cast_tex, mask_tex, geo_tex;
+    GLint mix_lamps, mix_lit, mix_fog, mix_geo, mix_air;
+    GLuint lamp_tex, lamp_fbo, cast_tex, mask_tex, geo_tex, air_tex;
     int lamp_w, lamp_h, lamp_ready;
     DdgiFrame frame;
 } DdgiContext;
@@ -1067,6 +1135,57 @@ static const char *DDGI_SUNMAP_FS =
     "in vec2 v_uv; flat in ivec3 v_mat;\n"
     "void main(){ int raw = (v_mat.z & 1) != 0 ? texel(v_uv, v_mat.y, v_mat.x) : 0x8000;\n"
     "  if (raw == 0 || ((v_mat.z & 2) != 0 && (raw & 0x8000) != 0)) discard; }\n";
+/* One y layer of the air volume round the camera, at points jittered inside their cells: the lamps' light a point of air gets,
+ * blended with the last game frame's where the volume held the point, and the shots' apart. */
+static const char *DDGI_AIR_FS =
+    "#version 330\n" DDGI_GLSL_BVH
+    "#define LAMPS " DDGI_STR(GPU_DDGI_LAMPS) "\n#define AIR_W " DDGI_STR(DDGI_AIR_W) "\n#define AIR_H " DDGI_STR(DDGI_AIR_H) "\n#define AIR_D " DDGI_STR(DDGI_AIR_D) "\n"
+    "layout(location = 0) out vec4 frag;\n"
+    "layout(location = 1) out vec4 shot;  /* the shots' light, kept apart: no history, they move fast */\n"
+    "uniform sampler2D u_was;\n"
+    "/* The air atlas: layer y of the volume at x + y*AIR_W; c in cells, centres at .5. Two taps, x kept off the tiles' edges. */\n"
+    "vec4 air_fetch(sampler2D t, vec3 c){\n"
+    "  c = clamp(c, vec3(0.5), vec3(AIR_W, AIR_H, AIR_D) - 0.5);\n"
+    "  float l0 = floor(c.y - 0.5), f = c.y - 0.5 - l0, l1 = min(l0 + 1.0, float(AIR_H) - 1.0);\n"
+    "  vec2 size = vec2(float(AIR_W*AIR_H), float(AIR_D));\n"
+    "  return mix(texture(t, vec2(c.x + l0*float(AIR_W), c.z)/size), texture(t, vec2(c.x + l1*float(AIR_W), c.z)/size), f); }\n"
+    "uint mixed(uint x){ x ^= x >> 16; x *= 0x7feb352dU; x ^= x >> 15; x *= 0x846ca68bU; x ^= x >> 16; return x; }\n"
+    "uniform vec4 u_box, u_was_box;  /* the corner and cell of this volume and of the last one, w 0 for none */\n"
+    "uniform vec4 u_layer;  /* -, the jitter across, up and along in cells */\n"
+    "uniform vec4 u_box2;   /* the frame's number, for the lamps' picks */\n"
+    "uniform vec4 u_lamp[LAMPS*3], u_aircount;  /* the lamps as the lamp pass has them; their count, lamps' strength, -, shots' */\n"
+    "void main(){\n"
+    "  ivec3 at = ivec3(int(gl_FragCoord.x) % AIR_W, int(gl_FragCoord.x) / AIR_W, int(gl_FragCoord.y));\n"
+    "  vec3 w = u_box.xyz + (vec3(at) + 0.5 + u_layer.yzw)*u_box.w;\n"
+    "  /* The level's lamps: one a frame, picked by how much it gives here, tested against the faces and weighed by the whole;\n"
+    "     the history averages the picks into the sum, so a lamp past a wall gives nothing. The shots: each, every frame. */\n"
+    "  vec3 lamps = vec3(0.0), shots = vec3(0.0); float total = 0.0, give[LAMPS];\n"
+    "  for (int i = 0; i < int(u_aircount.x); ++i) {\n"
+    "    vec4 a = u_lamp[3*i], b = u_lamp[3*i + 1], c = u_lamp[3*i + 2];\n"
+    "    give[i] = 0.0;\n"
+    "    vec3 l = a.xyz - w; float d2 = dot(l, l), lum = max(dot(b.rgb, vec3(0.2126, 0.7152, 0.0722)), 1e-3);\n"
+    "    if (c.w > 0.0) {  /* as the lamp pass shares the baked light, a lamp with a front lighting mostly before it */\n"
+    "      float side = dot(c.xyz, c.xyz) > 0.25 ? max(0.15, dot(c.xyz, -l*inversesqrt(max(d2, 1.0)))) : 1.0;\n"
+    "      give[i] = b.w*c.w*side/(d2 + a.w*a.w); total += give[i]; continue; }\n"
+    "    float dist = sqrt(d2); if (c.w == 0.0 || dist >= a.w || u_aircount.w <= 0.0) continue;\n"
+    "    float x = dist/a.w, r = dist/(0.35*a.w), fall = (1.0 - x*x)*(1.0 - x*x)/(1.0 + r*r);\n"
+    "    float best = dist*0.95 - 16.0, hu, hv;\n"
+    "    if (dist > 40.0 && bvh_hit(w, l/dist, 2.0, best, hu, hv, true, true) >= 0) continue;\n"
+    "    shots += b.rgb/lum*(u_aircount.w*(b.w/(b.w + 20000.0))*2.0*(-c.w)*fall); }\n"
+    "  if (total > 0.0 && u_aircount.y > 0.0) {\n"
+    "    float pick = float(mixed(uint(at.x) + 128U*(uint(at.y) + 32U*(uint(at.z) + 128U*uint(u_box2.x))))&0xffffffU)/16777216.0*total;\n"
+    "    int i = 0; for (; i < int(u_aircount.x) - 1; ++i) { pick -= give[i]; if (pick < 0.0) break; }\n"
+    "    vec4 a = u_lamp[3*i], b = u_lamp[3*i + 1];\n"
+    "    vec3 l = a.xyz - w; float dist = length(l), best = dist*0.95 - 16.0, hu, hv;\n"
+    "    bool hidden = dist > 40.0 && (bvh_hit(w, l/dist, 2.0, best, hu, hv, true, true) >= 0 ||\n"
+    "                  (u_level.x > 0.5 && bvh_hit_in(u_level_nodes, u_level_tris, w, l/dist, 2.0, best, hu, hv, true, true) >= 0));\n"
+    "    if (!hidden) lamps = b.rgb/max(dot(b.rgb, vec3(0.2126, 0.7152, 0.0722)), 1e-3)*(u_aircount.y*total); }\n"
+    "  vec4 now = vec4(lamps, 0.0);\n"
+    "  shot = vec4(shots, 0.0);\n"
+    "  vec3 was = (u_box.xyz + (vec3(at) + 0.5)*u_box.w - u_was_box.xyz)/max(u_was_box.w, 1.0);  /* the cell's centre: no resampling blur */\n"
+    "  if (u_was_box.w > 0.0 && all(greaterThanEqual(was, vec3(0.0))) && all(lessThanEqual(was, vec3(AIR_W, AIR_H, AIR_D))))\n"
+    "    now = mix(air_fetch(u_was, was), now, 0.1);\n"
+    "  frag = now; }\n";
 static GLuint s_ddgi_sunmap_tex[2], s_ddgi_sunmap_fbo[2], s_ddgi_sunmap_prog;
 static GLint s_ddgi_sunmap_tris = -1, s_ddgi_sunmap_vram = -1, s_ddgi_sunmap_row[3] = {-1, -1, -1};
 /* Map 0 looks from the sun. Maps 1..5 look from the sky, straight down and 45 degrees four ways, as tiles of one atlas: how much
@@ -1421,6 +1540,163 @@ static DdgiShot s_ddgi_shots[DDGI_SHOTS], s_ddgi_shot_live;
 static unsigned s_ddgi_shot_next;
 static uint32_t s_ddgi_shot_pose; /* the last world draw taken */
 
+/* The air volume round the camera: world aligned, so in-between pictures and a moving camera read it without swimming. */
+#define DDGI_AIR_SLOTS 4 /* as many as the shots' ring: a frame the presenter still holds keeps its volume */
+static GLuint s_ddgi_air_tex[DDGI_AIR_SLOTS], s_ddgi_air_shot[DDGI_AIR_SLOTS], s_ddgi_air_fbo, s_ddgi_air_prog;
+static GLint s_ddgi_air_u[13];
+static float s_ddgi_air_box[DDGI_AIR_SLOTS][4];
+static int s_ddgi_air_next, s_ddgi_air_last = -1, s_ddgi_air_level[DDGI_AIR_SLOTS] = {-1, -1, -1, -1}, s_ddgi_air_failed;
+static unsigned s_ddgi_air_frames;
+static float s_ddgi_air_set[5]; /* density a 1000 units, sun, lamps, shots (game light units: E 1 shows a texel as it is), the air alone */
+static int s_ddgi_air_ends;     /* PSX_DDGI_AIR_ENDS: the air target holds the rays' ends, for the offline reference */
+static int s_ddgi_air_on, s_ddgi_air_open, s_ddgi_air_open_now;
+static float s_ddgi_air_amount[4] = {2.0f, 2.0f, 0.5f, 1.0f}; /* the settings: haze (of 0.01), sun, lamps, shots */
+
+/* The settings' values, each PSX_DDGI_AIR_* variable taking the place of its own. */
+static void ddgi_air_settings(void) {
+    static int read;
+    static const char *given[7];
+    if (!read) {
+        read = 1;
+        const char *names[6] = {"PSX_DDGI_AIR_DENSITY", "PSX_DDGI_AIR_SUN", "PSX_DDGI_AIR_LAMPS", "PSX_DDGI_AIR_SHOTS", "PSX_DDGI_AIR_VIEW",
+                                "PSX_DDGI_AIR"};
+        for (int i = 0; i < 6; ++i) given[i] = getenv(names[i]);
+        given[6] = getenv("PSX_DDGI_AIR_OPEN");
+        s_ddgi_air_ends = getenv("PSX_DDGI_AIR_ENDS") != NULL;
+    }
+    const float from_settings[5] = {0.01f * s_ddgi_air_amount[0], s_ddgi_air_amount[1], s_ddgi_air_amount[2], s_ddgi_air_amount[3], 0.0f};
+    for (int i = 0; i < 5; ++i) s_ddgi_air_set[i] = given[i] ? (float)atof(given[i]) : from_settings[i];
+    if (given[5]) s_ddgi_air_set[0] *= (float)atof(given[5]);
+    else if (!s_ddgi_air_on) s_ddgi_air_set[0] = 0.0f;
+    s_ddgi_air_open_now = given[6] ? atoi(given[6]) != 0 : s_ddgi_air_open;
+}
+
+/* The frame's lamps as the lamp pass packs them, each kind while its own setting is on. */
+static int ddgi_pack_lamps(const DdgiFrame *f, float *lamps) {
+    int count = 0;
+    for (int i = 0; i < f->scene.lamps && count < GPU_DDGI_LAMPS; ++i) {
+        const GpuDdgiLamp *l = &f->scene.lamp[i];
+        if (l->dynamic ? !s_ddgi_lamps : !s_ddgi_shadows) continue;
+        float *at = &lamps[count++ * 12];
+        memcpy(at, l->position, sizeof l->position);
+        at[3] = l->size;
+        memcpy(at + 4, l->colour, sizeof l->colour);
+        at[7] = l->power;
+        memcpy(at + 8, l->normal, sizeof l->normal);
+        at[11] = l->dynamic ? -l->weight : l->weight;
+    }
+    return count;
+}
+
+static float ddgi_halton(unsigned i, unsigned base) {
+    float f = 1.0f, r = 0.0f;
+    for (; i > 0; i /= base) {
+        f /= (float)base;
+        r += f * (float)(i % base);
+    }
+    return r;
+}
+
+/* Game thread's context, inside ddgi_update: the lamps' and shots' light in the volume round now's eye, the lamps' blended with
+ * the last frame's. None while nothing lights the air. */
+static void ddgi_air_update(DdgiFrame *now) {
+    enum { WAS, BOX, WAS_BOX, LAYER, LAMP, COUNT, NODES, TRIS, VRAM, LEVEL_NODES, LEVEL_TRIS, FRAME, LEVEL, UNIFORMS };
+    static const char *const names[UNIFORMS] = {"u_was",  "u_box",  "u_was_box",     "u_layer",      "u_lamp", "u_aircount", "u_nodes",
+                                                "u_tris", "u_vram", "u_level_nodes", "u_level_tris", "u_box2", "u_level"};
+    ddgi_air_settings();
+    now->air = -1;
+    float lamps[GPU_DDGI_LAMPS * 3 * 4];
+    const int count = ddgi_pack_lamps(now, lamps);
+    if (s_ddgi_air_failed || s_ddgi_air_set[0] <= 0.0f || !count) {
+        s_ddgi_air_last = -1;
+        return;
+    }
+    if (!s_ddgi_air_prog) {
+        s_ddgi_air_prog = build_program(DDGI_VS, DDGI_AIR_FS);
+        if (!s_ddgi_air_prog) {
+            s_ddgi_air_failed = 1;
+            return;
+        }
+        for (int i = 0; i < UNIFORMS; ++i) s_ddgi_air_u[i] = ddgi_uniform(s_ddgi_air_prog, names[i]);
+        for (int i = 0; i < 2 * DDGI_AIR_SLOTS; ++i) {
+            GLuint *made = i < DDGI_AIR_SLOTS ? &s_ddgi_air_tex[i] : &s_ddgi_air_shot[i - DDGI_AIR_SLOTS];
+            glGenTextures(1, made);
+            glBindTexture(GL_TEXTURE_2D, *made);
+            glTexImage2D(GL_TEXTURE_2D, 0, DDGI_GL_RGBA16F, DDGI_AIR_W * DDGI_AIR_H, DDGI_AIR_D, 0, GL_RGBA, GL_FLOAT, NULL);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+        }
+        glBindTexture(GL_TEXTURE_2D, 0);
+        p_glGenFramebuffers(1, &s_ddgi_air_fbo);
+        p_glBindFramebuffer(PSXGL_FRAMEBUFFER, s_ddgi_air_fbo);
+        static const GLenum targets[2] = {PSXGL_COLOR_ATTACHMENT0, PSXGL_COLOR_ATTACHMENT0 + 1};
+        p_glDrawBuffers(2, targets);
+    }
+    const int target = s_ddgi_air_next, was = s_ddgi_air_last;
+    const float cell = DDGI_AIR_CELL;
+    const int size[3] = {DDGI_AIR_W, DDGI_AIR_H, DDGI_AIR_D};
+    float *box = s_ddgi_air_box[target];
+    for (int a = 0; a < 3; ++a) box[a] = (floorf(now->eye[a] / cell) - (float)(size[a] / 2)) * cell;
+    box[3] = cell;
+    const unsigned n = ++s_ddgi_air_frames;
+    const float jitter[3] = {ddgi_halton(n, 2) - 0.5f, ddgi_halton(n, 3) - 0.5f, ddgi_halton(n, 5) - 0.5f};
+    const int scene = s_ddgi_level_generation; /* not the level's slot: it flips at every upload of the same level */
+    const int history = was >= 0 && s_ddgi_air_level[was] == scene;
+    /* The presenter may still have a draw queued that reads the slot about to be written, as for the probes. */
+    if (s_interp_mutex) SDL_LockMutex(s_interp_mutex);
+    if (s_interp_draw_fence) gz_wait(0, s_interp_draw_fence);
+    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, s_ddgi_air_fbo);
+    glViewport(0, 0, DDGI_AIR_W * DDGI_AIR_H, DDGI_AIR_D);
+    glDisable(GL_BLEND);
+    p_glUseProgram(s_ddgi_air_prog);
+    p_glActiveTexture(PSXGL_TEXTURE0 + 1);
+    glBindTexture(GL_TEXTURE_2D, history ? s_ddgi_air_tex[was] : 0);
+    p_glActiveTexture(PSXGL_TEXTURE0 + 2);
+    glBindTexture(GL_TEXTURE_2D, s_ddgi_nodes_tex[now->bvh]);
+    p_glActiveTexture(PSXGL_TEXTURE0 + 3);
+    glBindTexture(GL_TEXTURE_2D, s_ddgi_tris_tex[now->bvh]);
+    p_glActiveTexture(PSXGL_TEXTURE0 + 4);
+    glBindTexture(GL_TEXTURE_2D, s_raw_tex);
+    p_glActiveTexture(PSXGL_TEXTURE0 + 5);
+    glBindTexture(GL_TEXTURE_2D, now->level >= 0 ? s_ddgi_level_nodes_tex[now->level] : 0);
+    p_glActiveTexture(PSXGL_TEXTURE0 + 6);
+    glBindTexture(GL_TEXTURE_2D, now->level >= 0 ? s_ddgi_level_tris_tex[now->level] : 0);
+    p_glActiveTexture(PSXGL_TEXTURE0);
+    p_glUniform1i(s_ddgi_air_u[WAS], 1);
+    p_glUniform1i(s_ddgi_air_u[NODES], 2);
+    p_glUniform1i(s_ddgi_air_u[TRIS], 3);
+    p_glUniform1i(s_ddgi_air_u[VRAM], 4);
+    p_glUniform1i(s_ddgi_air_u[LEVEL_NODES], 5);
+    p_glUniform1i(s_ddgi_air_u[LEVEL_TRIS], 6);
+    p_glUniform4f(s_ddgi_air_u[FRAME], (float)(n & 0xFFFFu), 0.0f, 0.0f, 0.0f);
+    p_glUniform4f(s_ddgi_air_u[LEVEL], now->level >= 0 ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
+    p_glUniform4f(s_ddgi_air_u[BOX], box[0], box[1], box[2], box[3]);
+    const float *last = history ? s_ddgi_air_box[was] : box;
+    p_glUniform4f(s_ddgi_air_u[WAS_BOX], last[0], last[1], last[2], history ? cell : 0.0f);
+    p_glUniform4fv(s_ddgi_air_u[LAMP], count * 3, lamps);
+    p_glUniform4f(s_ddgi_air_u[COUNT], (float)count, s_ddgi_air_set[2], 0.0f, s_ddgi_air_set[3]);
+    p_glBindVertexArray(s_present_vao);
+    p_glFramebufferTexture2D(PSXGL_FRAMEBUFFER, PSXGL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, s_ddgi_air_tex[target], 0);
+    p_glFramebufferTexture2D(PSXGL_FRAMEBUFFER, PSXGL_COLOR_ATTACHMENT0 + 1, GL_TEXTURE_2D, s_ddgi_air_shot[target], 0);
+    p_glUniform4f(s_ddgi_air_u[LAYER], 0.0f, jitter[0], jitter[1], jitter[2]);
+    glDrawArrays(GL_TRIANGLES, 0, 3);
+    p_glActiveTexture(PSXGL_TEXTURE0 + 1);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    p_glActiveTexture(PSXGL_TEXTURE0);
+    s_ddgi_air_level[target] = scene;
+    s_ddgi_air_last = target;
+    s_ddgi_air_next = (target + 1) % DDGI_AIR_SLOTS;
+    now->air = target;
+    memcpy(now->air_box, box, sizeof now->air_box);
+    /* The presenter reads it: its next draws wait for this fence, as for the probes and the maps. */
+    if (s_ddgi_probe_fence) p_glDeleteSync(s_ddgi_probe_fence);
+    s_ddgi_probe_fence = p_glFenceSync(PSXGL_SYNC_GPU_COMMANDS_COMPLETE, 0);
+    glFlush();
+    if (s_interp_mutex) SDL_UnlockMutex(s_interp_mutex);
+}
+
 static int ddgi_wanted(void) { return s_ddgi_light || s_ddgi_shadows || s_ddgi_lamps || ddgi_sun_active(); }
 
 /* 0 when the frame shows no world draw newer than the last one taken; copy keeps its triangles. cy picks the draw shown. */
@@ -1581,6 +1857,21 @@ static void ddgi_update(float cy) {
             ddgi_sunmap_update(0, now->sun, now->level);
             for (int k = 0; k < DDGI_SKY_MAPS; ++k) ddgi_sunmap_update(1 + k, sky[k], now->level);
         }
+        static GLuint air_stamps[2];
+        static unsigned air_timed;
+        if (timing && !air_stamps[0]) p_glGenQueries(2, air_stamps);
+        if (timing && air_timed && air_timed % 60u == 0u) {
+            GLuint64 from = 0, to = 0;
+            p_glGetQueryObjectui64v(air_stamps[0], 0x8866 /* GL_QUERY_RESULT */, &from);
+            p_glGetQueryObjectui64v(air_stamps[1], 0x8866 /* GL_QUERY_RESULT */, &to);
+            fprintf(stderr, "ddgi air: GPU %.3f ms a volume\n", (double)(to - from) / 1.0e6);
+        }
+        if (timing) p_glQueryCounter(air_stamps[0], GL_TIMESTAMP);
+        ddgi_air_update(now);
+        if (timing) {
+            p_glQueryCounter(air_stamps[1], GL_TIMESTAMP);
+            ++air_timed;
+        }
         s_ddgi_ctx[0].frame = *now;
         if (probes) ddgi_probe_update(now);
         if (timing) {
@@ -1677,6 +1968,7 @@ static DdgiContext *ddgi_context(int thread) {
     ctx->mix_lit = ddgi_uniform(ctx->mix_prog, "u_lit");
     ctx->mix_fog = ddgi_uniform(ctx->mix_prog, "u_fog");
     ctx->mix_geo = ddgi_uniform(ctx->mix_prog, "u_lamp_geo");
+    ctx->mix_air = ddgi_uniform(ctx->mix_prog, "u_lamp_air");
     const GLuint l = ctx->lamp_prog;
     ctx->la = (DdgiLampUniforms){ddgi_uniform(l, "u_nodes"), ddgi_uniform(l, "u_tris"),   ddgi_uniform(l, "u_vram"),
                                  ddgi_uniform(l, "u_rect"),  ddgi_uniform(l, "u_size"),   ddgi_uniform(l, "u_eye"),
@@ -1686,7 +1978,9 @@ static DdgiContext *ddgi_context(int thread) {
                                  ddgi_uniform(l, "u_fog"),   ddgi_uniform(l, "u_cast"), ddgi_uniform(l, "u_mask"),
                                  ddgi_uniform(l, "u_sunmap"), ddgi_uniform(l, "u_sunrow0"), ddgi_uniform(l, "u_sunrow1"),
                                  ddgi_uniform(l, "u_sunrow2"), ddgi_uniform(l, "u_sunlook"), ddgi_uniform(l, "u_skymap"),
-                                 ddgi_uniform(l, "u_skyrow")};
+                                 ddgi_uniform(l, "u_skyrow"), ddgi_uniform(l, "u_air"), ddgi_uniform(l, "u_airshot"),
+                                 ddgi_uniform(l, "u_airbox"), ddgi_uniform(l, "u_airlook"), ddgi_uniform(l, "u_airtint"),
+                                 ddgi_uniform(l, "u_airmode")};
     ctx->built = 1;
     return ctx;
 }
@@ -1712,7 +2006,8 @@ static void ddgi_lamp_pass(int thread, GLuint color, GLuint depth, float focal_x
         if (ctx->lamp_fbo) p_glDeleteFramebuffers(1, &ctx->lamp_fbo);
         if (ctx->lamp_tex) glDeleteTextures(1, &ctx->lamp_tex);
         if (ctx->geo_tex) glDeleteTextures(1, &ctx->geo_tex);
-        ctx->lamp_fbo = ctx->lamp_tex = ctx->geo_tex = 0;
+        if (ctx->air_tex) glDeleteTextures(1, &ctx->air_tex);
+        ctx->lamp_fbo = ctx->lamp_tex = ctx->geo_tex = ctx->air_tex = 0;
         GLfloat clear_colour[4];
         glGetFloatv(GL_COLOR_CLEAR_VALUE, clear_colour);
         int made = ddgi_target(&ctx->lamp_tex, &ctx->lamp_fbo, DDGI_GL_RGBA16F, lw, lh, GL_RGBA, 0);
@@ -1723,9 +2018,14 @@ static void ddgi_lamp_pass(int thread, GLuint color, GLuint depth, float focal_x
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
             p_glBindFramebuffer(PSXGL_FRAMEBUFFER, ctx->lamp_fbo);
             p_glFramebufferTexture2D(PSXGL_FRAMEBUFFER, PSXGL_COLOR_ATTACHMENT0 + 1, GL_TEXTURE_2D, ctx->geo_tex, 0);
-            static const GLenum both[2] = {PSXGL_COLOR_ATTACHMENT0, PSXGL_COLOR_ATTACHMENT0 + 1};
-            p_glDrawBuffers(2, both);
-            made = ctx->geo_tex && p_glCheckFramebufferStatus(PSXGL_FRAMEBUFFER) == PSXGL_FRAMEBUFFER_COMPLETE;
+            ctx->air_tex = make_tex(DDGI_GL_RGBA16F, lw, lh, GL_RGBA, GL_FLOAT);
+            glBindTexture(GL_TEXTURE_2D, ctx->air_tex);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+            glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+            p_glFramebufferTexture2D(PSXGL_FRAMEBUFFER, PSXGL_COLOR_ATTACHMENT0 + 2, GL_TEXTURE_2D, ctx->air_tex, 0);
+            static const GLenum targets[3] = {PSXGL_COLOR_ATTACHMENT0, PSXGL_COLOR_ATTACHMENT0 + 1, PSXGL_COLOR_ATTACHMENT0 + 2};
+            p_glDrawBuffers(3, targets);
+            made = ctx->geo_tex && ctx->air_tex && p_glCheckFramebufferStatus(PSXGL_FRAMEBUFFER) == PSXGL_FRAMEBUFFER_COMPLETE;
         }
         glClearColor(clear_colour[0], clear_colour[1], clear_colour[2], clear_colour[3]);
         if (!made) return;
@@ -1812,6 +2112,26 @@ static void ddgi_lamp_pass(int thread, GLuint color, GLuint depth, float focal_x
                       s_ddgi_sunmap_rows[0][r][3]);
     p_glUniform4fv(ctx->la.skyrow, 3 * DDGI_SKY_MAPS, &s_ddgi_sunmap_rows[1][0][0]);
     p_glUniform4f(ctx->la.sunlook, s_ddgi_sun_light, s_ddgi_sun_shade, 0.0f, maps ? 1.0f : 0.0f);
+    ddgi_air_settings();
+    p_glActiveTexture(PSXGL_TEXTURE0 + 5);
+    glBindTexture(GL_TEXTURE_2D, f->air >= 0 ? s_ddgi_air_tex[f->air] : 0);
+    p_glActiveTexture(PSXGL_TEXTURE0 + 1);
+    glBindTexture(GL_TEXTURE_2D, f->air >= 0 ? s_ddgi_air_shot[f->air] : 0);
+    p_glActiveTexture(PSXGL_TEXTURE0);
+    p_glUniform1i(ctx->la.air, 5);
+    p_glUniform1i(ctx->la.airshot, 1);
+    p_glUniform4f(ctx->la.airbox, f->air_box[0], f->air_box[1], f->air_box[2], f->air >= 0 ? f->air_box[3] : 0.0f);
+    /* The air reaches as far as the fog leaves anything, a long way where there is none. */
+    const float air_far = s_fade_rows > 1 && s_fade_step > 0.0f ? s_fade_start + s_fade_step * (float)s_fade_rows : 8000.0f;
+    p_glUniform4f(ctx->la.airlook, f->air >= 0 || (ddgi_sun_active() && maps) ? s_ddgi_air_set[0] : 0.0f, ddgi_sun_active() && maps ? s_ddgi_air_set[1] : 0.0f, 24.0f,
+                  fminf(air_far, 12000.0f));
+    /* The fog's colour gives the air its hue, at the same brightness. */
+    const float clear_lum = 0.2126f * s_clear_rgb[0] + 0.7152f * s_clear_rgb[1] + 0.0722f * s_clear_rgb[2];
+    float tint[3] = {1.0f, 1.0f, 1.0f};
+    if (s_clear_known && clear_lum > 0.02f)
+        for (int k = 0; k < 3; ++k) tint[k] = 0.5f + 0.5f * s_clear_rgb[k] / clear_lum;
+    p_glUniform4f(ctx->la.airtint, tint[0], tint[1], tint[2], s_ddgi_air_ends ? 2.0f : 1.0f);
+    p_glUniform4f(ctx->la.airmode, s_ddgi_air_open_now ? 1.0f : 0.0f, 0.25f, 0.0f, 0.0f);
     p_glUniform1i(ctx->la.level_nodes, 10);
     p_glUniform1i(ctx->la.level_tris, 11);
     p_glUniform4f(ctx->la.level, f->level >= 0 ? 1.0f : 0.0f, 0.0f, 0.0f, 0.0f);
@@ -1844,6 +2164,37 @@ static void ddgi_lamp_pass(int thread, GLuint color, GLuint depth, float focal_x
         p_glEndQuery(GL_TIME_ELAPSED);
         ++passes[slot];
     }
+    {   /* PSX_DDGI_AIR_DUMP=<file> at lamp pass PSX_DDGI_AIR_DUMP_AT: the air target and what made it, for the offline reference */
+        static unsigned air_passes;
+        const char *path = getenv("PSX_DDGI_AIR_DUMP"), *at = getenv("PSX_DDGI_AIR_DUMP_AT");
+        if (path && at && ++air_passes == (unsigned)atoi(at)) {
+            float *pixels = (float *)malloc(sizeof(float) * 4u * (size_t)lw * (size_t)lh);
+            FILE *out = pixels ? fopen(path, "wb") : NULL;
+            if (out) {
+                glReadBuffer(PSXGL_COLOR_ATTACHMENT0 + 2);
+                glReadPixels(0, 0, lw, lh, GL_RGBA, GL_FLOAT, pixels);
+                glReadBuffer(PSXGL_COLOR_ATTACHMENT0);
+                const float far_air = s_fade_rows > 1 && s_fade_step > 0.0f ? s_fade_start + s_fade_step * (float)s_fade_rows : 8000.0f;
+                fprintf(out, "air %d %d eye %.3f %.3f %.3f sun %.6f %.6f %.6f density %.6f sun_strength %.4f steps 24 far %.1f "
+                        "fog %.3f %.3f %.4f %d box %.1f %.1f %.1f %.1f level %d ends %d tint %.4f %.4f %.4f\n", lw, lh, f->eye[0], f->eye[1], f->eye[2],
+                        f->sun[0], f->sun[1], f->sun[2], s_ddgi_air_set[0], ddgi_sun_active() && maps ? s_ddgi_air_set[1] : 0.0f,
+                        fminf(far_air, 12000.0f), s_fade_start, fog_length, s_fade_side, s_fade_rows > 1 && fog_length > 0.0f,
+                        f->air_box[0], f->air_box[1], f->air_box[2], f->air_box[3], f->level, s_ddgi_air_ends, tint[0], tint[1], tint[2]);
+                fwrite(pixels, sizeof(float) * 4u, (size_t)lw * (size_t)lh, out);
+                fwrite(s_ddgi_sunmap_rows[0], sizeof s_ddgi_sunmap_rows[0], 1, out);
+                float *map = (float *)malloc(sizeof(float) * DDGI_SUNMAP * DDGI_SUNMAP);
+                if (map) {
+                    p_glActiveTexture(PSXGL_TEXTURE0 + DDGI_SUN_UNIT);
+                    glGetTexImage(GL_TEXTURE_2D, 0, 0x1902 /* GL_DEPTH_COMPONENT */, GL_FLOAT, map);
+                    p_glActiveTexture(PSXGL_TEXTURE0);
+                    fwrite(map, sizeof(float), (size_t)DDGI_SUNMAP * DDGI_SUNMAP, out);
+                    free(map);
+                }
+                fclose(out);
+            }
+            free(pixels);
+        }
+    }
     p_glActiveTexture(PSXGL_TEXTURE0 + 7);
     glBindTexture(GL_TEXTURE_2D, 0);
     p_glActiveTexture(PSXGL_TEXTURE0 + 8);
@@ -1862,6 +2213,10 @@ static void ddgi_lamp_pass(int thread, GLuint color, GLuint depth, float focal_x
     glBindTexture(GL_TEXTURE_2D, 0);
     p_glActiveTexture(PSXGL_TEXTURE0 + DDGI_SKY_UNIT);
     glBindTexture(GL_TEXTURE_2D, 0);
+    p_glActiveTexture(PSXGL_TEXTURE0 + 5);
+    glBindTexture(GL_TEXTURE_2D, 0);
+    p_glActiveTexture(PSXGL_TEXTURE0 + 1);
+    glBindTexture(GL_TEXTURE_2D, 0);
     p_glActiveTexture(PSXGL_TEXTURE0);
     ctx->lamp_ready = 1;
 }
@@ -1878,13 +2233,16 @@ static int ddgi_mix_begin(int thread, GLuint color, GLuint depth, float focal_x,
     glBindTexture(GL_TEXTURE_2D, ctx->lamp_tex);
     p_glActiveTexture(PSXGL_TEXTURE0 + 8);
     glBindTexture(GL_TEXTURE_2D, ctx->geo_tex);
+    p_glActiveTexture(PSXGL_TEXTURE0 + 9);
+    glBindTexture(GL_TEXTURE_2D, ctx->air_tex);
     p_glActiveTexture(PSXGL_TEXTURE0);
     p_glUseProgram(ctx->mix_prog);
     ddgi_apply_set(&ctx->mu, &ctx->frame, focal_x, focal_y, centre_x, centre_y, w, h, scale);
     p_glUniform1i(ctx->mu.shade, 1);
     p_glUniform1i(ctx->mix_lamps, 7);
     p_glUniform1i(ctx->mix_geo, 8);
-    p_glUniform4f(ctx->mix_lit, 1.0f, s_ddgi_lamp_view ? 1.0f : 0.0f, 0.0f, 0.0f);
+    p_glUniform1i(ctx->mix_air, 9);
+    p_glUniform4f(ctx->mix_lit, 1.0f, s_ddgi_lamp_view ? 1.0f : 0.0f, s_ddgi_air_set[4] > 0.5f ? 1.0f : 0.0f, 0.0f);
     const float fog_length = s_fade_step * (float)s_fade_rows;
     p_glUniform4f(ctx->mix_fog, s_fade_start, fog_length, s_fade_side, s_fade_rows > 1 && fog_length > 0.0f ? 1.0f : 0.0f);
     p_glUniform4f(ctx->mu.uv_rect, u0, v0, u1, v1);
@@ -1979,6 +2337,22 @@ void gl_renderer_set_ddgi_lamp_strength(float strength) {
     s_ddgi_lamp_strength = strength < 0.0f ? 0.0f : strength > 4.0f ? 4.0f : strength;
 }
 float gl_renderer_ddgi_lamp_strength(void) { return s_ddgi_lamp_strength; }
+void gl_renderer_set_ddgi_air(int enabled) { GL_RT_SYNC(__func__); s_ddgi_air_on = enabled != 0; }
+int gl_renderer_ddgi_air(void) { return s_ddgi_air_on; }
+void gl_renderer_set_ddgi_air_open(int enabled) { GL_RT_SYNC(__func__); s_ddgi_air_open = enabled != 0; }
+int gl_renderer_ddgi_air_open(void) { return s_ddgi_air_open; }
+static void ddgi_air_amount_set(int which, float amount) {
+    GL_RT_SYNC(__func__);
+    s_ddgi_air_amount[which] = amount < 0.0f ? 0.0f : amount > 4.0f ? 4.0f : amount;
+}
+void gl_renderer_set_ddgi_air_haze(float amount) { ddgi_air_amount_set(0, amount); }
+float gl_renderer_ddgi_air_haze(void) { return s_ddgi_air_amount[0]; }
+void gl_renderer_set_ddgi_air_sun(float amount) { ddgi_air_amount_set(1, amount); }
+float gl_renderer_ddgi_air_sun(void) { return s_ddgi_air_amount[1]; }
+void gl_renderer_set_ddgi_air_lamps(float amount) { ddgi_air_amount_set(2, amount); }
+float gl_renderer_ddgi_air_lamps(void) { return s_ddgi_air_amount[2]; }
+void gl_renderer_set_ddgi_air_shots(float amount) { ddgi_air_amount_set(3, amount); }
+float gl_renderer_ddgi_air_shots(void) { return s_ddgi_air_amount[3]; }
 void gl_renderer_set_ddgi_lamp_view(int enabled) { GL_RT_SYNC(__func__); s_ddgi_lamp_view = enabled != 0; }
 int gl_renderer_ddgi_lamp_view(void) { return s_ddgi_lamp_view; }
 void gl_renderer_set_ddgi_sun(int enabled) {

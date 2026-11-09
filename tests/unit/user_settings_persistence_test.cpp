@@ -188,6 +188,14 @@ int main() {
         written.sun_turn = 270;
         written.has_sun_raise = true;
         written.sun_raise = -20;
+        written.has_air_light = true;
+        written.air_light = false;
+        written.has_air_open = true;
+        written.air_open = true;
+        written.has_air_haze = true;
+        written.air_haze = 350;
+        written.has_air_shots = true;
+        written.air_shots = 0;
         written.has_language = true;
         written.language = "en";
 
@@ -274,7 +282,9 @@ int main() {
                     loaded.has_shot_light_strength && loaded.shot_light_strength == 200 &&
                     loaded.has_sun_lighting && loaded.sun_lighting &&
                     loaded.has_sun_turn && loaded.sun_turn == 270 &&
-                    loaded.has_sun_raise && loaded.sun_raise == -20,
+                    loaded.has_sun_raise && loaded.sun_raise == -20 && loaded.has_air_light && !loaded.air_light &&
+                    loaded.has_air_open && loaded.air_open && loaded.has_air_haze && loaded.air_haze == 350 && loaded.has_air_shots && loaded.air_shots == 0 &&
+                    !loaded.has_air_sun && !loaded.has_air_lamps,
                 "lighting preferences did not round-trip");
         require(loaded.has_language && loaded.language == "en",
                 "merge-save dropped an unrelated known setting");

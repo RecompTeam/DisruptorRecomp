@@ -196,6 +196,12 @@ void mark_lighting() {
     mark("disruptor.shot_lights", gl_renderer_ddgi_lamps() != 0);
     mark("disruptor.shot_light_strength", percent(gl_renderer_ddgi_lamp_strength()));
     mark("disruptor.sun_lighting", gl_renderer_ddgi_sun() != 0);
+    mark("disruptor.air_light", gl_renderer_ddgi_air() != 0);
+    mark("disruptor.air_open", gl_renderer_ddgi_air_open() != 0);
+    mark("disruptor.air_haze", percent(gl_renderer_ddgi_air_haze()));
+    mark("disruptor.air_sun", percent(gl_renderer_ddgi_air_sun()));
+    mark("disruptor.air_lamps", percent(gl_renderer_ddgi_air_lamps()));
+    mark("disruptor.air_shots", percent(gl_renderer_ddgi_air_shots()));
 }
 
 void mark_sun(const int amounts[2]) {
@@ -223,6 +229,12 @@ void apply_lighting(const PSXRecompV4::UserSettings &settings) {
     gl_renderer_set_ddgi_shadows(value("disruptor.dynamic_shadows"));
     gl_renderer_set_ddgi_lamps(value("disruptor.shot_lights"));
     gl_renderer_set_ddgi_sun(value("disruptor.sun_lighting"));
+    gl_renderer_set_ddgi_air_open(value("disruptor.air_open"));
+    gl_renderer_set_ddgi_air_haze(value("disruptor.air_haze") / 100.0f);
+    gl_renderer_set_ddgi_air_sun(value("disruptor.air_sun") / 100.0f);
+    gl_renderer_set_ddgi_air_lamps(value("disruptor.air_lamps") / 100.0f);
+    gl_renderer_set_ddgi_air_shots(value("disruptor.air_shots") / 100.0f);
+    gl_renderer_set_ddgi_air(value("disruptor.air_light"));
 }
 
 void apply_sticks(const PSXRecompV4::UserSettings &settings) {
@@ -559,7 +571,10 @@ void apply_pending_preferences() {
     if (changed("disruptor.probe_lighting") || changed("disruptor.probe_strength") || changed("disruptor.dynamic_shadows") ||
         changed("disruptor.shadow_strength") ||
         changed("disruptor.shadow_underneath") || changed("disruptor.shot_lights") ||
-        changed("disruptor.shot_light_strength") || changed("disruptor.sun_lighting"))
+        changed("disruptor.shot_light_strength") || changed("disruptor.sun_lighting") || changed("disruptor.air_light") ||
+        changed("disruptor.air_open") ||
+        changed("disruptor.air_haze") || changed("disruptor.air_sun") || changed("disruptor.air_lamps") ||
+        changed("disruptor.air_shots"))
         apply_lighting(pending);
     if (changed("disruptor.sun_turn") || changed("disruptor.sun_raise"))
         apply_sun(pending);

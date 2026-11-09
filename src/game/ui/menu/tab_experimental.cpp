@@ -94,6 +94,35 @@ void draw_lighting() {
         }
     }
     ImGui::Unindent();
+    bool air = gl_renderer_ddgi_air() != 0;
+    const bool air_applies = applies("disruptor.air_light");
+    if (!air_applies) ImGui::BeginDisabled();
+    if (option_toggle("disruptor.air_light", &air)) set_switch(gl_renderer_set_ddgi_air, air);
+    if (!air_applies) ImGui::EndDisabled();
+    draw_status_badge("EXPERIMENTAL", kExperimental);
+    ImGui::Indent();
+    bool open_haze = gl_renderer_ddgi_air_open() != 0;
+    const bool open_applies = applies("disruptor.air_open");
+    if (!open_applies) ImGui::BeginDisabled();
+    if (option_toggle("disruptor.air_open", &open_haze)) set_switch(gl_renderer_set_ddgi_air_open, open_haze);
+    if (!open_applies) ImGui::EndDisabled();
+    const bool air_amounts_apply = applies("disruptor.air_haze") && applies("disruptor.air_sun") && applies("disruptor.air_lamps") &&
+                                   applies("disruptor.air_shots");
+    if (!air_amounts_apply) ImGui::BeginDisabled();
+    int haze = percent(gl_renderer_ddgi_air_haze());
+    ImGui::SetNextItemWidth(260.0f);
+    if (option_slider("disruptor.air_haze", &haze)) set_amount(gl_renderer_set_ddgi_air_haze, haze);
+    int beams = percent(gl_renderer_ddgi_air_sun());
+    ImGui::SetNextItemWidth(260.0f);
+    if (option_slider("disruptor.air_sun", &beams)) set_amount(gl_renderer_set_ddgi_air_sun, beams);
+    int lamp_glow = percent(gl_renderer_ddgi_air_lamps());
+    ImGui::SetNextItemWidth(260.0f);
+    if (option_slider("disruptor.air_lamps", &lamp_glow)) set_amount(gl_renderer_set_ddgi_air_lamps, lamp_glow);
+    int shot_glow = percent(gl_renderer_ddgi_air_shots());
+    ImGui::SetNextItemWidth(260.0f);
+    if (option_slider("disruptor.air_shots", &shot_glow)) set_amount(gl_renderer_set_ddgi_air_shots, shot_glow);
+    if (!air_amounts_apply) ImGui::EndDisabled();
+    ImGui::Unindent();
     if (shadows || lamps || sun) {
         bool alone = gl_renderer_ddgi_lamp_view() != 0;
         if (ImGui::Checkbox("Shadows and light alone", &alone)) gl_renderer_set_ddgi_lamp_view(alone ? 1 : 0);

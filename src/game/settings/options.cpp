@@ -134,10 +134,12 @@ constexpr const char* probes_key = "disruptor.probe_lighting";
 constexpr const char* shadows_key = "disruptor.dynamic_shadows";
 constexpr const char* shots_key = "disruptor.shot_lights";
 constexpr const char* sun_key = "disruptor.sun_lighting";
+constexpr const char* air_key = "disruptor.air_light";
 constexpr const char* needs_probes[] = {probes_key};
 constexpr const char* needs_shadows[] = {shadows_key};
 constexpr const char* needs_shots[] = {shots_key};
 constexpr const char* needs_sun[] = {sun_key};
+constexpr const char* needs_air[] = {air_key};
 constexpr const char* needs_geometry_shots[] = {geometry_key, shots_key};
 constexpr const char* needs_geometry_shadows[] = {geometry_key, shadows_key};
 constexpr const char* needs_geometry[] = {geometry_key};
@@ -471,6 +473,24 @@ constexpr Option option_list[] = {
     slider("disruptor.sun_raise", "Raise the sun", 0, "Up or down from where the level's light puts it", -45, 45, Unit::degrees,
            saved<&Settings::has_sun_raise>, read<&Settings::sun_raise>,
            write<&Settings::has_sun_raise, &Settings::sun_raise>, needs_sun),
+    toggle<&Settings::has_air_light, &Settings::air_light>(
+        "disruptor.air_light", "Light in the air", 0,
+        "Sunlight through openings shows in the level's haze\nLamps and shots glow in the air round them\n"
+        "Needs Dynamic shadows, Light from shots and blasts or Sun on open levels",
+        needs_geometry),
+    toggle<&Settings::has_air_open, &Settings::air_open>(
+        "disruptor.air_open", "Haze in the open", 0,
+        "Sunlit air out in the open shows as haze\nOff: the sun shows only in air under cover, through openings", needs_air),
+    slider("disruptor.air_haze", "Haze", 200, "How thick the air is", 0, 400, Unit::percent, saved<&Settings::has_air_haze>,
+           read<&Settings::air_haze>, write<&Settings::has_air_haze, &Settings::air_haze>, needs_air),
+    slider("disruptor.air_sun", "Sunbeams", 200, "How bright the sun is in the air", 0, 400, Unit::percent,
+           saved<&Settings::has_air_sun>, read<&Settings::air_sun>, write<&Settings::has_air_sun, &Settings::air_sun>, needs_air),
+    slider("disruptor.air_lamps", "Lamp glow", 50, "How bright the level's lamps are in the air", 0, 400, Unit::percent,
+           saved<&Settings::has_air_lamps>, read<&Settings::air_lamps>, write<&Settings::has_air_lamps, &Settings::air_lamps>,
+           needs_air),
+    slider("disruptor.air_shots", "Shot glow", 100, "How bright shots and blasts are in the air", 0, 400, Unit::percent,
+           saved<&Settings::has_air_shots>, read<&Settings::air_shots>, write<&Settings::has_air_shots, &Settings::air_shots>,
+           needs_air),
     choice("disruptor.fog_shape", "Fog shape", 0,
            "How the smooth distance fade thickens\n"
            "Original: at one pace, as the game's own",
