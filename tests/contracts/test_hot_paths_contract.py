@@ -43,6 +43,7 @@ icache = read("psxrecomp/runtime/src/psx_icache.c")
 
 require(
     "void psx_check_interrupts_at(CPUState* cpu, uint32_t resume_pc) {\n"
+    "    if (check_interrupts_quiet_edge(cpu, resume_pc)) return;\n"
     "    uint32_t prev = s_compiled_interrupt_resume_pc;\n"
     "    s_compiled_interrupt_resume_pc = resume_pc;\n"
     "    s_resume_pc_given = 1;\n"
@@ -54,6 +55,88 @@ require(
     in interrupts,
     "the edge check stays out of line over the framework's longer check (mission 13 costs 2.09 ms of CPU a frame against "
     "the shipped build's 2.96), takes the resume PC and the save mark, and the check reads the mark once",
+)
+quiet = interrupts[
+    interrupts.index("static inline int check_interrupts_quiet_edge(CPUState* cpu, uint32_t resume_pc) {") : interrupts.index(
+        "void psx_check_interrupts_at(CPUState* cpu, uint32_t resume_pc) {"
+    )
+]
+quiet_guards, quiet_writes = quiet[: quiet.index("    ++s_fast_maintenance;\n")], quiet[quiet.index("    ++s_fast_maintenance;\n") :]
+require(
+    all(
+        guard in quiet_guards
+        for guard in (
+            "(uint32_t)g_psx_guest_time_frozen",
+            "g_psx_cyc_batch",
+            "(uint32_t)in_exception",
+            "(uint32_t)s_defer_switch_pending",
+            "(uint32_t)g_psx_savestate_pending",
+            "(uint32_t)g_ls_suppress_record",
+            "g_dirty_safe_resume_pc",
+            "(i_stat & i_mask)",
+            "(cpu->cop0[COP0_CAUSE] & cpu->cop0[COP0_SR] & 0x0300u)) return 0;",
+            "    if (g_psx_cyc_local_acc && *g_psx_cyc_local_acc) return 0;\n",
+            "    if (g_idle_skip_enabled <= 0 || !g_psx_idle_edge_fresh || !resume_pc || resume_pc == s_idle_pc) return 0;\n",
+            "(uint32_t)g_ls_replay_active",
+            "(uint32_t)g_ls_mode",
+            "(uint32_t)g_precise_mode",
+            "(uint32_t)g_psx_call_bail",
+            "(uint32_t)g_idle_note_suppress",
+            "(uint32_t)g_idle_note_suppress | (uint32_t)((g_psx_idle_site_filter >> ((s_idle_pc >> 2) & 63u)) & 1u)) return 0;\n",
+            "    if (((s_fast_maintenance + 1u) & 0x3FFFu) == 0) return 0;\n",
+        )
+    )
+    and quiet_guards.count("return 0;") == 5
+    and "return 1;" not in quiet_guards
+    and quiet_writes.strip()
+    == "++s_fast_maintenance;\n    ++s_irq_path_entry;\n    ++s_irq_path_fast_none;\n    s_last_interrupt_check_pc = resume_pc;\n"
+    "    s_last_interrupt_check_cycle = psx_cycle_count;\n    s_idle_pc = resume_pc;\n    s_idle_last_cycle = psx_cycle_count;\n"
+    "    s_idle_last_stores = g_guest_store_count;\n    s_idle_last_mmio = g_mmio_access_count;\n    return 1;\n}",
+    "the edge's quiet return is taken only with every state the full check and the idle detector read at rest and the "
+    "maintenance not due, and it writes what that check's return with nothing pending and the detector's restart write",
+)
+cycles = read("psxrecomp/runtime/src/psx_cycles.c")
+full_begin = cycles.index("static void idle_note_check_full(CPUState *cpu, uint32_t check_pc) {")
+full_end = cycles.index("static int idle_edge_fresh(void) {")
+full, outside = cycles[full_begin:full_end], cycles[:full_begin] + cycles[full_end:]
+restart = full[full.index("    if (check_pc != s_idle_pc) {\n") :]
+restart = restart[: restart.index("    }\n")]
+fresh = cycles[full_end : cycles.index("void psx_idle_note_check(CPUState *cpu, uint32_t check_pc) {")]
+progress = ("s_idle_streak", "s_idle_quantum", "s_idle_have_snap", "s_idle_progress_reg", "s_idle_progress_delta",
+            "s_idle_mem_progress", "s_idle_store_addr", "s_idle_edges")
+written_outside = set(re.findall(r"(?m)^\s+(s_idle_\w+)\s*(?:=[^=]|\+\+|--|[-+]=)", outside))
+reset = cycles[cycles.index("static void idle_reset_progress(void) {") :]
+reset = reset[: reset.index("}\n")]
+require(
+    "void psx_idle_note_check(CPUState *cpu, uint32_t check_pc) {\n    idle_note_check_full(cpu, check_pc);\n"
+    "    g_psx_idle_edge_fresh = idle_edge_fresh();\n}\n" in cycles
+    and cycles.count("idle_note_check_full(") == 2
+    and cycles.count("g_psx_idle_edge_fresh = idle_edge_fresh();") == 1
+    and "static int idle_edge_fresh(void) {\n#if defined(PSX_COSIM) || defined(PSX_HAS_RECOMP_NET)\n    return 0;\n#else\n" in cycles
+    and len(re.findall(r"g_psx_idle_edge_fresh = (?!0;|idle_edge_fresh\(\);)", cycles)) == 0
+    and all(f"{name} == " in fresh or f"!{name} " in fresh for name in progress)
+    and all(token in fresh for token in ("!s_idle_audited_only", "idle_skip_on() > 0", "!g_ls_replay_active", "!g_idle_note_suppress"))
+    and "*s_track == (g_idle_skip_ext > 0 && s_idle_host_write != NULL && s_track != &s_track_dummy);" in fresh
+    and {name for name in re.findall(r"\b(s_idle_\w+)\s*=", restart + reset)}
+    == set(progress) | {"s_idle_pc", "s_idle_last_cycle", "s_idle_last_stores", "s_idle_last_mmio"}
+    and all(
+        f"{definition} {{\n    g_psx_idle_edge_fresh = 0;\n" in cycles
+        for definition in (
+            "void psx_idle_skip_set_store_tracker(int *gate, const uint32_t *addr, const uint32_t *val)",
+            "void psx_idle_skip_set_audited_only(int enabled)",
+        )
+    )
+    and "    if (n > IDLE_SITES_MAX) n = IDLE_SITES_MAX;\n    g_psx_idle_edge_fresh = 0;\n    g_psx_idle_site_filter = 0;\n" in cycles
+    and "        g_psx_idle_site_filter |= 1ull << ((pcs[i] >> 2) & 63u);\n" in cycles
+    and written_outside
+    == {"s_idle_hi", "s_idle_lo", "s_idle_site_count", "s_idle_audited_only", "s_idle_pc", "s_idle_have_snap", "s_idle_edges",
+        "s_idle_streak", "s_idle_quantum", "s_idle_progress_reg", "s_idle_progress_delta", "s_idle_mem_progress", "s_idle_last_cycle"}
+    and "void psx_idle_skip_set_host_writer(void (*w)(uint32_t, uint32_t)) { g_psx_idle_edge_fresh = 0; s_idle_host_write = w; }" in cycles
+    and cycles[cycles.index("void psx_cycles_resync_after_restore(") :].count("    g_psx_idle_edge_fresh = 0;\n") == 1
+    and cycles.count("idle_skip_ext_on()") == 1,
+    "the detector's restart writes the four words the edge writes and the progress fields the fresh mark is taken from, the "
+    "mark is taken anew after every full note and dropped by every other writer, never set in a co-simulation or network build, "
+    "and the site filter has a bit for every site",
 )
 require(
     interrupts.count("if ((++s_fast_maintenance & 0x3FFFu) == 0 || g_psx_savestate_pending) {") == 2

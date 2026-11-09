@@ -1,8 +1,75 @@
 diff --git a/runtime/src/psx_cycles.c b/runtime/src/psx_cycles.c
-index 86528dbea22ea54bc7d6d63e7ad70de744ed54fe..8261598af02f248ad9b03ade51dee5774d0499a1 100644
+index 86528dbea22ea54bc7d6d63e7ad70de744ed54fe..a0c1416e5f0ad13114a0e6aea7c826eef4227bd5 100644
 --- a/runtime/src/psx_cycles.c
 +++ b/runtime/src/psx_cycles.c
-@@ -776,6 +776,18 @@
+@@ -587,7 +587,7 @@
+  * delivery still runs normally. */
+ int g_idle_note_suppress = 0;
+ 
+-static uint32_t s_idle_pc = 0;
++uint32_t s_idle_pc = 0; /* with the three last_ counters below, also written by psx_check_interrupts_at */
+ static uint32_t s_idle_quantum = 0;
+ static uint32_t s_idle_streak = 0;
+ static int      s_idle_have_snap = 0; /* GPR snapshot valid for s_idle_pc */
+@@ -595,9 +595,9 @@
+ static uint32_t s_idle_hi = 0, s_idle_lo = 0;
+ static int      s_idle_progress_reg = -2; /* -2 unknown, -1 stable, 1..31 countdown */
+ static int32_t  s_idle_progress_delta = 0;
+-static uint64_t s_idle_last_cycle = 0;
+-static uint64_t s_idle_last_stores = 0;
+-static uint64_t s_idle_last_mmio = 0;
++uint64_t s_idle_last_cycle = 0;
++uint64_t s_idle_last_stores = 0;
++uint64_t s_idle_last_mmio = 0;
+ 
+ static void idle_snapshot_regs(const CPUState *cpu) {
+     for (int i = 1; i < 32; i++) s_idle_gpr[i] = cpu->gpr[i];
+@@ -654,8 +654,12 @@
+ static int            *s_track = &s_track_dummy;
+ static const uint32_t *s_last_addr = &s_no_store, *s_last_val = &s_no_store;
+ static void (*s_idle_host_write)(uint32_t addr, uint32_t val) = NULL;
+-void psx_idle_skip_set_host_writer(void (*w)(uint32_t, uint32_t)) { s_idle_host_write = w; }
++/* 1 while a check at another PC outside the sites would only restart the detector there: psx_check_interrupts_at then does that itself. */
++int      g_psx_idle_edge_fresh = 0;
++uint64_t g_psx_idle_site_filter = 0;
++void psx_idle_skip_set_host_writer(void (*w)(uint32_t, uint32_t)) { g_psx_idle_edge_fresh = 0; s_idle_host_write = w; }
+ void psx_idle_skip_set_store_tracker(int *gate, const uint32_t *addr, const uint32_t *val) {
++    g_psx_idle_edge_fresh = 0;
+     s_track = gate ? gate : &s_track_dummy;
+     s_last_addr = addr ? addr : &s_no_store;
+     s_last_val = val ? val : &s_no_store;
+@@ -671,7 +675,12 @@
+ void psx_idle_skip_set_store_counter_sites(const uint32_t *pcs, int n) {
+     if (n < 0 || !pcs) n = 0;
+     if (n > IDLE_SITES_MAX) n = IDLE_SITES_MAX;
+-    for (int i = 0; i < n; i++) s_idle_sites[i] = pcs[i];
++    g_psx_idle_edge_fresh = 0;
++    g_psx_idle_site_filter = 0;
++    for (int i = 0; i < n; i++) {
++        s_idle_sites[i] = pcs[i];
++        g_psx_idle_site_filter |= 1ull << ((pcs[i] >> 2) & 63u);
++    }
+     s_idle_site_count = n;
+ }
+ static int idle_site_listed(uint32_t pc) {
+@@ -720,6 +729,7 @@
+ }
+ 
+ void psx_idle_skip_set_audited_only(int enabled) {
++    g_psx_idle_edge_fresh = 0;
+     s_idle_audited_only = enabled != 0;
+     s_idle_pc = 0;
+     s_idle_have_snap = 0;
+@@ -728,7 +738,7 @@
+     if (s_idle_audited_only) *s_track = 0;
+ }
+ 
+-void psx_idle_note_check(CPUState *cpu, uint32_t check_pc) {
++static void idle_note_check_full(CPUState *cpu, uint32_t check_pc) {
+ #ifdef PSX_COSIM
+     (void)cpu; (void)check_pc;
+     return;
+@@ -776,6 +786,18 @@
      if (ext && s_idle_pc != 0 && check_pc != s_idle_pc && s_idle_edges < IDLE_EDGES_MAX &&
          g_mmio_access_count == s_idle_last_mmio) {
          s_idle_edges++;
@@ -21,7 +88,7 @@ index 86528dbea22ea54bc7d6d63e7ad70de744ed54fe..8261598af02f248ad9b03ade51dee577
          return;
      }
  
-@@ -864,7 +876,8 @@
+@@ -864,7 +886,8 @@
       * (v_wait). Multi-edge loops with no counter store -- OpenBIOS's
       * 0xBFC057C0 poll, kernel 0x16BC -- moved R4's boot timing when skipped
       * (frame 192, cyc +3857), so they keep running for real. */
@@ -31,7 +98,39 @@ index 86528dbea22ea54bc7d6d63e7ad70de744ed54fe..8261598af02f248ad9b03ade51dee577
      uint32_t q = s_idle_quantum;
      uint32_t dist = devices_cycles_to_next_idle_event();
      /* The devices report distances from where they were last serviced
-@@ -1161,6 +1174,66 @@
+@@ -920,6 +943,23 @@
+     s_idle_last_stores = g_guest_store_count;
+     s_idle_last_mmio   = g_mmio_access_count;
+ #endif
++}
++
++static int idle_edge_fresh(void) {
++#if defined(PSX_COSIM) || defined(PSX_HAS_RECOMP_NET)
++    return 0;
++#else
++    extern int g_ls_replay_active;
++    return !s_idle_audited_only && g_idle_skip_ext >= 0 && idle_skip_on() > 0 && !g_ls_replay_active && !g_idle_note_suppress &&
++           s_idle_streak == 0 && s_idle_quantum == 0 && !s_idle_have_snap && s_idle_progress_reg == -2 &&
++           s_idle_progress_delta == 0 && !s_idle_mem_progress && s_idle_store_addr == 0xFFFFFFFFu && s_idle_edges == 0 &&
++           *s_track == (g_idle_skip_ext > 0 && s_idle_host_write != NULL && s_track != &s_track_dummy);
++#endif
++}
++
++void psx_idle_note_check(CPUState *cpu, uint32_t check_pc) {
++    idle_note_check_full(cpu, check_pc);
++    g_psx_idle_edge_fresh = idle_edge_fresh();
+ }
+ 
+ /* Save-state restore: psx_cycle_count was just overwritten from the snapshot, so
+@@ -943,6 +983,7 @@
+     s_idle_progress_reg = -2;
+     s_idle_edges = 0;
+     idle_reset_progress();
++    g_psx_idle_edge_fresh = 0;
+     if (s_idle_audited_only) *s_track = 0;
+     s_idle_last_cycle = psx_cycle_count;
+     /* GTE/muldiv completion deadlines and load-absorb give-back are host-only
+@@ -1161,6 +1202,66 @@
      }
  }
  

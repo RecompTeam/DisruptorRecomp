@@ -1,5 +1,5 @@
 diff --git a/runtime/src/interrupts.c b/runtime/src/interrupts.c
-index fd390f9ae91d7b55e4228c036a984ba518a1772d..c038bad6d98eb3b1e58dfcd0c89abd24808d2fdc 100644
+index fd390f9ae91d7b55e4228c036a984ba518a1772d..a3d21e909a01ffb0c93a3e21ead453756207b36e 100644
 --- a/runtime/src/interrupts.c
 +++ b/runtime/src/interrupts.c
 @@ -1120,9 +1120,13 @@
@@ -81,8 +81,37 @@ index fd390f9ae91d7b55e4228c036a984ba518a1772d..c038bad6d98eb3b1e58dfcd0c89abd24
          psx_netplay_poll_snap(cpu, s_last_interrupt_check_pc);
          psx_selfcheck_poll(cpu, s_last_interrupt_check_pc);
          psx_rewind_poll(cpu, s_last_interrupt_check_pc);
-@@ -2254,6 +2260,7 @@
+@@ -2251,9 +2257,36 @@
+  * interrupts via psx_check_interrupts (cpu->pc / scratch sentinel). Forwarding
+  * here gives the mmx6 baseline interrupt behavior — sufficient to build+run the
+  * current generated code on the good baseline for instrumented comparison. */
++/* The check's return with nothing pending, without its calls: taken only where psx_check_interrupts would change nothing else. */
++static inline int check_interrupts_quiet_edge(CPUState* cpu, uint32_t resume_pc) {
++    extern int g_ls_suppress_record, g_ls_replay_active, g_ls_mode, g_precise_mode, g_psx_call_bail, g_idle_note_suppress, g_psx_idle_edge_fresh;
++    extern uint64_t g_guest_store_count, g_mmio_access_count, g_psx_idle_site_filter, s_idle_last_cycle, s_idle_last_stores, s_idle_last_mmio;
++    extern uint32_t s_idle_pc;
++    if ((uint32_t)g_psx_guest_time_frozen | g_psx_cyc_batch | (uint32_t)in_exception | (uint32_t)s_defer_switch_pending |
++        (uint32_t)g_psx_savestate_pending | (uint32_t)g_ls_suppress_record | g_dirty_safe_resume_pc | (i_stat & i_mask) |
++        (cpu->cop0[COP0_CAUSE] & cpu->cop0[COP0_SR] & 0x0300u)) return 0;
++    if (g_psx_cyc_local_acc && *g_psx_cyc_local_acc) return 0;
++    if (g_idle_skip_enabled <= 0 || !g_psx_idle_edge_fresh || !resume_pc || resume_pc == s_idle_pc) return 0;
++    if ((uint32_t)g_ls_replay_active | (uint32_t)g_ls_mode | (uint32_t)g_precise_mode | (uint32_t)g_psx_call_bail |
++        (uint32_t)g_idle_note_suppress | (uint32_t)((g_psx_idle_site_filter >> ((s_idle_pc >> 2) & 63u)) & 1u)) return 0;
++    if (((s_fast_maintenance + 1u) & 0x3FFFu) == 0) return 0;
++    ++s_fast_maintenance;
++    ++s_irq_path_entry;
++    ++s_irq_path_fast_none;
++    s_last_interrupt_check_pc = resume_pc;
++    s_last_interrupt_check_cycle = psx_cycle_count;
++    s_idle_pc = resume_pc;
++    s_idle_last_cycle = psx_cycle_count;
++    s_idle_last_stores = g_guest_store_count;
++    s_idle_last_mmio = g_mmio_access_count;
++    return 1;
++}
++
  void psx_check_interrupts_at(CPUState* cpu, uint32_t resume_pc) {
++    if (check_interrupts_quiet_edge(cpu, resume_pc)) return;
      uint32_t prev = s_compiled_interrupt_resume_pc;
      s_compiled_interrupt_resume_pc = resume_pc;
 +    s_resume_pc_given = 1;
