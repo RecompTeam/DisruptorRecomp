@@ -362,8 +362,8 @@ require(
     and "static uint32_t gp0_cmd_buf[16];" in gpu
     and "    return disruptor_far_rendering_packet_fraction(resolved_packet, signature);\n" in host
     and "    const int packet_raw = packet_fade >= 0 ? 2 | (packet_fade << 2) : ctx_hud_glyph() << 2;\n" in renderer
-    and "vp[13] = (float)((rawtex ? 1 : 0) | packet_raw | sky_raw);" in renderer
-    and '"  } else if ((v_raw & 2) != 0) level = float(v_raw >> 2)/256.0;' in renderer
+    and "vp[13] = (float)((rawtex ? 1 : 0) | packet_raw | sky_raw | smooth_raw);" in renderer
+    and '"  } else if ((v_raw & 2) != 0) level = float((v_raw >> 2) & 0x3FFFF)/256.0;' in renderer
     and '"  if ((v_raw & 1) == 0) rgb = clamp(rgb * v_col.rgb * 2.0, 0.0, 1.0);\\n"' in renderer
     and "v_raw == 0" not in renderer,
     "a sprite the game faded carries its share of the next row from its packet to the renderer, the colour bit apart",
