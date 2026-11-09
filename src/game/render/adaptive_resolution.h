@@ -4,6 +4,9 @@
 
 #ifdef __cplusplus
 #include "dynamic_resolution.h"
+#include "host_ui_flags.h"
+
+#include <cstdint>
 
 namespace disruptor::adaptive_resolution {
 
@@ -21,6 +24,13 @@ inline bool gpu_bound(double wall, double work, double period, double factor) {
  * when its frames straddle the gap. A lone one, as a stall that drained queued frames, stays a pause. */
 inline double judged_wall(double wall, bool slow, bool after_late, double period, double gap_factor) {
     return slow && after_late ? period * gap_factor : wall;
+}
+
+/* The host's UI as a menu: it takes input or stops the in-between frames. The crosshair and popups laid over the
+ * picture do neither, and the game's GPU time under them is still the game's. */
+inline bool menu_shown(std::uint32_t ui_flags) {
+    constexpr std::uint32_t kInput = PSX_HOST_UI_CAPTURE_KEYBOARD | PSX_HOST_UI_CAPTURE_MOUSE | PSX_HOST_UI_CAPTURE_GAMEPAD;
+    return (ui_flags & PSX_HOST_UI_VISIBLE) != 0 && (psx_host_ui_stops_interpolation(ui_flags) || (ui_flags & kInput) != 0);
 }
 
 /* Nothing is judged while the picture is not the world or the frame is not the game's own. */

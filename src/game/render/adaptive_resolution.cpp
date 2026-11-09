@@ -16,7 +16,7 @@ extern "C" void gl_renderer_gpu_busy_enable(int enabled);
 extern "C" double gl_renderer_gpu_busy_ms(void);
 extern "C" int gpu_ws_displayed_flat(void);
 extern "C" int gpu_ws_displayed_menu(void);
-extern "C" int psx_host_ui_gl_visible(void);
+extern "C" uint32_t psx_host_ui_gl_flags(void);
 extern "C" int psx_host_video_get_internal_scale(void);
 extern "C" int psx_host_video_set_internal_scale(int scale);
 
@@ -100,7 +100,7 @@ void frame() {
     const bool slow = gpu_bound(wall, gpu, kPeriod, g.controller.p.gap_factor);
     const DynresSample sample{kPeriod, judged_wall(wall, slow, g.late, kPeriod, g.controller.p.gap_factor),
                               gpu * g_work_scale,
-                              held(world, psx_host_ui_gl_visible() != 0, g_replaying, psx_netplay_active() != 0)};
+                              held(world, menu_shown(psx_host_ui_gl_flags()), g_replaying, psx_netplay_active() != 0)};
     g.late = gpu_bound(wall, gpu, kPeriod, g.controller.p.late_factor);
     g.last = now;
     g.busy_ms = busy_ms;

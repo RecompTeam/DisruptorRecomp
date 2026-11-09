@@ -58,7 +58,7 @@ void gl_renderer_gpu_busy_enable(int enabled) { g_busy_wanted = enabled; }
 double gl_renderer_gpu_busy_ms(void) { return g_busy_ms; }
 int gpu_ws_displayed_flat(void) { return 0; }
 int gpu_ws_displayed_menu(void) { return 0; }
-int psx_host_ui_gl_visible(void) { return 0; }
+uint32_t psx_host_ui_gl_flags(void) { return 0; }
 int psx_netplay_active(void) { return 0; }
 int psx_host_video_get_internal_scale(void) { return g_scale; }
 int psx_host_video_set_internal_scale(int scale) {

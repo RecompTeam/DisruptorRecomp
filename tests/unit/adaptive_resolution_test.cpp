@@ -39,6 +39,14 @@ void only_the_game_s_own_world_is_judged() {
     expect(held(true, true, false, false), "the in-game menu is held");
     expect(held(true, false, true, false), "a capsule replay is held, its pictures stay at the recorded scale");
     expect(held(true, false, false, true), "netplay is held");
+    constexpr std::uint32_t kLayer = PSX_HOST_UI_VISIBLE | PSX_HOST_UI_LAYER;
+    expect(!menu_shown(0u) && !menu_shown(kLayer) && !menu_shown(kLayer | PSX_HOST_UI_APART),
+           "the crosshair or a popup over the picture holds nothing");
+    expect(menu_shown(PSX_HOST_UI_VISIBLE | PSX_HOST_UI_CAPTURE_KEYBOARD | PSX_HOST_UI_CAPTURE_MOUSE) &&
+               menu_shown(PSX_HOST_UI_VISIBLE) && menu_shown(kLayer | PSX_HOST_UI_CAPTURE_GAMEPAD) &&
+               menu_shown(kLayer | PSX_HOST_UI_SUSPEND_INTERPOLATION),
+           "the open menu, the wheel, a browser taking input or a UI stopping the in-between frames holds");
+    expect(!menu_shown(PSX_HOST_UI_CAPTURE_MOUSE), "input taken with nothing shown is no menu on screen");
 }
 
 void the_controller_steps_down_under_load_and_never_below_the_floor() {
