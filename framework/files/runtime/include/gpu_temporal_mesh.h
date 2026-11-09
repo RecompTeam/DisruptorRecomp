@@ -930,13 +930,7 @@ static inline int gpu_temporal_camera_rematch_in(GpuTemporalFaceIndex *index, co
     return best;
 }
 
-typedef struct GpuTemporalMeshPoint {
-    float x, y, depth;
-    int corner;
-} GpuTemporalMeshPoint;
-
 typedef struct GpuTemporalMeshEdge {
-    float ax, ay, bx, by;
     int a, b, triangle, direction;
 } GpuTemporalMeshEdge;
 
@@ -948,29 +942,59 @@ typedef struct GpuTemporalMeshLink {
     int vertex, next;
 } GpuTemporalMeshLink;
 
-static inline int gpu_temporal_mesh_compare_float(float a, float b) {
-    return a < b ? -1 : a > b ? 1 : 0;
+/* For finite values the keys order and equal as the floats do: -0 is +0. */
+static inline uint32_t gpu_temporal_mesh_float_key(float value) {
+    uint32_t bits;
+    if (value == 0.0f) value = 0.0f;
+    memcpy(&bits, &value, sizeof(bits));
+    return bits & 0x80000000u ? ~bits : bits | 0x80000000u;
 }
 
-static inline int gpu_temporal_mesh_compare_point(const void *left,
-                                                  const void *right) {
-    const GpuTemporalMeshPoint *a = (const GpuTemporalMeshPoint *)left;
-    const GpuTemporalMeshPoint *b = (const GpuTemporalMeshPoint *)right;
-    int order = gpu_temporal_mesh_compare_float(a->x, b->x);
-    if (!order) order = gpu_temporal_mesh_compare_float(a->y, b->y);
-    if (!order) order = gpu_temporal_mesh_compare_float(a->depth, b->depth);
-    return order;
+static inline uint64_t gpu_temporal_mesh_pair_key(float first, float second) {
+    return (uint64_t)gpu_temporal_mesh_float_key(first) << 32 | gpu_temporal_mesh_float_key(second);
 }
 
-static inline int gpu_temporal_mesh_compare_edge(const void *left,
-                                                 const void *right) {
-    const GpuTemporalMeshEdge *a = (const GpuTemporalMeshEdge *)left;
-    const GpuTemporalMeshEdge *b = (const GpuTemporalMeshEdge *)right;
-    int order = gpu_temporal_mesh_compare_float(a->ax, b->ax);
-    if (!order) order = gpu_temporal_mesh_compare_float(a->ay, b->ay);
-    if (!order) order = gpu_temporal_mesh_compare_float(a->bx, b->bx);
-    if (!order) order = gpu_temporal_mesh_compare_float(a->by, b->by);
-    return order;
+#define GPU_TEMPORAL_MESH_RADIX_BITS 11
+#define GPU_TEMPORAL_MESH_RADIX_DIGITS ((64 + GPU_TEMPORAL_MESH_RADIX_BITS - 1) / GPU_TEMPORAL_MESH_RADIX_BITS)
+#define GPU_TEMPORAL_MESH_RADIX_BUCKETS (1 << GPU_TEMPORAL_MESH_RADIX_BITS)
+
+/* Orders `order` by keys[order[i]], equal keys keeping their order. A digit that is the same everywhere costs no pass. */
+static inline void gpu_temporal_mesh_radix(const uint64_t *keys, int *order, int *spare, int count) {
+    uint32_t counts[GPU_TEMPORAL_MESH_RADIX_DIGITS][GPU_TEMPORAL_MESH_RADIX_BUCKETS];
+    const uint64_t mask = GPU_TEMPORAL_MESH_RADIX_BUCKETS - 1;
+    int *from = order, *to = spare;
+    if (count < 2) return;
+    memset(counts, 0, sizeof(counts));
+    for (int index = 0; index < count; ++index) {
+        const uint64_t key = keys[order[index]];
+        for (int digit = 0; digit < GPU_TEMPORAL_MESH_RADIX_DIGITS; ++digit)
+            ++counts[digit][(key >> (digit * GPU_TEMPORAL_MESH_RADIX_BITS)) & mask];
+    }
+    for (int digit = 0; digit < GPU_TEMPORAL_MESH_RADIX_DIGITS; ++digit) {
+        const int shift = digit * GPU_TEMPORAL_MESH_RADIX_BITS;
+        uint32_t *bucket = counts[digit];
+        uint32_t start = 0;
+        int *swap;
+        if (bucket[(keys[from[0]] >> shift) & mask] == (uint32_t)count) continue;
+        for (int value = 0; value < GPU_TEMPORAL_MESH_RADIX_BUCKETS; ++value) {
+            const uint32_t held = bucket[value];
+            bucket[value] = start;
+            start += held;
+        }
+        for (int index = 0; index < count; ++index) {
+            const int item = from[index];
+            to[bucket[(keys[item] >> shift) & mask]++] = item;
+        }
+        swap = from; from = to; to = swap;
+    }
+    if (from != order) memcpy(order, from, (size_t)count * sizeof(*order));
+}
+
+/* Orders by `major`, then by `minor`, then by the place in `order` on entry. */
+static inline void gpu_temporal_mesh_sort(const uint64_t *major, const uint64_t *minor, int *order, int *spare,
+                                          int count) {
+    gpu_temporal_mesh_radix(minor, order, spare, count);
+    gpu_temporal_mesh_radix(major, order, spare, count);
 }
 
 static inline int gpu_temporal_mesh_root(GpuTemporalMeshNode *nodes, int corner) {
@@ -1165,7 +1189,8 @@ static inline int gpu_temporal_mesh_prepare_scene(
         GpuTemporalTriangle *departed_from, GpuTemporalTriangle *departed_to, int *departed,
         GpuTemporalCamera *prior) {
     GpuTemporalMeshNode *nodes = NULL;
-    GpuTemporalMeshPoint *points = NULL;
+    uint64_t *major = NULL, *minor = NULL;
+    int *order = NULL, *spare = NULL;
     GpuTemporalMeshEdge *edges = NULL;
     GpuTemporalMeshFace *faces = NULL;
     GpuTemporalMeshLink *links = NULL;
@@ -1191,16 +1216,19 @@ static inline int gpu_temporal_mesh_prepare_scene(
         prev_n > GPU_TEMPORAL_MAX_TRIANGLES) return 0;
     vertex_count = curr_n * 3;
     nodes = (GpuTemporalMeshNode *)calloc((size_t)vertex_count, sizeof(*nodes));
-    points = (GpuTemporalMeshPoint *)malloc((size_t)vertex_count * sizeof(*points));
-    edges = (GpuTemporalMeshEdge *)malloc((size_t)vertex_count * sizeof(*edges));
+    major = (uint64_t *)malloc((size_t)vertex_count * (2 * sizeof(*major) + 2 * sizeof(*order)));
+    edges =(GpuTemporalMeshEdge *)malloc((size_t)vertex_count * sizeof(*edges));
     faces = (GpuTemporalMeshFace *)calloc((size_t)curr_n, sizeof(*faces));
     queue = (int *)malloc((size_t)curr_n * sizeof(*queue));
     links = (GpuTemporalMeshLink *)malloc((size_t)vertex_count * 2 * sizeof(*links));
     reverse = (int *)malloc((size_t)prev_n * sizeof(*reverse));
     pairs = (int *)malloc((size_t)curr_n * sizeof(*pairs));
     trusted = (int *)malloc((size_t)curr_n * sizeof(*trusted));
-    if (!nodes || !points || !edges || !faces || !queue || !links || !reverse || !pairs ||
+    if (!nodes || !major || !edges || !faces || !queue || !links || !reverse || !pairs ||
         !trusted) goto cleanup;
+    minor = major + vertex_count;
+    order = (int *)(minor + vertex_count);
+    spare = order + vertex_count;
 
     for (int corner = 0; corner < vertex_count; ++corner) {
         nodes[corner].parent = corner;
@@ -1223,36 +1251,42 @@ static inline int gpu_temporal_mesh_prepare_scene(
             if (t->x[a] > t->x[b] || (t->x[a] == t->x[b] && t->y[a] > t->y[b])) {
                 a = next; b = vertex; edge->direction = -1;
             }
-            edge->ax = t->x[a]; edge->ay = t->y[a];
-            edge->bx = t->x[b]; edge->by = t->y[b];
             edge->a = triangle * 3 + a; edge->b = triangle * 3 + b;
             edge->triangle = triangle;
             if (gpu_temporal_mesh_known_depth(t->depth[vertex])) {
-                GpuTemporalMeshPoint *point = &points[point_count++];
-                point->x = t->x[vertex]; point->y = t->y[vertex];
-                point->depth = t->depth[vertex];
-                point->corner = triangle * 3 + vertex;
+                const int corner = triangle * 3 + vertex;
+                major[corner] = gpu_temporal_mesh_pair_key(t->x[vertex], t->y[vertex]);
+                minor[corner] = gpu_temporal_mesh_float_key(t->depth[vertex]);
+                order[point_count++] = corner;
             }
         }
     }
 
     if (prior) memcpy(shift, prior->shift, sizeof(shift));
     twins = gpu_temporal_mesh_pairs(prev, prev_n, curr, curr_n, matches, pairs, trusted, shift);
-    qsort(points, (size_t)point_count, sizeof(*points), gpu_temporal_mesh_compare_point);
+    gpu_temporal_mesh_sort(major, minor, order, spare, point_count);
     /* The world goes by a rider: a corner of one that meets a corner of the other is not welded to it. */
     for (int point = 0, last[2] = {-1, -1}; point < point_count; ++point) {
-        const int rides = trusted[points[point].corner / 3] == 3;
-        if (point && gpu_temporal_mesh_compare_point(&points[point - 1], &points[point])) last[0] = last[1] = -1;
-        if (last[rides] >= 0) gpu_temporal_mesh_union(nodes, last[rides], points[point].corner);
-        last[rides] = points[point].corner;
+        const int corner = order[point];
+        const int rides = trusted[corner / 3] == 3;
+        if (point && (major[corner] != major[order[point - 1]] || minor[corner] != minor[order[point - 1]]))
+            last[0] = last[1] = -1;
+        if (last[rides] >= 0) gpu_temporal_mesh_union(nodes, last[rides], corner);
+        last[rides] = corner;
     }
-    qsort(edges, (size_t)edge_count, sizeof(*edges), gpu_temporal_mesh_compare_edge);
+    for (int edge = 0; edge < edge_count; ++edge) {
+        const int a = edges[edge].a, b = edges[edge].b;
+        major[edge] = gpu_temporal_mesh_pair_key(curr[a / 3].x[a % 3], curr[a / 3].y[a % 3]);
+        minor[edge] = gpu_temporal_mesh_pair_key(curr[b / 3].x[b % 3], curr[b / 3].y[b % 3]);
+        order[edge] = edge;
+    }
+    gpu_temporal_mesh_sort(major, minor, order, spare, edge_count);
     for (int first = 0; first < edge_count;) {
         int end = first + 1;
-        while (end < edge_count && !gpu_temporal_mesh_compare_edge(&edges[first], &edges[end]))
+        while (end < edge_count && major[order[first]] == major[order[end]] && minor[order[first]] == minor[order[end]])
             ++end;
         if (end - first == 2) {
-            const GpuTemporalMeshEdge *a = &edges[first], *b = &edges[first + 1];
+            const GpuTemporalMeshEdge *a = &edges[order[first]], *b = &edges[order[first + 1]];
             if (a->triangle != b->triangle && a->direction != b->direction &&
                 (trusted[a->triangle] == 3) == (trusted[b->triangle] == 3) &&
                 gpu_temporal_mesh_depth_compatible(curr, a->a, b->a) &&
@@ -1572,7 +1606,7 @@ cleanup:
     free(queue);
     free(faces);
     free(edges);
-    free(points);
+    free(major);
     free(nodes);
     return moving_triangles;
 }

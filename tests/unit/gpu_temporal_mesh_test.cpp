@@ -1121,9 +1121,55 @@ void the_face_index_answers_as_the_scan() {
     expect(index.head == nullptr && index.faces == nullptr, "a freed index holds nothing");
 }
 
+/* Corners and edges are grouped by sorting integer keys: the keys must order and equal as the floats, and ties keep their entry order. */
+void the_sort_answers_as_a_stable_comparison() {
+    const float tiny = std::numeric_limits<float>::denorm_min(), endless = std::numeric_limits<float>::infinity();
+    const std::array<float, 13> values = {-endless, -1.0e12f, -2.5f, -1.0f, -tiny, -0.0f, 0.0f,
+                                          tiny,     0.5f,     1.0f,  2.5f,  65534.996f, endless};
+    bool keyed = true;
+    for (const float a : values)
+        for (const float b : values) {
+            const uint32_t ka = gpu_temporal_mesh_float_key(a), kb = gpu_temporal_mesh_float_key(b);
+            keyed = keyed && (ka < kb) == (a < b) && (ka == kb) == (a == b);
+        }
+    expect(keyed, "a float's key is below, above or equal to another's exactly as the floats are, minus zero being zero");
+    expect(gpu_temporal_mesh_pair_key(1.0f, -3.0f) < gpu_temporal_mesh_pair_key(1.0f, 2.0f) &&
+               gpu_temporal_mesh_pair_key(-1.0f, 9.0f) < gpu_temporal_mesh_pair_key(1.0f, -9.0f) &&
+               gpu_temporal_mesh_pair_key(-0.0f, 4.0f) == gpu_temporal_mesh_pair_key(0.0f, 4.0f),
+           "a pair's key is decided by its first number, then by its second");
+
+    std::mt19937_64 random(7);
+    const std::array<int, 8> widths = {0, 3, 11, 12, 23, 34, 47, 64};
+    bool sorted = true;
+    for (int trial = 0; trial < 96; ++trial) {
+        const int room = trial < 3 ? trial + 1 : 1 + static_cast<int>(random() % 3000);
+        const int major_width = widths[static_cast<size_t>(trial) % widths.size()];
+        const int minor_width = widths[static_cast<size_t>(trial / 8) % widths.size()];
+        const int lift = trial % 3 == 2 && major_width < 40 ? 20 : 0;
+        std::vector<uint64_t> major(static_cast<size_t>(room)), minor(static_cast<size_t>(room));
+        for (int item = 0; item < room; ++item) {
+            major[static_cast<size_t>(item)] = (major_width == 64 ? random() : random() & ((1ull << major_width) - 1)) << lift;
+            minor[static_cast<size_t>(item)] = minor_width == 64 ? random() : random() & ((1ull << minor_width) - 1);
+        }
+        std::vector<int> order;
+        for (int item = 0; item < room; ++item)
+            if (trial < 3 || random() % 4) order.push_back(item);
+        std::shuffle(order.begin(), order.end(), random);
+        std::vector<int> expected = order, spare(order.size() + 1, -7);
+        std::stable_sort(expected.begin(), expected.end(), [&](int left, int right) {
+            const size_t a = static_cast<size_t>(left), b = static_cast<size_t>(right);
+            return major[a] != major[b] ? major[a] < major[b] : minor[a] < minor[b];
+        });
+        gpu_temporal_mesh_sort(major.data(), minor.data(), order.data(), spare.data(), static_cast<int>(order.size()));
+        sorted = sorted && order == expected && spare.back() == -7;
+    }
+    expect(sorted, "the sort orders by the first key, then the second, then the place on entry, whatever the keys' widths");
+}
+
 } // namespace
 
 int main() {
+    the_sort_answers_as_a_stable_comparison();
     the_face_index_answers_as_the_scan();
     twins_move_the_static_world();
     look_alikes_and_moving_objects();

@@ -253,15 +253,16 @@ require(
     and "                    near_camera &= rides || abs(proposed[axis] - best_shift[axis]) <= GPU_TEMPORAL_TWIN_OBJECT_REACH;\n"
     in mesh
     and "                    trusted[triangle] = rides ? 3 : 2;\n" in mesh
-    and "        const int rides = trusted[points[point].corner / 3] == 3;\n" in mesh
-    and "        if (point && gpu_temporal_mesh_compare_point(&points[point - 1], &points[point])) last[0] = last[1] = -1;\n"
+    and "        const int rides = trusted[corner / 3] == 3;\n" in mesh
+    and "        if (point && (major[corner] != major[order[point - 1]] || minor[corner] != minor[order[point - 1]]))\n"
+    "            last[0] = last[1] = -1;\n"
     in mesh
-    and "        if (last[rides] >= 0) gpu_temporal_mesh_union(nodes, last[rides], points[point].corner);\n" in mesh
+    and "        if (last[rides] >= 0) gpu_temporal_mesh_union(nodes, last[rides], corner);\n" in mesh
     and "                (trusted[a->triangle] == 3) == (trusted[b->triangle] == 3) &&\n" in mesh
     and "        if (has_camera && trusted[triangle] >= 2) dynamic = 1;\n" in mesh
     and "        if (trusted && trusted[triangle] >= 2) continue;" in mesh
     and mesh.index("    twins = gpu_temporal_mesh_pairs(prev, prev_n, curr, curr_n, matches, pairs, trusted, shift);\n")
-    < mesh.index("        const int rides = trusted[points[point].corner / 3] == 3;\n"),
+    < mesh.index("        const int rides = trusted[corner / 3] == 3;\n"),
     "in an in-between picture the faces that kept their place before a moving camera are a rider with its own motion, whatever "
     "the camera's step, the pairs are known before corners are welded, and no corner of a rider is welded to one of the world",
 )
