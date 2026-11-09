@@ -190,6 +190,32 @@ int main() {
         require(read(installed_cue(package, fixture[0]).parent_path() / "disc.bin") == "abc",
                 "failed import replaced the good installation");
         no_staging(package);
+
+        // The installed image is hashed once, then again only when its size or write time is not what that check wrote.
+        {
+            const fs::path installed = installed_cue(package, fixture[0]);
+            const fs::path bin = installed.parent_path() / "disc.bin";
+            const fs::path record = fs::path(bin) += ".known";
+            fs::remove(record);
+            {
+                auto first = verify_installed(installed, cancelled, {}, fixture);
+                require(first.profile == &fixture[0] && fs::exists(record), "the first check left no record");
+            }
+            static constexpr DiscProfile other_hash[] = {
+                {"TEST-USA", L"Test USA", 3, "0000000000000000000000000000000000000000000000000000000000000000", L"game.toml"},
+            };
+            {
+                auto known = verify_installed(installed, cancelled, {}, other_hash);
+                require(known.profile == &other_hash[0] && known.mount == installed && known.data == bin,
+                        "an unchanged image was hashed again");
+            }
+            fs::last_write_time(bin, fs::last_write_time(bin) + std::chrono::seconds(2));
+            fails([&] { verify_installed(installed, cancelled, {}, other_hash); }, "a rewritten image was taken unhashed");
+            {
+                auto again = verify_installed(installed, cancelled, {}, fixture);
+                require(again.profile == &fixture[0], "a rewritten image of the right bytes was refused");
+            }
+        }
         write(bad, "ab");
         fails([&] { verify_disc(bad, cancelled, {}, fixture); }, "truncated image verified");
         write(bad, "abc");

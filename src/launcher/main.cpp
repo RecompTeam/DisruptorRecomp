@@ -433,8 +433,10 @@ int run_window(const Arguments& arguments, Updater& updater, Activity& activity,
     };
     ImGui_ImplSDL3_SetGamepadMode(ImGui_ImplSDL3_GamepadMode_Manual, nullptr, 0);
 
-    const SDL_DisplayMode* mode = SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(window));
-    session.open(mode ? mode->refresh_rate : 0.0);
+    // SDL's first mode query took 0.39 s on the main thread, before the disc check even began.
+    const double rate = platform::display_rate();
+    const SDL_DisplayMode* mode = rate > 0.0 ? nullptr : SDL_GetCurrentDisplayMode(SDL_GetDisplayForWindow(window));
+    session.open(rate > 0.0 ? rate : mode ? mode->refresh_rate : 0.0);
     if (view.choices().check_for_updates && updater.view().state == UpdateState::idle) updater.check();
     SDL_Texture* picture = nullptr;
     if (arguments.screenshot) {

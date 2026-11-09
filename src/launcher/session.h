@@ -99,6 +99,7 @@ private:
     void finish(Outcome& outcome);
     // Save states of an earlier build are tried on this one once a session, after the disc is verified.
     void begin_upgrade();
+    void stop_upgrade();
     void finish_upgrade(StateUpgrade& upgrade);
     struct Earlier {
         std::optional<EarlierCopy> copy;
@@ -127,6 +128,7 @@ private:
     std::thread worker_;
     std::atomic_bool cancelled_{false};
     bool busy_ = false, closing_ = false, closed_ = false, upgraded_ = false;
+    bool upgrading_ = false;  // save states of an earlier version are tried apart: Play stays open and stops it
     std::unique_ptr<GameProcess> game_;
     bool other_game_ = false;
     FirstFrameWatch first_frame_;

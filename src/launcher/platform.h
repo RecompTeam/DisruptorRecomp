@@ -63,6 +63,9 @@ void open_folder(const std::filesystem::path& folder);
 // The file's folder, with the file chosen where the file manager can.
 void show_file(const std::filesystem::path& file);
 
+// The primary display's refresh rate in hertz, 0 where the system does not say it cheaply.
+double display_rate();
+
 // Text to standard output or error. A Windows GUI program's C streams reach no redirected handle.
 void write_standard(std::string_view text, bool error);
 void unset(const std::string& name);

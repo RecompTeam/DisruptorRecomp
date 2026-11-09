@@ -37,6 +37,11 @@ VerifiedDisc verify_disc(const std::filesystem::path& selected,
                          const std::atomic_bool& cancelled,
                          const Progress& progress = {},
                          std::span<const DiscProfile> profiles = supported_discs());
+// The installed image: hashed only when its size or write time is not what its last full check wrote beside it.
+VerifiedDisc verify_installed(const std::filesystem::path& selected,
+                              const std::atomic_bool& cancelled,
+                              const Progress& progress = {},
+                              std::span<const DiscProfile> profiles = supported_discs());
 VerifiedDisc import_disc(const std::filesystem::path& selected,
                          const std::filesystem::path& package,
                          const std::atomic_bool& cancelled,

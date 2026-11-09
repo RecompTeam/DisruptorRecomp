@@ -500,6 +500,49 @@ VerifiedDisc verify_disc(const fs::path& selected, const std::atomic_bool& cance
     return {&profile, data, cue_lock ? selected : fs::path{}, locks};
 }
 
+namespace {
+fs::path known_path(const fs::path& image) { return fs::path(image) += ".known"; }
+
+// The image's size and write time, as its last full check wrote them beside it.
+std::string file_state(const fs::path& image) {
+    std::error_code failed;
+    const auto size = fs::file_size(image, failed);
+    if (failed) return {};
+    const auto written = fs::last_write_time(image, failed);
+    if (failed) return {};
+    return std::to_string(size) + ' ' + std::to_string(written.time_since_epoch().count());
+}
+} // namespace
+
+VerifiedDisc verify_installed(const fs::path& selected, const std::atomic_bool& cancelled, const Progress& progress,
+                              std::span<const DiscProfile> profiles) {
+    check_cancel(cancelled);
+    const bool chd = is_chd(selected);
+    {
+        std::shared_ptr<File> cue_lock;
+        if (!chd && upper(selected.extension().string()) == ".CUE") cue_lock = std::make_shared<File>(selected);
+        const fs::path data = chd ? selected : resolve_image(selected);
+        auto file = std::make_shared<File>(data);
+        std::ifstream input(known_path(data), std::ios::binary);
+        std::string size, written, id;
+        const std::string now = file_state(data);
+        if (!now.empty() && input >> size >> written >> id && size + ' ' + written == now)
+            for (const auto& profile : profiles)
+                if (id == profile.id) {
+                    auto locks = std::make_shared<std::array<std::shared_ptr<File>, 2>>(
+                        std::array<std::shared_ptr<File>, 2>{file, cue_lock});
+                    return {&profile, data, chd || cue_lock ? selected : fs::path{}, locks};
+                }
+    }
+    VerifiedDisc disc = verify_disc(selected, cancelled, progress, profiles);
+    // Held open by the check, so nothing wrote it between the hash and this line.
+    if (const std::string now = file_state(disc.data); !now.empty()) {
+        std::ofstream output(known_path(disc.data), std::ios::binary);
+        output << now << ' ' << disc.profile->id << '\n';
+    }
+    return disc;
+}
+
 fs::path installed_cue(const fs::path& package, const DiscProfile& profile) {
     return package / "input" / "discs" / profile.id / "disc.cue";
 }

@@ -222,6 +222,8 @@ void open_folder(const fs::path& folder) { spawn_detached({"xdg-open", folder.st
 
 void show_file(const fs::path& file) { spawn_detached({"xdg-open", file.parent_path().string()}); }
 
+double display_rate() { return 0.0; }
+
 void write_standard(std::string_view text, bool error) {
     if (::write(error ? 2 : 1, text.data(), text.size()) < 0) {}
 }

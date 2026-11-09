@@ -262,8 +262,9 @@ require(
     and window.count("check_region_disc(") == 1
     and worker.count("import_disc(") == 1
     and window.count("import_disc(") == 2
-    and worker.count("verify_disc(") == 1
-    and window.count("verify_disc(") == 3,
+    and worker.count("verify_installed(") == 1
+    and window.count("verify_installed(") == 1
+    and window.count("verify_disc(") == 2,
     "a disc image is opened on the worker only: one on a share that is gone must not stall the window",
 )
 require(

@@ -174,6 +174,12 @@ void show_file(const fs::path& file) {
     ShellExecuteW(nullptr, L"open", L"explorer.exe", shown.c_str(), nullptr, SW_SHOWNORMAL);
 }
 
+double display_rate() {
+    DEVMODEW mode{};
+    mode.dmSize = sizeof mode;
+    return EnumDisplaySettingsW(nullptr, ENUM_CURRENT_SETTINGS, &mode) && mode.dmDisplayFrequency > 1 ? mode.dmDisplayFrequency : 0.0;
+}
+
 void write_standard(std::string_view text, bool error) {
     DWORD written = 0;
     WriteFile(GetStdHandle(error ? STD_ERROR_HANDLE : STD_OUTPUT_HANDLE), text.data(), static_cast<DWORD>(text.size()),

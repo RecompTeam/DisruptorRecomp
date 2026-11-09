@@ -92,6 +92,7 @@ void Session::poll() {
 }
 
 void Session::begin(Task task, fs::path source, bool launch) {
+    stop_upgrade();
     if (worker_.joinable()) worker_.join();
     Request request{task, std::move(source), launch, verified_.data, settings_.language_disc(), settings_.language_discs()};
     if (task == Task::import || task == Task::verify) verified_ = {}; // release previous read locks before replacing data
@@ -114,7 +115,7 @@ void Session::begin(Task task, fs::path source, bool launch) {
         };
         Discs discs;
         discs.import = [&](const fs::path& image) { return import_disc(image, data_, cancelled_, report); };
-        discs.verify = [&](const fs::path& cue) { return verify_disc(cue, cancelled_, report); };
+        discs.verify = [&](const fs::path& cue) { return verify_installed(cue, cancelled_, report); };
         discs.check_package = [&](const VerifiedDisc& disc) { check_package(program_, *disc.profile); };
         discs.look = [](const fs::path& image) { return region_disc(image); };
         discs.check = [](const fs::path& home, const fs::path& image) { return check_region_disc(home, image); };
@@ -154,7 +155,7 @@ void Session::begin_upgrade() {
     if (game_running()) return;
     if (worker_.joinable()) worker_.join();
     cancelled_ = false;
-    busy_ = true;
+    upgrading_ = true;
     progress_ = 0;
     auto upgrade = std::make_unique<StateUpgrade>();
     upgrade->lines.reserve(16);
@@ -176,7 +177,7 @@ void Session::begin_upgrade() {
 
 void Session::finish_upgrade(StateUpgrade& upgrade) {
     if (worker_.joinable()) worker_.join();
-    busy_ = false;
+    upgrading_ = false;
     if (closing_) {
         closed_ = true;
         return;
@@ -196,7 +197,20 @@ void Session::finish_upgrade(StateUpgrade& upgrade) {
     say(wide(text + "Activity says which\nPress Play to start"));
 }
 
+void Session::stop_upgrade() {
+    if (!upgrading_) return;
+    cancelled_ = true;
+    if (worker_.joinable()) worker_.join();
+    upgrading_ = false;
+    {
+        std::scoped_lock lock(handed_mutex_);
+        handed_upgrade_.reset();
+    }
+    activity_.add("Trying the save states stopped: they are tried again next time");
+}
+
 void Session::begin_earlier(std::function<Earlier()> work) {
+    stop_upgrade();
     if (worker_.joinable()) worker_.join();
     cancelled_ = false;
     busy_ = true;
