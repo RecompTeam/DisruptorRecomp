@@ -146,6 +146,18 @@ void draw_enhancements_tab() {
     if (!sampling_applies) ImGui::EndDisabled();
     draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
 
+    int filtering = PSXRecompV4::disruptor_texture_filter_index(gr_texture_filter(), gl_renderer_texture_lod(),
+                                                                gl_renderer_anisotropy());
+    const bool filtering_applies = applies("disruptor.texture_filtering");
+    if (!filtering_applies) ImGui::BeginDisabled();
+    ImGui::SetNextItemWidth(260.0f);
+    if (option_list("disruptor.texture_filtering", &filtering)) {
+        set_texture_filtering(filtering);
+        mark_texture_filtering(filtering);
+    }
+    if (!filtering_applies) ImGui::EndDisabled();
+    draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
+
     bool facing = gpu_facing_sprites_enabled() != 0;
     const bool facing_applies = applies("disruptor.facing_sprites");
     if (!facing_applies) ImGui::BeginDisabled();

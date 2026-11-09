@@ -457,6 +457,15 @@ void read_game_user_settings(const toml::value& doc, UserSettings& s) {
                 }
             }
         });
+        if (d.contains("texture_filtering")) try_get([&]{
+            const std::string filter = toml::find<std::string>(d, "texture_filtering");
+            for (int index = 0; index < kDisruptorTextureFilterCount; ++index) {
+                if (filter == kDisruptorTextureFilters[index]) {
+                    s.texture_filtering = index;
+                    s.has_texture_filtering = true;
+                }
+            }
+        });
         if (d.contains("diagnostic_view")) try_get([&]{
             const std::string view = toml::find<std::string>(d, "diagnostic_view");
             for (int index = 0; index < kDisruptorDiagnosticViewCount; ++index) {
@@ -499,7 +508,7 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
         s.has_perspective_textures || s.has_frame_unlock ||
         s.has_ambient_occlusion || s.has_occlusion_reach || s.has_occlusion_strength || s.has_smooth_fade ||
         s.has_multisampling || s.has_sample_shading || s.has_downscale_averaging || s.has_edge_smoothing ||
-        s.has_gap_filling || s.has_depth_sorted_world || s.has_facing_sprites || s.has_sprite_depth_read || s.has_movie_filter || s.has_draw_distance || s.has_fog_shape || s.has_diagnostic_view || s.has_detailed_logging ||
+        s.has_gap_filling || s.has_depth_sorted_world || s.has_facing_sprites || s.has_sprite_depth_read || s.has_movie_filter || s.has_draw_distance || s.has_fog_shape || s.has_texture_filtering || s.has_diagnostic_view || s.has_detailed_logging ||
         s.has_language_discs || s.has_mute_in_background || s.has_achievements || s.has_bass_cut ||
         s.has_achievements_encore || s.has_achievements_unofficial || s.has_achievements_popups || s.has_achievements_progress || s.has_achievements_sound || s.has_achievements_popup_time || s.has_achievements_corner ||
         s.has_language_disc || s.has_skip_intro || s.has_fast_disc_reads ||
@@ -685,6 +694,8 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
             f << "draw_distance = " << s.draw_distance << "\n";
         if (s.has_fog_shape && s.fog_shape >= 0 && s.fog_shape < kDisruptorFogShapeCount)
             f << "fog_shape = " << quoted(kDisruptorFogShapes[s.fog_shape]) << "\n";
+        if (s.has_texture_filtering && s.texture_filtering >= 0 && s.texture_filtering < kDisruptorTextureFilterCount)
+            f << "texture_filtering = " << quoted(kDisruptorTextureFilters[s.texture_filtering]) << "\n";
         if (s.has_diagnostic_view && s.diagnostic_view >= 0 && s.diagnostic_view < kDisruptorDiagnosticViewCount)
             f << "diagnostic_view = " << quoted(kDisruptorDiagnosticViews[s.diagnostic_view]) << "\n";
     }

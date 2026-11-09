@@ -92,7 +92,8 @@ require(
     and '"  } else if (u_sky.z != 1.0 && u_sky_frame.z > 0.0) {' in sample
     and '"    at.x += v_sky.z * u_sky.w / u_sky_frame.z * (u_sky.z - 1.0);\\n"' in sample
     and '"    at.y += v_sky.w * (u_sky.z - 1.0);\\n"' in sample
-    and '"  if (u_filter == 0 && u_sky_grown.z == 0) {\\n"' in renderer
+    and '"  if ((u_filter & 15) == 0 && u_sky_grown.z == 0) {  /* the panorama takes bilinear under every filter */\\n"'
+    in renderer
     and "uniform ivec3 u_sky_grown;" in renderer
     and '"  vec2 at = vec2(v_sky.x, v_sky.y - u_sky_frame.w);  /* the vertical look moves the sky with the horizon, whole */\\n"'
     in sample

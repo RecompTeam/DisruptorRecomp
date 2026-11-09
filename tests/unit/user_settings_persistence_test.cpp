@@ -26,6 +26,18 @@ static void require(bool condition, const char *message) {
     if (!condition) throw std::runtime_error(message);
 }
 
+constexpr bool texture_filters_found_again() {
+    for (int index = 0; index < PSXRecompV4::kDisruptorTextureFilterCount; ++index) {
+        const auto& mode = PSXRecompV4::kDisruptorTextureFilterModes[index];
+        if (PSXRecompV4::disruptor_texture_filter_index(mode.filter, mode.levels, mode.anisotropy) != index) return false;
+    }
+    return true;
+}
+static_assert(texture_filters_found_again(), "each texture filter is found again from the renderer's state");
+static_assert(PSXRecompV4::disruptor_texture_filter_index(0, 0, 16) == 0, "nearest whatever the anisotropy");
+static_assert(PSXRecompV4::disruptor_texture_filter_index(2, 0, 1) == -1, "a debug key's stable world is no entry");
+static_assert(std::size(PSXRecompV4::kDisruptorTextureFilters) == std::size(PSXRecompV4::kDisruptorTextureFilterModes));
+
 static bool has_temp_sibling(const fs::path& directory) {
     for (const auto& entry : fs::directory_iterator(directory)) {
         if (entry.path().filename().string().find(".tmp.") != std::string::npos)
@@ -152,6 +164,8 @@ int main() {
         written.draw_distance = 125;
         written.has_fog_shape = true;
         written.fog_shape = 2;
+        written.has_texture_filtering = true;
+        written.texture_filtering = 5;
         written.has_multisampling = true;
         written.multisampling = 8;
         written.has_sample_shading = true;
@@ -264,6 +278,7 @@ int main() {
                     loaded.has_render_thread && loaded.render_thread &&
                     loaded.has_draw_distance && loaded.draw_distance == 125 &&
                     loaded.has_fog_shape && loaded.fog_shape == 2 &&
+                    loaded.has_texture_filtering && loaded.texture_filtering == 5 &&
                     loaded.has_multisampling && loaded.multisampling == 8 &&
                     loaded.has_sample_shading && loaded.sample_shading &&
                     loaded.has_downscale_averaging && loaded.downscale_averaging &&

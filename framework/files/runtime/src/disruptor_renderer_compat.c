@@ -14,10 +14,6 @@ int gl_renderer_accurate_blending(void) {
     return 0;
 }
 
-int gl_renderer_anisotropy(void) {
-    return 0;
-}
-
 int gl_renderer_batch_sites(int kind, int *lines, uint64_t *counts, int cap) {
     (void)cap;
     (void)counts;
@@ -557,11 +553,6 @@ void gl_renderer_set_scanlines(int on, float strength) {
     (void)on;
 }
 
-void gl_renderer_set_texture_lod(int mode, int aniso) {
-    (void)aniso;
-    (void)mode;
-}
-
 void gl_renderer_set_texture_window_batching(int on) {
     (void)on;
 }
@@ -642,10 +633,6 @@ void gl_renderer_swap_timing_json(char *out, int cap) {
 }
 
 int gl_renderer_texture_banks_supported(void) {
-    return 0;
-}
-
-int gl_renderer_texture_lod(void) {
     return 0;
 }
 

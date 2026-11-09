@@ -69,6 +69,7 @@ struct GameUserSettings {
     bool has_detailed_logging = false; bool detailed_logging = false;
     bool has_draw_distance = false; int draw_distance = 100;  // percent of the game's own, one of kDisruptorDrawDistances
     bool has_fog_shape = false; int fog_shape = 0;  // an index into kDisruptorFogShapes
+    bool has_texture_filtering = false; int texture_filtering = 0;  // an index into kDisruptorTextureFilters
     // The Experimental tab's lighting, amounts in percent. The sun is the second mission's, the one open level with one.
     bool has_probe_lighting = false; bool probe_lighting = false;
     bool has_probe_strength = false; int probe_strength = 100;
@@ -95,6 +96,22 @@ inline constexpr int kDisruptorSampleCounts[] = {0, 2, 4, 8};
 inline constexpr int kDisruptorDrawDistances[] = {100, 125, 150, 200};
 inline constexpr const char* kDisruptorFogShapes[] = {"even", "soft", "late"};
 inline constexpr int kDisruptorFogShapeCount = 3;
+inline constexpr const char* kDisruptorTextureFilters[] = {"nearest", "bilinear", "trilinear", "anisotropic_2x",
+                                                           "anisotropic_4x", "anisotropic_8x", "anisotropic_16x", "xbr"};
+inline constexpr int kDisruptorTextureFilterCount = 8;
+// Each one's renderer filter (PSX_TEXTURE_FILTER_*), mip levels from the footprint and anisotropy.
+struct DisruptorTextureFilter { int filter, levels, anisotropy; };
+inline constexpr DisruptorTextureFilter kDisruptorTextureFilterModes[] = {{0, 0, 1}, {1, 0, 1}, {1, 1, 1}, {1, 1, 2},
+                                                                           {1, 1, 4}, {1, 1, 8}, {1, 1, 16}, {3, 0, 1}};
+// The entry the renderer's state is, or -1 for a state set elsewhere, such as a debug key's stable world.
+constexpr int disruptor_texture_filter_index(int filter, int levels, int anisotropy) {
+    for (int index = 0; index < kDisruptorTextureFilterCount; ++index) {
+        const DisruptorTextureFilter& mode = kDisruptorTextureFilterModes[index];
+        if (mode.filter == filter && mode.levels == (levels != 0 ? 1 : 0) && (mode.levels == 0 || mode.anisotropy == anisotropy))
+            return index;
+    }
+    return -1;
+}
 inline constexpr const char* kDisruptorBassCuts[] = {"original", "reduced", "tv_speaker"};
 inline constexpr int kDisruptorBassCutCount = 3;
 inline constexpr int kDisruptorBassCutDefault = 1;  // reduced: the owner's choice of 2026-11-03

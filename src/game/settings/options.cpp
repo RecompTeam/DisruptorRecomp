@@ -112,6 +112,8 @@ constexpr const char* scales[] = {"1x (native)", "2x", "3x", "4x", "5x", "6x", "
 constexpr const char* vsyncs[] = {"Adaptive", "Immediate", "Synchronised"};
 constexpr const char* schemes[] = {"Classic", "Modern"};
 constexpr const char* antialiasing_levels[] = {"Off", "2x MSAA", "4x MSAA", "8x MSAA", "2x SSAA", "4x SSAA", "8x SSAA"};
+constexpr const char* texture_filters[] = {"Nearest (original)", "Bilinear", "Trilinear", "Anisotropic 2x",
+                                           "Anisotropic 4x", "Anisotropic 8x", "Anisotropic 16x", "xBR"};
 constexpr const char* draw_distances[] = {"Original", "1.25x", "1.5x", "2x"};
 constexpr const char* fog_shapes[] = {"Original", "Soft", "Late"};
 constexpr int distances_offered = 2;  /* Original and 1.25x for now */
@@ -438,6 +440,15 @@ constexpr Option option_list[] = {
            "Higher counts cost the graphics card more, SSAA the most",
            antialiasing_levels,
            antialiasing_saved, antialiasing, set_antialiasing, needs_geometry),
+    choice("disruptor.texture_filtering", "Texture filtering", 0,
+           "Nearest: the PlayStation's sharp texels\n"
+           "Bilinear: smooth up close\n"
+           "Trilinear: also calms distant floors\n"
+           "Anisotropic: sharper floors at a slant, costs more\n"
+           "xBR: smooth diagonals, crisp pixel art\n"
+           "The HUD and text stay sharp",
+           texture_filters, saved<&Settings::has_texture_filtering>, read<&Settings::texture_filtering>,
+           write<&Settings::has_texture_filtering, &Settings::texture_filtering>, needs_geometry),
     choice("disruptor.draw_distance", "Draw distance", 0,
            "How far walls, enemies and pickups are drawn",
            draw_distances, saved<&Settings::has_draw_distance>, draw_distance, set_draw_distance, {}, distances_offered),

@@ -82,7 +82,7 @@ require(
 )
 
 require(
-    '    "  v_limits = ivec4(floor(a_limits + 0.5));\\n"\n' in renderer
+    '    "  v_limits = ivec4(floor(a_limits + 0.5)); v_sampled = v_limits;\\n"\n' in renderer
     and '    "  bool corrected = u_visual > 0.5 && a_visual_flags > 0.5;\\n"\n' in renderer
     and '    "  vec4 took = corrected ? step(0.125, a_limits - floor(a_limits + 0.5)) : vec4(0.0);\\n"\n'
     '    "  v_uv -= took.xy; v_limits += ivec4(vec4(-took.xy, took.zw));\\n"\n'

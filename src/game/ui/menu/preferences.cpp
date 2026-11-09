@@ -170,6 +170,12 @@ int apply_resolution(std::string_view text) {
 }
 
 void mark_antialiasing(int level) { mark("disruptor.multisampling", level); }
+void mark_texture_filtering(int index) { mark("disruptor.texture_filtering", index); }
+void set_texture_filtering(int index) {
+    const auto& mode = PSXRecompV4::kDisruptorTextureFilterModes[std::clamp(index, 0, PSXRecompV4::kDisruptorTextureFilterCount - 1)];
+    gr_set_texture_filter(mode.filter);
+    gl_renderer_set_texture_lod(mode.levels, mode.anisotropy);
+}
 
 void mark_draw_distance(int preset) { mark("disruptor.draw_distance", preset); }
 
@@ -425,6 +431,8 @@ void apply_saved_preferences(const PSXRecompV4::UserSettings &settings) {
     // A file may name one half of the list: the other is off, as the list starts.
     gl_renderer_set_multisampling(settings.multisampling);
     gl_renderer_set_sample_shading(settings.sample_shading ? 1 : 0);
+    if (!env_override_present("PSX_TEXTURE_FILTER") && !env_override_present("PSX_TEXTURE_LOD") && !env_override_present("PSX_ANISO"))
+        set_texture_filtering(stored(settings, *find_option("disruptor.texture_filtering")));
     (void)disruptor_far_rendering_set_preset(stored(settings, *find_option("disruptor.draw_distance")));
     disruptor_far_rendering_force_from_environment();
     disruptor_far_rendering_set_fog_exponent(stored(settings, *find_option("disruptor.fog_shape")) + 1);
@@ -556,6 +564,8 @@ void apply_pending_preferences() {
         gl_renderer_set_multisampling(pending.multisampling);
         gl_renderer_set_sample_shading(pending.sample_shading ? 1 : 0);
     }
+    if (changed("disruptor.texture_filtering"))
+        set_texture_filtering(stored(pending, *find_option("disruptor.texture_filtering")));
     if (changed("disruptor.draw_distance"))
         (void)disruptor_far_rendering_set_preset(stored(pending, *find_option("disruptor.draw_distance")));
     if (changed("disruptor.fog_shape"))
