@@ -191,7 +191,7 @@ int main() {
                 "failed import replaced the good installation");
         no_staging(package);
 
-        // The installed image is hashed once, then again only when its size or write time is not what that check wrote.
+        // The installed image is hashed once, then again only when its size, write time or expected hash changed.
         {
             const fs::path installed = installed_cue(package, fixture[0]);
             const fs::path bin = installed.parent_path() / "disc.bin";
@@ -201,16 +201,24 @@ int main() {
                 auto first = verify_installed(installed, cancelled, {}, fixture);
                 require(first.profile == &fixture[0] && fs::exists(record), "the first check left no record");
             }
+            const auto written = fs::last_write_time(bin);
+            write(bin, "abd");  // other bytes behind the size and write time the record holds: only a hash would see them
+            fs::last_write_time(bin, written);
+            {
+                auto known = verify_installed(installed, cancelled, {}, fixture);
+                require(known.profile == &fixture[0] && known.mount == installed && known.data == bin,
+                        "an unchanged image was hashed again");
+            }
+            write(bin, "abc");
+            fs::last_write_time(bin, written);
             static constexpr DiscProfile other_hash[] = {
                 {"TEST-USA", L"Test USA", 3, "0000000000000000000000000000000000000000000000000000000000000000", L"game.toml"},
             };
-            {
-                auto known = verify_installed(installed, cancelled, {}, other_hash);
-                require(known.profile == &other_hash[0] && known.mount == installed && known.data == bin,
-                        "an unchanged image was hashed again");
-            }
-            fs::last_write_time(bin, fs::last_write_time(bin) + std::chrono::seconds(2));
-            fails([&] { verify_installed(installed, cancelled, {}, other_hash); }, "a rewritten image was taken unhashed");
+            fails([&] { verify_installed(installed, cancelled, {}, other_hash); }, "a record outlived its profile's hash");
+            write(bin, "abd");
+            fs::last_write_time(bin, written + std::chrono::seconds(2));
+            fails([&] { verify_installed(installed, cancelled, {}, fixture); }, "a rewritten image was taken unhashed");
+            write(bin, "abc");
             {
                 auto again = verify_installed(installed, cancelled, {}, fixture);
                 require(again.profile == &fixture[0], "a rewritten image of the right bytes was refused");

@@ -524,11 +524,11 @@ VerifiedDisc verify_installed(const fs::path& selected, const std::atomic_bool& 
         const fs::path data = chd ? selected : resolve_image(selected);
         auto file = std::make_shared<File>(data);
         std::ifstream input(known_path(data), std::ios::binary);
-        std::string size, written, id;
+        std::string size, written, id, hash;
         const std::string now = file_state(data);
-        if (!now.empty() && input >> size >> written >> id && size + ' ' + written == now)
+        if (!now.empty() && input >> size >> written >> id >> hash && size + ' ' + written == now)
             for (const auto& profile : profiles)
-                if (id == profile.id) {
+                if (id == profile.id && hash == profile.sha256) {
                     auto locks = std::make_shared<std::array<std::shared_ptr<File>, 2>>(
                         std::array<std::shared_ptr<File>, 2>{file, cue_lock});
                     return {&profile, data, chd || cue_lock ? selected : fs::path{}, locks};
@@ -538,7 +538,7 @@ VerifiedDisc verify_installed(const fs::path& selected, const std::atomic_bool& 
     // Held open by the check, so nothing wrote it between the hash and this line.
     if (const std::string now = file_state(disc.data); !now.empty()) {
         std::ofstream output(known_path(disc.data), std::ios::binary);
-        output << now << ' ' << disc.profile->id << '\n';
+        output << now << ' ' << disc.profile->id << ' ' << disc.profile->sha256 << '\n';
     }
     return disc;
 }

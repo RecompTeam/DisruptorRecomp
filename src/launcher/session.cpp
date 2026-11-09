@@ -159,13 +159,14 @@ void Session::begin_upgrade() {
     progress_ = 0;
     auto upgrade = std::make_unique<StateUpgrade>();
     upgrade->lines.reserve(16);
-    worker_ = std::thread([this, disc = verified_, regions = regions_, upgrade = std::move(upgrade)]() mutable {
+    // Its own settings: the page may change them while the states are tried.
+    worker_ = std::thread([this, disc = verified_, regions = regions_, settings = settings_, upgrade = std::move(upgrade)]() mutable {
         const auto report = [this](const std::wstring& text, unsigned percent) {
             std::scoped_lock lock(handed_mutex_);
             handed_update_ = {text, percent};
         };
         try {
-            *upgrade = upgrade_states(program_, data_, disc, settings_, regions, cancelled_, report);
+            *upgrade = upgrade_states(program_, data_, disc, settings, regions, cancelled_, report);
         } catch (...) {
             upgrade->carried = upgrade->refused = 0;
             upgrade->untried = 1;
