@@ -35,7 +35,7 @@ require(
 )
 require(
     "    if (rth_record_mode()) {" in renderer[renderer.index("void gl_renderer_present_wide_or_vram(") :][:200]
-    and "        if (rth_rec_call(RTH_PRESENT_WIDE, v, 14)) return;\n" in renderer
+    and "        if (rth_rec_call(RTH_PRESENT_WIDE, v, 15)) return;\n" in renderer
     and "        gl_renderer_present_vram(canonical_x, disp_y, w, h, linear, force_4_3);\n" in renderer,
     "gl_renderer_present_wide_or_vram records RTH_PRESENT_WIDE under the render thread, its canonical fallback at the "
     "displayed x, not the wide base",

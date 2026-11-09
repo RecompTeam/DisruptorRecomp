@@ -30,6 +30,13 @@ void test_the_colour_and_its_rim() {
            "the colour list's third is red, opaque at 100 percent");
     expect(rim(Style{.opacity = 100}).a == 170 && rim(Style{.opacity = 100}).r == 0, "the rim is black, two thirds as opaque");
     expect(fill(Style{.colour = 7}).g == 255 && fill(Style{.colour = -1}).b == 255, "an unknown colour is white");
+    for (const Style style : {Style{}, Style{2, kLargest, 4, kOpaque}, Style{1, kSmallest, 3, kFaintest}}) {
+        const Style back = unpacked(packed(style));
+        expect(packed(style) != 0 && back.shape == style.shape && back.size == style.size && back.colour == style.colour &&
+                   back.opacity == style.opacity,
+               "a style goes to the render thread and back whole, and is never the word for none");
+    }
+    expect(unpacked(packed(Style{9, 9000, 9, 0})).size == kLargest, "an out-of-range style is clamped before it is packed");
 }
 
 void test_a_hand_edited_style_falls_back() {

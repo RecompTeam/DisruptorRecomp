@@ -91,6 +91,7 @@ extern "C" void gte_ws_set_backdrop_repair_enabled(int enabled);
 extern "C" void gl_renderer_set_world_depth(int enabled);
 extern "C" void gl_renderer_set_sprite_depth_read(int enabled);
 extern "C" void gl_renderer_set_host_ui_suspended(int suspended);
+extern "C" void gl_renderer_render_thread_sync(const char *reason);
 extern "C" int gl_renderer_world_depth(void);
 extern "C" void gl_renderer_set_full_yaw(int enabled);
 extern "C" void gl_renderer_set_mesh_view(int enabled);

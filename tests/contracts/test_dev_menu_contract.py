@@ -244,7 +244,7 @@ require(
 )
 layer_update = function_body(gl, "interp_layer_update")
 require(
-    "psx_host_ui_in_layer(psx_host_ui_capture_flags())" in layer_update
+    "psx_host_ui_in_layer(ctx_ui_flags())" in layer_update
     and "psx_host_ui_render_gl" not in layer_update
     and layer_update.index("gz_wait(0, s_interp_draw_fence")
     < layer_update.index(f"{host_ui_helper}(ww, wh);")
@@ -271,6 +271,28 @@ require(
     and "if (!make_fbo(&s_layer_fbo[i], s_layer_tex[i], 0)) {\n                s_layer_failed = 1;\n" in layer_update
     and "s_layer_failed = 0;" in function_body(gl, "gl_renderer_shutdown"),
     "the layer drawn is never the one shown: the two take turns, a shown one is only ever the one just drawn or none",
+)
+render_thread = (ROOT / "psxrecomp/runtime/src/gpu_gl_render_thread.c.inc").read_text(encoding="utf-8")
+require(
+    "psx_host_ui_allows_render_thread(psx_host_ui_gl_flags())" in function_body(render_thread, "gl_rth_eligible")
+    and "static uint32_t ctx_ui_flags(void) { return rth_replaying() ? s_rthx_ui : psx_host_ui_gl_flags(); }"
+    in render_thread
+    and "s_rthx_ui = (uint32_t)v[12];" in render_thread
+    and "s_rthx_ui = (uint32_t)v[14];" in render_thread
+    and "case RTH_PRESENT_BLANK: s_rthx_ui = (uint32_t)v[0];" in render_thread
+    and "psx_host_ui_gl_visible" not in gl
+    and "psx_host_ui_capture_flags" not in gl
+    and "        if (crosshair && !achievements && !pointing && !disruptor_capsule_notice()) return crosshair_apart();\n"
+    in menu
+    and "    g_crosshair_taken.store(disruptor::crosshair::packed(g_crosshair_style), std::memory_order_release);\n"
+    "    return kLayer | PSX_HOST_UI_APART;\n"
+    in menu
+    and "    if (psx_host_ui_render_apart()) {\n        render_crosshair_apart(width, height);\n        return;\n    }\n"
+    in function_body(menu, "render_gl")
+    and "disruptor_mouse_crosshair_shown" not in function_body(menu, "render_crosshair_apart")
+    and menu.count('gl_renderer_render_thread_sync("menu")') == 2,
+    "a layer of the crosshair alone leaves the frame to the render thread, which draws it from what the game's thread "
+    "took; the GL side reads the host UI only through the flags recorded with the present; ImGui is taken back first",
 )
 for present_name in ("gl_renderer_present_vram", "gl_renderer_present_wide_fbo"):
     require(

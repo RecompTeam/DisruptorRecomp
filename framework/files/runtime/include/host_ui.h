@@ -109,6 +109,10 @@ int psx_host_audio_set_mute_in_background(int enabled);
 
 int psx_host_ui_handle_event(const SDL_Event *event);
 int psx_host_ui_gl_visible(void);
+/* The provider's flags while it has GL output to draw (PSX_HOST_UI_VISIBLE among them), else 0. */
+uint32_t psx_host_ui_gl_flags(void);
+/* Inside render_gl: 1 on the render thread, where only what PSX_HOST_UI_APART promised may be drawn. */
+int psx_host_ui_render_apart(void);
 void psx_host_ui_render_gl(int drawable_width, int drawable_height);
 
 #ifdef __cplusplus

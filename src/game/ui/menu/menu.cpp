@@ -291,6 +291,7 @@ void on_runtime_shutdown(void *) {
     g_menu.open = false;
     g_menu.restore_mouse_capture = false;
     if (g_menu.imgui_ready) {
+        gl_renderer_render_thread_sync("menu");
         release_achievement_pictures();
         ImGui_ImplOpenGL3_Shutdown();
         imgui_sdl_shutdown();
@@ -351,9 +352,12 @@ int on_sdl_event(void *, const SDL_Event *event) {
     for (int key = SDL_SCANCODE_F1; !g_menu.open && key <= SDL_SCANCODE_F11; ++key)
         if (key_down(event, static_cast<SDL_Scancode>(key)) && disruptor_capsule_holds_states()) return 1;
     if (!g_menu.open || !g_menu.imgui_ready) return 0;
+    gl_renderer_render_thread_sync("menu");  /* the render thread may still draw the crosshair through ImGui */
     imgui_sdl_process_event(event);
     return 1;
 }
+
+std::uint32_t crosshair_apart();
 
 uint32_t current_flags(void *) {
     if (disruptor_selection_wheel_open())
@@ -364,6 +368,7 @@ uint32_t current_flags(void *) {
         const bool achievements = achievements_overlay_shown();
         const bool pointing = disruptor_menu_pointing() != 0 || password_hint_shown() || state_browser_shown();
         const bool crosshair = disruptor_mouse_crosshair_shown() != 0;
+        if (crosshair && !achievements && !pointing && !disruptor_capsule_notice()) return crosshair_apart();
         return disruptor_capsule_notice() || achievements || pointing || crosshair ? PSX_HOST_UI_VISIBLE | PSX_HOST_UI_LAYER : 0u;
     }
     return PSX_HOST_UI_CAPTURE_KEYBOARD |
@@ -376,6 +381,15 @@ uint32_t current_flags(void *) {
 
 namespace {
 disruptor::crosshair::Style g_crosshair_style;
+std::atomic<std::uint64_t> g_crosshair_taken{0};  /* the crosshair as the game's thread last answered the flags for it */
+
+/* The crosshair alone, taken on the game's thread: the render thread draws it and nothing that thread may be changing. */
+std::uint32_t crosshair_apart() {
+    constexpr std::uint32_t kLayer = PSX_HOST_UI_VISIBLE | PSX_HOST_UI_LAYER;
+    if (!g_menu.imgui_ready || disruptor_state_screen_hiding()) return kLayer;
+    g_crosshair_taken.store(disruptor::crosshair::packed(g_crosshair_style), std::memory_order_release);
+    return kLayer | PSX_HOST_UI_APART;
+}
 }  // namespace
 
 void set_crosshair_style(int shape, int size, int colour, int opacity) {
@@ -423,14 +437,32 @@ void draw_menu_pointer(int width, int height) {
     if (disruptor_mouse_menu_pointer_drawn(&x, &y)) draw_arrow_at(x, y, width, height);
 }
 
-/* Drawn without the SDL backend's frame: that one reads and captures the mouse, which is the game's while the menu is closed. */
-void render_notices(const char *word, int width, int height) {
+/* Without the SDL backend's frame: that one reads and captures the mouse, which is the game's while the menu is closed. */
+void begin_plain_frame(int width, int height) {
     ImGui_ImplOpenGL3_NewFrame();
     ImGuiIO &io = ImGui::GetIO();
     io.DisplaySize = ImVec2(static_cast<float>(width), static_cast<float>(height));
     io.DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
     io.DeltaTime = 1.0f / 60.0f;
     ImGui::NewFrame();
+}
+
+void end_frame() {
+    ImGui::Render();
+    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+}
+
+/* On the render thread: the crosshair as it was taken with the flags. */
+void render_crosshair_apart(int width, int height) {
+    begin_plain_frame(width, height);
+    if (const std::uint64_t taken = g_crosshair_taken.load(std::memory_order_acquire))
+        disruptor::crosshair::draw(ImGui::GetForegroundDrawList(), ImVec2(static_cast<float>(width) * 0.5f, static_cast<float>(height) * 0.5f),
+                                   height, disruptor::crosshair::unpacked(taken));
+    end_frame();
+}
+
+void render_notices(const char *word, int width, int height) {
+    begin_plain_frame(width, height);
     /* While a save state's picture is taken nothing of the host's lies over the game. */
     const bool hiding = disruptor_state_screen_hiding() != 0;
     if (word && !hiding) {
@@ -449,27 +481,24 @@ void render_notices(const char *word, int width, int height) {
         draw_state_browser(width, height);
         if (!state_browser_captures()) draw_menu_pointer(width, height);
     }
-    ImGui::Render();
-    ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+    end_frame();
 }
 
 void render_gl(void *, int width, int height) {
+    if (psx_host_ui_render_apart()) {
+        render_crosshair_apart(width, height);
+        return;
+    }
 #if DISRUPTOR_DEV_TOOLS
     if (g_asked_tab) set_menu_open(true);
 #endif
     if (disruptor_selection_wheel_open()) {
         if (!initialize_imgui()) return;
         gl_renderer_set_host_ui_suspended(1);
-        ImGui_ImplOpenGL3_NewFrame();
-        ImGuiIO &io = ImGui::GetIO();
-        io.DisplaySize = ImVec2(static_cast<float>(width), static_cast<float>(height));
-        io.DisplayFramebufferScale = ImVec2(1.0f, 1.0f);
-        io.DeltaTime = 1.0f / 60.0f;
-        ImGui::NewFrame();
+        begin_plain_frame(width, height);
         disruptor::wheel::draw(width, height);
         draw_achievements_overlay(width, height);
-        ImGui::Render();
-        ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+        end_frame();
         return;
     }
     if (!g_menu.open) {

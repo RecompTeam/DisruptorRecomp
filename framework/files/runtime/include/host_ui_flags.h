@@ -24,6 +24,10 @@ enum PsxHostUiFlags {
     /* The visible output only shows: render_gl draws it into a layer laid over each interpolated picture, so the
      * interpolation keeps running. Without interpolation it is drawn before SwapWindow as any other. */
     PSX_HOST_UI_LAYER = 1u << 5,
+
+    /* The layer's output may be drawn on the render thread: render_gl then draws only what the provider took on the
+     * emulation thread when it answered these flags, and psx_host_ui_render_apart() tells it which thread it is on. */
+    PSX_HOST_UI_APART = 1u << 6,
 };
 
 /* Whether the UI stops the interpolation: asked to, or visible outside the layer, since render_gl needs the main context. */
@@ -35,6 +39,11 @@ static inline int psx_host_ui_stops_interpolation(uint32_t flags) {
 /* Whether the UI is drawn into the layer over interpolated pictures. */
 static inline int psx_host_ui_in_layer(uint32_t flags) {
     return !psx_host_ui_stops_interpolation(flags) && (flags & PSX_HOST_UI_VISIBLE) != 0;
+}
+
+/* Whether a frame with this UI may be drawn on the render thread: nothing visible, or a layer drawn apart. */
+static inline int psx_host_ui_allows_render_thread(uint32_t flags) {
+    return (flags & PSX_HOST_UI_VISIBLE) == 0 || (psx_host_ui_in_layer(flags) && (flags & PSX_HOST_UI_APART) != 0);
 }
 
 #ifdef __cplusplus

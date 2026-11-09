@@ -83,6 +83,7 @@ require(
     and '    g_capsule.recording = Recording::kOff;\n    say("REC refused");\n' in capsule
     and "        const bool pointing = disruptor_menu_pointing() != 0 || password_hint_shown() || state_browser_shown();\n"
     "        const bool crosshair = disruptor_mouse_crosshair_shown() != 0;\n"
+    "        if (crosshair && !achievements && !pointing && !disruptor_capsule_notice()) return crosshair_apart();\n"
     "        return disruptor_capsule_notice() || achievements || pointing || crosshair ? PSX_HOST_UI_VISIBLE | PSX_HOST_UI_LAYER : 0u;\n"
     in menu
     and "    if (!g_menu.open) {\n"
@@ -379,8 +380,8 @@ require(
     and "    s_interp_cur_cycle = cycle;\n    s_interp_captures++;\n}\n" in renderer
     and "    const uint64_t cycle = rth_replaying() ? s_rthx_cycle : psx_get_cycle_count();\n" in renderer
     and renderer.count("        const uint64_t cycle = psx_get_cycle_count();\n") == 2
-    and "        if (rth_rec_call(RTH_PRESENT_VRAM, v, 12)) return;\n" in renderer
-    and "        if (rth_rec_call(RTH_PRESENT_WIDE, v, 14)) return;\n" in renderer
+    and "        if (rth_rec_call(RTH_PRESENT_VRAM, v, 13)) return;\n" in renderer
+    and "        if (rth_rec_call(RTH_PRESENT_WIDE, v, 15)) return;\n" in renderer
     and "        s_rthx_cycle = (uint64_t)(uint32_t)v[11] | (uint64_t)(uint32_t)v[12] << 32;\n" in temporal_thread
     and "        s_rthx_cycle = (uint64_t)(uint32_t)v[10] | (uint64_t)(uint32_t)v[11] << 32;\n" in temporal_thread
     and "    job.cycle = cycle;\n" in renderer

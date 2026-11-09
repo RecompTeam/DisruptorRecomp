@@ -38,6 +38,18 @@ inline constexpr std::array<Rgba, kColourCount> kColours{{
     return style;
 }
 
+/* A style in one word another thread can take whole; 0 is no crosshair. */
+[[nodiscard]] inline std::uint64_t packed(const Style& asked) {
+    const Style style = clamped(asked);
+    return std::uint64_t{1} << 63 | static_cast<std::uint64_t>(style.shape) | static_cast<std::uint64_t>(style.size) << 8 |
+           static_cast<std::uint64_t>(style.colour) << 24 | static_cast<std::uint64_t>(style.opacity) << 32;
+}
+
+[[nodiscard]] inline Style unpacked(std::uint64_t word) {
+    return clamped(Style{static_cast<int>(word & 0xFFu), static_cast<int>((word >> 8) & 0xFFFFu),
+                         static_cast<int>((word >> 24) & 0xFFu), static_cast<int>((word >> 32) & 0xFFu)});
+}
+
 /* The dot's radius in pixels: 3 at 1080 rows, never under 1.5. */
 [[nodiscard]] inline float radius(int height, int size_percent) {
     const float plain = std::max(2.0f, std::round(static_cast<float>(height) / 360.0f));

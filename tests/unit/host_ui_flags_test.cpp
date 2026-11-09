@@ -34,7 +34,14 @@ int main() {
     expect(!psx_host_ui_stops_interpolation(PSX_HOST_UI_LAYER) && !psx_host_ui_in_layer(PSX_HOST_UI_LAYER),
            "a layer with nothing visible draws nothing");
 
-    for (std::uint32_t flags = 0; flags < 64u; ++flags) {
+    expect(psx_host_ui_allows_render_thread(0u) && psx_host_ui_allows_render_thread(kCard | PSX_HOST_UI_APART),
+           "no UI, or a layer drawn apart, leaves the frame to the render thread");
+    expect(!psx_host_ui_allows_render_thread(kCard) &&
+               !psx_host_ui_allows_render_thread(kCapture | PSX_HOST_UI_VISIBLE | PSX_HOST_UI_APART) &&
+               !psx_host_ui_allows_render_thread(kCard | PSX_HOST_UI_APART | PSX_HOST_UI_SUSPEND_INTERPOLATION),
+           "a layer not drawn apart, an open menu or a suspension keep the frame on the emulation thread");
+
+    for (std::uint32_t flags = 0; flags < 128u; ++flags) {
         const bool visible = (flags & PSX_HOST_UI_VISIBLE) != 0;
         const bool stops = psx_host_ui_stops_interpolation(flags) != 0;
         const bool layer = psx_host_ui_in_layer(flags) != 0;
@@ -44,6 +51,8 @@ int main() {
                    layer == (psx_host_ui_in_layer(flags & ~kCapture) != 0),
                "capturing input changes neither");
         if ((flags & PSX_HOST_UI_SUSPEND_INTERPOLATION) != 0) expect(stops, "asked to stop, it stops");
+        expect(!psx_host_ui_allows_render_thread(flags) || !visible || layer,
+               "UI the render thread may draw is always the layer's");
     }
 
     if (g_failures != 0) return 1;

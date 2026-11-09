@@ -42,6 +42,7 @@ static int ctx_packet_fade(void) { return rth_replaying() ? s_rthx_fade : gpu_cu
 static int ctx_hud_glyph(void) { return rth_replaying() ? s_rthx_glyph : gpu_current_hud_glyph(); }
 static int ctx_sky_fogged(void) { return rth_replaying() ? s_rthx_sky : gpu_sky_fogged(); }
 static int ctx_world_sprite(void) { return rth_replaying() ? s_rthx_world_sprite : gpu_current_world_sprite(); }
+static uint32_t ctx_ui_flags(void) { return rth_replaying() ? s_rthx_ui : psx_host_ui_gl_flags(); }
 static int ctx_depth24(void) { return rth_replaying() ? 0 : gpu_display_is_depth24(); }
 static void ctx_x_squash(int32_t *num, int32_t *den) {
     if (rth_replaying()) { *num = s_rthx_squash[0]; *den = s_rthx_squash[1]; return; }
@@ -51,7 +52,7 @@ static void ctx_x_squash(int32_t *num, int32_t *den) {
 static int gl_rth_eligible(void) {
     extern int psx_netplay_active(void);
     return s_raster_ok && s_ctx && !gpu_display_is_depth24() && !psx_netplay_active() &&
-           !psx_host_ui_gl_visible();
+           psx_host_ui_allows_render_thread(psx_host_ui_gl_flags());
 }
 
 static void gl_rth_acquire(const char *reason) {
@@ -585,15 +586,17 @@ static void gl_rth_exec(void *user, const RtCmd *c, const void *payload) {
         s_rthx_squash[0] = v[7]; s_rthx_squash[1] = v[8];
         s_rthx_presented = (uint64_t)(uint32_t)v[9] | (uint64_t)(uint32_t)v[10] << 32;
         s_rthx_cycle = (uint64_t)(uint32_t)v[11] | (uint64_t)(uint32_t)v[12] << 32;
+        s_rthx_ui = (uint32_t)v[14];
         gl_renderer_present_wide_or_vram(v[0], v[1], v[2], v[3], v[4], v[5], v[6], v[13]);
         break;
     case RTH_PRESENT_VRAM:
         s_rthx_squash[0] = v[6]; s_rthx_squash[1] = v[7];
         s_rthx_presented = (uint64_t)(uint32_t)v[8] | (uint64_t)(uint32_t)v[9] << 32;
         s_rthx_cycle = (uint64_t)(uint32_t)v[10] | (uint64_t)(uint32_t)v[11] << 32;
+        s_rthx_ui = (uint32_t)v[12];
         gl_renderer_present_vram(v[0], v[1], v[2], v[3], v[4], v[5]);
         break;
-    case RTH_PRESENT_BLANK: gl_renderer_present_blank(); break;
+    case RTH_PRESENT_BLANK: s_rthx_ui = (uint32_t)v[0]; gl_renderer_present_blank(); break;
     case RTH_EDGE_SKY: gl_renderer_set_edge_sky(v[0]); break;
     case RTH_EDGE_DEPTH: gl_renderer_set_edge_depth(fv[0]); break;
     case RTH_FADE: gl_renderer_set_palette_fade(v[0], rth_float(v[1]), rth_float(v[2]), rth_float(v[3])); break;
