@@ -8,8 +8,6 @@
 #define RTHF_BD_SHIFT 2
 #define RTHF_FLAT    0x0010u
 #define RTHF_SKY     0x0020u
-#define RTHF_SPRITE  0x0040u
-#define RTHF_EFFECT  0x0080u
 
 static uint16_t *s_rth_vram_pub = NULL, *s_rth_vram_priv = NULL;
 static int s_rthm_area[4] = {0, 0, VRAM_W - 1, VRAM_H - 1};
@@ -41,7 +39,6 @@ static int ctx_drawing_flat(void) { return rth_replaying() ? s_rthx_flat : gpu_w
 static int ctx_packet_fade(void) { return rth_replaying() ? s_rthx_fade : gpu_current_packet_fade(); }
 static int ctx_hud_glyph(void) { return rth_replaying() ? s_rthx_glyph : gpu_current_hud_glyph(); }
 static int ctx_sky_fogged(void) { return rth_replaying() ? s_rthx_sky : gpu_sky_fogged(); }
-static int ctx_world_sprite(void) { return rth_replaying() ? s_rthx_world_sprite : gpu_current_world_sprite(); }
 static uint32_t ctx_ui_flags(void) { return rth_replaying() ? s_rthx_ui : psx_host_ui_gl_flags(); }
 static int ctx_depth24(void) { return rth_replaying() ? 0 : gpu_display_is_depth24(); }
 static void ctx_x_squash(int32_t *num, int32_t *den) {
@@ -127,10 +124,6 @@ static uint16_t rth_prim_flags(void) {
     if (gpu_ws_drawing_flat()) flags |= RTHF_FLAT;
     if (gpu_sky_fogged()) flags |= RTHF_SKY;
     return flags;
-}
-static uint16_t rth_tex_flags(void) {
-    const int kind = gpu_current_world_sprite();
-    return (uint16_t)(rth_prim_flags() | (kind & 1 ? RTHF_SPRITE : 0) | (kind & 2 ? RTHF_EFFECT : 0));
 }
 
 /* ---- the recording backend ------------------------------------------------ */
@@ -295,7 +288,7 @@ static void rtb_draw_gouraud_triangle(int x0, int y0, uint16_t c0, int x1, int y
 static void rtb_draw_textured_triangle(int x0, int y0, int u0, int v0, int x1, int y1, int u1, int v1, int x2, int y2, int u2,
                                        int v2, uint16_t cx, uint16_t cy, uint16_t tp) {
     if (rth_record_mode())
-        RTH_REC(RTH_TEX_TRI, rth_tex_flags(), x0, y0, u0, v0, x1, y1, u1, v1, x2, y2, u2, v2, cx, cy, tp,
+        RTH_REC(RTH_TEX_TRI, rth_prim_flags(), x0, y0, u0, v0, x1, y1, u1, v1, x2, y2, u2, v2, cx, cy, tp,
                 gpu_current_packet_fade(), gpu_current_hud_glyph());
     glb_draw_textured_triangle(x0, y0, u0, v0, x1, y1, u1, v1, x2, y2, u2, v2, cx, cy, tp);
 }
@@ -311,7 +304,7 @@ static void rtb_draw_shaded_textured_triangle(int x0, int y0, int u0, int v0, ui
                                               uint16_t cy, uint16_t tp, int raw) {
     rth_primsync();
     if (rth_record_mode())
-        RTH_REC(RTH_SHADED_TEX_TRI, rth_tex_flags(), x0, y0, u0, v0, (int32_t)c0, x1, y1, u1, v1, (int32_t)c1, x2, y2, u2,
+        RTH_REC(RTH_SHADED_TEX_TRI, rth_prim_flags(), x0, y0, u0, v0, (int32_t)c0, x1, y1, u1, v1, (int32_t)c1, x2, y2, u2,
                 v2, (int32_t)c2, cx, cy, tp, raw, gpu_current_packet_fade(), gpu_current_hud_glyph());
     glb_draw_shaded_textured_triangle(x0, y0, u0, v0, c0, x1, y1, u1, v1, c1, x2, y2, u2, v2, c2, cx, cy, tp, raw);
 }
@@ -321,13 +314,13 @@ static void rtb_draw_flat_rect(int x, int y, int w, int h, uint16_t c) {
 }
 static void rtb_draw_textured_rect(int x, int y, int w, int h, int u, int v, uint16_t cx, uint16_t cy, uint16_t tp) {
     if (rth_record_mode())
-        RTH_REC(RTH_TEX_RECT, rth_tex_flags(), x, y, w, h, u, v, cx, cy, tp, gpu_current_packet_fade(), gpu_current_hud_glyph());
+        RTH_REC(RTH_TEX_RECT, rth_prim_flags(), x, y, w, h, u, v, cx, cy, tp, gpu_current_packet_fade(), gpu_current_hud_glyph());
     glb_draw_textured_rect(x, y, w, h, u, v, cx, cy, tp);
 }
 static void rtb_draw_textured_rect_scaled(int x, int y, int w, int h, int u0, int v0, int u1, int v1, uint16_t cx, uint16_t cy,
                                           uint16_t tp) {
     if (rth_record_mode())
-        RTH_REC(RTH_TEX_RECT_SCALED, rth_tex_flags(), x, y, w, h, u0, v0, u1, v1, cx, cy, tp, gpu_current_packet_fade(),
+        RTH_REC(RTH_TEX_RECT_SCALED, rth_prim_flags(), x, y, w, h, u0, v0, u1, v1, cx, cy, tp, gpu_current_packet_fade(),
                 gpu_current_hud_glyph());
     glb_draw_textured_rect_scaled(x, y, w, h, u0, v0, u1, v1, cx, cy, tp);
 }
@@ -474,7 +467,6 @@ static void rth_prim_begin(uint16_t flags, int fade, int glyph) {
     s_rthx_backdrop = (flags >> RTHF_BD_SHIFT) & 3;
     s_rthx_flat = (flags & RTHF_FLAT) != 0;
     s_rthx_sky = (flags & RTHF_SKY) != 0;
-    s_rthx_world_sprite = ((flags & RTHF_SPRITE) ? 1 : 0) | ((flags & RTHF_EFFECT) ? 2 : 0);
     s_rthx_fade = fade;
     s_rthx_glyph = glyph;
 }

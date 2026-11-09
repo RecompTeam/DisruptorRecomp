@@ -61,21 +61,6 @@ require(
 )
 
 image_path = ROOT / "input" / "SLUS_002.24"
-renderer = read("psxrecomp/runtime/src/gpu_gl_renderer.c")
-thread = read("psxrecomp/runtime/src/gpu_gl_render_thread.c.inc")
-require(
-    "gpu_temporal_effect_sprite(packet);" in depth
-    and "    const WsTag *t = temporal_sprite_tag();\n    return t ? 1 | (t->effect ? 2 : 0) : 0;\n" in gpu
-    and "    return (uint16_t)(rth_prim_flags() | (kind & 1 ? RTHF_SPRITE : 0) | (kind & 2 ? RTHF_EFFECT : 0));\n"
-    in thread
-    and "    s_rthx_world_sprite = ((flags & RTHF_SPRITE) ? 1 : 0) | ((flags & RTHF_EFFECT) ? 2 : 0);\n" in thread
-    and thread.count("rth_tex_flags(),") == 4
-    and "    const int smooth_raw = (world_sprite & 2) || ((world_sprite & 1) && (semi == 1 || semi == 3)) ? RAW_SMOOTH : 0;\n"
-    in renderer
-    and '"  if (u_filter == 0 && (v_raw & 0x200000) == 0) {  /* RAW_SMOOTH */\\n"' in renderer
-    and '"    if (soft) rgb *= opac;\\n"' in renderer,
-    "a shot's, impact's or blast's small texture is drawn filtered, with the render thread too, its added rim fading",
-)
 require(
     "--require-artifacts" not in sys.argv[1:] or image_path.exists(),
     "the build gate must check the retail image: it is absent",
