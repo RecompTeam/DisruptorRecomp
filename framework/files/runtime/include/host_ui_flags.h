@@ -25,8 +25,8 @@ enum PsxHostUiFlags {
      * interpolation keeps running. Without interpolation it is drawn before SwapWindow as any other. */
     PSX_HOST_UI_LAYER = 1u << 5,
 
-    /* The layer's output may be drawn on the render thread: render_gl then draws only what the provider took on the
-     * emulation thread when it answered these flags, and psx_host_ui_render_apart() tells it which thread it is on. */
+    /* The layer's output may be drawn on the render thread: render_gl then draws only what the provider last took on
+     * the emulation thread when it answered the flags, and psx_host_ui_render_apart() tells it which thread it is on. */
     PSX_HOST_UI_APART = 1u << 6,
 };
 

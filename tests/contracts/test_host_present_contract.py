@@ -34,7 +34,7 @@ require(
     "gl_renderer_present_wide_fbo showed a black screen (main menu, demo after a refused load)",
 )
 require(
-    "    if (rth_record_mode()) {" in renderer[renderer.index("void gl_renderer_present_wide_or_vram(") :][:200]
+    "    if (rth_record_mode()) {" in renderer[renderer.index("void gl_renderer_present_wide_or_vram(") :][:500]
     and "        if (rth_rec_call(RTH_PRESENT_WIDE, v, 15)) return;\n" in renderer
     and "        gl_renderer_present_vram(canonical_x, disp_y, w, h, linear, force_4_3);\n" in renderer,
     "gl_renderer_present_wide_or_vram records RTH_PRESENT_WIDE under the render thread, its canonical fallback at the "

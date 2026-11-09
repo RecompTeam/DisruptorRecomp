@@ -486,7 +486,7 @@ void render_notices(const char *word, int width, int height) {
 
 void render_gl(void *, int width, int height) {
     if (psx_host_ui_render_apart()) {
-        render_crosshair_apart(width, height);
+        if (g_menu.imgui_ready) render_crosshair_apart(width, height);
         return;
     }
 #if DISRUPTOR_DEV_TOOLS

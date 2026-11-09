@@ -287,10 +287,14 @@ require(
     and "    g_crosshair_taken.store(disruptor::crosshair::packed(g_crosshair_style), std::memory_order_release);\n"
     "    return kLayer | PSX_HOST_UI_APART;\n"
     in menu
-    and "    if (psx_host_ui_render_apart()) {\n        render_crosshair_apart(width, height);\n        return;\n    }\n"
+    and "    if (psx_host_ui_render_apart()) {\n        if (g_menu.imgui_ready) render_crosshair_apart(width, height);\n"
+    "        return;\n    }\n"
     in function_body(menu, "render_gl")
     and "disruptor_mouse_crosshair_shown" not in function_body(menu, "render_crosshair_apart")
-    and menu.count('gl_renderer_render_thread_sync("menu")') == 2,
+    and menu.count('gl_renderer_render_thread_sync("menu")') == 2
+    and gl.count("    if (rth_record_mode() && !psx_host_ui_allows_render_thread(psx_host_ui_gl_flags()))\n") == 3
+    and gl.count("!ctx_ui_flags() && !s_ui_drawn) {\n") == 2
+    and gl.count("    s_ui_drawn = ctx_ui_flags() != 0;\n") == 2,
     "a layer of the crosshair alone leaves the frame to the render thread, which draws it from what the game's thread "
     "took; the GL side reads the host UI only through the flags recorded with the present; ImGui is taken back first",
 )
