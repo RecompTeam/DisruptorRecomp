@@ -494,7 +494,8 @@ def main() -> int:
     accept_pos = queue.index("gr_set_world_triangle(1)")
     gate_pos = queue.index("!exact")
     require(
-        gate_pos < reject_pos < queue.index("        return;\n    }\n") < accept_pos and queue.count("gr_set_world_triangle(0)") == 1,
+        gate_pos < reject_pos < queue.index("        return;\n    }\n") < accept_pos
+        and queue.count("gr_set_world_triangle(0)") == 1,
         "fractional yaw must activate only after exact provenance, and a triangle without it clears the world mark before it returns",
     )
 

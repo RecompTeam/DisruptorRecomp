@@ -57,11 +57,14 @@ require(
     "the shipped build's 2.96), takes the resume PC and the save mark, and the check reads the mark once",
 )
 quiet = interrupts[
-    interrupts.index("static inline int check_interrupts_quiet_edge(CPUState* cpu, uint32_t resume_pc) {") : interrupts.index(
-        "void psx_check_interrupts_at(CPUState* cpu, uint32_t resume_pc) {"
-    )
+    interrupts.index(
+        "static inline int check_interrupts_quiet_edge(CPUState* cpu, uint32_t resume_pc) {"
+    ) : interrupts.index("void psx_check_interrupts_at(CPUState* cpu, uint32_t resume_pc) {")
 ]
-quiet_guards, quiet_writes = quiet[: quiet.index("    ++s_fast_maintenance;\n")], quiet[quiet.index("    ++s_fast_maintenance;\n") :]
+quiet_guards, quiet_writes = (
+    quiet[: quiet.index("    ++s_fast_maintenance;\n")],
+    quiet[quiet.index("    ++s_fast_maintenance;\n") :],
+)
 require(
     all(
         guard in quiet_guards
@@ -102,20 +105,33 @@ full, outside = cycles[full_begin:full_end], cycles[:full_begin] + cycles[full_e
 restart = full[full.index("    if (check_pc != s_idle_pc) {\n") :]
 restart = restart[: restart.index("    }\n")]
 fresh = cycles[full_end : cycles.index("void psx_idle_note_check(CPUState *cpu, uint32_t check_pc) {")]
-progress = ("s_idle_streak", "s_idle_quantum", "s_idle_have_snap", "s_idle_progress_reg", "s_idle_progress_delta",
-            "s_idle_mem_progress", "s_idle_store_addr", "s_idle_edges")
+progress = (
+    "s_idle_streak",
+    "s_idle_quantum",
+    "s_idle_have_snap",
+    "s_idle_progress_reg",
+    "s_idle_progress_delta",
+    "s_idle_mem_progress",
+    "s_idle_store_addr",
+    "s_idle_edges",
+)
 written_outside = set(re.findall(r"(?m)^\s+(s_idle_\w+)\s*(?:=[^=]|\+\+|--|[-+]=)", outside))
 reset = cycles[cycles.index("static void idle_reset_progress(void) {") :]
 reset = reset[: reset.index("}\n")]
 require(
     "void psx_idle_note_check(CPUState *cpu, uint32_t check_pc) {\n    idle_note_check_full(cpu, check_pc);\n"
-    "    g_psx_idle_edge_fresh = idle_edge_fresh();\n}\n" in cycles
+    "    g_psx_idle_edge_fresh = idle_edge_fresh();\n}\n"
+    in cycles
     and cycles.count("idle_note_check_full(") == 2
     and cycles.count("g_psx_idle_edge_fresh = idle_edge_fresh();") == 1
-    and "static int idle_edge_fresh(void) {\n#if defined(PSX_COSIM) || defined(PSX_HAS_RECOMP_NET)\n    return 0;\n#else\n" in cycles
+    and "static int idle_edge_fresh(void) {\n#if defined(PSX_COSIM) || defined(PSX_HAS_RECOMP_NET)\n    return 0;\n#else\n"
+    in cycles
     and len(re.findall(r"g_psx_idle_edge_fresh = (?!0;|idle_edge_fresh\(\);)", cycles)) == 0
     and all(f"{name} == " in fresh or f"!{name} " in fresh for name in progress)
-    and all(token in fresh for token in ("!s_idle_audited_only", "idle_skip_on() > 0", "!g_ls_replay_active", "!g_idle_note_suppress"))
+    and all(
+        token in fresh
+        for token in ("!s_idle_audited_only", "idle_skip_on() > 0", "!g_ls_replay_active", "!g_idle_note_suppress")
+    )
     and "*s_track == (g_idle_skip_ext > 0 && s_idle_host_write != NULL && s_track != &s_track_dummy);" in fresh
     and {name for name in re.findall(r"\b(s_idle_\w+)\s*=", restart + reset)}
     == set(progress) | {"s_idle_pc", "s_idle_last_cycle", "s_idle_last_stores", "s_idle_last_mmio"}
@@ -126,12 +142,27 @@ require(
             "void psx_idle_skip_set_audited_only(int enabled)",
         )
     )
-    and "    if (n > IDLE_SITES_MAX) n = IDLE_SITES_MAX;\n    g_psx_idle_edge_fresh = 0;\n    g_psx_idle_site_filter = 0;\n" in cycles
+    and "    if (n > IDLE_SITES_MAX) n = IDLE_SITES_MAX;\n    g_psx_idle_edge_fresh = 0;\n    g_psx_idle_site_filter = 0;\n"
+    in cycles
     and "        g_psx_idle_site_filter |= 1ull << ((pcs[i] >> 2) & 63u);\n" in cycles
     and written_outside
-    == {"s_idle_hi", "s_idle_lo", "s_idle_site_count", "s_idle_audited_only", "s_idle_pc", "s_idle_have_snap", "s_idle_edges",
-        "s_idle_streak", "s_idle_quantum", "s_idle_progress_reg", "s_idle_progress_delta", "s_idle_mem_progress", "s_idle_last_cycle"}
-    and "void psx_idle_skip_set_host_writer(void (*w)(uint32_t, uint32_t)) { g_psx_idle_edge_fresh = 0; s_idle_host_write = w; }" in cycles
+    == {
+        "s_idle_hi",
+        "s_idle_lo",
+        "s_idle_site_count",
+        "s_idle_audited_only",
+        "s_idle_pc",
+        "s_idle_have_snap",
+        "s_idle_edges",
+        "s_idle_streak",
+        "s_idle_quantum",
+        "s_idle_progress_reg",
+        "s_idle_progress_delta",
+        "s_idle_mem_progress",
+        "s_idle_last_cycle",
+    }
+    and "void psx_idle_skip_set_host_writer(void (*w)(uint32_t, uint32_t)) { g_psx_idle_edge_fresh = 0; s_idle_host_write = w; }"
+    in cycles
     and cycles[cycles.index("void psx_cycles_resync_after_restore(") :].count("    g_psx_idle_edge_fresh = 0;\n") == 1
     and cycles.count("idle_skip_ext_on()") == 1,
     "the detector's restart writes the four words the edge writes and the progress fields the fresh mark is taken from, the "
