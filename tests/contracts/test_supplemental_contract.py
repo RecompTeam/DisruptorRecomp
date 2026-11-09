@@ -30,7 +30,7 @@ require(
     "    else if (s_piece_outside >= 0 ? s_piece_outside : gp0_supplemental()) gr_set_world_triangle(s_piece_outside > 0 ? 4 : 3);  /* admitted only by the widened walk */\n"
     in gpu
     and "    const uint32_t key = psx_mod_gpu_dma_resolve_address(gp0_cmd_source_addr - 4u);\n"
-    "    return key ? psx_supplemental_find(&supplemental, key) : NULL;\n"
+    "    return key ? psx_supplemental_find_again(&supplemental, &supplemental_last, key) : NULL;\n"
     in gpu
     and "    const PsxSupplementalRange *range = gp0_supplemental_range();\n    return range && range->left > range->right;\n"
     in gpu

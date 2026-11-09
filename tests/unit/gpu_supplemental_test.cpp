@@ -3,6 +3,7 @@
 #include <cstdint>
 #include <iostream>
 #include <memory>
+#include <random>
 
 namespace {
 
@@ -86,6 +87,75 @@ void test_a_band_range_keeps_its_band() {
     expect(!psx_supplemental_find(s.get(), 0x10D0u), "past the last range there is none");
 }
 
+const PsxSupplementalRange *scan(const PsxSupplemental &s, uint32_t address) {
+    for (uint32_t side = 0u; side < 2u; side++)
+        for (uint32_t i = 0u; i < s.count[side]; i++)
+            if (s.ranges[side][i].start <= address && address < s.ranges[side][i].end) return &s.ranges[side][i];
+    return nullptr;
+}
+
+void test_the_search_is_a_scan_of_every_range() {
+    std::mt19937 random(20261109u);
+    uint32_t differed = 0u, found = 0u, missed = 0u;
+    for (uint32_t ranges : {0u, 1u, 2u, 3u, 4u, 5u, 7u, 8u, 9u, 31u, 100u, 1000u}) {
+        auto s = std::make_unique<PsxSupplemental>();
+        for (int frame = 0; frame < 2; frame++) {
+            psx_supplemental_frame(s.get());
+            uint32_t next = 0x1000u + static_cast<uint32_t>(frame) * 0x40u;
+            for (uint32_t i = 0u; i < ranges + static_cast<uint32_t>(frame); i++) {
+                const uint32_t start = next + (random() % 4u ? 4u + random() % 0x80u : 0u);
+                next = start + 4u + random() % 0x60u;
+                psx_supplemental_band(s.get(), start, next, static_cast<int32_t>(i), static_cast<int32_t>(i + 1u + random() % 2u));
+            }
+            for (uint32_t address = 0xF00u; address < next + 0x100u; address++) {
+                const PsxSupplementalRange *expected = scan(*s, address);
+                if (psx_supplemental_find(s.get(), address) != expected) differed++;
+                (expected ? found : missed)++;
+            }
+        }
+    }
+    expect(differed == 0u && found > 10000u && missed > 10000u, "every byte's answer is the first range that holds it, for tables of every size");
+}
+
+void test_the_last_answer_is_the_search_through_every_change() {
+    auto s = std::make_unique<PsxSupplemental>();
+    PsxSupplementalLast last = {};
+    std::mt19937 random(20261110u);
+    expect(!psx_supplemental_find_again(s.get(), &last, 0u), "an empty table and no lookup yet answer nothing for address 0");
+    uint32_t next = 0x1000u, asked = 0u, differed = 0u, repeated = 0u;
+    for (int step = 0; step < 200000; step++) {
+        const uint32_t roll = random() % 100u;
+        if (roll < 1u) {
+            psx_supplemental_reset(s.get());
+            next = 0x1000u;
+        } else if (roll < 4u) {
+            psx_supplemental_frame(s.get());
+            next = 0x1000u + (random() % 64u) * 4u;
+        } else if (roll < 30u) {
+            const uint32_t start = next + (random() % 3u) * 0x34u, end = start + 0x34u;
+            if (random() % 4u) psx_supplemental_add(s.get(), start, end);
+            else psx_supplemental_band(s.get(), start, end, static_cast<int32_t>(random() % 320u), static_cast<int32_t>(random() % 320u));
+            next = end;
+        } else {
+            if (random() % 3u) asked = 0x1000u + (random() % (next - 0x1000u + 0x100u));
+            else repeated++;
+            const PsxSupplementalRange *found = psx_supplemental_find(s.get(), asked);
+            if (psx_supplemental_find_again(s.get(), &last, asked) != found) differed++;
+        }
+    }
+    expect(differed == 0u && repeated > 10000u, "the remembered answer is the search's after resets, frames, new and joined ranges");
+    psx_supplemental_reset(s.get());
+    psx_supplemental_frame(s.get());
+    psx_supplemental_add(s.get(), 0x1000u, 0x1034u);
+    expect(psx_supplemental_find_again(s.get(), &last, 0x1040u) == nullptr, "a byte past the range is outside");
+    psx_supplemental_add(s.get(), 0x1034u, 0x1068u);
+    expect(psx_supplemental_find_again(s.get(), &last, 0x1040u) != nullptr, "and inside once the next packet joins the range");
+    const uint64_t writes = s->writes;
+    psx_supplemental_reset(s.get());
+    expect(s->writes > writes && psx_supplemental_find_again(s.get(), &last, 0x1040u) == nullptr,
+           "a reset moves the count on and forgets the answer");
+}
+
 }  // namespace
 
 int main() {
@@ -95,6 +165,8 @@ int main() {
     test_a_frame_keeps_the_one_before_and_forgets_the_one_before_that();
     test_a_full_table_drops_the_rest();
     test_a_band_range_keeps_its_band();
+    test_the_search_is_a_scan_of_every_range();
+    test_the_last_answer_is_the_search_through_every_change();
     if (g_failures) {
         std::cerr << g_failures << " failure(s)\n";
         return 1;
