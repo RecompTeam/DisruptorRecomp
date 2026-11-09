@@ -89,7 +89,7 @@ ROW = r'\b(toggle|choice|slider)(?:<[^>]*>)?\(\s*"([\w.]+)", "([^"]+)", (-?\d+)'
 rows = re.findall(ROW, options)
 keys = [key for _, key, _, _ in rows]
 initial = {key: int(value) for _, key, _, value in rows}
-require(len(rows) == 78 and len(set(keys)) == 78, "the shared table must hold its 78 options, each key once")
+require(len(rows) == 79 and len(set(keys)) == 79, "the shared table must hold its 79 options, each key once")
 bass_default = re.search(r"kDisruptorBassCutDefault = (\d+);", read("src/game/settings/game_user_settings.h"))
 require(
     bass_default is not None and initial["disruptor.bass_cut"] == int(bass_default.group(1)) == 1,

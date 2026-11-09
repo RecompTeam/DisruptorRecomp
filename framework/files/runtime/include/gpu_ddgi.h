@@ -112,6 +112,9 @@ void gl_renderer_set_ddgi_shadows(int enabled);
 int gl_renderer_ddgi_shadows(void);
 void gl_renderer_set_ddgi_shadow_strength(float strength);
 float gl_renderer_ddgi_shadow_strength(void);
+/* The share of the level's even light a shadow keeps against the lamps, 0..1: lower, darker. */
+void gl_renderer_set_ddgi_shadow_fill(float share);
+float gl_renderer_ddgi_shadow_fill(void);
 void gl_renderer_set_ddgi_contact(float strength);
 float gl_renderer_ddgi_contact(void);
 /* Light from shots, impacts and blasts, with shadows. */
@@ -145,8 +148,9 @@ void gpu_ddgi_level_emission(const GpuDdgiTriangle *tris, int count, float (*emi
 /* The mission being played, from the game each world draw: a new one forgets the level's faces. */
 void gl_renderer_set_ddgi_mission(int mission);
 int gl_renderer_ddgi_sun_here(void);
-/* Game thread, each world draw before the level's hand-over: a sun on this level even where its light shows none, along the
- * direction found if the light hints at one, else from azimuth (degrees round from +z) and elevation (degrees up). */
+/* Game thread, each world draw before the level's hand-over. asked 1: a sun on this level even where its light shows none, along
+ * the direction found if the light hints at one, else from azimuth (degrees round from +z) and elevation (degrees up); 0: the
+ * sun its light shows, if any; -1: no sun, the lamps take all of the level's light. */
 void gl_renderer_ddgi_sun_ask(int asked, float azimuth, float elevation);
 /* The player's turn (0..360) and raise (-45..45) of the sun the level's fit found, in degrees; then its weight and the share of the
  * baked light it explained alone. Every mission alike: the mission given is not used. */

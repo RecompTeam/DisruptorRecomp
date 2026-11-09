@@ -192,6 +192,8 @@ int main() {
         written.shadow_strength = 140;
         written.has_shadow_underneath = true;
         written.shadow_underneath = 60;
+        written.has_shadow_fill = true;
+        written.shadow_fill = 12;
         written.has_shot_lights = true;
         written.shot_lights = true;
         written.has_shot_light_strength = true;
@@ -293,6 +295,7 @@ int main() {
                     loaded.has_dynamic_shadows && loaded.dynamic_shadows &&
                     loaded.has_shadow_strength && loaded.shadow_strength == 140 &&
                     loaded.has_shadow_underneath && loaded.shadow_underneath == 60 &&
+                    loaded.has_shadow_fill && loaded.shadow_fill == 12 &&
                     loaded.has_shot_lights && loaded.shot_lights &&
                     loaded.has_shot_light_strength && loaded.shot_light_strength == 200 &&
                     loaded.has_sun_lighting && loaded.sun_lighting &&

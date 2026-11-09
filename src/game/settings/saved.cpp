@@ -346,9 +346,16 @@ void read_game_user_settings(const toml::value& doc, UserSettings& s) {
         });
         if (d.contains("shadow_strength")) try_get([&]{
             const int amount = toml::find<int>(d, "shadow_strength");
-            if (amount >= 0 && amount <= 200) {
+            if (amount >= 0 && amount <= 400) {
                 s.shadow_strength = amount;
                 s.has_shadow_strength = true;
+            }
+        });
+        if (d.contains("shadow_fill")) try_get([&]{
+            const int amount = toml::find<int>(d, "shadow_fill");
+            if (amount >= 0 && amount <= 100) {
+                s.shadow_fill = amount;
+                s.has_shadow_fill = true;
             }
         });
         if (d.contains("shadow_underneath")) try_get([&]{
@@ -500,7 +507,7 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
         s.has_crosshair_colour || s.has_crosshair_opacity || s.has_separate_vertical_speed ||
         s.has_stick_layout || s.has_look_speed || s.has_look_deadzone || s.has_invert_look ||
         s.has_probe_lighting || s.has_probe_strength ||
-        s.has_dynamic_shadows || s.has_shadow_strength || s.has_shadow_underneath ||
+        s.has_dynamic_shadows || s.has_shadow_strength || s.has_shadow_fill || s.has_shadow_underneath ||
         s.has_shot_lights || s.has_shot_light_strength || s.has_sun_lighting || s.has_sun_turn ||
         s.has_sun_raise || s.has_air_light || s.has_air_open || s.has_air_haze || s.has_air_sun || s.has_air_lamps || s.has_air_shots ||
         s.has_dynamic_resolution || s.has_resolution || s.has_render_thread ||
@@ -661,8 +668,10 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
             f << "probe_strength = " << s.probe_strength << "\n";
         if (s.has_dynamic_shadows)
             f << "dynamic_shadows = " << (s.dynamic_shadows ? "true" : "false") << "\n";
-        if (s.has_shadow_strength && s.shadow_strength >= 0 && s.shadow_strength <= 200)
+        if (s.has_shadow_strength && s.shadow_strength >= 0 && s.shadow_strength <= 400)
             f << "shadow_strength = " << s.shadow_strength << "\n";
+        if (s.has_shadow_fill && s.shadow_fill >= 0 && s.shadow_fill <= 100)
+            f << "shadow_fill = " << s.shadow_fill << "\n";
         if (s.has_shadow_underneath && s.shadow_underneath >= 0 && s.shadow_underneath <= 200)
             f << "shadow_underneath = " << s.shadow_underneath << "\n";
         if (s.has_shot_lights)

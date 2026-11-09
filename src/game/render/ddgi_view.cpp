@@ -28,8 +28,9 @@ void world_draw(CPUState *, uint32_t) {
     gte_pose_begin();
     const uint8_t mission = psx_mod_read_byte(kMission);
     gl_renderer_set_ddgi_mission(mission);
-    /* The owner's choice: a sun on the first three missions; the first two's baked light shows none, the third's is found. */
-    gl_renderer_ddgi_sun_ask(mission >= 1 && mission <= 3, 35.0f, 50.0f);
+    /* The owner's choice: a sun on the first three missions; the first two's baked light shows none, the third's is found.
+     * With the sun off none is fitted, so the lamps carry the light it would have taken and cast their full shadows. */
+    gl_renderer_ddgi_sun_ask(!gl_renderer_ddgi_sun() ? -1 : mission >= 1 && mission <= 3 ? 1 : 0, 35.0f, 50.0f);
     disruptor::ddgi_level::publish_if_changed();
 }
 

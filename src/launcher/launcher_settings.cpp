@@ -76,6 +76,7 @@ constexpr Placement placed[] = {
     {"disruptor.probe_strength", Page::experimental, nullptr, 1},
     {"disruptor.dynamic_shadows", Page::experimental},
     {"disruptor.shadow_strength", Page::experimental, nullptr, 1},
+    {"disruptor.shadow_fill", Page::experimental, nullptr, 1},
     {"disruptor.shadow_underneath", Page::experimental, nullptr, 1},
     {"disruptor.shot_lights", Page::experimental},
     {"disruptor.shot_light_strength", Page::experimental, nullptr, 1},

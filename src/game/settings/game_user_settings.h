@@ -74,7 +74,8 @@ struct GameUserSettings {
     bool has_probe_lighting = false; bool probe_lighting = false;
     bool has_probe_strength = false; int probe_strength = 100;
     bool has_dynamic_shadows = false; bool dynamic_shadows = false;
-    bool has_shadow_strength = false; int shadow_strength = 100;
+    bool has_shadow_strength = false; int shadow_strength = 200;  // 0..400
+    bool has_shadow_fill = false; int shadow_fill = 30;  // 0..100
     bool has_shadow_underneath = false; int shadow_underneath = 100;
     bool has_shot_lights = false; bool shot_lights = false;
     bool has_shot_light_strength = false; int shot_light_strength = 150;

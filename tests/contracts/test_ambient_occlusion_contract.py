@@ -199,8 +199,8 @@ require(
     '    {"disruptor.occlusion_reach", Page::enhancements, nullptr, 1},\n'
     '    {"disruptor.occlusion_strength", Page::enhancements, nullptr, 1},\n'
     in launcher
-    and launcher.count('", Page::experimental') == 16,
-    "the launcher's Enhancements page holds these three rows and its Experimental page the lighting's sixteen rows: the switch needs geometry correction, the sliders the switch, "
+    and launcher.count('", Page::experimental') == 17,
+    "the launcher's Enhancements page holds these three rows and its Experimental page the lighting's seventeen rows: the switch needs geometry correction, the sliders the switch, "
     "with the menu's own bounds",
 )
 

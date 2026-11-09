@@ -956,7 +956,7 @@ staged_keys = set(re.findall(r'\bmark\("([\w.]+)"', menu)) | set(
 )
 applied_keys = set(re.findall(r'\bchanged\("([\w.]+)"\)', function_body(menu, "apply_pending_preferences")))
 require(
-    len(shared_keys) == 78
+    len(shared_keys) == 79
     and staged_keys == shared_keys
     and applied_keys == shared_keys
     and set(re.findall(r'\bfind_option\("([\w.]+)"', menu)) <= shared_keys,
@@ -1056,7 +1056,7 @@ present = read("src/game/frame/present_rate.cpp")
 require(
     HELPERS in menu
     and "bool option_list(const char *key, int *index, size_t skipped = 0);\n" in menu
-    and len(shared_labels) == 78
+    and len(shared_labels) == 79
     and drawn_keys == shared_keys
     and not [text for text in [*shared_labels, *shared_choices] if f'"{text}"' in menu + present]
     and "    static constexpr int kScaleCount = 8;\n" in menu
@@ -1127,7 +1127,7 @@ told = set(re.findall(r'key == "([\w.]+)"', function_body(menu, "prerequisite_on
 require(
     RULE in options
     and LIVE in menu
-    and len(needing) == 47
+    and len(needing) == 48
     and needing["disruptor.high_precision_camera"] == ["disruptor.mouse_aim", "disruptor.geometry_correction"]
     and asked == set(needing) - {"video.frame_interpolation_fps"}
     and told == {key for keys in needing.values() for key in keys} - {"video.frame_interpolation"}
@@ -1157,7 +1157,7 @@ def greyed_by_own_rule(source: str, key: str) -> bool:
 
 greyed = asked - {"video.frame_interpolation"}
 require(
-    len(greyed) == 45
+    len(greyed) == 46
     and all(greyed_by_own_rule(menu, key) for key in greyed)
     and not greyed_by_own_rule(
         menu.replace("    if (!textures_apply) ImGui::BeginDisabled();\n", "    if (false) ImGui::BeginDisabled();\n"),
@@ -1203,7 +1203,7 @@ shared_hints = [
 written = "".join(re.findall(LITERAL, menu + present))
 require(
     HINT in read("src/game/ui/hint.h")
-    and len(shared_hints) == 78
+    and len(shared_hints) == 79
     and all(not text or 20 <= len(text) <= 240 for text in shared_hints)
     and not [text for text in shared_hints if text and text[:32] in written]
     and "Also needs Exact-provenance geometry"

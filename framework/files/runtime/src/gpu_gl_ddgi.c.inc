@@ -656,7 +656,7 @@ static float s_ddgi_sun_turn = 0.0f, s_ddgi_sun_raise = 0.0f;
 static int s_ddgi_sun = 0, s_ddgi_sun_found = 0;
 static int s_ddgi_mission = -1, s_ddgi_mission_game = -1; /* the GL side's mission, the game thread's */
 static int ddgi_sun_active(void) { return s_ddgi_sun && s_ddgi_sun_found; }
-static float s_ddgi_shadow_strength = 1.0f, s_ddgi_contact = 1.0f, s_ddgi_lamp_strength = 1.5f;
+static float s_ddgi_shadow_strength = 2.0f, s_ddgi_contact = 1.0f, s_ddgi_lamp_strength = 1.5f;
 static DdgiContext s_ddgi_ctx[2]; /* the frame loop's context, the in-between presenter's */
 static DdgiFrame s_ddgi_frame_now;
 static int s_ddgi_bvh_next;
@@ -680,7 +680,7 @@ static unsigned char s_ddgi_fresh[64 * 64], s_ddgi_pending[DDGI_PROBES];
 static int s_ddgi_origin[3];
 #define DDGI_FRONT -1.0f    /* the game draws a face seen against its winding: 0 of 54 drawn faces wound toward the eye */
 #define DDGI_RESPONSE 0.15f /* seconds the probes take to follow the added lights by 1/e */
-#define DDGI_SHADOW_AMBIENT 0.3f /* the owner chose darker shadows than the fit: a third of its ambient stands against the lamps */
+static float s_ddgi_shadow_fill = 0.3f; /* the share of the fit's ambient that stands against the lamps: lower, darker shadows */
 
 static float s_ddgi_probe_seconds = -1.0f; /* since an added light was last in the scene, -1 once the probes are dark */
 static int s_ddgi_probe_reset = 1;
@@ -932,7 +932,8 @@ static int ddgi_level_main(void *opaque) {
                                                        s_ddgi_fit_made.lamp + s_ddgi_fit_made.emitting,
                                                        DDGI_FIT_LAMPS - s_ddgi_fit_made.emitting);
             psx_ddgi_fit_level(s_ddgi_level_nodes, s_ddgi_level_faces, s_ddgi_level, count, DDGI_FRONT,
-                               1, s_ddgi_sun_asked[3] > 0.5f ? s_ddgi_sun_asked : NULL, &s_ddgi_fit_made, &s_ddgi_fit_work);
+                               s_ddgi_sun_asked[3] > -0.5f, s_ddgi_sun_asked[3] > 0.5f ? s_ddgi_sun_asked : NULL, &s_ddgi_fit_made,
+                               &s_ddgi_fit_work);
         }
         if (getenv("PSX_DDGI")) {
             const double tick = 1000.0 / (double)SDL_GetPerformanceFrequency();
@@ -2142,7 +2143,7 @@ static void ddgi_lamp_pass(int thread, GLuint color, GLuint depth, float focal_x
     p_glUniform4f(ctx->la.rect, u0, v0, u1, v1);
     p_glUniform4f(ctx->la.size, (float)lw, (float)lh, 0.0f, 0.0f);
     p_glUniform4f(ctx->la.eye, f->eye[0], f->eye[1], f->eye[2], 0.0f);
-    p_glUniform4f(ctx->la.count, (float)caster_count, (float)lamp_count, 0.0f, f->ambient * DDGI_SHADOW_AMBIENT);
+    p_glUniform4f(ctx->la.count, (float)caster_count, (float)lamp_count, 0.0f, f->ambient * s_ddgi_shadow_fill);
     p_glUniform4f(ctx->la.shadow, shadows ? 0.85f * s_ddgi_shadow_strength : 0.0f, shadows ? 0.45f * s_ddgi_contact : 0.0f, 0.8f,
                   lit ? s_ddgi_lamp_strength : 0.0f);
     if (caster_count) p_glUniform4fv(ctx->la.caster, caster_count * 2, casters);
@@ -2320,9 +2321,11 @@ void gl_renderer_set_ddgi_shadows(int enabled) {
 int gl_renderer_ddgi_shadows(void) { return s_ddgi_shadows; }
 void gl_renderer_set_ddgi_shadow_strength(float strength) {
     GL_RT_SYNC(__func__);
-    s_ddgi_shadow_strength = strength < 0.0f ? 0.0f : strength > 2.0f ? 2.0f : strength;
+    s_ddgi_shadow_strength = strength < 0.0f ? 0.0f : strength > 4.0f ? 4.0f : strength;
 }
 float gl_renderer_ddgi_shadow_strength(void) { return s_ddgi_shadow_strength; }
+void gl_renderer_set_ddgi_shadow_fill(float share) { GL_RT_SYNC(__func__); s_ddgi_shadow_fill = share < 0.0f ? 0.0f : share > 1.0f ? 1.0f : share; }
+float gl_renderer_ddgi_shadow_fill(void) { return s_ddgi_shadow_fill; }
 void gl_renderer_set_ddgi_contact(float strength) { GL_RT_SYNC(__func__); s_ddgi_contact = strength < 0.0f ? 0.0f : strength > 2.0f ? 2.0f : strength; }
 float gl_renderer_ddgi_contact(void) { return s_ddgi_contact; }
 void gl_renderer_set_ddgi_lamps(int enabled) {
@@ -2388,8 +2391,8 @@ int gl_renderer_ddgi_sun_here(void) { return s_ddgi_sun_found; }
 /* Game thread, before the level is handed over: a sun on this level whatever its light shows. */
 void gl_renderer_ddgi_sun_ask(int asked, float azimuth, float elevation) {
     const float az = azimuth * 0.017453293f, el = elevation * 0.017453293f;
-    const float want[4] = {asked ? cosf(el) * sinf(az) : 0.0f, asked ? -sinf(el) : 0.0f, asked ? cosf(el) * cosf(az) : 0.0f,
-                           asked ? 1.0f : 0.0f};
+    const float want[4] = {asked > 0 ? cosf(el) * sinf(az) : 0.0f, asked > 0 ? -sinf(el) : 0.0f, asked > 0 ? cosf(el) * cosf(az) : 0.0f,
+                           asked > 0 ? 1.0f : asked < 0 ? -1.0f : 0.0f};
     memcpy(s_ddgi_sun_asked_game, want, sizeof want);
 }
 void gl_renderer_ddgi_sun_get(float sun[4]) {

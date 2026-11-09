@@ -198,6 +198,7 @@ void mark_lighting() {
     mark("disruptor.probe_strength", percent(gl_renderer_ddgi_strength()));
     mark("disruptor.dynamic_shadows", gl_renderer_ddgi_shadows() != 0);
     mark("disruptor.shadow_strength", percent(gl_renderer_ddgi_shadow_strength()));
+    mark("disruptor.shadow_fill", percent(gl_renderer_ddgi_shadow_fill()));
     mark("disruptor.shadow_underneath", percent(gl_renderer_ddgi_contact()));
     mark("disruptor.shot_lights", gl_renderer_ddgi_lamps() != 0);
     mark("disruptor.shot_light_strength", percent(gl_renderer_ddgi_lamp_strength()));
@@ -229,6 +230,7 @@ void apply_lighting(const PSXRecompV4::UserSettings &settings) {
     gl_renderer_set_ddgi_environment(kDeveloperBuild);
     gl_renderer_set_ddgi_strength(value("disruptor.probe_strength") / 100.0f);
     gl_renderer_set_ddgi_shadow_strength(value("disruptor.shadow_strength") / 100.0f);
+    gl_renderer_set_ddgi_shadow_fill(value("disruptor.shadow_fill") / 100.0f);
     gl_renderer_set_ddgi_contact(value("disruptor.shadow_underneath") / 100.0f);
     gl_renderer_set_ddgi_lamp_strength(value("disruptor.shot_light_strength") / 100.0f);
     gl_renderer_set_ddgi(value("disruptor.probe_lighting"));
@@ -579,7 +581,7 @@ void apply_pending_preferences() {
     if (changed("disruptor.facing_sprites"))
         gpu_facing_sprites_set(pending.facing_sprites ? 1 : 0);
     if (changed("disruptor.probe_lighting") || changed("disruptor.probe_strength") || changed("disruptor.dynamic_shadows") ||
-        changed("disruptor.shadow_strength") ||
+        changed("disruptor.shadow_strength") || changed("disruptor.shadow_fill") ||
         changed("disruptor.shadow_underneath") || changed("disruptor.shot_lights") ||
         changed("disruptor.shot_light_strength") || changed("disruptor.sun_lighting") || changed("disruptor.air_light") ||
         changed("disruptor.air_open") ||

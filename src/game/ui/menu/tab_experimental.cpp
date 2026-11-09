@@ -40,11 +40,15 @@ void draw_lighting() {
     if (!shadows_apply) ImGui::EndDisabled();
     draw_status_badge("EXPERIMENTAL", kExperimental);
     ImGui::Indent();
-    const bool shadow_amounts_apply = applies("disruptor.shadow_strength") && applies("disruptor.shadow_underneath");
+    const bool shadow_amounts_apply =
+        applies("disruptor.shadow_strength") && applies("disruptor.shadow_fill") && applies("disruptor.shadow_underneath");
     if (!shadow_amounts_apply) ImGui::BeginDisabled();
     int darkness = percent(gl_renderer_ddgi_shadow_strength());
     ImGui::SetNextItemWidth(260.0f);
     if (option_slider("disruptor.shadow_strength", &darkness)) set_amount(gl_renderer_set_ddgi_shadow_strength, darkness);
+    int fill = percent(gl_renderer_ddgi_shadow_fill());
+    ImGui::SetNextItemWidth(260.0f);
+    if (option_slider("disruptor.shadow_fill", &fill)) set_amount(gl_renderer_set_ddgi_shadow_fill, fill);
     int underneath = percent(gl_renderer_ddgi_contact());
     ImGui::SetNextItemWidth(260.0f);
     if (option_slider("disruptor.shadow_underneath", &underneath)) set_amount(gl_renderer_set_ddgi_contact, underneath);
