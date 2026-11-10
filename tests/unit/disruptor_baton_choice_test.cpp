@@ -71,6 +71,17 @@ int main() {
     g_current = 5;
     expect(!disruptor_baton_held_by_choice(), "a chosen baton no longer in hand is not");
     g_current = 0;
+
+    using disruptor::may_draw;
+    for (const std::uint8_t level : {1, 2, 3, 4, 5, 8, 9, 7, 11, 14, 15})
+        expect(may_draw(level, 3u, 0) && may_draw(level, 0xFFu, 0) && may_draw(level, 0xFFu, 1),
+               "elsewhere, mission 12's empty start too, a key draws the baton or a gun as before");
+    for (const std::uint8_t level : {6, 12}) {
+        expect(!may_draw(level, 3u, 0) && !may_draw(level, 0u, 0), "on missions 6 and 11 never the baton");
+        expect(!may_draw(level, 0xFFu, 1) && !may_draw(level, 0xFFu, 3),
+               "nor a gun from empty hands, whose empty 18mm Semi the game swaps for the baton");
+        expect(may_draw(level, 3u, 1) && may_draw(level, 1u, 3), "a gun once the game put one in hand");
+    }
     if (g_failures) return 1;
     std::cout << "Disruptor baton choice tests passed\n";
     return 0;

@@ -1187,6 +1187,38 @@ void test_weapon_selection_guards() {
     expect(psx_read_byte(kCurrentWeaponAddress) == 2u, "number keys pick with every mouse option off too");
 }
 
+void test_empty_handed_missions() {
+    constexpr std::uint32_t kLevel = 0x80071518u;
+    for (const std::uint8_t level : {6, 12}) {
+        for (const unsigned key : {SDL_SCANCODE_1, SDL_SCANCODE_2}) {
+            prepare_weapon_input();
+            psx_write_byte(kLevel, level);
+            psx_write_byte(kTestHeldWeaponAddress, 0xFFu);
+            g_keys[key] = 1;
+            const std::vector<Uint8> before(g_ram.begin(), g_ram.end());
+            mouse_aim_frame();
+            expect(std::equal(g_ram.begin(), g_ram.end(), before.begin()) && g_notes == 0 && g_list_shows == 0,
+                   "on missions 6 and 11 no key draws the baton or a gun from empty hands");
+        }
+        prepare_weapon_input();
+        psx_write_byte(kLevel, level);
+        psx_write_byte(kCurrentWeaponAddress, 3u);
+        psx_write_byte(kTestHeldWeaponAddress, 3u);
+        g_keys[SDL_SCANCODE_1] = 1;
+        mouse_aim_frame();
+        expect(psx_read_byte(kCurrentWeaponAddress) == 3u && g_notes == 0, "nor the baton once a gun is in hand");
+        g_keys[SDL_SCANCODE_1] = 0;
+        g_keys[SDL_SCANCODE_2] = 1;
+        mouse_aim_frame();
+        expect(psx_read_byte(kCurrentWeaponAddress) == 1u && g_notes == 1, "while a gun still picks a gun");
+    }
+    prepare_weapon_input();
+    psx_write_byte(kLevel, 14u);
+    g_keys[SDL_SCANCODE_1] = 1;
+    mouse_aim_frame();
+    expect(psx_read_byte(kCurrentWeaponAddress) == 0u && g_notes == 1, "mission 12's empty start still takes the baton");
+}
+
 void test_weapon_key_edges_through_menus() {
     prepare_weapon_input();
     g_host_ui_captured = 1;
@@ -2126,6 +2158,7 @@ int main(int argc, char **argv) {
         test_modern_keyboard_mapping_and_merge();
         test_direct_weapon_mapping();
         test_weapon_selection_guards();
+        test_empty_handed_missions();
         test_weapon_key_edges_through_menus();
         test_weapon_keys_follow_their_option();
         test_weapon_selection_with_mouse_aim();

@@ -98,10 +98,12 @@ void inventory() {
     view.count = weapons ? 10 : 5;
     const uint8_t equipped = psx_read_byte(weapons ? kSelectedWeapon : kSelectedPsionic);
     const uint32_t owned = weapons ? kWeaponOwned : kPsionicOwned;
+    const uint8_t level = psx_read_byte(disruptor::kLevelAddress);
     for (int i = 0; i < view.count; ++i) {
         Entry &entry = view.entries[static_cast<size_t>(i)];
         entry.name = weapons ? kWeapons[static_cast<size_t>(i)] : kPsionics[static_cast<size_t>(i)];
-        entry.owned = psx_read_word(owned + static_cast<uint32_t>(i) * 4u) == 1u;
+        entry.owned = psx_read_word(owned + static_cast<uint32_t>(i) * 4u) == 1u &&
+                      (!weapons || disruptor::may_draw(level, equipped, i));
         entry.equipped = equipped == i;
         entry.resource = -1;
         // The native HUD totals both pools for IDs 1..7, the rest show no ammo.

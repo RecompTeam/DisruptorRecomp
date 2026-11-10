@@ -211,6 +211,20 @@ void test_locked_items_and_navigation() {
     expect(view().highlighted == 3, "a digital pad's folded stick direction cannot also cycle past the pointed slice");
 }
 
+void test_empty_handed_missions() {
+    for (const uint8_t level : {6, 12}) {
+        reset(); g_ram[0x71518] = level; frame(kWeapon);
+        expect(view().kind == Kind::weapons && !view().entries[0].owned && view().entries[1].owned,
+               "on missions 6 and 11 the weapon wheel offers no baton");
+        g_dy = -100; frame(kWeapon); frame();
+        expect(psx_read_byte(0x80077627u) == 1 && g_writes == 0, "pointing at it equips nothing");
+        reset(); g_ram[0x71518] = level; g_ram[0x77627] = 0xFF; frame(kWeapon);
+        expect(!disruptor_selection_wheel_open(), "and from empty hands the weapon wheel stays shut");
+    }
+    reset(); g_ram[0x71518] = 14; g_ram[0x77627] = 0xFF; frame(kWeapon);
+    expect(disruptor_selection_wheel_open() && view().entries[0].owned, "mission 12's empty start still offers the baton");
+}
+
 void test_early_sample_guard() {
     reset();
     g_pad = static_cast<uint16_t>(~(kWeapon | kUp));
@@ -287,6 +301,7 @@ int main() {
     test_default_and_vanilla_fallback(); test_bindings_and_input_capture(); test_equip_and_record();
     test_locked_items_and_navigation(); test_cancellation_and_held_buttons(); test_guards_and_enable_edges(); test_sector_boundaries();
     test_early_sample_guard();
+    test_empty_handed_missions();
     test_ammo_totals();
     if (g_failures) return 1;
     std::cout << "Weapon and psionic wheel tests passed\n";

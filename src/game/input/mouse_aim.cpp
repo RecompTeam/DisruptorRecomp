@@ -528,7 +528,8 @@ bool select_weapon(int weapon) {
      * the change and owns its animation; ammunition and inventory stay put. */
     const uint8_t current = psx_read_byte(kCurrentWeaponAddress);
     if ((current >= 10u && current != 0xFFu) ||
-        psx_read_word(kWeaponOwnershipBase + static_cast<uint32_t>(weapon) * 4u) != 1u)
+        psx_read_word(kWeaponOwnershipBase + static_cast<uint32_t>(weapon) * 4u) != 1u ||
+        !disruptor::may_draw(psx_read_byte(disruptor::kLevelAddress), current, weapon))
         return false;
     if (current == static_cast<uint8_t>(weapon)) {
         g_mouse.pending_weapon = -1;
