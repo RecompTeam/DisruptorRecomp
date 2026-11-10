@@ -312,6 +312,14 @@ require(
     < presenter.index("SDL_GL_SwapWindow"),
     "the presenter lays the layer over its picture before the fence the main thread waits on, the read-back and the swap",
 )
+layer = function_body(gl, "interp_layer_draw")
+require(
+    0
+    <= layer.find("p_glBlendEquationSeparate(PSXGL_FUNC_ADD, PSXGL_FUNC_ADD);")
+    < layer.find("glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);")
+    < layer.find("glDrawArrays("),
+    "the layer sets its own blend equation: the scene under it may end on the game's subtractive blend",
+)
 require(
     "s_layer_shown = -1;" in function_body(gl, "interp_reset_history_unlocked"),
     "a history reset drops the layer with the pictures",

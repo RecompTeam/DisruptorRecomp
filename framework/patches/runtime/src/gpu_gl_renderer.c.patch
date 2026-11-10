@@ -1,5 +1,5 @@
 diff --git a/runtime/src/gpu_gl_renderer.c b/runtime/src/gpu_gl_renderer.c
-index 5665d9760569b1b0d565f2f1635865c6acd31e4c..fff99e44191fb78a1c2985457806fae6c01f4818 100644
+index 5665d9760569b1b0d565f2f1635865c6acd31e4c..3b0ebe38de171031cd9f3d650884babcc5770c0d 100644
 --- a/runtime/src/gpu_gl_renderer.c
 +++ b/runtime/src/gpu_gl_renderer.c
 @@ -4,10 +4,7 @@
@@ -10784,7 +10784,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..fff99e44191fb78a1c2985457806fae6
      if (s_interp_valid == 0) {
          s_interp_cur = dst;
          s_interp_valid = 1;
-@@ -8102,73 +6601,767 @@
+@@ -8102,73 +6601,768 @@
          s_interp_cur = dst;
          s_interp_valid = 2;
      }
@@ -11559,6 +11559,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..fff99e44191fb78a1c2985457806fae6
 +    glDisable(GL_SCISSOR_TEST);
 +    glViewport(0, 0, ww, wh);
 +    glEnable(GL_BLEND);
++    p_glBlendEquationSeparate(PSXGL_FUNC_ADD, PSXGL_FUNC_ADD);  /* the scene may end on a subtractive blend */
 +    glBlendFunc(GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
 +    p_glActiveTexture(PSXGL_TEXTURE0);
 +    glBindTexture(GL_TEXTURE_2D, s_layer_tex[i]);
@@ -11597,7 +11598,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..fff99e44191fb78a1c2985457806fae6
      int lx, ly, lw, lh;
      if (s_interp_force_4_3)
          letterbox_rect_aspect(ww, wh, 4, 3, &lx, &ly, &lw, &lh);
-@@ -8180,2551 +7373,251 @@
+@@ -8180,2551 +7374,251 @@
          glClearColor(0.f, 0.f, 0.f, 1.f);
          glClear(GL_COLOR_BUFFER_BIT);
      }
@@ -14357,7 +14358,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..fff99e44191fb78a1c2985457806fae6
      int lx, ly, lw, lh;
      if (force_4_3)
          letterbox_rect_aspect(ww, wh, 4, 3, &lx, &ly, &lw, &lh);
-@@ -10734,41 +7627,16 @@
+@@ -10734,41 +7628,16 @@
       * display mode (e.g. 216/224-line menus) must fill the rect as before.
       * The FMV band fix lives in the depth24/CPU present paths only. */
  
@@ -14402,7 +14403,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..fff99e44191fb78a1c2985457806fae6
          gl_perf_present_exit(0);
          present_dirty_rect(disp_x, disp_y, disp_x + w - 1, disp_y + h - 1, 0);
          present_force_consumed();
-@@ -10776,28 +7644,14 @@
+@@ -10776,28 +7645,14 @@
          s_last_dx = disp_x; s_last_dy = disp_y; s_last_dw = w; s_last_dh = h;
          return;
      }
@@ -14436,7 +14437,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..fff99e44191fb78a1c2985457806fae6
      gl_perf_present_exit(0);
      present_dirty_rect(disp_x, disp_y, disp_x + w - 1, disp_y + h - 1, 0);
      present_force_consumed();
-@@ -10814,19 +7668,13 @@
+@@ -10814,19 +7669,13 @@
   * x-translated by the reveal offset. No-op when s_wide_fast is off (then the
   * mirror drew the full surface, as before). Shared by both present paths. */
  static void wide_blit_center(GLuint wide_fbo, int base_x, int disp_y, int disp_h) {
@@ -14460,7 +14461,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..fff99e44191fb78a1c2985457806fae6
      /* Copy the canonical framebuffer column into the wide surface CENTRE over the
       * FULL VRAM height, not just the current display band [disp_y, disp_y+disp_h].
       * The wide surface holds BOTH vertical double-buffer bands (Ape flips
-@@ -10835,37 +7683,6 @@
+@@ -10835,37 +7684,6 @@
       * column makes the wide CENTRE bit-identical to what the full mirror would
       * have drawn there for every band, so nothing the present reads is ever left
       * black. The margins (x outside the centre) are untouched. */
@@ -14498,7 +14499,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..fff99e44191fb78a1c2985457806fae6
      p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, s_hr_fbo);
      p_glBindFramebuffer(PSXGL_DRAW_FRAMEBUFFER, wide_fbo);
      glDisable(GL_SCISSOR_TEST);
-@@ -10873,7 +7690,7 @@
+@@ -10873,7 +7691,7 @@
                          (base_x + native_w) * S, VRAM_H * S,
                          g_wide_off * S, 0,
                          (g_wide_off + native_w) * S, VRAM_H * S,
@@ -14507,7 +14508,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..fff99e44191fb78a1c2985457806fae6
      p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, 0);
      p_glBindFramebuffer(PSXGL_DRAW_FRAMEBUFFER, 0);
  }
-@@ -10884,57 +7701,135 @@
+@@ -10884,57 +7702,135 @@
   * disp_y+disp_h] region into the letterbox, V-flipped like present_vram (FBO y
   * bottom-origin → window top). Returns 0 if there's no wide surface for base_x
   * (caller falls back). disp_x is the displayed buffer base (the wide-surface key). */
@@ -14673,7 +14674,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..fff99e44191fb78a1c2985457806fae6
  
      p_glBindFramebuffer(PSXGL_DRAW_FRAMEBUFFER, 0);
      glDisable(GL_SCISSOR_TEST);
-@@ -10942,15 +7837,12 @@
+@@ -10942,15 +7838,12 @@
      if (lx != 0 || ly != 0 || lw != ww || lh != wh) {
          glClearColor(0.f, 0.f, 0.f, 1.f); glClear(GL_COLOR_BUFFER_BIT);
      }
@@ -14694,7 +14695,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..fff99e44191fb78a1c2985457806fae6
          gl_perf_present_exit(1);
          present_dirty_rect(0, disp_y, VRAM_W - 1, disp_y + disp_h - 1, 0);
          present_force_consumed();
-@@ -10959,26 +7851,23 @@
+@@ -10959,26 +7852,23 @@
          s_last_dw = g_wide_w; s_last_dh = disp_h;
          return 1;
      }
@@ -14735,7 +14736,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..fff99e44191fb78a1c2985457806fae6
      gl_perf_present_exit(1);
      present_dirty_rect(0, disp_y, VRAM_W - 1, disp_y + disp_h - 1, 0);
      present_force_consumed();
-@@ -10988,594 +7877,37 @@
+@@ -10988,594 +7878,37 @@
      return 1;
  }
  
@@ -15353,7 +15354,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..fff99e44191fb78a1c2985457806fae6
      .fill_rect = glb_fill_rect, .copy_rect = glb_copy_rect,
      .draw_flat_triangle = glb_draw_flat_triangle, .draw_gouraud_triangle = glb_draw_gouraud_triangle,
      .draw_textured_triangle = glb_draw_textured_triangle,
-@@ -11589,3517 +7921,35 @@
+@@ -11589,3517 +7922,35 @@
      .set_draw_area = glb_set_draw_area, .get_draw_area = glb_get_draw_area,
      .set_draw_offset = glb_set_draw_offset,
      .wide_configure = glb_wide_configure,
