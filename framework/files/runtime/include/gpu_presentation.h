@@ -19,6 +19,7 @@ typedef struct {
     float alpha;       /* its place between them, 1 the later one */
     uint16_t width, height;
     uint8_t kind;      /* 0 a game frame's own swap, 1 the in-between presenter's */
+    uint64_t micros;   /* the host's time since the log began, right before its swap */
 } PsxShownPicture;
 
 typedef struct {
@@ -38,7 +39,12 @@ static inline void psx_shown_log_begin(PsxShownLog *log) {
 }
 
 /* Returns the picture's number. One that finds the ring full is counted lost and keeps its number. */
-static inline uint32_t psx_shown_log_add(PsxShownLog *log, uint32_t frame, int kind, float alpha, int width, int height) {
+/* A host counter's reading as microseconds since egan, 0 for one before it or no frequency. */
+static inline uint64_t psx_shown_micros(uint64_t now, uint64_t began, uint64_t frequency) {
+    return frequency != 0u && now > began ? (now - began) / frequency * 1000000u + (now - began) % frequency * 1000000u / frequency : 0u;
+}
+
+static inline uint32_t psx_shown_log_add(PsxShownLog *log, uint32_t frame, int kind, float alpha, int width, int height, uint64_t micros) {
     const uint32_t sequence = log->sequence++;
     if (log->head - log->tail >= PSX_SHOWN_LOG_SIZE) {
         log->lost++;
@@ -51,6 +57,7 @@ static inline uint32_t psx_shown_log_add(PsxShownLog *log, uint32_t frame, int k
     picture->width = (uint16_t)(width > 0 && width < 65536 ? width : 0);
     picture->height = (uint16_t)(height > 0 && height < 65536 ? height : 0);
     picture->kind = (uint8_t)(kind ? 1 : 0);
+    picture->micros = micros;
     log->head++;
     return sequence;
 }

@@ -375,8 +375,10 @@ temporal_thread = read("psxrecomp/runtime/src/gpu_gl_render_thread.c.inc")
 require(
     "        const uint64_t cycle = kind ? s_interp_cur_cycle : rth_replaying() ? s_rthx_cycle : psx_get_cycle_count();\n"
     "        SDL_AtomicLock(&s_shown_log_lock);\n        if (s_shown_log.on)\n"
-    "            sequence = (int)psx_shown_log_add(&s_shown_log, psx_shown_frame_of(cycle, s_shown_log_first, s_shown_log_period), kind, alpha, ww, wh);\n"
+    "            sequence = (int)psx_shown_log_add(&s_shown_log, psx_shown_frame_of(cycle, s_shown_log_first, s_shown_log_period), kind, alpha, ww, wh,\n"
+    "                                              psx_shown_micros(SDL_GetPerformanceCounter(), s_shown_log_began, SDL_GetPerformanceFrequency()));\n"
     in renderer
+    and "    s_shown_log_period = period;\n    s_shown_log_began = SDL_GetPerformanceCounter();\n" in renderer
     and "    s_interp_cur_cycle = cycle;\n    s_interp_captures++;\n}\n" in renderer
     and "    const uint64_t cycle = rth_replaying() ? s_rthx_cycle : psx_get_cycle_count();\n" in renderer
     and renderer.count("        const uint64_t cycle = psx_get_cycle_count();\n") == 2

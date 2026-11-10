@@ -303,7 +303,8 @@ for a second once the picture is kept.
 The capsule also keeps every picture that reached the screen in
 `presented.csv`: the game frame it showed, named by the VBlank the game
 presented it in, its place between that frame and the one before when it is
-an in-between picture, and the window's size. Each frame of `input.bin` holds
+an in-between picture, the window's size, and the microseconds since the
+recording began at which it was ready, right before its swap. Each frame of `input.bin` holds
 the part of a game step smooth aim turned the picture by.
 
 ```sh

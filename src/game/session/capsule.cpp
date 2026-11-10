@@ -150,35 +150,42 @@ bool decode(std::string_view bytes, std::vector<Frame> &frames, uint64_t &first_
 }
 
 std::string shown_list(const std::vector<Shown> &pictures) {
-    std::string out = "sequence,frame,kind,alpha,width,height\n";
-    char line[96];
+    std::string out = "sequence,frame,kind,alpha,width,height,micros\n";
+    char line[128];
     for (const Shown &picture : pictures) {
-        std::snprintf(line, sizeof(line), "%u,%u,%u,%.9g,%u,%u\n", static_cast<unsigned>(picture.sequence), static_cast<unsigned>(picture.frame),
+        std::snprintf(line, sizeof(line), "%u,%u,%u,%.9g,%u,%u,%llu\n", static_cast<unsigned>(picture.sequence), static_cast<unsigned>(picture.frame),
                       static_cast<unsigned>(picture.kind), static_cast<double>(picture.alpha), static_cast<unsigned>(picture.width),
-                      static_cast<unsigned>(picture.height));
+                      static_cast<unsigned>(picture.height), static_cast<unsigned long long>(picture.micros));
         out += line;
     }
     return out;
 }
 
 bool shown_decode(std::string_view text, std::vector<Shown> &pictures) {
-    constexpr std::string_view head = "sequence,frame,kind,alpha,width,height\n";
+    constexpr std::string_view head = "sequence,frame,kind,alpha,width,height", time_head = ",micros";
     std::vector<Shown> read;
     pictures.clear();
     if (text.substr(0, head.size()) != head) return false;
-    for (size_t at = head.size(); at < text.size();) {
+    const bool timed = text.substr(head.size(), time_head.size()) == time_head;
+    size_t at = head.size() + (timed ? time_head.size() : 0);
+    if (text.substr(at, 1) != "\n") return false;
+    for (++at; at < text.size();) {
         const size_t end = text.find('\n', at);
         if (end == std::string_view::npos) return false;
         const std::string line(text.substr(at, end - at));
         unsigned sequence = 0, frame = 0, kind = 0, width = 0, height = 0;
+        unsigned long long micros = 0;
         double alpha = 0.0;
         int used = 0;
-        if (std::sscanf(line.c_str(), "%u,%u,%u,%lf,%u,%u%n", &sequence, &frame, &kind, &alpha, &width, &height, &used) != 6 ||
-            static_cast<size_t>(used) != line.size() || kind > 1u || !(alpha >= 0.0 && alpha <= 1.0) || width > 65535u || height > 65535u)
+        const int fields = timed ? std::sscanf(line.c_str(), "%u,%u,%u,%lf,%u,%u,%llu%n", &sequence, &frame, &kind, &alpha, &width, &height, &micros, &used)
+                                 : std::sscanf(line.c_str(), "%u,%u,%u,%lf,%u,%u%n", &sequence, &frame, &kind, &alpha, &width, &height, &used);
+        const std::string_view time = timed ? std::string_view(line).substr(line.rfind(',') + 1) : std::string_view("0");
+        if (fields != (timed ? 7 : 6) || static_cast<size_t>(used) != line.size() || time.size() > 19 ||
+            time.find_first_not_of("0123456789") != std::string_view::npos || kind > 1u || !(alpha >= 0.0 && alpha <= 1.0) || width > 65535u || height > 65535u)
             return false;
-        if (!read.empty() && (sequence <= read.back().sequence || frame < read.back().frame)) return false;
+        if (!read.empty() && (sequence <= read.back().sequence || frame < read.back().frame || micros < read.back().micros)) return false;
         read.push_back({sequence, frame, static_cast<float>(alpha), static_cast<uint16_t>(width), static_cast<uint16_t>(height),
-                            static_cast<uint8_t>(kind)});
+                            static_cast<uint8_t>(kind), micros});
         at = end + 1;
     }
     pictures = std::move(read);
@@ -613,7 +620,7 @@ void take_shown() {
     for (int count; (count = gl_renderer_shown_log_take(taken, 256, &capsule.shown_lost)) > 0;)
         for (int index = 0; index < count; ++index)
             capsule.shown.push_back({taken[index].sequence, taken[index].frame, taken[index].alpha, taken[index].width, taken[index].height,
-                                     taken[index].kind});
+                                     taken[index].kind, taken[index].micros});
 }
 
 /* The open frame gets what the last VBlank left in the pads and wrote into the game. */
@@ -1162,7 +1169,7 @@ extern "C" void disruptor_capsule_after_input(void) {
         capsule.shown_base = gl_renderer_shown_captures();
         if (capsule.as_shown) {
             std::vector<PsxShownPicture> script;
-            for (const Shown &picture : capsule.shown) script.push_back({picture.sequence, picture.frame, picture.alpha, picture.width, picture.height, picture.kind});
+            for (const Shown &picture : capsule.shown) script.push_back({picture.sequence, picture.frame, picture.alpha, picture.width, picture.height, picture.kind, picture.micros});
             if (!gl_renderer_shown_script(script.data(), static_cast<int>(script.size()), capsule.played_first_cycle, kVBlankCycles)) {
                 std::fprintf(stderr, "disruptor: capsule: the presenter takes no script, the replay presents its own pictures\n");
                 capsule.as_shown = false;

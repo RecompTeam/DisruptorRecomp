@@ -42,16 +42,17 @@ bool decode(std::string_view bytes, std::vector<Frame> &frames, uint64_t &first_
 
 /* A picture that reached the screen while recording: its number, the later of the two game frames it is placed between,
  * named by the VBlank since the recording's first in which the game presented it, its place between them (kind 1) or a
- * game frame's own swap (kind 0), the window's size. */
+ * game frame's own swap (kind 0), the window's size, the host's microseconds since the recording began right before its swap. */
 struct Shown {
     uint32_t sequence = 0, frame = 0;
     float alpha = 1.0f;
     uint16_t width = 0, height = 0;
     uint8_t kind = 0;
+    uint64_t micros = 0;
 };
 inline constexpr const char *kShownFile = "presented.csv", *kMarksFile = "marks.csv";
 std::string shown_list(const std::vector<Shown> &pictures);
-/* Refused unless every line is whole and the pictures come in order. */
+/* Refused unless every line is whole and the pictures come in order. A list from before the times is read with every time 0. */
 bool shown_decode(std::string_view text, std::vector<Shown> &pictures);
 
 /* Ctrl+F11 while recording: the frame it came in and the picture of the screen kept for it, -1 until that is taken. */

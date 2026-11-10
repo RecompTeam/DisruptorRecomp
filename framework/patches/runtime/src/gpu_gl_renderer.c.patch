@@ -1,5 +1,5 @@
 diff --git a/runtime/src/gpu_gl_renderer.c b/runtime/src/gpu_gl_renderer.c
-index 5665d9760569b1b0d565f2f1635865c6acd31e4c..26e2437d57b3ceac1aafc81343bf6dde523e18ae 100644
+index 5665d9760569b1b0d565f2f1635865c6acd31e4c..fff99e44191fb78a1c2985457806fae6c01f4818 100644
 --- a/runtime/src/gpu_gl_renderer.c
 +++ b/runtime/src/gpu_gl_renderer.c
 @@ -4,10 +4,7 @@
@@ -10651,7 +10651,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..26e2437d57b3ceac1aafc81343bf6dde
 +static PsxShownScript s_script;
 +static SDL_cond      *s_script_cond = NULL;
 +static uint64_t       s_interp_cur_cycle = 0;  /* the emulated clock at the present of the game frame held as the later one */
-+static uint64_t       s_shown_log_first = 0, s_shown_log_period = 0;
++static uint64_t       s_shown_log_first = 0, s_shown_log_period = 0, s_shown_log_began = 0;
 +static SDL_atomic_t   s_shown_log_on;  /* a swap with no log running takes no lock */
 +static int            s_script_index = -1;  /* the script's picture being shown, -1 when none */
 +
@@ -10784,7 +10784,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..26e2437d57b3ceac1aafc81343bf6dde
      if (s_interp_valid == 0) {
          s_interp_cur = dst;
          s_interp_valid = 1;
-@@ -8102,73 +6601,765 @@
+@@ -8102,73 +6601,767 @@
          s_interp_cur = dst;
          s_interp_valid = 2;
      }
@@ -11461,7 +11461,8 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..26e2437d57b3ceac1aafc81343bf6dde
 +        const uint64_t cycle = kind ? s_interp_cur_cycle : rth_replaying() ? s_rthx_cycle : psx_get_cycle_count();
 +        SDL_AtomicLock(&s_shown_log_lock);
 +        if (s_shown_log.on)
-+            sequence = (int)psx_shown_log_add(&s_shown_log, psx_shown_frame_of(cycle, s_shown_log_first, s_shown_log_period), kind, alpha, ww, wh);
++            sequence = (int)psx_shown_log_add(&s_shown_log, psx_shown_frame_of(cycle, s_shown_log_first, s_shown_log_period), kind, alpha, ww, wh,
++                                              psx_shown_micros(SDL_GetPerformanceCounter(), s_shown_log_began, SDL_GetPerformanceFrequency()));
 +        SDL_AtomicUnlock(&s_shown_log_lock);
 +    }
 +    shown_snap(sequence);
@@ -11478,6 +11479,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..26e2437d57b3ceac1aafc81343bf6dde
 +    psx_shown_log_begin(&s_shown_log);
 +    s_shown_log_first = first;
 +    s_shown_log_period = period;
++    s_shown_log_began = SDL_GetPerformanceCounter();
 +    SDL_AtomicUnlock(&s_shown_log_lock);
 +    SDL_AtomicSet(&s_shown_log_on, 1);
 +}
@@ -11595,7 +11597,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..26e2437d57b3ceac1aafc81343bf6dde
      int lx, ly, lw, lh;
      if (s_interp_force_4_3)
          letterbox_rect_aspect(ww, wh, 4, 3, &lx, &ly, &lw, &lh);
-@@ -8180,2551 +7371,251 @@
+@@ -8180,2551 +7373,251 @@
          glClearColor(0.f, 0.f, 0.f, 1.f);
          glClear(GL_COLOR_BUFFER_BIT);
      }
@@ -14355,7 +14357,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..26e2437d57b3ceac1aafc81343bf6dde
      int lx, ly, lw, lh;
      if (force_4_3)
          letterbox_rect_aspect(ww, wh, 4, 3, &lx, &ly, &lw, &lh);
-@@ -10734,41 +7625,16 @@
+@@ -10734,41 +7627,16 @@
       * display mode (e.g. 216/224-line menus) must fill the rect as before.
       * The FMV band fix lives in the depth24/CPU present paths only. */
  
@@ -14400,7 +14402,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..26e2437d57b3ceac1aafc81343bf6dde
          gl_perf_present_exit(0);
          present_dirty_rect(disp_x, disp_y, disp_x + w - 1, disp_y + h - 1, 0);
          present_force_consumed();
-@@ -10776,28 +7642,14 @@
+@@ -10776,28 +7644,14 @@
          s_last_dx = disp_x; s_last_dy = disp_y; s_last_dw = w; s_last_dh = h;
          return;
      }
@@ -14434,7 +14436,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..26e2437d57b3ceac1aafc81343bf6dde
      gl_perf_present_exit(0);
      present_dirty_rect(disp_x, disp_y, disp_x + w - 1, disp_y + h - 1, 0);
      present_force_consumed();
-@@ -10814,19 +7666,13 @@
+@@ -10814,19 +7668,13 @@
   * x-translated by the reveal offset. No-op when s_wide_fast is off (then the
   * mirror drew the full surface, as before). Shared by both present paths. */
  static void wide_blit_center(GLuint wide_fbo, int base_x, int disp_y, int disp_h) {
@@ -14458,7 +14460,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..26e2437d57b3ceac1aafc81343bf6dde
      /* Copy the canonical framebuffer column into the wide surface CENTRE over the
       * FULL VRAM height, not just the current display band [disp_y, disp_y+disp_h].
       * The wide surface holds BOTH vertical double-buffer bands (Ape flips
-@@ -10835,37 +7681,6 @@
+@@ -10835,37 +7683,6 @@
       * column makes the wide CENTRE bit-identical to what the full mirror would
       * have drawn there for every band, so nothing the present reads is ever left
       * black. The margins (x outside the centre) are untouched. */
@@ -14496,7 +14498,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..26e2437d57b3ceac1aafc81343bf6dde
      p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, s_hr_fbo);
      p_glBindFramebuffer(PSXGL_DRAW_FRAMEBUFFER, wide_fbo);
      glDisable(GL_SCISSOR_TEST);
-@@ -10873,7 +7688,7 @@
+@@ -10873,7 +7690,7 @@
                          (base_x + native_w) * S, VRAM_H * S,
                          g_wide_off * S, 0,
                          (g_wide_off + native_w) * S, VRAM_H * S,
@@ -14505,7 +14507,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..26e2437d57b3ceac1aafc81343bf6dde
      p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, 0);
      p_glBindFramebuffer(PSXGL_DRAW_FRAMEBUFFER, 0);
  }
-@@ -10884,57 +7699,135 @@
+@@ -10884,57 +7701,135 @@
   * disp_y+disp_h] region into the letterbox, V-flipped like present_vram (FBO y
   * bottom-origin → window top). Returns 0 if there's no wide surface for base_x
   * (caller falls back). disp_x is the displayed buffer base (the wide-surface key). */
@@ -14671,7 +14673,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..26e2437d57b3ceac1aafc81343bf6dde
  
      p_glBindFramebuffer(PSXGL_DRAW_FRAMEBUFFER, 0);
      glDisable(GL_SCISSOR_TEST);
-@@ -10942,15 +7835,12 @@
+@@ -10942,15 +7837,12 @@
      if (lx != 0 || ly != 0 || lw != ww || lh != wh) {
          glClearColor(0.f, 0.f, 0.f, 1.f); glClear(GL_COLOR_BUFFER_BIT);
      }
@@ -14692,7 +14694,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..26e2437d57b3ceac1aafc81343bf6dde
          gl_perf_present_exit(1);
          present_dirty_rect(0, disp_y, VRAM_W - 1, disp_y + disp_h - 1, 0);
          present_force_consumed();
-@@ -10959,26 +7849,23 @@
+@@ -10959,26 +7851,23 @@
          s_last_dw = g_wide_w; s_last_dh = disp_h;
          return 1;
      }
@@ -14733,7 +14735,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..26e2437d57b3ceac1aafc81343bf6dde
      gl_perf_present_exit(1);
      present_dirty_rect(0, disp_y, VRAM_W - 1, disp_y + disp_h - 1, 0);
      present_force_consumed();
-@@ -10988,594 +7875,37 @@
+@@ -10988,594 +7877,37 @@
      return 1;
  }
  
@@ -15351,7 +15353,7 @@ index 5665d9760569b1b0d565f2f1635865c6acd31e4c..26e2437d57b3ceac1aafc81343bf6dde
      .fill_rect = glb_fill_rect, .copy_rect = glb_copy_rect,
      .draw_flat_triangle = glb_draw_flat_triangle, .draw_gouraud_triangle = glb_draw_gouraud_triangle,
      .draw_textured_triangle = glb_draw_textured_triangle,
-@@ -11589,3517 +7919,35 @@
+@@ -11589,3517 +7921,35 @@
      .set_draw_area = glb_set_draw_area, .get_draw_area = glb_get_draw_area,
      .set_draw_offset = glb_set_draw_offset,
      .wide_configure = glb_wide_configure,

@@ -367,21 +367,37 @@ void test_a_folder_is_a_url_for_the_host() {
 
 void test_the_shown_pictures_survive_their_list() {
     using disruptor::capsule::Shown;
-    const std::vector<Shown> pictures = {{0, 0, 1.0f, 3840, 2160, 0}, {1, 1, 0.25f, 3840, 2160, 1}, {3, 1, 0.758125f, 3840, 2160, 1}};
+    const std::vector<Shown> pictures = {{0, 0, 1.0f, 3840, 2160, 0, 0}, {1, 1, 0.25f, 3840, 2160, 1, 8333}, {3, 1, 0.758125f, 3840, 2160, 1, 7200000025ull}};
     const std::string list = disruptor::capsule::shown_list(pictures);
-    expect(list.rfind("sequence,frame,kind,alpha,width,height\n0,0,0,1,3840,2160\n", 0) == 0, "the list has a header and a line a picture");
+    expect(list.rfind("sequence,frame,kind,alpha,width,height,micros\n0,0,0,1,3840,2160,0\n1,1,1,0.25,3840,2160,8333\n", 0) == 0,
+           "the list has a header and a line a picture");
     std::vector<Shown> back;
     expect(disruptor::capsule::shown_decode(list, back) && back.size() == 3 && back[2].sequence == 3 && back[2].frame == 1 && back[2].kind == 1 &&
-               back[2].alpha == 0.758125f && back[1].width == 3840 && back[1].height == 2160,
+               back[2].alpha == 0.758125f && back[1].width == 3840 && back[1].height == 2160 && back[1].micros == 8333 && back[2].micros == 7200000025ull,
            "what was written is what is read, a lost picture's number left out");
+    expect(disruptor::capsule::shown_decode("sequence,frame,kind,alpha,width,height,micros\n0,0,1,1e-05,10,10,9999999999999999999\n", back) &&
+               back.size() == 1 && back[0].micros == 9999999999999999999ull && back[0].alpha == 1e-05f,
+           "the longest time a line may hold is read whole, beside a place written with an exponent");
+    expect(disruptor::capsule::shown_decode("sequence,frame,kind,alpha,width,height\n0,0,0,1,10,10\n1,1,1,0.5,10,10\n", back) && back.size() == 2 &&
+               back[1].frame == 1 && back[1].micros == 0,
+           "a list written before the times is read, every time 0");
     for (const char *broken : {"sequence,frame,kind,alpha,width,height\n0,0,0,1.0,10,10",
                                "sequence,frame,kind,alpha,width,height\n0,0,2,0.5,10,10\n",
                                "sequence,frame,kind,alpha,width,height\n0,0,1,1.5,10,10\n",
                                "sequence,frame,kind,alpha,width,height\n1,2,1,0.5,10,10\n1,3,1,0.5,10,10\n",
                                "sequence,frame,kind,alpha,width,height\n1,2,1,0.5,10,10\n2,1,1,0.5,10,10\n",
-                               "sequence,frame,kind,alpha,width,height\n0,0,1,0.5,10,10,7\n", "sequence,kind\n0,0\n"})
-        expect(!disruptor::capsule::shown_decode(broken, back) && back.empty(), "a list cut, out of order or of another kind is refused");
-    expect(disruptor::capsule::shown_decode("sequence,frame,kind,alpha,width,height\n", back) && back.empty(), "a list of none is a list");
+                               "sequence,frame,kind,alpha,width,height\n0,0,1,0.5,10,10,7\n", "sequence,kind\n0,0\n",
+                               "sequence,frame,kind,alpha,width,height,micros\n0,0,1,0.5,10,10\n",
+                               "sequence,frame,kind,alpha,width,height,micros\n0,0,1,0.5,10,10,7,7\n",
+                               "sequence,frame,kind,alpha,width,height,micros\n0,0,1,0.5,10,10,9\n1,0,1,0.6,10,10,8\n",
+                               "sequence,frame,kind,alpha,width,height,micros\n0,0,1,0.5,10,10,0\n1,1,1,0.5,10,10,-1\n",
+                               "sequence,frame,kind,alpha,width,height,micros\n0,0,1,0.5,10,10,+7\n",
+                               "sequence,frame,kind,alpha,width,height,micros\n0,0,1,0.5,10,10,18446744073709551616\n",
+                               "sequence,frame,kind,alpha,width,height,microseconds\n0,0,1,0.5,10,10,7\n"})
+        expect(!disruptor::capsule::shown_decode(broken, back) && back.empty(), "a list cut, out of order, of another kind or with a time that is no plain count is refused");
+    expect(disruptor::capsule::shown_decode("sequence,frame,kind,alpha,width,height\n", back) && back.empty() &&
+               disruptor::capsule::shown_decode("sequence,frame,kind,alpha,width,height,micros\n", back) && back.empty(),
+           "a list of none is a list");
 }
 
 void test_marks_are_listed_with_their_pictures() {

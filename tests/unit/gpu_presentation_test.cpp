@@ -18,25 +18,28 @@ void expect(bool condition, const char *message) {
 void test_the_log_numbers_pictures_from_its_start() {
     auto log = std::make_unique<PsxShownLog>();
     psx_shown_log_begin(log.get());
-    expect(psx_shown_log_add(log.get(), 0u, 0, 1.0f, 3840, 2160) == 0u, "the first picture is number 0");
-    expect(psx_shown_log_add(log.get(), 1u, 1, 0.25f, 3840, 2160) == 1u, "the next one 1");
+    expect(psx_shown_log_add(log.get(), 0u, 0, 1.0f, 3840, 2160, 0u) == 0u, "the first picture is number 0");
+    expect(psx_shown_log_add(log.get(), 1u, 1, 0.25f, 3840, 2160, 8333u) == 1u, "the next one 1");
     PsxShownPicture out[4]{};
     expect(psx_shown_log_take(log.get(), out, 4u) == 2u, "both are taken");
     expect(out[0].frame == 0u && out[0].kind == 0u && out[0].alpha == 1.0f, "a game frame's own swap in the log's first VBlank");
     expect(out[1].sequence == 1u && out[1].frame == 1u && out[1].kind == 1u && out[1].alpha == 0.25f && out[1].width == 3840u &&
-               out[1].height == 2160u,
-           "an in-between picture keeps its game frame, its place and the window's size");
+               out[1].height == 2160u && out[0].micros == 0u && out[1].micros == 8333u,
+           "an in-between picture keeps its game frame, its place, the window's size and its time");
+    expect(psx_shown_micros(10000000u + 83330u, 10000000u, 10000000u) == 8333u && psx_shown_micros(48000u * 7200u, 0u, 48000u) == 7200000000u,
+           "a counter's reading is microseconds since the log began, at any frequency and past an hour");
+    expect(psx_shown_micros(5u, 9u, 10000000u) == 0u && psx_shown_micros(9u, 5u, 0u) == 0u, "a reading before the beginning or no frequency is 0, never a wrapped time");
     expect(psx_shown_log_take(log.get(), out, 4u) == 0u, "a picture is taken once");
 }
 
 void test_a_full_log_counts_the_lost_and_keeps_numbering() {
     auto log = std::make_unique<PsxShownLog>();
     psx_shown_log_begin(log.get());
-    for (uint32_t i = 0; i < PSX_SHOWN_LOG_SIZE + 3u; ++i) psx_shown_log_add(log.get(), i, 1, 0.5f, 640, 360);
+    for (uint32_t i = 0; i < PSX_SHOWN_LOG_SIZE + 3u; ++i) psx_shown_log_add(log.get(), i, 1, 0.5f, 640, 360, i);
     expect(log->lost == 3u, "pictures past a full ring are counted lost");
     std::vector<PsxShownPicture> out(PSX_SHOWN_LOG_SIZE);
     expect(psx_shown_log_take(log.get(), out.data(), PSX_SHOWN_LOG_SIZE) == PSX_SHOWN_LOG_SIZE, "the ring gives what it kept");
-    expect(psx_shown_log_add(log.get(), 0u, 1, 0.5f, 640, 360) == PSX_SHOWN_LOG_SIZE + 3u, "the next picture's number counts the lost ones");
+    expect(psx_shown_log_add(log.get(), 0u, 1, 0.5f, 640, 360, 0u) == PSX_SHOWN_LOG_SIZE + 3u, "the next picture's number counts the lost ones");
     PsxShownPicture one{};
     expect(psx_shown_log_take(log.get(), &one, 1u) == 1u && one.sequence == PSX_SHOWN_LOG_SIZE + 3u, "and it is kept once there is room");
 }
