@@ -8,7 +8,9 @@
 #define TEMP_BUILD_SLOTS (WIDE_MAX_SURF * 2)
 #define TEMP_MAX_VERTS (GPU_TEMPORAL_MAX_TRIANGLES * 3)
 #define TEMP_MAX_COMMANDS 2048
-#define TEMP_MAX_TEXTURES 16
+#define TEMP_MAX_TEXTURES 128 /* uploads between draws in one frame: 16 refused 135 of 1961 scenes of a crowd */
+#define TEMP_KEPT_TEXTURES 16 /* a scene keeps the rest only while it lately needed them, 1 MiB each */
+#define TEMP_QUIET_USES 600
 #define TEMP_NEAR_CORNERS 384 /* of near faces in one frame, kept by the level's point: 30 were the most seen */
 #define TEMP_BACKDROP_MOST 12.0f /* frame pixels the panorama is carried between two frames: a faster turn steps the rest */
 #define TEMP_BACKDROP_END_CARRY 2.0f /* an end carried outward goes this many times the panorama's way: at 1 a window left 164 px */
@@ -31,7 +33,7 @@ typedef struct {
     TemporalCommand *commands;
     int *matches;
     int nv, nt, nc, active, bad, clear_y, clear_h, width, height, scale;
-    int origin_y, texture_count, matched, world, moving;
+    int origin_y, texture_count, texture_quiet, matched, world, moving;
     int backdrop;  /* it has placed backdrop tiles: the panorama's numbers below are theirs, see PsxWsPlacedTile */
     float backdrop_origin, backdrop_period, backdrop_scale, backdrop_column;
     float backdrop_back;  /* where the panorama stood a frame earlier, from where it stands */
@@ -236,6 +238,11 @@ static void temporal_begin(GLuint fbo, int y, int h, uint16_t color) {
     s->active = 1; s->bad = 0; s->nv = s->nt = s->nc = 0;
     s->backdrop = 0; s->backdrop_back = 0.0f; s->sky_known = 0; s->sky_frame[3] = 0.0f;
     s->near_count = 0;
+    if (s->texture_count > TEMP_KEPT_TEXTURES) s->texture_quiet = 0;
+    else if (s->texture_quiet < TEMP_QUIET_USES && ++s->texture_quiet == TEMP_QUIET_USES) {
+        glDeleteTextures(TEMP_MAX_TEXTURES - TEMP_KEPT_TEXTURES, s->textures + TEMP_KEPT_TEXTURES);
+        memset(s->textures + TEMP_KEPT_TEXTURES, 0, (TEMP_MAX_TEXTURES - TEMP_KEPT_TEXTURES) * sizeof(s->textures[0]));
+    }
     s->texture_count = 0; s->clear_y = y; s->clear_h = h;
     s->width = g_wide_w; s->scale = s_scale;
     s->clear[0] = (color & 31) / 31.0f;
@@ -251,12 +258,17 @@ static void temporal_invalidate_surface(GLuint fbo) {
 
 /* Snapshot every distinct texture generation used by this scene. This also
  * handles texture uploads between draws, without sampling mutable VRAM from
- * the other context. A bounded overflow holds the real frame. */
+ * the other context. A bounded overflow holds the real frame. A snapshot kept
+ * from an earlier frame takes only what changed since, see PsxRawChanges. */
 static int temporal_texture(TemporalScene *s) {
     for (int i = 0; i < s->texture_count; ++i)
-        if (s->texture_generation[i] == s_temporal_raw_generation) return i;
+        if (s->texture_generation[i] == s_temporal_raw.generation) return i;
     if (s->texture_count == TEMP_MAX_TEXTURES) { s->bad = 3; return -1; }
     int i = s->texture_count++;
+    PsxRawRect rects[PSX_RAW_CHANGE_RECTS];
+    int count = s->textures[i]
+                    ? psx_raw_changes_since(&s_temporal_raw, s->texture_generation[i], (uint64_t)VRAM_W * VRAM_H, rects)
+                    : -1;
     GLint read_fbo = 0, texture = 0;
     /* The queries wait for the driver's thread to drain: 4% of the emulation thread in a crowd, measured. */
     const int queried = !p_glCopyImageSubData || !s->textures[i];
@@ -267,18 +279,24 @@ static int temporal_texture(TemporalScene *s) {
     if (!s->textures[i])
         s->textures[i] = make_tex(PSXGL_R16UI, VRAM_W, VRAM_H,
                                   PSXGL_RED_INTEGER, GL_UNSIGNED_SHORT);
+    if (count < 0) {
+        rects[0].x = rects[0].y = 0; rects[0].w = VRAM_W; rects[0].h = VRAM_H;
+        count = 1;
+    }
     if (p_glCopyImageSubData) {
-        p_glCopyImageSubData(s_raw_tex, GL_TEXTURE_2D, 0, 0, 0, 0, s->textures[i], GL_TEXTURE_2D, 0, 0, 0, 0,
-                             VRAM_W, VRAM_H, 1);
+        for (int r = 0; r < count; ++r)
+            p_glCopyImageSubData(s_raw_tex, GL_TEXTURE_2D, 0, rects[r].x, rects[r].y, 0, s->textures[i], GL_TEXTURE_2D, 0,
+                                 rects[r].x, rects[r].y, 0, rects[r].w, rects[r].h, 1);
         if (queried) glBindTexture(GL_TEXTURE_2D, (GLuint)texture);
     } else {
         p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, s_raw_fbo);
         glBindTexture(GL_TEXTURE_2D, s->textures[i]);
-        glCopyTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 0, 0, VRAM_W, VRAM_H);
+        for (int r = 0; r < count; ++r)
+            glCopyTexSubImage2D(GL_TEXTURE_2D, 0, rects[r].x, rects[r].y, rects[r].x, rects[r].y, rects[r].w, rects[r].h);
         p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, (GLuint)read_fbo);
         glBindTexture(GL_TEXTURE_2D, (GLuint)texture);
     }
-    s->texture_generation[i] = s_temporal_raw_generation;
+    s->texture_generation[i] = s_temporal_raw.generation;
     return i;
 }
 /* A 32-bit word a step, a quarter of the steps of a byte at a time (every field hashed is whole words), then any tail byte by byte. */

@@ -130,7 +130,7 @@ require(
     "    }\n"
     in snapshot
     and snapshot.count("glGetIntegerv(") == 2
-    and "        p_glCopyImageSubData(s_raw_tex, GL_TEXTURE_2D, 0, 0, 0, 0, s->textures[i], GL_TEXTURE_2D, 0, 0, 0, 0,\n"
+    and "            p_glCopyImageSubData(s_raw_tex, GL_TEXTURE_2D, 0, rects[r].x, rects[r].y, 0, s->textures[i], GL_TEXTURE_2D, 0,\n"
     in presenter
     and '|| SDL_GL_ExtensionSupported("GL_ARB_copy_image")\n' in renderer,
     "a scene's texture snapshot asks the driver nothing when it can copy texture to texture: the queries waited for it",

@@ -26,6 +26,7 @@ runtime/include/gpu_gl_renderer.h
 +runtime/include/gpu_near_face.h
 +runtime/include/gpu_pinned_corner.h
 +runtime/include/gpu_presentation.h
++runtime/include/gpu_raw_changes.h
 runtime/include/gpu_render.h
 +runtime/include/gpu_sky_fog.h
 +runtime/include/gpu_supplemental.h
