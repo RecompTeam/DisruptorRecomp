@@ -80,7 +80,10 @@ require(
     in renderer
     and "    hr_begin(1);\n    p_glUseProgram(s_tex_prog);\n    smooth_fade_uniforms(s_tex_uFade, s_tex_uFadeAt, s_tex_uFadePower, s_tex_uFadeBlocks, s_tex_uFadeBlockCount, 1.0f);\n    edge_dissolve_batch(s_tex_uDissolve, s_tex_uClear, semi, s_mask_check);\n"
     in renderer
-    and renderer.count("smooth_fade_uniforms(") == 2
+    and "    p_glUseProgram(s_native_clear_prog);\n"
+    "    smooth_fade_uniforms(u->fade, u->fade_at, u->fade_power, u->fade_blocks, u->fade_block_count, 1.0f);\n"
+    in renderer
+    and renderer.count("smooth_fade_uniforms(") == 3
     and "    s_fade_rows = rows; s_fade_start = start; s_fade_step = step > 0.0f ? step : 1.0f; s_fade_side = side;\n"
     in renderer,
     "the fade is off until it is switched on and the game has said its rows, and a textured batch is told its numbers with its own program bound",

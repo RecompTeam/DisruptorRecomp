@@ -61,6 +61,7 @@ require(
     "    PsxTurnCorner cut[PSX_TURN_CLIP_MAX];\n"
     "    const int near_face = s_near_set;\n"
     "    const int banded = s_next_band, canonical = !banded || s_next_band_canonical;\n    s_next_band = 0;\n    const int cut_corners = near_face ? -1 : turn_clip(px, py, visual_flags, banded, s_next_band_low, s_next_band_high, cut);\n"
+    "    if (!canonical && cut_corners == 0) return;\n"
     "    const float whole_q[3] = {pq[0], pq[1], pq[2]};\n"
     "    turned_perspective(px, pq, visual_flags);\n"
     in renderer
