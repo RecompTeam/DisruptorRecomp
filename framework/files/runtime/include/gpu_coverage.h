@@ -230,6 +230,13 @@ static inline int psx_coverage_piece(PsxCoveragePiece *out, int count, int32_t l
     return count + 1;
 }
 
+static inline int psx_coverage_span_pieces(int32_t left, int32_t right, PsxCoveragePiece out[PSX_COVERAGE_PIECES]) {
+    const int32_t far = 1 << 20;
+    int count = left > -far ? psx_coverage_piece(out, 0, -far, left, 1) : 0;
+    if (right > left) count = psx_coverage_piece(out, count, left, right, 0);
+    return right < far ? psx_coverage_piece(out, count, right, far, 1) : count;
+}
+
 /* The one rule for a face of the game's own crossing an inner edge [left, right] of its room's span. The game draws it
  * whole; only the columns within the reach of an edge it overhangs, where the game's whole picture shows sky within the
  * reach in the face's rows, are a tick to cut away. A face over sky the game itself hides is drawn whole. Returns the

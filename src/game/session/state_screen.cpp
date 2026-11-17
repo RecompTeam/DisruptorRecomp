@@ -5,6 +5,7 @@
 #include "boot_state.h"
 #include "cpu_state.h"
 #include "game/achievements/progress_file.h"
+#include "game/input/menu_rows.h"
 #include "game/language/language.h"
 #include "game/session/capsule.h"
 #include "mod_plugins.h"
@@ -193,6 +194,8 @@ void finish(files::Picture picture) {
 
 /* While the picture is taken the pause menu is not drawn: the scene behind it is what the card shows. */
 void pause_draw_entry(CPUState *cpu, uint32_t) {
+    if (psx_mod_read_byte(menu_rows::kPauseState) != menu_rows::kPaused || psx_mod_read_word(menu_rows::kPauseAsks) != 0u)
+        publish_pause_row({});
     if (g_hiding.load()) psx_mod_finish_function(cpu);
 }
 
@@ -445,6 +448,7 @@ extern "C" void disruptor_state_screen_loaded(void) {
         std::scoped_lock lock(screen::g_mutex);
         screen::g_saves_at = {};
         screen::g_context = {};
+        screen::g_pause_row.clear();
     }
     screen::g_load_staged.store(false);
     screen::g_landed.store(true);

@@ -128,11 +128,18 @@ require(
     and "    s_near_set = exact && s_next_near_set && s_near_shader;\n    s_next_near_set = 0;\n" in renderer
     and "    s_next_precise = enabled ? 1 : 0;\n    s_next_near_set = 0;" in renderer
     and "        s_near_shader = tex_fs != NULL;\n" in renderer
-    and "    const int near_face = s_near_set;\n    const int banded = s_next_band, canonical = !banded || s_next_band_canonical;\n    s_next_band = 0;\n    if (near_face && !canonical) return;  /* uncut, a near face's first piece already drew all of it */\n    const int cut_corners = near_face ? -1 : turn_clip(px, py, visual_flags, banded, s_next_band_low, s_next_band_high, cut);\n"
+    and "    const int near_face = s_near_set;\n    const int banded = s_next_band, canonical = !banded || s_next_band_canonical;\n    s_next_band = 0;\n    const int cut_corners = near_face ? -1 : turn_clip(px, py, visual_flags, banded, s_next_band_low, s_next_band_high, cut);\n"
     in renderer
     and "        const float near_w[3] = {s_near[0][2], s_near[1][2], s_near[2][2]};\n        int world = psx_world_depth_triangle_class(s_world_depth || s_zbuffer_oracle, visual_flags, near_face, near_w, turned_z, s_world_margin);\n"
     in renderer
-    and "            if (near_face) { vp[19] = 4.0f; vp[20] = s_near[i][0]; vp[21] = s_near[i][1]; vp[22] = s_near[i][2]; }\n"
+    and "            if (near_face) {\n"
+    "                const int source_corner = deferred ? 0 : i;\n"
+    "                vp[19] = 4.0f;\n"
+    "                memcpy(&vp[20], s_near[source_corner], sizeof(s_near[source_corner]));\n"
+    "                vp[24] = s_next_band_low;\n"
+    "                vp[25] = s_next_band_high;\n"
+    "                vp[26] = banded ? 1.0f : 0.0f;\n"
+    "            }\n"
     in renderer
     and renderer.count("    glEnable(PSXGL_DEPTH_CLAMP);") == 1
     and presenter.count("    glEnable(PSXGL_DEPTH_CLAMP);") == 1,
@@ -156,11 +163,13 @@ require(
     and '    "  if (close) { v_uvq = vec3(0.0); v_perspective = 2; }\\n"\n    "  v_uvw = v_uv;\\n"\n' in renderer
     and '    "  if (v_perspective == 2) sample_uv = v_uvw;\\n"\n' in renderer
     and '    static const char closing[] = "  if (close) { v_deep = 1.0; v_fade = vec2(-1.0, 0.0);\\n"\n' in renderer
-    and '"    if (u_visual_options.w <= 0.0) { gl_Position.z = 1.0 - 32.0*(1.0 + u_pull)/hw; gl_Position *= hw; } '
-    'else gl_Position = vec4(2.0, 2.0, 2.0, 1.0); }\\n";\n'
-    in renderer,
+    and '"    if (u_visual_options.w <= 0.0) {\\n"' in renderer
+    and '"      if (u_visual_options.w > -1.5) gl_Position.z = 1.0 - 32.0*(1.0 + u_pull)/hw;\\n"' in renderer
+    and '"      if (u_visual_options.w > -1.5) gl_Position.z = 1.0 - 32.0*(1.0 + u_pull)/hw;\\n"' in presenter
+    and '"      gl_Position *= hw;\\n"' in renderer
+    and '"      gl_Position *= hw;\\n"' in presenter,
     "the shader multiplies a near corner's position by its w, turns it at any angle with the w taking the turn's sign as the "
-    "presenter does, reads the texture by the rasterizer's own perspective, orders the face by its w and draws it in the scene's passes alone",
+    "presenter does, reads the texture by the rasterizer's own perspective, and preserves fixed depth during coverage-mask passes",
 )
 
 require(

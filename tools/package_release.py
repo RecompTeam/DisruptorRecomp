@@ -12,7 +12,8 @@ A release goes in two runs. Without --publish the script packs, from a build who
 checkout's commit, and records the packages' digests in packed.json. Then tools/release_smoke.py tests the player's
 file it names, and the installed launcher's --updates-from <packages folder> rehearses the update. --publish packs
 nothing: it signs and uploads that packing, and stops unless it came from a clean checkout of this commit, is
-unchanged, passed the smoke test, and the build workflow passed on the commit.
+unchanged, passed the smoke test, and the build workflow passed on the commit. --skip-smoke explicitly waives
+the smoke test and update rehearsal for a release.
 """
 
 from __future__ import annotations
@@ -550,17 +551,24 @@ def packed_names(version: str, platform: Platform) -> tuple[str, ...]:
     return tuple(f"{PACKAGE_ID}-{version[1:]}{channel_part}-{kind}.nupkg" for kind in ("full", "delta"))
 
 
-def publish(work: Path, version: str, platform: Platform, stamp: Path, text: str) -> None:
+def publish(work: Path, version: str, platform: Platform, stamp: Path, text: str, *, skip_smoke: bool = False) -> None:
     """Signs and uploads the packing in `work` once it is a clean packing of the checkout's commit, unchanged since,
-    passed by the smoke test, and the build workflow passed on that commit. It packs nothing itself."""
+    passed by the smoke test unless explicitly waived, and the build workflow passed on that commit."""
     if checkout_changed():
         raise SystemExit("The checkout has uncommitted changes: a release names its commit")
     commit = source_commit()
     record = check_packed(work, version, platform, commit)
     player_file = SMOKE_FILES[platform.name]
-    check_smoke(
-        stamp, version, platform, (work / "program/MANIFEST.json").read_bytes(), record["files"].get(player_file, "")
-    )
+    if skip_smoke:
+        print("Smoke test and update rehearsal skipped by request.")
+    else:
+        check_smoke(
+            stamp,
+            version,
+            platform,
+            (work / "program/MANIFEST.json").read_bytes(),
+            record["files"].get(player_file, ""),
+        )
     repository = REPOSITORY.removeprefix("https://github.com/")
     check_ci(repository, commit)
     packages = work / "packages"
@@ -604,6 +612,9 @@ def main() -> None:
     )
     parser.add_argument("--publish", action="store_true", help="create the GitHub release and upload the packages")
     parser.add_argument("--sign", action="store_true", help="sign the packages without publishing them")
+    parser.add_argument(
+        "--skip-smoke", action="store_true", help="explicitly waive the smoke test and update rehearsal"
+    )
     args = parser.parse_args()
     if not re.fullmatch(r"v\d+\.\d+\.\d+(?:-[A-Za-z0-9.]+)?", args.version):
         parser.error("version must be a release tag such as v0.3.1")
@@ -611,7 +622,7 @@ def main() -> None:
     work = (args.output / args.version / platform.name).resolve()
     stamp = smoke_stamp(args.output.resolve(), args.version, platform)
     if args.publish:
-        publish(work, args.version, platform, stamp, release_text(args.version))
+        publish(work, args.version, platform, stamp, release_text(args.version), skip_smoke=args.skip_smoke)
         return
 
     build = args.build.resolve()
@@ -695,7 +706,7 @@ def main() -> None:
         "--packTitle",
         "Disruptor Recompiled",
         "--packAuthors",
-        "RecompTeam",
+        "Solganis",
         "--releaseNotes",
         str(work / "notes.md"),
         "--outputDir",
@@ -718,14 +729,19 @@ def main() -> None:
     record = {"version": args.version, "platform": platform.name, "commit": commit, "clean": clean}
     record |= {"started": started, "files": package_digests(packages)}
     (work / PACKED).write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
-    smoked = packages / SMOKE_FILES[platform.name]
-    capsule = " --capsule <capsule recorded on this build>" if "capsule" in REQUIRED_CHECKS[platform.name] else ""
-    where = "" if platform.name == "windows" else " (inside the Linux build's system, with its own paths)"
-    print(
-        f"Smoke test{where}: python tools/release_smoke.py --version {args.version} --platform {platform.name} "
-        f"--package {smoked} --disc <cue>{capsule} --stamp {stamp}"
-    )
-    print(f"Update rehearsal: <installed copy>/DisruptorLauncher{platform.executable_suffix} --updates-from {packages}")
+    if args.skip_smoke:
+        print("Smoke test and update rehearsal skipped by request.")
+    else:
+        smoked = packages / SMOKE_FILES[platform.name]
+        capsule = " --capsule <capsule recorded on this build>" if "capsule" in REQUIRED_CHECKS[platform.name] else ""
+        where = "" if platform.name == "windows" else " (inside the Linux build's system, with its own paths)"
+        print(
+            f"Smoke test{where}: python tools/release_smoke.py --version {args.version} --platform {platform.name} "
+            f"--package {smoked} --disc <cue>{capsule} --stamp {stamp}"
+        )
+        print(
+            f"Update rehearsal: <installed copy>/DisruptorLauncher{platform.executable_suffix} --updates-from {packages}"
+        )
     if args.sign:
         sign(work, players, args.version, commit, started, platform.channel)
         print(f"Signed {len(players)} files as {SIGNER}")

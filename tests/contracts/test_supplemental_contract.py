@@ -27,7 +27,7 @@ module = read("src/game/render/far_rendering.cpp")
 
 require(
     "    if (s_precise_grown) gr_set_world_triangle(2);  /* the game's grown second copy */\n"
-    "    else if (s_piece_outside >= 0 ? s_piece_outside : gp0_supplemental()) gr_set_world_triangle(s_piece_outside > 0 ? 4 : 3);  /* admitted only by the widened walk */\n"
+    "    else if (s_piece_outside >= 0 ? s_piece_outside : gp0_supplemental()) gr_set_world_triangle(s_piece_outside > 0 ? s_piece_outside + 2 : 3);  /* admitted only by the widened walk */\n"
     in gpu
     and "    const uint32_t key = psx_mod_gpu_dma_resolve_address(gp0_cmd_source_addr - 4u);\n"
     "    return key ? psx_supplemental_find_again(&supplemental, &supplemental_last, key) : NULL;\n"
@@ -35,14 +35,13 @@ require(
     and "    const PsxSupplementalRange *range = gp0_supplemental_range();\n    return range && range->left > range->right;\n"
     in gpu
     and gpu.count("    psx_supplemental_reset(&supplemental);\n") == 2
-    and "    s_took_supplemental = !exact ? 0 : s_next_world == 3 ? 1 : s_next_world == 4 ? 2 : 0;\n" in renderer,
+    and "    s_took_supplemental = !exact || s_next_world < 3 ? 0 : s_next_world - 2;\n" in renderer,
     "an exact polygon from a packet of the admitted table is flagged for the renderer, a grown copy stays a copy, and a "
     "reset or a loaded state forgets the table",
 )
 
 require(
-    "        const int supp = near_face || (s_zbuffer_oracle && s_took_supplemental == 2) ? 0 : s_took_supplemental;\n"
-    in renderer
+    "        const int supp = psx_supplemental_draw_kind(s_took_supplemental, s_zbuffer_oracle);\n" in renderer
     and "        if (s_tb_n > 0 && (deferred ? s_tb_supp != 0 : supp != s_tb_supp)) flush_tex_batch();\n" in renderer
     and "            s_tb_supp = deferred ? 0 : supp;\n" in renderer,
     "such a polygon and its kind are a key of its batch, so a batch holds one kind alone",
@@ -63,18 +62,19 @@ require(
     and "        glDepthFunc(c->supp?GL_LESS:GL_LEQUAL); glDepthMask(GL_TRUE);\n" in presenter
     and "        if (c->supp) glDepthFunc(GL_EQUAL);\n" in presenter
     and "    s_won_stencil = held_back;\n    tex_batch_draw_passes(nverts, semi);\n    s_won_stencil = 0;\n" in renderer
-    and "        glStencilFunc(GL_EQUAL, SUPPLEMENTAL_STENCIL | HELD_BACK_WON_STENCIL, SUPPLEMENTAL_STENCIL);\n"
-    in renderer
+    and "glStencilMask(HELD_BACK_WON_STENCIL | SUPPLEMENTAL_DEPTH_STENCIL);" in renderer
     and "    const GLint within = s_supp_stencil ? SUPPLEMENTAL_STENCIL | (s_won_stencil ? HELD_BACK_WON_STENCIL : 0) : 0;\n"
     in renderer
     and "    const GLint within=s_temp_supp ? SUPPLEMENTAL_STENCIL|(s_temp_won ? HELD_BACK_WON_STENCIL : 0) : 0;\n"
     in presenter
-    and "glStencilFunc(GL_EQUAL,SUPPLEMENTAL_STENCIL|HELD_BACK_WON_STENCIL,SUPPLEMENTAL_STENCIL); glStencilOp(GL_KEEP,GL_KEEP,GL_REPLACE);"
-    in presenter
+    and "glStencilMask(HELD_BACK_WON_STENCIL|SUPPLEMENTAL_DEPTH_STENCIL);" in presenter
     and "        if (c->supp) { glEnable(GL_POLYGON_OFFSET_FILL); glPolygonOffset(1.0f,1.0f); s_temp_won=s_temp_supp; }\n"
     in presenter
     and "        if (deferred) vp = &s_tp[s_tp_n * TEXV];\n" in renderer
-    and "                vp[0] = whole[0];\n                vp[1] = whole[1];\n                vp[20] = px[i];\n                vp[21] = py[i];\n"
+    and "                vp[0] = whole[0];\n                vp[1] = whole[1];\n"
+    "                if (near_face) {\n"
+    "                    memcpy(&vp[20], s_near[i], sizeof(s_near[i]));\n"
+    "                } else {\n                    vp[20] = px[i];\n                    vp[21] = py[i];\n                }\n"
     in renderer
     and "    const int by_depth=(s_world_depth || c->supp) && c->world && " in presenter,
     "a face of a supplemental kind waits for its batch's end and is drawn there, pieces past their span first, strictly nearer than the batch in the mirror and the in-between pictures, its canonical part left in order as one point in the mirror",
@@ -89,7 +89,7 @@ require(
     and "    glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);\n" in mark
     and "    glDepthMask(GL_FALSE);\n" in mark
     and "    glDepthFunc(set ? GL_LESS : GL_ALWAYS);\n" in mark
-    and "#define SUPPLEMENTAL_STENCIL 0x04\n#define HELD_BACK_WON_STENCIL 0x08  /* a held-back face's prepass won the sample */\n#define SUPPLEMENTAL_MARK_PASS -2.0f\n"
+    and "#define SUPPLEMENTAL_STENCIL 0x04\n#define HELD_BACK_WON_STENCIL 0x08  /* a held-back face's prepass won the sample */\n#define SUPPLEMENTAL_DEPTH_STENCIL 0x10\n#define SUPPLEMENTAL_MARK_PASS -2.0f\n"
     in renderer
     and "(u_visual_options.w > 0.0 || u_visual_options.w < -1.5) ? 0.9999995" in renderer
     and "((u_visual_options.w > 0.0 || u_visual_options.w < -1.5) ? 0.9999995" in presenter,
@@ -172,7 +172,7 @@ require(
 
 pieces = between(
     gpu,
-    "static int band_pieces(const int32_t *vx, const int32_t *vy, int a, int b, int c, PsxCoveragePiece pieces[PSX_COVERAGE_PIECES]) {",
+    "static int band_pieces(const int32_t *vx, const int32_t *fx, int exact, int a, int b, int c, PsxCoveragePiece pieces[PSX_COVERAGE_PIECES]) {",
     "\n}\n",
 )
 prepass = between(gpu, "static void coverage_prepass(uint32_t start_addr) {", "\n}\n")
@@ -182,19 +182,20 @@ require(
     in pieces
     and "int gr_has_column_band(void) { return g_b->set_column_band != NULL; }\n"
     in read("psxrecomp/runtime/src/gpu_render.c")
-    and "    return psx_coverage_pieces(&coverage, least, most, top, bottom, left, right, pieces);" in pieces
+    and "    const int count = psx_coverage_span_pieces(left, right, pieces);" in pieces
+    and "    const int kind = psx_supplemental_span_kind(s_near_face, least, most, visible_left, visible_right);"
+    in pieces
+    and "        if (pieces[piece].outside) pieces[piece].outside = kind;" in pieces
     and "void gpu_ws_prepass_linked_list(uint32_t start_addr) {\n    coverage_list = start_addr;\n" in gpu
     and "    coverage_list_unread = 1;\n    if (coverage_dump_folder()) coverage_read_list();\n" in gpu
     and prepass.endswith("    coverage_current = 1;")
-    and "    coverage_read_list();\n    if (!coverage_current) return 0;\n    psx_coverage_build(&coverage);\n    return psx_coverage_pieces("
-    in pieces
     and "const int sky = offset == 0 && (psx_sky_fog_opening_top(&sky_fog, addr) != INT32_MAX ||" in prepass
     and "range && range->left > range->right ? PSX_COVER_REACH : PSX_COVER_WORLD" in prepass
     and prepass.count("!(op & 0x02u)") == 2
     and "    for (int kind = 2; kind >= 1 + s_zbuffer_oracle; --kind) {" in renderer
     and "    if (s_zbuffer_oracle && c->supp==1) return;  /* the z-buffer view shows the game's own faces alone */\n"
     in presenter
-    and gpu.count("band_pieces(vx, vy, ") == 6
+    and gpu.count("band_pieces(vx, ") == 6
     and "reach_face_hidden" not in gpu
     and "psx_coverage_sky_keys_has(&coverage_sky_drawn, addr)" in prepass
     and "    psx_coverage_sky_keys_add(&coverage_sky_drawn, key);\n" in gpu
@@ -219,13 +220,11 @@ require(
     in renderer
     and "    case RTH_COLUMN_BAND: glb_set_column_band(v[0], v[1], v[2]); break;\n"
     in read("psxrecomp/runtime/src/gpu_gl_render_thread.c.inc")
-    and "    } else if (disruptor::portal_reach::crossed_band(screen, g_face_rule.left, g_face_rule.right, g_admitted_band)) {\n"
+    and "    } else if (disruptor::portal_reach::room_band(g_face_rule.left, g_face_rule.right, g_admitted_band)) {\n"
     in module
     and "            gpu_supplemental_band(g_admitted_from, end, g_admitted_band.left, g_admitted_band.right);\n"
     in module,
-    "a textured face of the game's room over an inner edge of its own span is drawn whole unless the game's whole picture, "
-    "read from the display list before it runs, shows a tick of it over the sky; then that tick is cut away, the first "
-    "piece alone in the game's picture",
+    "room spans split the displayed face independently of sky coverage, with only the first piece drawing the canonical picture",
 )
 require(
     "#define PAST_SPAN_MARK_PASS -3.0f" in renderer
@@ -247,8 +246,7 @@ require(
     and "    c->supp=textured ? s_draw_supp : 0;\n" in presenter
     and "    if (set && c->supp==2) { p_glUniform4f(u->options,0,0,s->tint,PAST_SPAN_MARK_PASS); glDepthFunc(GL_GREATER);"
     in presenter,
-    "a piece past its span draws as the game's own face where the world, a copy or nothing was drawn, never over the sky, "
-    "in the frame and in every in-between picture",
+    "regular span pieces use the kind-2 depth rule while near faces and triangles extending beyond both opening edges use kind 1",
 )
 
 print("Disruptor supplemental polygons source contract: PASS")

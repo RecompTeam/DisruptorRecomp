@@ -256,16 +256,10 @@ void test_a_face_beside_its_span() {
     expect(beside_span(at(-20, -30, -9, -10), -8, 328), "screen x is signed");
 
     disruptor::portal_reach::Span band{};
-    expect(crossed_band(at(45, 60, 70, 80), 50, 200, band) && band.left == 50 && band.right == disruptor::portal_reach::kBandFar,
-           "a face over the span's left edge is the wider walk's left of it");
-    expect(crossed_band(at(190, 210, 150, 160), 50, 200, band) && band.left == -disruptor::portal_reach::kBandFar && band.right == 200,
-           "and one over its right edge right of it");
-    expect(crossed_band(at(10, 20, 300, 400), 50, 200, band) && band.left == 50 && band.right == 200, "one across the span past both");
-    expect(!crossed_band(at(50, 60, 200, 100), 50, 200, band), "a face on the edges crosses none");
-    expect(!crossed_band(at(-20, 10, 20, 30), -8, 328, band) && !crossed_band(at(300, 340, 310, 320), -8, 328, band),
-           "a span at the frame's edge has no inner edge there: a widescreen picture shows past it");
-    expect(!crossed_band(at(-20, 10, 20, 30), 0, 320, band) && !crossed_band(at(300, 340, 310, 320), 0, 320, band),
-           "nor at the frame's edge itself");
+    expect(room_band(50, 200, band) && band.left == 50 && band.right == 200, "both room edges remain available after projection");
+    expect(room_band(50, 320, band) && band.left == 50 && band.right == disruptor::portal_reach::kBandFar, "the screen's right edge stays open");
+    expect(room_band(0, 200, band) && band.left == -disruptor::portal_reach::kBandFar && band.right == 200, "the screen's left edge stays open");
+    expect(!room_band(-8, 328, band) && !room_band(0, 320, band), "a full-screen span has no internal edge");
     expect(disruptor::portal_reach::kWholeFace.left > disruptor::portal_reach::kWholeFace.right, "a whole face has no band");
 }
 

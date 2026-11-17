@@ -67,6 +67,7 @@ static GLuint s_temp_ms_fbo, s_temp_ms_rb, s_temp_ms_depth, s_temp_ms_ds;  /* th
 static int s_temp_samples, s_temp_shading;  /* the twin's samples, and whether this context shades every one */
 static int s_temp_underlaying;  /* departed faces are being drawn: they keep the depth rule of their own pass */
 static int s_temp_marked;       /* the textured program is the one that tells fillers apart */
+static int s_temp_supplemental_depth;
 static int s_temp_part;         /* what temporal_submit draws of a command: 0 all of it, 1 its fillers alone, 2 its polygons alone */
 static float s_temp_sky_moved;  /* the in-between horizon's shift from the drawn scene's own, in rows */
 static GLint s_temp_uPull=-1, s_temp_uHold=-1;
@@ -79,6 +80,8 @@ typedef struct {
     int sky_sent;  /* the panorama generation its cells were sent for */
 } TemporalUniforms;
 static TemporalUniforms s_temp_uniforms[2];
+static GLuint s_temp_clear_prog;
+static TemporalUniforms s_temp_clear_uniforms;
 
 #ifndef PSX_NO_DEBUG_TOOLS
 static int s_temp_edge_diag = -1;
@@ -681,7 +684,7 @@ static int temporal_worker_init(void) {
     s_temp_verify_left=verify && verify[0]=='1' ? 3 : 0;
     s_temp_geo_prog=geo_vs ? build_program(geo_vs,GEO_FS) : 0;
     {   /* As the frame loop's programs: what a fragment is goes into the alpha for the shading to tell sprites and blends by. */
-        char *marked_vs=tex_vs ? shader_variant(tex_vs,"flat out float v_bill; noperspective out float v_deep; uniform float u_pull; uniform float u_hold; layout(location=13) in vec3 a_ground; flat out vec3 v_ground; noperspective out float v_texel;\n","a_order, 1.0); }\n",
+        char *marked_vs=tex_vs ? shader_variant(tex_vs,"flat out float v_bill; noperspective out float v_deep; uniform float u_pull; uniform float u_hold; flat out vec3 v_ground; noperspective out float v_texel;\n","a_order, 1.0); }\n",
             "u_visual_options.w < -3.5 ? 0.99999925 : u_visual_options.w < -2.5 || u_visual_options.w >= 1.0 ? 0.99999 : ((u_visual_options.w > 0.0 || u_visual_options.w < -1.5) ? 0.9999995 "
             ": (u_pull > 0.0 && a_order > -0.99999 && a_order < 0.99999) ? "
             "max(1.0 - (1.0 - a_order)*(1.0 + u_pull), -1.0) : a_order), 1.0);\n"
@@ -691,7 +694,10 @@ static int temporal_worker_init(void) {
             "  v_deep = (a_order > -0.9999 && a_order < 0.9999) ? 1.0 : -1000.0;\n"
             "  v_fade = (a_visual_flags > 1.5 && a_order > -0.9999 && a_order < 0.9999) ? vec2((1.0 - a_order)/32.0, a_visual_pos.x) : vec2(-1.0, 0.0);\n"
             "  if (close) { v_deep = 1.0; v_fade = vec2(-1.0, 0.0);\n"
-            "    if (u_visual_options.w <= 0.0) { gl_Position.z = 1.0 - 32.0*(1.0 + u_pull)/hw; gl_Position *= hw; } else gl_Position = vec4(2.0, 2.0, 2.0, 1.0); }\n"
+            "    if (u_visual_options.w <= 0.0) {\n"
+                                  "      if (u_visual_options.w > -1.5) gl_Position.z = 1.0 - 32.0*(1.0 + u_pull)/hw;\n"
+                                  "      gl_Position *= hw;\n"
+                                  "    } else gl_Position = vec4(2.0, 2.0, 2.0, 1.0); }\n"
             "  v_bill = a_visual_flags < -0.5 && a_visual_flags > -1.5 ? 0.75 : (a_visual_flags < 1.5 && a_order > -0.9999 && a_order < 0.9999) ? 2.0 : 1.0;\n"
             "  if (u_hold > 0.0) gl_Position.z = (a_order > -0.9999 && a_order < 0.9999)\n"
             "    ? max(1.0 - (1.0 - a_order)/(1.0 - u_hold), -1.0)*gl_Position.w : -gl_Position.w;\n"
@@ -699,6 +705,13 @@ static int temporal_worker_init(void) {
         char *marked_fs=marked_vs ? sprite_marking_shader(TEX_FS) : NULL;
         s_temp_tex_prog=tex_vs ? build_program_ex(marked_fs ? marked_vs : tex_vs,marked_fs ? marked_fs : TEX_FS,1) : 0;
         s_temp_marked=marked_fs!=NULL;
+        char *clear_fs=supplemental_clear_shader();
+        s_temp_clear_prog=0;
+        if (marked_vs && marked_fs && clear_fs) {
+            s_temp_clear_prog=build_program_ex(marked_vs,clear_fs,1);
+            if (s_temp_clear_prog) temporal_uniforms_init(s_temp_clear_prog,&s_temp_clear_uniforms);
+        }
+        free(clear_fs);
         free(marked_vs); free(marked_fs);
     }
     free(geo_vs); free(tex_vs);
@@ -927,6 +940,10 @@ static void temporal_submit_faces(const TemporalScene *s,const TemporalCommand *
     }
     if (!t) {
         if (s_temp_part==1) return;
+        if (s_temp_scene_depth && !s_temp_underlaying && c->semi<0) {
+            if (s_temp_supplemental_depth) clear_supplemental_depth((GLenum)c->mode,count,c->check);
+            glDepthMask(GL_TRUE);
+        }
         if (c->semi>=0) apply_psx_blend(c->semi); else glDisable(GL_BLEND);
         temporal_mask(c->check,c->mask);
         glLineWidth((float)s->scale);
@@ -944,6 +961,28 @@ static void temporal_submit_faces(const TemporalScene *s,const TemporalCommand *
     const int supp=s_temp_marked && c->mode==GL_TRIANGLES && (s_temp_scene_depth || s_temp_underlaying) ? c->supp : 0;
     const GLenum depth_after=s_temp_underlaying && !s_temp_scene_depth ? GL_LESS : GL_ALWAYS;
     const GLboolean write_after=!s_temp_underlaying || (s_temp_scene_depth && !s_world_depth);
+    if (!supp && s_temp_scene_depth && !s_temp_underlaying && s_temp_part!=1) {
+        p_glUniform1i(u->pass,c->semi<0?3:4);
+        if (s_temp_supplemental_depth) {
+            TemporalUniforms *clear=s_temp_clear_prog?&s_temp_clear_uniforms:u;
+            if (s_temp_clear_prog) {
+                p_glUseProgram(s_temp_clear_prog);
+                smooth_fade_uniforms(clear->fade,clear->fade_at,clear->fade_power,clear->fade_blocks,clear->fade_block_count,s_temp_fade_nearer);
+                p_glUniform1f(clear->shift,0.5f/s->scale-1.0f/64.0f);
+                p_glUniform1f(clear->xhalf,s->width/2.0f); p_glUniform1f(clear->visual,1);
+                p_glUniform4i(clear->twin,c->twin[0],c->twin[1],c->twin[2],c->twin[3]);
+                p_glUniform1i(clear->filter,c->filter); p_glUniform1i(clear->semi,c->semi<0?0:c->semi);
+                p_glUniform1i(clear->pass,c->semi<0?3:4);
+                if (s->sky_known) sky_uniforms(clear->sky,clear->sky_frame,clear->sky_cells,clear->sky_shape,clear->sky_irregular,clear->sky_grown,
+                    &clear->sky_sent,&s->sky,s->sky_frame[0],s->sky_frame[1],s->sky_frame[2],s->sky_frame[3]+s_temp_sky_moved);
+            }
+            p_glUniform4f(clear->options,0,0,s->tint,0);
+            clear_supplemental_depth((GLenum)c->mode,count,c->check);
+            if (s_temp_clear_prog) p_glUseProgram(s_temp_tex_prog);
+            else p_glUniform4f(u->options,0,0,s->tint,0);
+        }
+        glDepthMask(write_after);
+    }
     if (supp) { temporal_supp_mark(s,c,u,count,1,depth_after,write_after); s_temp_supp=1; }
     if (fill && s_crack_fill>0.0f) {  /* the edges of the exact world polygons, see s_crack_fill */
         p_glUniform4f(u->options,0,0,s->tint,2.0f);
@@ -968,8 +1007,11 @@ static void temporal_submit_faces(const TemporalScene *s,const TemporalCommand *
     if (!round && by_depth) {  /* as tex_batch_by_depth: the nearest opaque depth, then the colours within the margin of it */
         glColorMask(GL_FALSE,GL_FALSE,GL_FALSE,GL_FALSE); glDisable(GL_BLEND);
         if (s_temp_supp && c->supp) {  /* as tex_batch_by_depth's held-back batch */
-            glEnable(GL_STENCIL_TEST); glStencilMask(HELD_BACK_WON_STENCIL);
-            glStencilFunc(GL_EQUAL,SUPPLEMENTAL_STENCIL|HELD_BACK_WON_STENCIL,SUPPLEMENTAL_STENCIL); glStencilOp(GL_KEEP,GL_KEEP,GL_REPLACE);
+            if (c->supp==1) s_temp_supplemental_depth=1;
+            glEnable(GL_STENCIL_TEST); glStencilMask(HELD_BACK_WON_STENCIL|SUPPLEMENTAL_DEPTH_STENCIL);
+            glStencilFunc(GL_EQUAL,SUPPLEMENTAL_STENCIL|HELD_BACK_WON_STENCIL|
+                                  (c->supp==1?SUPPLEMENTAL_DEPTH_STENCIL:0),SUPPLEMENTAL_STENCIL);
+            glStencilOp(GL_KEEP,GL_KEEP,GL_REPLACE);
         } else if (s_temp_supp) { glEnable(GL_STENCIL_TEST); glStencilMask(0); glStencilFunc(GL_EQUAL,SUPPLEMENTAL_STENCIL,SUPPLEMENTAL_STENCIL); }
         else glDisable(GL_STENCIL_TEST);
         if (c->supp) { glEnable(GL_POLYGON_OFFSET_FILL); glPolygonOffset(1.0f,1.0f); s_temp_won=s_temp_supp; }
@@ -1185,6 +1227,7 @@ static int temporal_present(float alpha,int lx,int ly,int lw,int lh) {
     glEnable(GL_DEPTH_TEST); glDepthFunc(GL_ALWAYS); glDepthMask(GL_TRUE); glClearDepth(1.0);
     glEnable(PSXGL_DEPTH_CLAMP);
     glClear(GL_COLOR_BUFFER_BIT|GL_STENCIL_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+    s_temp_supplemental_depth=0;
     gz_end(GZ_BETWEEN_CLEAR);
     gz_begin(GZ_BETWEEN_DRAW);
     s_temp_scene_depth=1;

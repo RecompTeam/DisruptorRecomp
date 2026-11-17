@@ -2,6 +2,30 @@
 
 What changed in each release. The launcher shows the section of its own version on its home page.
 
+## v0.15.0
+
+### Enhancements
+
+- Texture filtering: Nearest, Bilinear, Trilinear, Anisotropic 2x to 16x and xBR under Enhancements, beside Anti-aliasing, with Nearest (original) as the default
+- Sky: new upper artwork for all eight panoramas when looking up, including a continuous Earth above mission 10
+- Launcher: Play becomes available sooner after opening an installed copy, without reading the whole unchanged disc image again or waiting for older save states to be checked
+- Performance: less processor work in gameplay, rendering and In-between frames
+- Replay capsules: recordings now include frame timings to help investigate uneven motion
+
+### Bug fixes
+
+- New game: overwriting an existing save no longer corrupts password symbols or mission 2's water
+- Pause menu: Save states disappears with the menu when resuming play
+- In-between frames: fixes dropouts in busy scenes with many enemies and effects
+- Render thread: keeps drawing while the crosshair is visible
+- Dynamic resolution: adjusts while the crosshair or an achievement popup is visible and still pauses for an open menu
+- Mission 8: lava no longer stretches out of its channel or shows through nearby walls at the reported angles
+- Triton: fixes gaps at wall corners and ice formations appearing hollow or losing faces at certain viewing angles
+- Triton: no purple strip across the sky when looking up or down
+- Ambient occlusion: stays aligned with the world when looking up or down
+- Crosshair: keeps its chosen colour during the red damage flash with In-between frames on
+- Missions 6 and 11: weapon keys and the weapon wheel no longer equip the baton where the original game forbids it
+
 ## v0.14.0
 
 ### Enhancements

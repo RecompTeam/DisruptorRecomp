@@ -44,6 +44,8 @@ constexpr int kScrollRegister = 3;   /* $v1 */
 constexpr int kPacketRegister = 17;  /* $s1 */
 constexpr int kEdgeRegister = 24;    /* $t8 */
 constexpr int kStackRegister = 29;   /* $sp */
+constexpr int kOpeningRegister = 9;
+constexpr uint32_t kBottomSlot = 72u;
 constexpr uint32_t kFadeStepSlot = 80u;  /* the stack word holding the opening's fog step */
 constexpr int32_t kFrameRight = 320;
 constexpr int32_t kSkyMargin = 4;  /* frame pixels: a window's frames reach past the opening the game measures, the clear colour showed between */
@@ -106,6 +108,9 @@ extern "C" void disruptor_backdrop_tiles_instruction_hook(
             g_span_left = static_cast<int32_t>(cpu->gpr[kEdgeRegister]);
             if (address == kLoadLeftEdge && cpu->read_word) {
                 gpu_sky_fog_opening(static_cast<int32_t>(cpu->read_word(cpu->gpr[kStackRegister] + kFadeStepSlot)));
+                gpu_sky_fog_background(cpu->gpr[kOpeningRegister] == 0u
+                                           ? static_cast<int32_t>(cpu->read_word(cpu->gpr[kStackRegister] + kBottomSlot))
+                                           : 0);
                 tell_panorama(cpu);
             }
             return;

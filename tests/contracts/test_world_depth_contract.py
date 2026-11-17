@@ -84,8 +84,12 @@ require(
     glDisable(GL_BLEND);
     depth_stencil_within();
     if (held_back && s_supp_stencil) {
-        glStencilMask(HELD_BACK_WON_STENCIL);
-        glStencilFunc(GL_EQUAL, SUPPLEMENTAL_STENCIL | HELD_BACK_WON_STENCIL, SUPPLEMENTAL_STENCIL);
+        const int surface = wide_surface_of(g_wide_cur);
+        if (s_supp_stencil == 1 && surface >= 0)
+            s_wide_supplemental_rows[surface] |= wide_depth_rows(s_area_y1, s_area_y2 - s_area_y1 + 1);
+        glStencilMask(HELD_BACK_WON_STENCIL | SUPPLEMENTAL_DEPTH_STENCIL);
+        glStencilFunc(GL_EQUAL, SUPPLEMENTAL_STENCIL | HELD_BACK_WON_STENCIL |
+                                   (s_supp_stencil == 1 ? SUPPLEMENTAL_DEPTH_STENCIL : 0), SUPPLEMENTAL_STENCIL);
         glStencilOp(GL_KEEP, GL_KEEP, GL_REPLACE);
     }
     glDepthFunc(held_back ? GL_LESS : GL_LEQUAL);
@@ -249,7 +253,7 @@ require(
 held = between(presenter, "    if (!round && held) {", "        continue;\n    }")
 require(
     '"flat out float v_bill; noperspective out float v_deep; uniform float u_pull; uniform float u_hold; '
-    'layout(location=13) in vec3 a_ground; flat out vec3 v_ground; noperspective out float v_texel;\\n"'
+    'flat out vec3 v_ground; noperspective out float v_texel;\\n"'
     in presenter
     and '            "  if (u_hold > 0.0) gl_Position.z = (a_order > -0.9999 && a_order < 0.9999)\\n"\n'
     '            "    ? max(1.0 - (1.0 - a_order)/(1.0 - u_hold), -1.0)*gl_Position.w : -gl_Position.w;\\n"\n'

@@ -1,5 +1,5 @@
 diff --git a/runtime/include/gpu_render.h b/runtime/include/gpu_render.h
-index b609ad9a2a7f8fe338b005d875b2f08771b09a03..8c1605bae12cc945b238dfd498fa5295f0258055 100644
+index b609ad9a2a7f8fe338b005d875b2f08771b09a03..78feed7ab328da2f76db11ce8595b70baa325c43 100644
 --- a/runtime/include/gpu_render.h
 +++ b/runtime/include/gpu_render.h
 @@ -45,6 +45,44 @@
@@ -13,7 +13,7 @@ index b609ad9a2a7f8fe338b005d875b2f08771b09a03..8c1605bae12cc945b238dfd498fa5295
 +void gr_set_column_band(int low, int high, int canonical);
 +void gr_set_sky_cells(int rows, int columns, int tall, int period, int focal, const int32_t *cells, int irregular);
 +void gr_set_sky_extension(int width, int rows, int band, const uint8_t *indices);
-+/* The panorama column, plus one, of the sky tile drawn next: 0 when the next is none. */
++/* Signed panorama column plus one: negative marks the tile's bottom edge as fixed-height background, zero means none. */
 +void gr_set_sky_column(float column);
 +/* The panorama's look: its size in thousandths of the game's lay, rows and columns about the horizon, and its texels blended. */
 +void gr_set_sky_look(int size_per_mille, int smooth);

@@ -17,3 +17,4 @@ framework/patches/** -text
 
 # The CHD test images are chdman's bytes.
 *.chd binary
+*.idx binary

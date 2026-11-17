@@ -114,6 +114,10 @@ A release goes in two runs for each system:
    without uncommitted changes, its files are unchanged, the smoke test passed
    on its player's file, and the newest build run on the commit is green.
 
+When the release owner waives the smoke test and update rehearsal, pass
+`--skip-smoke` when packing and publishing. The clean checkout, package
+digests and successful build workflow remain required.
+
 A Linux release is an AppImage packed from a Linux Release build of the same
 commit. It is built on Ubuntu 22.04, so that it runs on glibc 2.35 and newer:
 GCC 13 from the `ubuntu-toolchain-r/test` PPA, Kitware's CMake and Python 3.11,

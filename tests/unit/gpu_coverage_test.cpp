@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <initializer_list>
 #include <memory>
+#include <utility>
 
 namespace {
 
@@ -135,6 +136,18 @@ void broken_sky_cuts_alternate_and_never_spill() {
     expect(filled == PSX_COVERAGE_PIECES + 1, "more pieces than room are told as such, never merged into a cut");
 }
 
+void room_spans_partition_without_gaps() {
+    for (const auto [left, right] : {std::pair{-kFar, 200}, std::pair{50, kFar}, std::pair{50, 200}, std::pair{-kFar, kFar}}) {
+        PsxCoveragePiece pieces[PSX_COVERAGE_PIECES];
+        const int count = psx_coverage_span_pieces(left, right, pieces);
+        expect(count >= 1 && count <= 3 && pieces[0].low == -kFar && pieces[count - 1].high == kFar, "pieces cover the view");
+        for (int i = 0; i < count; ++i) {
+            expect(pieces[i].low < pieces[i].high && (i == 0 || pieces[i - 1].high == pieces[i].low), "pieces neither overlap nor leave gaps");
+            expect(pieces[i].outside == (pieces[i].high <= left || pieces[i].low >= right), "only the room's own span is original");
+        }
+    }
+}
+
 void drawn_sky_tiles_are_kept_by_packet() {
     PsxCoverageSkyKeys drawn{};
     psx_coverage_sky_keys_reset(&drawn);
@@ -187,6 +200,7 @@ int main() {
     the_widened_walk_fills_only_the_void();
     a_tick_is_cut_and_hidden_sky_is_not();
     broken_sky_cuts_alternate_and_never_spill();
+    room_spans_partition_without_gaps();
     drawn_sky_tiles_are_kept_by_packet();
     the_bit_answers_match_a_plain_count();
     std::puts("GPU coverage tests passed");

@@ -1,12 +1,6 @@
-/*
- * The sky above the panorama's top is grown on the player's machine from the game's own panorama (sky_extension.h), once a
- * revision, on a worker: the renderer draws the top rows' colour there until it is handed over. A revision is the
- * panorama's indices with its base palette; an unchanged table is checked again every second, as the game may rewrite the
- * VRAM under it.
- */
-
 #include "game/render/sky_grower.h"
 
+#include "game/render/sky_art.h"
 #include "game/render/sky_extension.h"
 #include "game/render/sky_look.h"
 #include "gpu.h"
@@ -65,7 +59,8 @@ private:
                 job = std::move(*job_);
                 job_.reset();
             }
-            Grown grown{job.revision, extension::grow(job.picture, job.palette, job.rows, job.revision)};
+            std::optional<extension::Extension> art = disruptor::sky_art::find(job.picture, job.rows);
+            Grown grown{job.revision, art ? std::move(*art) : extension::grow(job.picture, job.palette, job.rows, job.revision)};
             std::scoped_lock lock(mutex_);
             grown_ = std::move(grown);
         }

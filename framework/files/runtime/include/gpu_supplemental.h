@@ -11,7 +11,17 @@ extern "C" {
 #endif
 
 #define PSX_SUPPLEMENTAL_RANGES 8192u
+#define PSX_SUPPLEMENTAL_STRICT_SPAN 3
 #define PSX_SUPPLEMENTAL_FAR (1 << 20) /* a band's side with no edge, past any column */
+
+static inline int psx_supplemental_span_kind(int near_face, int32_t least, int32_t most, int32_t left, int32_t right) {
+    return near_face || (least < left && most > right) ? PSX_SUPPLEMENTAL_STRICT_SPAN : 2;
+}
+
+static inline int psx_supplemental_draw_kind(int kind, int zbuffer_oracle) {
+    if (kind == PSX_SUPPLEMENTAL_STRICT_SPAN) return zbuffer_oracle ? 0 : 1;
+    return kind == 2 ? 0 : kind;
+}
 
 /* A face is the widened walk's alone outside [left, right]: left above right for the whole face. */
 typedef struct {

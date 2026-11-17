@@ -20,10 +20,12 @@
 #include "game/render/far_rendering.h"
 
 #include "game/guest.h"
+#include "game/render/ice_winding.h"
 #include "game/render/marked_corners.h"
 #include "game/render/misplaced_riser.h"
 #include "game/render/near_split.h"
 #include "game/render/portal_reach.h"
+#include "game/render/quad_visibility.h"
 #include "game/render/sector_reach.h"
 
 #include "cpu_state.h"
@@ -686,7 +688,7 @@ void note_face(const CPUState *cpu) {
     if (g_face_rule.whole || disruptor::portal_reach::beside_span(screen, g_face_rule.left, g_face_rule.right)) {
         g_admitted_from = packet;
         g_admitted_band = disruptor::portal_reach::kWholeFace;
-    } else if (disruptor::portal_reach::crossed_band(screen, g_face_rule.left, g_face_rule.right, g_admitted_band)) {
+    } else if (disruptor::portal_reach::room_band(g_face_rule.left, g_face_rule.right, g_admitted_band)) {
         g_admitted_from = packet;
     }
 }
@@ -1334,6 +1336,19 @@ void keep_marked_faces_on_screen(CPUState *cpu) {
                                static_cast<int32_t>(cpu->read_word(kSpanRight)));
 }
 
+void keep_visible_quad_on_screen(CPUState *cpu) {
+    if (!cpu || !cpu->read_word || !gpu_geometry_correction_enabled() || psx_netplay_active() || comparator_active() ||
+        cpu->gpr[1] != 0u || cpu->gpr[23] != 0u || (cpu->gpr[30] & 1u) ||
+        (cpu->gpr[7] & disruptor::quad_visibility::kTwoSided))
+        return;
+    cpu->gpr[7] = disruptor::ice_winding::culling_flags(cpu->gpr[6], cpu->gpr[7], cpu->read_word(0x1F800054u), cpu->read_word);
+    for (int corner = 0; corner < 4; ++corner)
+        if (cpu->gpr[12 + corner] & (disruptor::marked_corners::kMarked | disruptor::marked_corners::kNear)) return;
+    const std::array<uint32_t, 4> screen = {cpu->read_word(cpu->gpr[8] + 4u), cpu->read_word(cpu->gpr[9] + 4u),
+                                           cpu->read_word(cpu->gpr[10] + 4u), cpu->read_word(cpu->gpr[11] + 4u)};
+    cpu->gpr[7] = disruptor::quad_visibility::culling_flags(screen, cpu->gpr[7]);
+}
+
 /* a1 at the middle point, corners packed in t0..t3, the camera in at, v0, v1. */
 void put_split_centre_on_diagonal(CPUState *cpu) {
     if (!cpu || !cpu->write_word) return;
@@ -1792,6 +1807,7 @@ extern "C" void disruptor_far_rendering_instruction_hook(
     if (pc == kSharedSides && instruction == kSharedSidesOpcode) {
         keep_marked_faces_on_screen(cpu);
         note_face(cpu);
+        keep_visible_quad_on_screen(cpu);
         return;
     }
 

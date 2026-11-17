@@ -395,7 +395,12 @@ class Recorder:
 
 
 def publish_attempt(
-    record_changes: dict, smoke: dict, runs: list[dict], changed_file: bool = False, added_file: bool = False
+    record_changes: dict,
+    smoke: dict,
+    runs: list[dict],
+    changed_file: bool = False,
+    added_file: bool = False,
+    skip_smoke: bool = False,
 ) -> list:
     """What publish() did before it stopped or finished: the signing and every command, in order."""
     with tempfile.TemporaryDirectory() as root:
@@ -430,7 +435,9 @@ def publish_attempt(
         package_release.source_commit = lambda: "c0ffee"
         package_release.checkout_changed = lambda: False
         try:
-            stopped = refused(lambda: package_release.publish(work, "v0.10.2", windows, stamp, "Text\n"))
+            stopped = refused(
+                lambda: package_release.publish(work, "v0.10.2", windows, stamp, "Text\n", skip_smoke=skip_smoke)
+            )
         finally:
             (
                 package_release.subprocess,
@@ -458,6 +465,13 @@ require(
     and publish_attempt({}, smoke_result(), GREEN, added_file=True)[-1] == "gh release create",
     "publish() signs and uploads only a clean, unchanged packing of the commit that passed the smoke test, after a "
     f"green CI run, and none of the files added after packing: every refusal stops before signing, got {whole}",
+)
+require(
+    publish_attempt({}, {}, GREEN, skip_smoke=True) == whole
+    and publish_attempt({"clean": False}, {}, GREEN, skip_smoke=True) == ["stopped"]
+    and publish_attempt({}, {}, GREEN, changed_file=True, skip_smoke=True) == ["stopped"]
+    and publish_attempt({}, {}, RED, skip_smoke=True) == ["stopped", "gh run list"],
+    "waiving smoke checks still requires a clean packing, unchanged files and green CI",
 )
 
 print("Disruptor release text and files: PASS")

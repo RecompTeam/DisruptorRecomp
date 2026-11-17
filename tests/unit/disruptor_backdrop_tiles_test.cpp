@@ -45,6 +45,8 @@ std::int32_t g_own_told_left = 0, g_own_told_right = 0;
 int g_scrolls = 0, g_spans = 0;
 std::vector<std::int32_t> g_fog_steps;
 std::vector<std::uint32_t> g_fog_tiles;
+std::int32_t g_background_bottom = 0;
+int g_background_calls = 0;
 std::uint32_t g_taken_pins = 0;
 int g_failures = 0;
 
@@ -102,6 +104,10 @@ void gpu_ws_backdrop_scroll(std::int32_t scroll, std::int32_t period, std::int32
 }
 
 void gpu_sky_fog_opening(std::int32_t step) { g_fog_steps.push_back(step); }
+void gpu_sky_fog_background(std::int32_t bottom) {
+    g_background_bottom = bottom;
+    ++g_background_calls;
+}
 struct PanoramaTold {
     int rows, columns, tall, period, focal;
     std::int32_t first_x, first_y, last_x;
@@ -766,7 +772,25 @@ void test_the_level_panorama_is_told_when_it_changes() {
     expect(g_panoramas.size() == 3u && g_panoramas[2].rows == 0, "a table the sky pass cannot draw is told as none");
 }
 
+void test_fixed_background_height_is_presentation_metadata() {
+    constexpr std::uint32_t stack = 0x801FFE00u;
+    CPUState cpu = make_cpu();
+    cpu.gpr[29] = stack;
+    cpu.gpr[9] = 0u;
+    seed_word(stack + 72u, 110u);
+    run_seam(cpu, kLeftSeam, kLeftWord);
+    expect(g_background_bottom == 110, "a null opening carries its fixed background height to the renderer");
+    expect(read_word(stack + 72u) == 110u, "the guest's stack and tile generation remain unchanged");
+    const int calls = g_background_calls;
+    run_seam(cpu, kReloadSeam, kLeftWord);
+    expect(g_background_calls == calls, "later tile rows do not begin another background");
+    cpu.gpr[9] = 0x800C0000u;
+    run_seam(cpu, kLeftSeam, kLeftWord);
+    expect(g_background_bottom == 0, "a projected room opening keeps its existing bounds");
+}
+
 int main() {
+    test_fixed_background_height_is_presentation_metadata();
     test_the_level_panorama_is_told_when_it_changes();
     test_each_opening_tells_its_fog_step();
     test_sky_behind_the_world();

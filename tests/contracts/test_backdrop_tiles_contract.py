@@ -24,6 +24,10 @@ TILE_SITES = {
 RETAIL_INSTRUCTIONS = {
     **TILE_SITES,
     0x8003AF68: 0x27BDFF60,
+    0x8003AF70: 0x00804821,
+    0x8003AFE4: 0x112000CB,
+    0x8003B31C: 0xAFA50048,
+    0x8003DAE4: 0x3405006E,
     0x8003B33C: 0xAFB80038,
     0x8003B340: 0x0303C021,
     0x8003B344: 0xAFB80018,
@@ -270,8 +274,8 @@ require(
 )
 require(
     '    "  bool placed = u_visual > 0.5 && a_visual_flags < -1.5;\\n"\n' in renderer
-    and '    "  vec2 p = corrected ? a_visual_pos : a_pos;\\n"\n'
-    '    "  if (u_visual > 0.5 && a_visual_flags < -0.5 && a_visual_flags > -1.5) p.x = a_visual_pos.x;\\n"\n'
+    and '    "  vec2 p = corrected ? a_visual_pos : a_pos;\\n"\n' in renderer
+    and '    "  if (u_visual > 0.5 && a_visual_flags < -0.5 && a_visual_flags > -1.5) p.x = a_visual_pos.x;\\n"\n'
     '    "  if (placed) { p = vec2(a_visual_pos.x, a_pos.y); v_uv.x += a_q; v_limits.x -= 64; v_limits.z += 64; }\\n"\n'
     in renderer
     and renderer.count("a_visual_flags < -1.5") == 1
@@ -373,6 +377,9 @@ require(
     "constexpr uint32_t kFadeStepSlot = 80u;" in module
     and "            if (address == kLoadLeftEdge && cpu->read_word) {\n"
     "                gpu_sky_fog_opening(static_cast<int32_t>(cpu->read_word(cpu->gpr[kStackRegister] + kFadeStepSlot)));\n"
+    "                gpu_sky_fog_background(cpu->gpr[kOpeningRegister] == 0u\n"
+    "                                           ? static_cast<int32_t>(cpu->read_word(cpu->gpr[kStackRegister] + kBottomSlot))\n"
+    "                                           : 0);\n"
     "                tell_panorama(cpu);\n            }\n"
     in module
     and "            gpu_ws_tag_screen_tile(cpu, cpu->gpr[kPacketRegister]);\n"
@@ -405,13 +412,15 @@ require(
     and sky_rect.count("gp0_cmd_buf[") == 7
     and "    parse_vertex(gp0_cmd_buf[1], &frame_x, &frame_y);\n"
     "    /* the panorama column the game cut the tile from, which its VRAM block does not tell where blocks are shared */\n"
-    "    gr_set_sky_column(psx_ws_screen_tile_sky_column(frame_x, ws_backdrop_now, ws_backdrop_period, ws_backdrop_column));\n"
+    "    const float column = psx_ws_screen_tile_sky_column(frame_x, ws_backdrop_now, ws_backdrop_period, ws_backdrop_column);\n"
     in sky_rect
-    and sky_rect.count("        gp0_exec_textured_rect();\n        gr_set_sky_column(0.0f);\n        return;\n") == 1
+    and sky_rect.count("        gr_set_sky_column(0.0f);\n        gp0_exec_textured_rect();\n        return;\n") == 1
+    and sky_rect.index("!psx_sky_fog_take(&sky_fog, key, gp0_cmd_buf, &clut, &step)")
+    < sky_rect.index("    gr_set_sky_column(bottom_edge ? -column : column);\n")
     and "+runtime/include/gpu_sky_fog.h\n" in read("framework/FILES.txt")
     and "disruptor_unit_test(disruptor_gpu_sky_fog tests/unit/gpu_sky_fog_test.cpp RUNTIME_HEADERS)\n" in cmake,
     "a sky tile takes its widescreen mark from the game's words and hands it to the draw, only the palette and the rows "
-    "change, and the game's words come back after: the panorama column its frame x tells is the draw's alone, on either path",
+    "change, and the game's words come back after. Only a validated sky tile carries a panorama column",
 )
 
 require(

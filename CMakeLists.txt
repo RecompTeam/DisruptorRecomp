@@ -46,6 +46,7 @@ set(DISRUPTOR_EXTRA_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/achievements/game_client.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/backdrop_tiles.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/sky_grower.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/sky_art.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/billboard_aspect.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/capsule.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/cheats.cpp"
@@ -95,6 +96,19 @@ if(DISRUPTOR_DEV_TOOLS)
     list(APPEND DISRUPTOR_EXTRA_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/mission_select.cpp")
     list(APPEND DISRUPTOR_EXTRA_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/sky_dump.cpp")
 endif()
+
+set(DISRUPTOR_SKY_SOURCES)
+foreach(sky earth city rooftop mars triton dusk green fire)
+    set(sky_input "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/assets/sky-${sky}.idx")
+    set(sky_source "${CMAKE_CURRENT_BINARY_DIR}/sky_${sky}.cpp")
+    add_custom_command(OUTPUT "${sky_source}"
+        COMMAND "${CMAKE_COMMAND}" "-DINPUT=${sky_input}" "-DOUTPUT=${sky_source}"
+            "-DNAME=disruptor_sky_${sky}" -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_bytes.cmake"
+        DEPENDS "${sky_input}" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_bytes.cmake"
+        VERBATIM)
+    list(APPEND DISRUPTOR_SKY_SOURCES "${sky_source}")
+endforeach()
+list(APPEND DISRUPTOR_EXTRA_SOURCES ${DISRUPTOR_SKY_SOURCES})
 
 # The project deliberately uses the redistributable OpenBIOS backend only.
 set(PSXRECOMP_BIOS_STEMS "OpenBIOS" CACHE STRING "" FORCE)
@@ -525,9 +539,13 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
 disruptor_unit_test(disruptor_portal_reach tests/unit/disruptor_portal_reach_test.cpp INCLUDES src)
 disruptor_unit_test(disruptor_sky_panorama tests/unit/disruptor_sky_panorama_test.cpp INCLUDES src)
 disruptor_unit_test(disruptor_sky_extension tests/unit/disruptor_sky_extension_test.cpp INCLUDES src)
+disruptor_unit_test(disruptor_sky_art tests/unit/disruptor_sky_art_test.cpp INCLUDES src
+    SOURCES src/game/render/sky_art.cpp ${DISRUPTOR_SKY_SOURCES})
 disruptor_unit_test(disruptor_misplaced_riser tests/unit/disruptor_misplaced_riser_test.cpp INCLUDES src)
 disruptor_unit_test(disruptor_near_split tests/unit/disruptor_near_split_test.cpp INCLUDES src)
 disruptor_unit_test(disruptor_marked_corners tests/unit/disruptor_marked_corners_test.cpp INCLUDES src)
+disruptor_unit_test(disruptor_quad_visibility tests/unit/disruptor_quad_visibility_test.cpp INCLUDES src)
+disruptor_unit_test(disruptor_ice_winding tests/unit/disruptor_ice_winding_test.cpp INCLUDES src)
     disruptor_unit_test(disruptor_streamed_reads tests/unit/disruptor_streamed_reads_test.cpp INCLUDES src)
     disruptor_unit_test(disruptor_main_menu_exit tests/unit/disruptor_main_menu_exit_test.cpp INCLUDES src)
     disruptor_unit_test(disruptor_main_menu_exit_hooks tests/unit/disruptor_main_menu_exit_hooks_test.cpp

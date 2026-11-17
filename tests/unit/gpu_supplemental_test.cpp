@@ -158,7 +158,32 @@ void test_the_last_answer_is_the_search_through_every_change() {
 
 }  // namespace
 
+void test_supplemental_visibility_rules() {
+    expect(psx_supplemental_draw_kind(1, 0) == 1, "an added room cannot cover original geometry");
+    expect(psx_supplemental_draw_kind(1, 1) == 1, "the reference view excludes added rooms");
+    expect(psx_supplemental_draw_kind(2, 0) == 0, "regular edge pieces keep the original face over sky and world");
+    expect(psx_supplemental_draw_kind(2, 1) == 0, "the reference view uses the original whole face");
+    expect(psx_supplemental_draw_kind(0, 0) == 0 && psx_supplemental_draw_kind(0, 1) == 0, "original faces remain original");
+}
+
+void test_span_geometry_selects_the_draw_policy() {
+    struct Case {
+        int near_face;
+        int32_t least, most;
+        int expected_draw;
+    };
+    const Case cases[] = {{1, 130, 180, 1}, {0, 50, 250, 1}, {0, 50, 150, 0},
+                          {0, 150, 250, 0}, {0, 100, 250, 0}, {0, 50, 200, 0}};
+    for (const Case &example : cases) {
+        const int kind = psx_supplemental_span_kind(example.near_face, example.least, example.most, 100, 200);
+        expect(psx_supplemental_draw_kind(kind, 0) == example.expected_draw, "near and two-edge overhangs stay restricted, regular edge pieces sort by depth");
+        expect(psx_supplemental_draw_kind(kind, 1) == 0, "the reference view retains every part of the original face");
+    }
+}
+
 int main() {
+    test_supplemental_visibility_rules();
+    test_span_geometry_selects_the_draw_policy();
     test_a_range_holds_its_bytes_and_no_others();
     test_ranges_are_found_among_many();
     test_touching_ranges_join_and_a_backward_one_is_dropped();

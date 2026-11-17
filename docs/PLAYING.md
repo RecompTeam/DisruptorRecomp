@@ -368,6 +368,7 @@ The page is in five groups, in the launcher and in the game alike.
 | Picture | **Exact-provenance geometry**, **Perspective-correct world textures**, **Gap filling**, **Smooth distance fade**, **Depth-sorted world** | On |
 | Picture | **Fog shape** and **Draw distance** | Original |
 | Picture | **Anti-aliasing (MSAA / SSAA)** | Off |
+| Picture | **Texture filtering** | Nearest (original) |
 | Picture | **Sprites face the camera** | Off |
 | Shading | **Ambient occlusion**, its reach and strength | Off |
 | Movies | **Movie filter** | Smooth |
@@ -405,6 +406,22 @@ The page is in five groups, in the launcher and in the game alike.
 - **Skip the logos and the title movie** skips only the boot intro. The other
   movies play. Escape skips the logo or movie on screen while the settings
   menu is closed.
+
+### Texture filtering
+
+**Texture filtering** is under **Enhancements**, beside Anti-aliasing, in the
+launcher and the game's settings. It needs **Exact-provenance geometry**.
+
+| Filter | Effect |
+| --- | --- |
+| Nearest (original) | Keeps the PlayStation's sharp texels and is the default |
+| Bilinear | Smooths textures up close |
+| Trilinear | Also reduces shimmer on distant floors |
+| Anisotropic 2x, 4x, 8x or 16x | Keeps slanted floors sharper, with more graphics card work at higher counts |
+| xBR | Smooths diagonal edges in the pixel art |
+
+The filter applies to the world and sprites. The HUD, text and menus stay
+sharp. Filtering can make seams between some floor polygons more visible.
 
 ### Audio
 

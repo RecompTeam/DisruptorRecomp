@@ -139,14 +139,10 @@ inline bool beside_span(const std::array<uint32_t, 4> &screen, int32_t left, int
 inline constexpr int32_t kBandFar = 1 << 20;  /* a band's side with no edge, as PSX_SUPPLEMENTAL_FAR */
 inline constexpr Span kWholeFace{kBandFar, -kBandFar};
 
-/* A kept face crossing an inner edge of its span is the wider walk's past it; a widescreen picture shows past the frame's. */
-inline bool crossed_band(const std::array<uint32_t, 4> &screen, int32_t left, int32_t right, Span &band) {
-    bool past_left = false, past_right = false;
-    for (const uint32_t word : screen) {
-        const int32_t x = static_cast<int16_t>(word & 0xFFFFu);
-        past_left = past_left || (left > 0 && x < left);
-        past_right = past_right || (right < static_cast<int32_t>(kFrameEdge) && x > right);
-    }
+/* Pinned corners cannot prove that a precisely projected near face stays inside its room. */
+inline bool room_band(int32_t left, int32_t right, Span &band) {
+    const bool past_left = left > 0;
+    const bool past_right = right < static_cast<int32_t>(kFrameEdge);
     band = {past_left ? left : -kBandFar, past_right ? right : kBandFar};
     return past_left || past_right;
 }

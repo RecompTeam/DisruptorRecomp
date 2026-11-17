@@ -47,8 +47,11 @@ void a_near_face_is_classed_by_its_own_w() {
     const float far_turned[3] = {200.0f, 640.0f, 3200.0f}, no_turned[3] = {0.0f, 0.0f, 0.0f};
     expect(psx_world_depth_triangle_class(1, kExact, 1, pinned_w, no_turned, kMargin) == 1,
            "a near face whose corner the game pinned, every w beyond the nearest depth, is drawn by depth");
-    expect(psx_world_depth_triangle_class(1, kExact, 1, at_viewer_w, far_turned, kMargin) == 0,
-           "a near face with a corner at the viewer is not, whatever its turned depths");
+    expect(psx_world_depth_triangle_class(1, kExact, 1, at_viewer_w, far_turned, kMargin) == 1,
+           "a near face crossing the eye plane still tests its visible fragments against the walls");
+    const float crossing_w[3] = {-885.0f, 4702.0f, -1097.0f};
+    expect(psx_world_depth_triangle_class(1, kExact, 1, crossing_w, no_turned, kMargin) == 1,
+           "the lava triangle from the recorded corridor keeps depth testing with two corners behind the camera");
     expect(psx_world_depth_triangle_class(0, kExact, 1, pinned_w, far_turned, kMargin) == 0, "with the setting off no near face is");
     expect(psx_world_depth_triangle_class(1, kWorld, 1, pinned_w, far_turned, kMargin) == 0, "nor one that is not exact");
     expect(psx_world_depth_triangle_class(1, kExact, 0, no_turned, far_turned, kMargin) == 1,

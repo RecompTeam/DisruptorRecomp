@@ -361,7 +361,44 @@ void test_a_tile_the_game_stops_above_the_frames_last_row_reaches_it() {
            "a taken tile is forgotten: its opening's top is read before it is taken");
 }
 
+void test_only_fixed_background_bottom_tiles_follow_the_horizon() {
+    auto fog = std::make_unique<PsxSkyFog>();
+    const auto upper = tile_words(0, 0, 64, 60, 0);
+    const auto lower = tile_words(0, 60, 64, 50, 0);
+    psx_sky_fog_background(fog.get(), 110);
+    expect(psx_sky_fog_opening(fog.get(), 0u) == nullptr, "metadata before an opening creates no tile");
+    psx_sky_fog_open(fog.get(), 0);
+    psx_sky_fog_background(fog.get(), 110);
+    psx_sky_fog_tile(fog.get(), 0x1000u, upper.data());
+    psx_sky_fog_tile(fog.get(), 0x1020u, lower.data());
+    expect(!psx_sky_fog_bottom_edge(fog.get(), 0x1000u, upper.data()), "the shared row between tiles stays fixed");
+    expect(psx_sky_fog_bottom_edge(fog.get(), 0x1020u, lower.data()), "the final row of the fixed background follows the horizon");
+    expect(!psx_sky_fog_bottom_edge(fog.get(), 0x1040u, lower.data()), "an unknown packet receives no edge correction");
+    psx_sky_fog_open(fog.get(), 4);
+    psx_sky_fog_tile(fog.get(), 0x1040u, lower.data());
+    expect(!psx_sky_fog_bottom_edge(fog.get(), 0x1040u, lower.data()), "a room opening with the same bottom is not extended");
+    std::uint16_t clut = 0;
+    std::int32_t step = 0;
+    expect(psx_sky_fog_take(fog.get(), 0x1020u, lower.data(), &clut, &step), "the marked packet still draws normally");
+    expect(!psx_sky_fog_bottom_edge(fog.get(), 0x1020u, lower.data()), "taking a packet consumes its edge metadata too");
+    for (const int32_t bottom : {-1, 0, 239, 240}) {
+        psx_sky_fog_open(fog.get(), 0);
+        psx_sky_fog_background(fog.get(), bottom);
+        const auto tile = tile_words(0, 0, 64, 239, 0);
+        psx_sky_fog_tile(fog.get(), 0x1080u, tile.data());
+        expect(!psx_sky_fog_bottom_edge(fog.get(), 0x1080u, tile.data()), "invalid and full-frame bounds need no extension");
+    }
+    for (uint32_t index = 0; index <= PSX_SKY_FOG_OPENINGS; ++index) psx_sky_fog_open(fog.get(), 0);
+    psx_sky_fog_background(fog.get(), 110);
+    expect(!psx_sky_fog_bottom_edge(fog.get(), 0x1080u, lower.data()), "an overflowing opening table carries no edge correction");
+    psx_sky_fog_reset(fog.get());
+    fog->frame = 1;
+    psx_sky_fog_background(fog.get(), 110);
+    expect(psx_sky_fog_current(fog.get())->count == 0, "metadata for a frame not begun is ignored");
+}
+
 int main() {
+    test_only_fixed_background_bottom_tiles_follow_the_horizon();
     test_a_tile_the_game_stops_above_the_frames_last_row_reaches_it();
     test_a_known_tile_tells_its_palette_and_step();
     test_the_clearest_sky_runs_across_openings_that_overlap();

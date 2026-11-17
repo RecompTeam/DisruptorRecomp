@@ -75,10 +75,11 @@ def interpolate_uv(
     """Reference the shader's noperspective (uv*q)/q reconstruction."""
     denominator = sum(weight * reciprocal for weight, reciprocal in zip(weights, q))
     require(denominator > 0.0, "deterministic perspective fixture must have positive q")
-    return tuple(
+    coordinates = [
         sum(weight * uv[axis] * reciprocal for weight, uv, reciprocal in zip(weights, uvs, q)) / denominator
         for axis in (0, 1)
-    )
+    ]
+    return coordinates[0], coordinates[1]
 
 
 def require_uv_close(actual: tuple[float, float], expected: tuple[float, float], message: str) -> None:
@@ -181,7 +182,7 @@ def main() -> int:
     for name in ("gp0_exec_textured_tri", "gp0_exec_shaded_textured_tri"):
         body = function_body(gpu, name)
         require(
-            re.search(r"\b(?:const\s+)?int\s+\w+\s*=\s*prepare_precise_triangle\s*\(", body) is not None,
+            re.search(r"\b(?:const\s+)?int\s+\w+\s*=\s*resolve_precise_vertices\s*\(", body) is not None,
             f"{name} must retain the exact geometry verdict",
         )
         require(
@@ -286,7 +287,7 @@ def main() -> int:
     temporal_route = function_body(render, "gr_set_temporal_depth_triangle")
     require(
         temporal_route.count("g_b->set_temporal_depth_triangle") >= 2
-        and re.search(r"\.set_temporal_depth_triangle\s*=\s*NULL", sw_backend),
+        and re.search(r"\.set_temporal_depth_triangle\s*=\s*NULL", sw_backend) is not None,
         "temporal metadata must remain an optional presentation callback",
     )
     precise = function_body(gpu, "resolve_precise_vertices")

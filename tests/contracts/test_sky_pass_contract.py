@@ -46,9 +46,9 @@ require(
 
 vertex = between(renderer, "static const char *TEX_VS =", "static const char *TEX_FS =")
 require(
-    '"  if ((placed || tilted) && u_sky.x > 0.5 && v_depth == 1 && (u_sky_irregular == 0 || (tilted && want >= 0))) {\\n"'
+    '"  if (want >= 0 && (placed || tilted) && u_sky.x > 0.5 && v_depth == 1 && (u_sky_irregular == 0 || tilted)) {\\n"'
     in vertex
-    and '"  int want = int(a_sky_column + 0.5) - 1;\\n"' in vertex
+    and '"  int want = int(abs(a_sky_column) + 0.5) - 1;\\n"' in vertex
     and '"  bool tilted = u_sky_frame.w != 0.0;\\n"' in vertex
     and '"      if (i == k ? want >= 0 && k % u_sky_shape.y != want : want < 0 || u_sky_irregular != 0) continue;'
     in vertex
@@ -121,6 +121,7 @@ require(
 
 require(
     "    if (sky_drawn(pano) <= 0 || (int)floorf(depth + 0.5f) != 1) return 0;\n" in renderer
+    and "    if (want < 0) return 0;\n" in renderer
     and "(int)floorf(page_x + 0.5f) + ((int)floorf(u0 + 0.5f) >> 1)" in renderer
     and "            x >= pano->cells[2 * i] && x < pano->cells[2 * i] + 32 && y >= pano->cells[2 * i + 1] && "
     "y < pano->cells[2 * i + 1] + pano->tall)\n"
@@ -211,7 +212,9 @@ require(
     "    if (cells.rows == 0) return;\n" in module
     and "    disruptor::sky_grower::look(cells, clut_x, clut_y, changed, now);\n" in module
     and "constexpr uint32_t kRecheck = 60;\n" in grower
-    and "            Grown grown{job.revision, extension::grow(job.picture, job.palette, job.rows, job.revision)};\n"
+    and "            std::optional<extension::Extension> art = disruptor::sky_art::find(job.picture, job.rows);\n"
+    in grower
+    and "            Grown grown{job.revision, art ? std::move(*art) : extension::grow(job.picture, job.palette, job.rows, job.revision)};\n"
     in grower
     and "                gpu_sky_extension(0, 0, 0, nullptr);\n                const int32_t rows = disruptor::sky_look::grown_rows(look, extension::kRows);\n"
     "                g_grower.ask({revision, std::move(picture), palette, rows});\n"
@@ -240,10 +243,19 @@ require(
     and '    s_tex_uSkyShape = p_glGetUniformLocation(s_tex_prog, "u_sky_shape");\n' in renderer
     and 'TEMP_U(sky_irregular,"u_sky_irregular"); TEMP_U(sky_grown,"u_sky_grown");' in presenter
     and 'TEMP_U(sky_shape,"u_sky_shape");' in presenter,
-    "the sky above the panorama is grown on a worker from the level's own indices and palette, seeded by them, asked again only "
+    "the sky above the panorama uses prepared art or grows on a worker from the level's own indices and palette, asked again only "
     "for a new revision and dropped meanwhile, and reaches the renderer as an index texture through the render thread, a texture of "
     "its own kept by each scene, finished before use and freed a level later, that every context binds on its own unit when the "
     "panorama's generation changes, the in-between presenter's included",
+)
+
+require(
+    '"  if (u_visual > 0.5 && v_sky_on != 0 && a_sky_column < 0.0) {\\n"' in vertex
+    and '"    float down = max(u_sky_frame.w, 0.0); p.y += down; v_sky.yw += vec2(down);\\n"' in vertex
+    and "vp[27] = s_sky_column < 0.0f && ys[i] == s_sprite_y ? -s_sky_column : s_sky_column;" in renderer
+    and "floorf(fabsf(column) + 0.5f)" in renderer
+    and "gr_set_sky_column(bottom_edge ? -column : column);" in gpu,
+    "only the visual bottom edge of a fixed background follows the horizon, with matching panorama coordinates",
 )
 
 print("Disruptor sky pass source contract: PASS")
