@@ -32,6 +32,7 @@ import tarfile
 from dataclasses import dataclass
 from pathlib import Path
 
+from release_preflight import check_release_inputs
 from release_smoke import LINUX_ARCHIVE, MIN_SECONDS, REQUIRED_CHECKS
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -689,6 +690,7 @@ def main() -> None:
     if args.sign and not clean:
         raise SystemExit("The build or the checkout has uncommitted changes: commit them, build again, then sign")
 
+    check_release_inputs()
     started = now()
     shutil.rmtree(work, ignore_errors=True)
     stage, packages = work / "program", work / "packages"

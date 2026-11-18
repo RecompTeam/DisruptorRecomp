@@ -247,7 +247,8 @@ def check_profile_parent(launcher: Path, folder: Path) -> None:
             env["PSX_USER_DIR"] = str(chosen)
         done = subprocess.run(args, env=env, capture_output=True, timeout=30, check=False)
         require(
-            done.returncode == 1 and b"No supported disc image" in done.stderr, "the newly selected profile is empty"
+            done.returncode == 1 and b"No supported disc image" in done.stderr,
+            f"expected an empty profile via {mode}, got exit {done.returncode}: {done.stderr.decode(errors='replace')}",
         )
         require(
             (target.parent / mode).is_dir() and not (alias.parent / mode).exists(), "use the linked directory's parent"

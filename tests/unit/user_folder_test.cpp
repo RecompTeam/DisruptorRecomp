@@ -7,6 +7,7 @@
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <string_view>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -237,7 +238,16 @@ void test_prepared_folder() {
 
 } // namespace
 
-int main() {
+int main(int argc, char** argv) {
+    if (argc == 2 && std::string_view(argv[1]) == "--prepare-profile") {
+        try {
+            ensure_directory(fs::current_path(), {});
+            return 0;
+        } catch (const std::exception& error) {
+            std::cerr << error.what() << '\n';
+            return 1;
+        }
+    }
     test_kinds_of_copy();
     test_where_the_files_go();
     test_seeding();

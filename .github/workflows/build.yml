@@ -5,6 +5,11 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+    inputs:
+      baseline:
+        description: Install the toolchains on the runner for comparison
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -31,29 +36,48 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Install the toolchain and what SDL builds against
+      - name: Install Linux dependencies on the runner
+        if: inputs.baseline
         run: |
           sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends \
-            build-essential ccache cmake ninja-build pkg-config python3 python3-venv \
-            libx11-dev libxext-dev libxrandr-dev libxcursor-dev libxi-dev \
-            libxfixes-dev libxss-dev libxtst-dev libxinerama-dev \
-            libxkbcommon-dev libwayland-dev wayland-protocols libdecor-0-dev \
-            libgl1-mesa-dev libegl1-mesa-dev libgles2-mesa-dev libdrm-dev \
-            libgbm-dev libasound2-dev libpulse-dev libpipewire-0.3-dev \
-            libudev-dev libdbus-1-dev libibus-1.0-dev liburing-dev
+          sudo xargs -a .github/ci/linux-packages.txt apt-get install --yes --no-install-recommends
+      - name: Cache the Linux build image
+        if: ${{ !inputs.baseline }}
+        id: image
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/disruptor-ci.tar
+          key: ubuntu-24.04-x64-${{ hashFiles('.github/ci/Dockerfile', '.github/ci/linux-packages.txt') }}
+      - name: Prepare the Linux build image
+        if: ${{ !inputs.baseline }}
+        env:
+          RESTORED: ${{ steps.image.outputs.cache-hit }}
+        run: |
+          if [[ "$RESTORED" == true ]]; then
+            docker load -i "$RUNNER_TEMP/disruptor-ci.tar"
+          else
+            docker build -t disruptor-ci:noble .github/ci
+            docker save -o "$RUNNER_TEMP/disruptor-ci.tar" disruptor-ci:noble
+          fi
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/ccache
-          key: ccache-linux-${{ github.sha }}
-          restore-keys: ccache-linux-
+          key: ccache-linux-${{ inputs.baseline && 'host' || 'image' }}-${{ github.sha }}
+          restore-keys: ccache-linux-${{ inputs.baseline && 'host' || 'image' }}-
       - name: Build and test without the game
         env:
           CCACHE_DIR: ${{ runner.temp }}/ccache
+          BASELINE: ${{ inputs.baseline }}
         run: |
-          ccache --zero-stats
-          ./build.sh
-          ccache --show-stats
+          if [[ "$BASELINE" == true ]]; then
+            sh .github/ci/build.sh
+          else
+            mkdir -p "$CCACHE_DIR"
+            docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/work" -w /work -v "$CCACHE_DIR:/ccache" \
+              -e HOME=/tmp -e CCACHE_DIR=/ccache -e CCACHE_MAXSIZE -e CCACHE_SLOPPINESS \
+              -e DISRUPTOR_COMPILER_LAUNCHER -e DISRUPTOR_WITHOUT_GAME disruptor-ci:noble \
+              sh .github/ci/build.sh
+          fi
       - name: Check the Python tools and tests with ruff
         if: ${{ !cancelled() }}
         run: |
@@ -65,16 +89,18 @@ jobs:
 
   mingw:
     name: Windows, MinGW-w64
-    runs-on: windows-latest
+    runs-on: windows-2025
     timeout-minutes: 45
-    defaults:
-      run:
-        shell: msys2 {0}
+    env:
+      CC: gcc
+      CXX: g++
+      CCACHE_COMPILERTYPE: gcc
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - uses: msys2/setup-msys2@ec48f7c5447b3140e2b088413ae3a55687bccb6e # v2.33.0
+        if: inputs.baseline
         with:
           msystem: MINGW64
           update: true
@@ -85,17 +111,20 @@ jobs:
             mingw-w64-x86_64-cmake
             mingw-w64-x86_64-ninja
             mingw-w64-x86_64-python
+      - name: Prepare runner MinGW-w64 and ccache
+        if: ${{ !inputs.baseline }}
+        shell: pwsh
+        run: ./.github/ci/windows-tools.ps1
       - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/ccache
-          key: ccache-mingw-${{ github.sha }}
-          restore-keys: ccache-mingw-
+          key: ccache-mingw-${{ inputs.baseline && 'msys' || 'runner' }}-${{ github.sha }}
+          restore-keys: ccache-mingw-${{ inputs.baseline && 'msys' || 'runner' }}-
       - name: Build and test without the game
-        env:
-          CCACHE_DIR: ${{ runner.temp }}/ccache
-          # MSYS2's cc.exe is no name ccache knows: unnamed, it rebuilt the precompiled header on every run.
-          CCACHE_COMPILERTYPE: gcc
-        run: |
-          ccache --zero-stats
-          ./build.sh
-          ccache --show-stats
+        if: ${{ !inputs.baseline }}
+        shell: bash
+        run: sh .github/ci/build.sh
+      - name: Build and test with MSYS2
+        if: inputs.baseline
+        shell: msys2 {0}
+        run: sh .github/ci/build.sh

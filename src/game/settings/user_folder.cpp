@@ -4,6 +4,7 @@
 
 #include <array>
 #include <chrono>
+#include <cstddef>
 #include <cstdlib>
 #include <mutex>
 #include <stdexcept>
@@ -14,6 +15,10 @@
 #ifdef _WIN32
 #include <windows.h>
 #include <shlobj.h>
+#ifdef __MINGW32__
+#include <ntdef.h>
+#include <winioctl.h>
+#endif
 #endif
 
 namespace fs = std::filesystem;
@@ -106,6 +111,69 @@ bool redirects(const fs::path& path, fs::file_type type) {
 #endif
 }
 
+fs::path link_target(const fs::path& path) {
+#ifdef __MINGW32__
+    // MinGW's read_symlink returns ENOSYS. Read one link at a time to preserve ancestor checks.
+    const HANDLE handle = CreateFileW(path.c_str(), 0, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr,
+                                      OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_BACKUP_SEMANTICS, nullptr);
+    if (handle == INVALID_HANDLE_VALUE) throw std::system_error(GetLastError(), std::system_category(), text(path));
+    alignas(REPARSE_DATA_BUFFER) std::array<unsigned char, MAXIMUM_REPARSE_DATA_BUFFER_SIZE> bytes{};
+    DWORD length = 0;
+    const BOOL read = DeviceIoControl(handle, FSCTL_GET_REPARSE_POINT, nullptr, 0, bytes.data(), bytes.size(), &length, nullptr);
+    const DWORD error = read ? ERROR_SUCCESS : GetLastError();
+    CloseHandle(handle);
+    if (!read) throw std::system_error(error, std::system_category(), text(path));
+    const auto& data = *reinterpret_cast<const REPARSE_DATA_BUFFER*>(bytes.data());
+    const auto invalid = [&] { return std::runtime_error("Invalid or unsupported player data link: " + text(path)); };
+    constexpr auto header = offsetof(REPARSE_DATA_BUFFER, GenericReparseBuffer);
+    if (length < header || length != header + data.ReparseDataLength) throw invalid();
+    const auto name_of = [&](const auto& link) {
+        const size_t start = reinterpret_cast<const unsigned char*>(link.PathBuffer) - bytes.data() + link.SubstituteNameOffset;
+        const size_t size = link.SubstituteNameLength;
+        if (!size || start % sizeof(wchar_t) || size % sizeof(wchar_t) || start + size > length) throw invalid();
+        return std::wstring_view(reinterpret_cast<const wchar_t*>(bytes.data() + start), size / sizeof(wchar_t));
+    };
+    std::wstring_view name;
+    bool relative = false;
+    if (data.ReparseTag == IO_REPARSE_TAG_MOUNT_POINT && length >= offsetof(REPARSE_DATA_BUFFER, MountPointReparseBuffer.PathBuffer)) {
+        name = name_of(data.MountPointReparseBuffer);
+    } else if (data.ReparseTag == IO_REPARSE_TAG_SYMLINK && length >= offsetof(REPARSE_DATA_BUFFER, SymbolicLinkReparseBuffer.PathBuffer)) {
+        const auto& link = data.SymbolicLinkReparseBuffer;
+        name = name_of(link);
+        relative = (link.Flags & SYMLINK_FLAG_RELATIVE) != 0;
+    } else throw invalid();
+    if (name.find(L'\0') != name.npos || name.find(L'/') != name.npos) throw invalid();
+    fs::path target;
+    if (relative) {
+        target = name;
+        if (target.has_root_path()) throw invalid();
+    } else {
+        if (!name.starts_with(L"\\??\\")) throw invalid();
+        name.remove_prefix(4);
+        if (name.starts_with(L"UNC\\")) {
+            const auto share = name.find(L'\\', 4);
+            const auto server = name.substr(4, share == name.npos ? name.npos : share - 4);
+            if (server.empty() || server.back() == L'.' || server.back() == L' ' || server.find_first_of(L"<>:\"/|?*") != name.npos ||
+                share == name.npos || share + 1 == name.size() || name[share + 1] == L'\\') throw invalid();
+            target = std::wstring(L"\\\\") + std::wstring(name.substr(4));
+        } else {
+            if (name.size() < 3 || !((name[0] >= L'A' && name[0] <= L'Z') || (name[0] >= L'a' && name[0] <= L'z')) ||
+                name[1] != L':' || name[2] != L'\\') throw invalid();
+            target = name;
+        }
+    }
+    for (const auto& part : target.relative_path()) {
+        const auto& component = part.native();
+        if (component.empty() || (relative && (component == L"." || component == L".."))) continue;
+        if (component.back() == L'.' || component.back() == L' ' || component.find_first_of(L"<>:\"|?*") != component.npos)
+            throw invalid();
+    }
+    return target;
+#else
+    return fs::read_symlink(path);
+#endif
+}
+
 void check_ancestors(fs::path path, const fs::path& program, const fs::path& requested) {
     if (program.empty()) return;
     while (!path.empty()) {
@@ -151,7 +219,7 @@ fs::path physical_directory(const fs::path& path, const fs::path& protected_prog
         const auto type = kind(resolved);
         if (type == fs::file_type::not_found) continue;
         if (redirects(resolved, type)) {
-            const auto target = fs::read_symlink(resolved);
+            const auto target = link_target(resolved);
             resolved = physical_directory(resolved.parent_path() / target, protected_program, links + 1);
             if (!fs::exists(resolved)) throw std::runtime_error("Broken player data link in " + text(path));
         }

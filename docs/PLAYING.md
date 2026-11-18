@@ -108,7 +108,7 @@ standard error and returns a nonzero exit code.
 
 For example, to import a disc once and then play from the same library:
 
-```sh
+```
 ./DisruptorRecomp.AppImage --import "/media/games/Disruptor.chd" --data-dir "/media/games/Disruptor data"
 ./DisruptorRecomp.AppImage --play --data-dir "/media/games/Disruptor data"
 ```

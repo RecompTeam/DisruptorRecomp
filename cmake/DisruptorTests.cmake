@@ -1,8 +1,7 @@
 # disruptor_contract(<name> [RETAIL])
 #
 # Registers tests/contracts/test_<name>_contract.py as the test disruptor_<name>_contract.
-# RETAIL: the contract needs the retail image or the translated code. It is passed
-# --require-artifacts and labelled so that `ctest -LE retail` leaves it out.
+# A build without the game runs the source-only part of each retail contract.
 function(disruptor_contract name)
     cmake_parse_arguments(PARSE_ARGV 1 CONTRACT "RETAIL" "" "")
     if(CONTRACT_UNPARSED_ARGUMENTS)
@@ -13,12 +12,12 @@ function(disruptor_contract name)
         message(FATAL_ERROR "disruptor_contract(${name}): ${script} does not exist")
     endif()
     set(arguments "")
-    if(CONTRACT_RETAIL)
+    if(CONTRACT_RETAIL AND "$ENV{DISRUPTOR_WITHOUT_GAME}" STREQUAL "")
         set(arguments --require-artifacts)
     endif()
     add_test(NAME disruptor_${name}_contract
         COMMAND "${Python3_EXECUTABLE}" -B "${script}" ${arguments})
-    if(CONTRACT_RETAIL)
+    if(arguments)
         set_tests_properties(disruptor_${name}_contract PROPERTIES LABELS retail)
     endif()
 endfunction()

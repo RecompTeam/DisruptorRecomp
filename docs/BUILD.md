@@ -32,6 +32,10 @@ repository instead. `build.sh` and `run.sh` read it too. Set
 `DISRUPTOR_COMPILER_LAUNCHER` to a compiler cache such as `ccache` and `build.sh`
 compiles through it.
 
+## CI builds
+
+The `build` workflow uses the GCC toolchain on the Windows 2025 runner and a cached Ubuntu 24.04 image with SDL's build dependencies. To compare the two setups on GitHub, dispatch `build` twice on the same revision and select `baseline` for one run. Wait for the first run to finish before starting the second because both use the same concurrency group. A first run with a new Dockerfile or dependency list builds the image. Compare warm runs after each toolchain has populated its compiler cache. Both setups compile and run the same tests without the retail disc.
+
 After a first build, `tools/regen.ps1` regenerates only the translated code, and
 `tools/regen.sh` does the same on Linux.
 
@@ -91,6 +95,7 @@ A release goes in two runs for each system:
    file naming the checkout's commit. The packager records every package's
    digest in `packed.json` beside them and prints the next two commands with
    this build's paths.
+   Before replacing a previous packing, it compiles the guide and profile checks from the checkout. The first reads the player's guide. The second follows a directory link before choosing the parent for a fresh profile. On Windows it uses a real NTFS junction and MinGW-w64, including when packing a Linux build from WSL. Put `g++` on `PATH` or set `DISRUPTOR_PREFLIGHT_CXX` to its full path. Run `python tools/release_preflight.py` to run just these checks locally. They do not launch the game.
 2. Run the smoke test on the player's file:
 
    ```powershell

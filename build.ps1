@@ -110,7 +110,7 @@ if (!(Test-Path $Exe)) {
 }
 
 if (!(Test-Path (Join-Path $Framework '.git'))) {
-    Invoke-Checked { git clone https://github.com/mstan/psxrecomp.git $Framework }
+    Invoke-Checked { git clone --config core.autocrlf=false https://github.com/mstan/psxrecomp.git $Framework }
 }
 & git -C $Framework cat-file -e "$Pin`^{commit}" 2>$null
 if ($LASTEXITCODE -ne 0) {

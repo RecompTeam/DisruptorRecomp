@@ -24,7 +24,7 @@ WITHOUT_GAME="${DISRUPTOR_WITHOUT_GAME:-}"
 }
 
 if [ ! -d "$FRAMEWORK/.git" ]; then
-    git clone https://github.com/mstan/psxrecomp.git "$FRAMEWORK"
+    git clone --config core.autocrlf=false https://github.com/mstan/psxrecomp.git "$FRAMEWORK"
 fi
 git -C "$FRAMEWORK" fetch --quiet origin "$PIN"
 git -C "$FRAMEWORK" checkout --detach "$PIN"
@@ -76,7 +76,8 @@ if [ -n "$WITHOUT_GAME" ]; then
     TARGETS=$(ninja -C "$BUILD" -t targets all)
     OBJECTS=$(printf '%s\n' "$TARGETS" | sed -n 's/^\(.*\.o\(bj\)\{0,1\}\): .*/\1/p' |
         grep -v 'generated/SLUS_')
-    TESTS=$(printf '%s\n' "$TARGETS" | sed -n 's/^\([A-Za-z0-9_-]*-test\): .*/\1/p')
+    # When zlib is built from source, CTest also runs its example and example64 executables.
+    TESTS=$(printf '%s\n' "$TARGETS" | sed -nE 's/^([A-Za-z0-9_-]+-test|example(64)?): .*/\1/p')
     [ -n "$OBJECTS" ] && [ -n "$TESTS" ] || {
         echo "The build names no object files or no tests." >&2
         exit 1
@@ -87,10 +88,6 @@ if [ -n "$WITHOUT_GAME" ]; then
     # shellcheck disable=SC2086
     printf '%s\n' $OBJECTS $TESTS | xargs -n 100 ninja -C "$BUILD"
     ctest --test-dir "$BUILD" --output-on-failure --no-tests=error -LE retail
-    # The retail contracts still check the sources when the image is not asked for.
-    for contract in tests/contracts/test_*_contract.py; do
-        python3 -B "$contract"
-    done
     echo "Built and tested without the game: the runtime was compiled and not linked."
     exit 0
 fi
