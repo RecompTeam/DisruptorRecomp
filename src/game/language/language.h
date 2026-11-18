@@ -3,6 +3,8 @@
 
 #include <stdint.h>
 
+#define DISRUPTOR_LAUNCH_LANGUAGE "DISRUPTOR_LAUNCH_LANGUAGE"
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -21,7 +23,7 @@ const char *disruptor_language_disc_name(void);
 /* Whether that disc's hints are twice as tall as the US ones. */
 int disruptor_language_disc_tall_hints(void);
 /* Lays the named language disc over the disc in the drive now and not at the drive's first read: its save states have a folder of their own. */
-void disruptor_language_settle(void);
+int disruptor_language_settle(void);
 /* The stream frame number the language disc's player keys movie `movie`'s sound on at, 0 when it does so at the first. */
 int disruptor_language_disc_sound_start(uint32_t movie);
 /* The VBlanks the language disc's player lets mission `mission`'s briefing play before the mission starts, -1 while the US wait stands. */

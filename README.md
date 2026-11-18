@@ -31,6 +31,8 @@
 2. Drop your **Disruptor (USA, SLUS-00224)** disc image on the launcher it opens
 3. Press **Play**
 
+For Steam and other game managers, see [launch options and data folders](docs/PLAYING.md#launch-from-steam-or-another-game-manager).
+
 **No game data is included** - a French, German or Japanese disc of yours can give the game its language
 
 ## Launcher

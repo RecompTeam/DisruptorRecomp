@@ -123,7 +123,7 @@ int psx_game_fast_boot_forced(void) {
     return forced && forced[0] && forced[0] != '0';
 }
 
-void psx_game_states_configured(void) { disruptor_language_settle(); }
+int psx_game_states_configured(void) { return disruptor_language_settle(); }
 
 void psx_game_state_loaded(void) {
     disruptor_capsule_state_loaded();

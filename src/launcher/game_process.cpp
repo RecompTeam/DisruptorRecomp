@@ -1,4 +1,7 @@
 #include "game_process.h"
+#include "game/language/language.h"
+#include "game/settings/game_package.h"
+#include "game/settings/user_folder.h"
 
 #include "launcher_flow.h"
 #include "launcher_settings.h"
@@ -17,7 +20,8 @@ namespace disruptor::launcher {
 
 namespace {
 
-std::unique_ptr<platform::Process> start_game(const fs::path& program, const fs::path& data, const VerifiedDisc& disc) {
+std::unique_ptr<platform::Process> start_game(const fs::path& program, const fs::path& data, const VerifiedDisc& disc,
+                                             const std::optional<RegionDisc>& language) {
     check_package(program, *disc.profile);
     std::error_code kept;  // a report takes the run before as well: a crash is often seen after a second start
     fs::rename(data / "startup.log", data / "startup.previous.log", kept);
@@ -26,6 +30,7 @@ std::unique_ptr<platform::Process> start_game(const fs::path& program, const fs:
     launch.arguments = game_arguments(program, disc);
     launch.folder = program;
     platform::Variables given{{"PSX_USER_DIR", utf8(data)}};
+    given.emplace_back(DISRUPTOR_LAUNCH_LANGUAGE, language ? language->language + "\n" + utf8(language->image) : "English");
     if (const std::string_view name = platform::window_class(); !name.empty()) given.emplace_back("SDL_APP_ID", std::string(name));
     launch.environment = platform::with(platform::environment(), given);
     launch.output = data / "startup.log";
@@ -49,7 +54,31 @@ std::unique_ptr<platform::Process> start_game(const fs::path& program, const fs:
 
 fs::path executable_directory() { return platform::executable_path().parent_path(); }
 
+void check_disc_location(const fs::path& program, const fs::path& mount) {
+    if (user_folder::copy_of(program) == user_folder::Copy::plain) return;
+    user_folder::require_update_safe_folder(program, mount);
+    user_folder::require_update_safe_folder(program, resolve_image(mount));
+}
+
+fs::path checked_installed_disc(const fs::path& program, const fs::path& data) {
+    user_folder::require_update_safe_folder(program, data / "input/discs");
+    const fs::path mount = find_installed_disc(data);
+    if (!mount.empty()) check_disc_location(program, mount);
+    return mount;
+}
+
+VerifiedDisc import_player_disc(const fs::path& program, const fs::path& data, const fs::path& selected,
+                                const std::atomic_bool& cancelled, const Progress& progress) {
+    const fs::path library = user_folder::ensure_directory(program, data / "input/discs");
+    auto verified = import_disc(selected, library, cancelled, progress);
+    check_disc_location(program, verified.mount);
+    user_folder::require_update_safe_folder(program, verified.data);
+    return verified;
+}
+
 void check_package(const fs::path& program, const DiscProfile& profile) {
+    if (!fs::is_regular_file(program / "mods/bundled" / disruptor::kGamePackage / "1.0.0/manifest.toml"))
+        throw std::runtime_error(disruptor::game_package_problem(false, false));
     for (const auto& name : {platform::game_executable(program).filename(), fs::path(profile.game_config), fs::path(L"bios/openbios.bin")}) {
         if (!fs::is_regular_file(program / name))
             throw std::runtime_error("The game is incomplete\n"
@@ -59,8 +88,8 @@ void check_package(const fs::path& program, const DiscProfile& profile) {
         throw std::runtime_error("The bundled OpenBIOS is incomplete\nInstall the game again");
 }
 
-GameProcess::GameProcess(const fs::path& program, const fs::path& data, const VerifiedDisc& disc)
-    : process_(start_game(program, data, disc)), started_(std::chrono::steady_clock::now()) {}
+GameProcess::GameProcess(const fs::path& program, const fs::path& data, const VerifiedDisc& disc, const std::optional<RegionDisc>& language)
+    : process_(start_game(program, data, disc, language)), started_(std::chrono::steady_clock::now()) {}
 
 GameProcess::~GameProcess() = default;
 

@@ -125,7 +125,8 @@ require(
     "    g_game = handle;\n"
     "    g_state = State::kRefused;\n"
     in source
-    and "    if (g_other && g_disc.build(*g_home, *g_other, why)) {\n        g_state = State::kOn;\n" in source
+    and "    if (g_other && g_disc.build(*g_home, *g_other, why)) {" in source
+    and "g_expected_language != g_disc.language()" in source
     and "    if (!laid_out(handle)) return 0;\n    return g_disc.raw_sector(lba, raw) ? 1 : -1;" in source
     and "uint32_t sectors(void *handle) { return laid_out(handle) ? g_disc.sectors() : 0u; }" in source
     and "    bool raw_sector(uint32_t lba, uint8_t *raw) override { return iso_read_raw_sector_plain(handle_, lba, raw) != 0; }"
@@ -138,7 +139,8 @@ require(
     "both images are read past the overlay, and a layout ends with the image it was made for",
 )
 require(
-    "    if (!path || path[0] == '\\0' || !g_path.empty()) return;\n    g_path = path;\n    iso_set_overlay(&kOverlay);"
+    "    if (g_verified_english || !path || path[0] == '\\0' || !g_path.empty()) return;\n"
+    "    g_path = path;\n    iso_set_overlay(&kOverlay);"
     in source
     and source.count("iso_set_overlay(") == 1
     and "    if (g_state != State::kOn || g_disc.pack().empty()) return 0;" in source,
@@ -336,20 +338,20 @@ require(
     and "    g_game_disc = reader;\n    return reader;" in reader
     and "    void* const game = g_game_disc;\n    void* handle = iso_open(path);\n    g_game_disc = game;" in reader
     and "    if (handle == g_game_disc) g_game_disc = nullptr;" in reader
-    and 'extern "C" void disruptor_language_settle(void) {\n'
-    "    if (void *game = iso_game_disc(); game && !g_path.empty()) (void)laid_out(game);"
+    and 'extern "C" int disruptor_language_settle(void) {\n'
+    "    if (void *game = iso_game_disc(); game && !g_path.empty() && laid_out(game)) return 1;"
     in source
     and "        savestate_configure(memcard_dir.string().c_str(),\n"
     "                            memory_get_bios_checksum(), game_entry_pc,\n"
     "                            bios_token, openbios_ws);\n"
     "#ifdef PSX_HAS_GAME_HOST\n"
     "        /* Before any state can be asked for. */\n"
-    "        psx_game_states_configured();\n"
+    "        if (!psx_game_states_configured()) return 1;\n"
     "#endif"
     in host
-    and "void psx_game_states_configured(void) { disruptor_language_settle(); }\n" in read("src/game/host.cpp")
+    and "int psx_game_states_configured(void) { return disruptor_language_settle(); }\n" in read("src/game/host.cpp")
     and host.index("    cdrom_init(disc_path_str.empty()")
-    < host.index("        psx_game_states_configured();")
+    < host.index("        if (!psx_game_states_configured()) return 1;")
     < host.index('        if (const char *ls = std::getenv("PSX_LOAD_SLOT"); ls && *ls) {')
     and "    language_ = language->name;\n    tall_hints_ = language->hints == Hints::kTall && hints != 0;\n    return true;"
     in disc

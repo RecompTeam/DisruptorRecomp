@@ -9,6 +9,7 @@ namespace disruptor::launcher {
 struct RegionDisc {
     std::string language;
     bool words = false; // menus and texts too, and not only movies, speech and hints
+    std::filesystem::path image{};
 };
 
 // Which known disc of another region the image is, by its boot file alone.

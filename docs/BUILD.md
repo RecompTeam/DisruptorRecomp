@@ -62,6 +62,10 @@ python tools/package_release.py --version v0.3.1 --build build --zstd-license <z
   written, else that section. The folder is kept out of git. The packager
   adds the Install section below it. A release page gives its headings no
   ids, so a link to one of them gets an explicit anchor from the packager.
+- Put the `Download` table directly below the banner. Link each file to the
+  current release tag, in this order: Windows installer, Windows portable ZIP,
+  Linux AppImage, then `DisruptorRecomp-linux-x64.tar.gz`. Label the last row
+  **Linux x64, portable archive** so players can see both Linux options at the top.
 - The .NET SDK runs the pinned Velopack packer, the version of the C library
   the launcher links.
 - The previous release's package is fetched from GitHub when there is one,
@@ -101,10 +105,13 @@ A release goes in two runs for each system:
    launcher and report this version. It starts the game from power-on, hidden
    and muted with detailed logging: the game must draw its first frame, show
    new pictures from the game in every pulse of the log after the first, and
-   still run after 30 seconds. Without its own package the game
+   still run at the end of the check (30 seconds by default, 25 seconds minimum). Without its own package the game
    stops at the start with a message. On Windows it also replays the capsule,
    which must be recorded on this build and stay in step. On Linux it runs
-   inside the build's distribution on the AppImage, without a capsule.
+   inside the build's distribution on the AppImage and again on
+   `DisruptorRecomp-linux-x64.tar.gz`, without a capsule. Write the tarball
+   result beside `linux.smoke.json` as `linux-tar.smoke.json`. Publishing
+   checks each result against the digest of the corresponding package.
 3. Rehearse the update: close the game, start the installed launcher with
    `--updates-from build/releases/v0.3.1/windows/packages`, update, then check
    EXIT in the main menu, a mission start and a memory card load.
@@ -118,10 +125,10 @@ When the release owner waives the smoke test and update rehearsal, pass
 `--skip-smoke` when packing and publishing. The clean checkout, package
 digests and successful build workflow remain required.
 
-A Linux release is an AppImage packed from a Linux Release build of the same
+A Linux release ships an AppImage and a portable tarball from a Linux Release build of the same
 commit. It is built on Ubuntu 22.04, so that it runs on glibc 2.35 and newer:
 GCC 13 from the `ubuntu-toolchain-r/test` PPA, Kitware's CMake and Python 3.11,
-newer than the ones 22.04 ships. The C++ runtime is linked statically and OpenGL through
+newer than the ones 22.04 ships. The C++ runtime and zlib are linked statically and OpenGL through
 `libGL.so.1`, so glibc and a GL driver are all it asks of a player's system.
 From Windows, with that build reachable through WSL:
 
@@ -132,7 +139,7 @@ python tools/package_release.py --platform linux --version v0.3.1 `
 
 The Linux build folder holds a `SOURCE_COMMIT` file too, and the script stops
 unless it names the checkout's commit. It makes
-`DisruptorRecomp.AppImage` and the packages the launcher updates from in
+`DisruptorRecomp.AppImage`, `DisruptorRecomp-linux-x64.tar.gz` and the packages the launcher updates from in
 `build/releases/<version>/linux/packages`. With `--publish` they go to the draft the Windows run made, which must
 come first and from the same commit. The release text gets the Linux
 install lines, and the draft is published as a regular release and the
@@ -144,7 +151,9 @@ The launcher and the game find the player's files by one rule,
 `%LOCALAPPDATA%\DisruptorRecompData`, a portable copy of the updater in `data`
 beside its `current` folder, the AppImage in `$XDG_DATA_HOME` or
 `~/.local/share` under `DisruptorRecompData`, and any other copy, a build
-folder included, beside the executable. A whole path in `PSX_USER_DIR` names another folder.
+folder included, beside the executable. The tarball carries a `.portable` marker
+beside the launcher and uses its `data/` directory. See the [player's guide](PLAYING.md#where-your-files-are)
+for explicit path overrides.
 The framework's `main.cpp` asks `psx_game_user_folder` for it before anything
 else and writes settings, bindings, memory cards, caches, mods and the notes of
 a run there. Program files are still found beside the executable. The shipped

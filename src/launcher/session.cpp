@@ -7,6 +7,7 @@
 #include "report.h"
 #include "startup_log.h"
 #include "game/settings/game_mark.h"
+#include "game/settings/user_folder.h"
 
 #include <cwchar>
 #include <exception>
@@ -33,22 +34,24 @@ Session::~Session() {
     if (worker_.joinable()) worker_.join();
 }
 
-void Session::open(double display_rate) {
+void Session::open(double display_rate, bool play_now) {
+    direct_play_ = play_now;
     settings_.set_display_rate(display_rate);
     settings_.load();
     activity_.add("Your saves and settings are in " + utf8(data_));
     watch_other_game();
     if (!settings_.readable()) say(settings_error());
-    check_installed_disc();
-    look();
+    if (play_now && other_game_) throw std::runtime_error("Disruptor is already running");
+    check_installed_disc(play_now);
+    if (!play_now) look();
 }
 
-void Session::check_installed_disc() {
+void Session::check_installed_disc(bool launch) {
     try {
-        auto installed = find_installed_disc(data_);
+        auto installed = checked_installed_disc(program_, data_);
         if (!installed.empty()) {
             bool legacy = installed.parent_path() != installed_cue(data_, supported_discs().front()).parent_path();
-            begin(legacy ? Task::import : Task::verify, installed, false);
+            begin(legacy ? Task::import : Task::verify, installed, launch);
         } else if (settings_.readable()) {
             say(L"No game data installed\nChoose your disc image to get started\n"
                 L"It is copied and verified, and your original files are kept\n"
@@ -83,7 +86,7 @@ void Session::poll() {
         const auto code = game_->ended();
         const auto now = std::chrono::steady_clock::now();
         // A game gone between two looks has its log read once more: its picture may have come meanwhile.
-        if (!game_showed_ && (code || now >= next_look_)) {
+        if (!direct_play_ && !game_showed_ && (code || now >= next_look_)) {
             next_look_ = now + std::chrono::milliseconds(250);
             if (first_frame_.seen(data_ / "startup.log")) game_showed_ = game_shown_ = true;
         }
@@ -94,10 +97,10 @@ void Session::poll() {
 void Session::begin(Task task, fs::path source, bool launch) {
     stop_upgrade();
     if (worker_.joinable()) worker_.join();
-    Request request{task, std::move(source), launch, verified_.data, settings_.language_disc(), settings_.language_discs()};
+    Request request{task, std::move(source), launch, verified_.data, settings_.language_disc(), {}};
+    if (!direct_play_) request.listed = settings_.language_discs();
     if (task == Task::import || task == Task::verify) verified_ = {}; // release previous read locks before replacing data
     cancelled_ = false;
-    busy_ = true;
     progress_ = 0;
     if (task != Task::look)
         say(task == Task::import ? L"Preparing to import your image..."
@@ -114,9 +117,17 @@ void Session::begin(Task task, fs::path source, bool launch) {
             handed_update_ = {text, percent};
         };
         Discs discs;
-        discs.import = [&](const fs::path& image) { return import_disc(image, data_, cancelled_, report); };
-        discs.verify = [&](const fs::path& cue) { return verify_installed(cue, cancelled_, report); };
-        discs.check_package = [&](const VerifiedDisc& disc) { check_package(program_, *disc.profile); };
+        discs.import = [&](const fs::path& image) {
+            return import_player_disc(program_, data_, image, cancelled_, report);
+        };
+        discs.verify = [&](const fs::path& cue) {
+            check_disc_location(program_, cue);
+            return verify_installed(cue, cancelled_, report);
+        };
+        discs.check_package = [&](const VerifiedDisc& disc) {
+            user_folder::require_update_safe_folder(program_, disc.data);
+            check_package(program_, *disc.profile);
+        };
         discs.look = [](const fs::path& image) { return region_disc(image); };
         discs.check = [](const fs::path& home, const fs::path& image) { return check_region_disc(home, image); };
         discs.report = report;
@@ -124,6 +135,7 @@ void Session::begin(Task task, fs::path source, bool launch) {
         std::scoped_lock lock(handed_mutex_);
         handed_outcome_ = std::move(outcome);
     });
+    busy_ = true;
 }
 
 void Session::finish(Outcome& outcome) {
@@ -135,6 +147,16 @@ void Session::finish(Outcome& outcome) {
     }
     progress_ = 0;
     regions_ = std::move(outcome.regions);
+    if (outcome.launch && outcome.disc.profile && !cancelled_ && !game_running()) {
+        if (!settings_.load()) {
+            say(settings_error());
+            return;
+        }
+        if (settings_.language_disc() != outcome.spoken) {
+            begin(Task::verify, outcome.disc.mount, true);
+            return;
+        }
+    }
     Step step = after(outcome, cancelled_);
     if (step.import_next) {
         begin(Task::import, outcome.image, outcome.launch);
@@ -146,8 +168,11 @@ void Session::finish(Outcome& outcome) {
         step.status = L"The game started meanwhile, so the language is not saved\nChoose it again once the game closes";
     else if (step.save_language && !settings_.choose_language_disc(utf8(outcome.image))) step.status = settings_error();
     if (!step.status.empty()) say(step.status);
-    if (step.launch && !game_running()) launch();
-    else if (verified_.profile && !upgraded_) begin_upgrade();
+    if (step.launch && !game_running()) launch(outcome.language);
+    else if (direct_play_ && step.launch) say(L"Disruptor is already running");
+    else if (!direct_play_ && verified_.profile && !upgraded_) begin_upgrade();
+    if (direct_play_ && !outcome.language_error.empty())
+        say(outcome.language_error + L"\nOpen the launcher with the same data folder to choose another language.");
 }
 
 void Session::begin_upgrade() {
@@ -284,9 +309,9 @@ void Session::finish_earlier(Earlier& earlier) {
     check_installed_disc();
 }
 
-void Session::launch() {
+void Session::launch(const std::optional<RegionDisc>& language) {
     try {
-        game_ = std::make_unique<GameProcess>(program_, data_, verified_);
+        game_ = std::make_unique<GameProcess>(program_, data_, verified_, language);
         first_frame_ = {};
         next_look_ = {};
         game_showed_ = game_shown_ = false;
@@ -301,6 +326,10 @@ void Session::game_ended(unsigned long code) {
     const unsigned long long seconds = game_->seconds();
     game_.reset();
     game_end_ = code;
+    if (direct_play_) {
+        note_exit(data_ / "startup.log", code, seconds);
+        return;
+    }
     settings_.load(); // the in-game menu writes the same file
     if (code == 0) {
         show({});
@@ -331,7 +360,7 @@ void Session::watch_other_game() {
 }
 
 void Session::look() {
-    if (!busy_ && !settings_.language_discs().empty()) begin(Task::look, {}, false);
+    if (!direct_play_ && !busy_ && !settings_.language_discs().empty()) begin(Task::look, {}, false);
 }
 
 void Session::take_image(const fs::path& image) {

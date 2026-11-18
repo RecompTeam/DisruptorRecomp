@@ -20,7 +20,8 @@ std::unique_ptr<Velopack::UpdateManager> open_manager(const std::string& source)
 
 } // namespace
 
-Updater::Updater(std::string source, Activity& activity) : source_(std::move(source)), activity_(activity) {
+Updater::Updater(std::string source, Activity& activity, std::vector<std::string> restart_args)
+    : source_(std::move(source)), activity_(activity), restart_args_(std::move(restart_args)) {
     try {
         manager_ = open_manager(source_);
     } catch (const std::exception& error) {
@@ -143,7 +144,7 @@ void Updater::download() {
 bool Updater::apply(bool silent, bool restart) {
     if (!manager_ || busy_ || !pending_) return false;
     try {
-        manager_->WaitExitThenApplyUpdates(*pending_, silent, restart);
+        manager_->WaitExitThenApplyUpdates(*pending_, silent, restart, restart_args_);
     } catch (const std::exception& error) {
         fail(error.what());
         return false;

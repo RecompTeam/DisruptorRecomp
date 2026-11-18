@@ -1,5 +1,5 @@
-"""Package a release with Velopack: on Windows Setup.exe and a portable ZIP, on Linux an AppImage, each with the
-packages the launcher updates from.
+"""Package a release for Windows (Setup.exe and portable ZIP) and Linux (AppImage and tarball),
+with the Velopack update packages.
 
 The program's files come from an explicit list and exclude game data. The packages carry the release's section of
 CHANGELOG.md as their notes. The GitHub release's text is release/notes/<version>.md when it is written, else that
@@ -21,15 +21,18 @@ from __future__ import annotations
 import argparse
 import datetime
 import hashlib
+import io
 import json
+import math
 import re
 import shutil
 import struct
 import subprocess
+import tarfile
 from dataclasses import dataclass
 from pathlib import Path
 
-from release_smoke import MIN_SECONDS, REQUIRED_CHECKS
+from release_smoke import LINUX_ARCHIVE, MIN_SECONDS, REQUIRED_CHECKS
 
 ROOT = Path(__file__).resolve().parents[1]
 REPOSITORY = "https://github.com/RecompTeam/DisruptorRecomp"
@@ -69,12 +72,14 @@ PLATFORMS = {
         "linux",
         "linux",
         "",
-        (f"{PACKAGE_ID}.AppImage",),
+        (f"{PACKAGE_ID}.AppImage", LINUX_ARCHIVE),
         "**Linux x64, glibc 2.35 or newer**\n\n"
         f"- Download **{PACKAGE_ID}.AppImage**\n"
         f"- Make it executable: `chmod +x {PACKAGE_ID}.AppImage`\n"
         "- Run it\n"
-        "- Your files are kept in `~/.local/share/DisruptorRecompData`\n",
+        "- Your files are kept in `~/.local/share/DisruptorRecompData`\n"
+        f"- Or unpack **{LINUX_ARCHIVE}** and run `DisruptorRecomp/DisruptorLauncher`. "
+        "The archive keeps your files in its `data` folder.\n",
     ),
 }
 # The player's file the smoke test starts on each system.
@@ -311,7 +316,9 @@ def check_packed(work: Path, version: str, platform: Platform, commit: str) -> d
         )
     now_digests = package_digests(work / "packages")
     files = record.get("files") or {}
-    if not files or any(now_digests.get(name) != digest for name, digest in files.items()):
+    if not set(platform.player_files) <= files.keys() or any(
+        now_digests.get(name) != digest for name, digest in files.items()
+    ):
         raise SystemExit(f"{work / 'packages'} changed since it was packed: pack again")
     return record
 
@@ -321,9 +328,12 @@ def smoke_stamp(output: Path, version: str, platform: Platform) -> Path:
     return output / version / f"{platform.name}.smoke.json"
 
 
-def check_smoke(stamp: Path, version: str, platform: Platform, manifest: bytes, package_sha256: str) -> None:
+def check_smoke(
+    stamp: Path, version: str, platform: Platform, manifest: bytes, package_sha256: str, player_file: str = ""
+) -> None:
     """Stops unless the smoke test passed this very player's file, with every check its system asks for."""
-    player_file, needed = SMOKE_FILES[platform.name], REQUIRED_CHECKS[platform.name]
+    player_file = player_file or SMOKE_FILES[platform.name]
+    needed = REQUIRED_CHECKS[platform.name]
     if not stamp.is_file():
         raise SystemExit(
             f"No smoke test result at {stamp}: pack without --publish, run tools/release_smoke.py on {player_file}, "
@@ -343,7 +353,7 @@ def check_smoke(stamp: Path, version: str, platform: Platform, manifest: bytes, 
     if verdict.get("passed") is not True or missing:
         failed = [name for name, check in checks.items() if check.get("passed") is not True]
         raise SystemExit(f"The smoke test did not pass: failed {failed}, not passed {missing}")
-    if not isinstance(start_seconds, (int, float)) or not start_seconds >= MIN_SECONDS:
+    if not isinstance(start_seconds, (int, float)) or not math.isfinite(start_seconds) or start_seconds < MIN_SECONDS:
         raise SystemExit(f"The smoke test's start ran {start_seconds} s, not {MIN_SECONDS:.0f} or more")
 
 
@@ -507,6 +517,28 @@ def payload_of(build: Path, version: str, zstd_license: Path, platform: Platform
     return payload
 
 
+def write_linux_archive(destination: Path, payload: dict[str, bytes]) -> None:
+    """Pack the standalone Linux programs with their runtime files and portable data marker."""
+    entries = payload | {".portable": b""}
+    programs = {"DisruptorLauncher", "DisruptorRecompiled"}
+    with tarfile.open(destination, "w:gz", compresslevel=6) as archive:
+        for name, content in sorted(entries.items()):
+            member = tarfile.TarInfo(f"{PACKAGE_ID}/{name}")
+            member.size = len(content)
+            member.mode = 0o755 if name in programs else 0o644
+            archive.addfile(member, io.BytesIO(content))
+    with tarfile.open(destination, "r:gz") as archive:
+        for name, expected in sorted(entries.items()):
+            member = archive.next()
+            if member is None or member.name != f"{PACKAGE_ID}/{name}" or not member.isfile():
+                raise SystemExit(f"Missing or unexpected member in Linux archive: {name}")
+            stream = archive.extractfile(member)
+            if stream is None or stream.read() != expected or member.mode != (0o755 if name in programs else 0o644):
+                raise SystemExit(f"Invalid content or permissions in Linux archive: {name}")
+        if archive.next() is not None:
+            raise SystemExit("Unexpected files after the Linux archive payload")
+
+
 def add_to_release(
     work: Path, repository: str, version: str, commit: str, platform: Platform, uploads: list[str]
 ) -> None:
@@ -569,6 +601,15 @@ def publish(work: Path, version: str, platform: Platform, stamp: Path, text: str
             (work / "program/MANIFEST.json").read_bytes(),
             record["files"].get(player_file, ""),
         )
+        if platform.name == "linux":
+            check_smoke(
+                stamp.with_name("linux-tar.smoke.json"),
+                version,
+                platform,
+                (work / "program/MANIFEST.json").read_bytes(),
+                record["files"][LINUX_ARCHIVE],
+                LINUX_ARCHIVE,
+            )
     repository = REPOSITORY.removeprefix("https://github.com/")
     check_ci(repository, commit)
     packages = work / "packages"
@@ -714,6 +755,8 @@ def main() -> None:
     )
     if packed.returncode != 0:
         raise SystemExit(f"vpk pack failed:\n{packed.stdout[-3000:]}\n{packed.stderr[-3000:]}")
+    if platform.name == "linux":
+        write_linux_archive(packages / LINUX_ARCHIVE, payload)
     players = [packages / name for name in platform.player_files]
     digests = {}
     for player_file in players:
@@ -742,6 +785,11 @@ def main() -> None:
         print(
             f"Update rehearsal: <installed copy>/DisruptorLauncher{platform.executable_suffix} --updates-from {packages}"
         )
+        if platform.name == "linux":
+            print(
+                f"Tarball smoke test: python tools/release_smoke.py --version {args.version} --platform linux "
+                f"--package {packages / LINUX_ARCHIVE} --disc <cue> --stamp {stamp.with_name('linux-tar.smoke.json')}"
+            )
     if args.sign:
         sign(work, players, args.version, commit, started, platform.channel)
         print(f"Signed {len(players)} files as {SIGNER}")

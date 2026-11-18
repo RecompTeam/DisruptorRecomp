@@ -21,6 +21,7 @@
 #include <cstdlib>
 #include <memory>
 #include <string>
+#include <string_view>
 
 namespace {
 
@@ -37,6 +38,8 @@ class IsoImage final : public disruptor::DiscImage {
 enum class State { kUnbuilt, kOn, kRefused };
 
 std::string g_path;
+bool g_verified_english = false;
+std::string g_expected_language;
 void *g_game = nullptr;
 State g_state = State::kUnbuilt;
 std::unique_ptr<IsoImage> g_home;
@@ -69,6 +72,11 @@ bool laid_out(void *handle) {
     }
     g_home = std::make_unique<IsoImage>(handle);
     if (g_other && g_disc.build(*g_home, *g_other, why)) {
+        if (!g_expected_language.empty() && g_expected_language != g_disc.language()) {
+            std::fprintf(stderr, "disruptor: expected the %s disc, opened the %s disc instead\n",
+                         g_expected_language.c_str(), g_disc.language());
+            return false;
+        }
         g_state = State::kOn;
         keep_states_apart();
     } else {
@@ -93,19 +101,38 @@ void closed(void *handle) {
 const PsxIsoOverlay kOverlay = {read, sectors, closed};
 
 PSX_MOD_CONSTRUCTOR(register_disruptor_language_source) {
+    if (const char *verified = std::getenv(DISRUPTOR_LAUNCH_LANGUAGE)) {
+        const std::string_view selection(verified);
+        g_verified_english = selection == "English";
+        if (!g_verified_english) {
+            const auto separator = selection.find('\n');
+            g_expected_language = selection.substr(0, separator);
+            if (separator != selection.npos) disruptor_language_set_disc(verified + separator + 1);
+        }
+#ifdef _WIN32
+        _putenv_s(DISRUPTOR_LAUNCH_LANGUAGE, "");
+#else
+        unsetenv(DISRUPTOR_LAUNCH_LANGUAGE);
+#endif
+        return;
+    }
     disruptor_language_set_disc(std::getenv("PSX_DISRUPTOR_LANGUAGE_DISC"));
 }
 
 }  // namespace
 
 extern "C" void disruptor_language_set_disc(const char *path) {
-    if (!path || path[0] == '\0' || !g_path.empty()) return;
+    if (g_verified_english || !path || path[0] == '\0' || !g_path.empty()) return;
     g_path = path;
     iso_set_overlay(&kOverlay);
 }
 
-extern "C" void disruptor_language_settle(void) {
-    if (void *game = iso_game_disc(); game && !g_path.empty()) (void)laid_out(game);
+extern "C" int disruptor_language_settle(void) {
+    if (void *game = iso_game_disc(); game && !g_path.empty() && laid_out(game)) return 1;
+    if (g_expected_language.empty()) return 1;
+    std::fprintf(stderr, "disruptor: could not start with the verified %s language image: %s\n",
+                 g_expected_language.c_str(), g_path.c_str());
+    return 0;
 }
 
 extern "C" const char *disruptor_language_disc_name(void) { return g_state == State::kOn ? g_disc.language() : ""; }

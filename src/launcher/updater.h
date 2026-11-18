@@ -9,6 +9,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace Velopack {
 class UpdateManager;
@@ -37,7 +38,7 @@ struct UpdateView {
 class Updater {
 public:
     // A GitHub repository URL reads its releases, pre-releases included, anything else is a feed folder or URL.
-    Updater(std::string source, Activity& activity);
+    Updater(std::string source, Activity& activity, std::vector<std::string> restart_args = {});
     ~Updater();
     Updater(const Updater&) = delete;
     Updater& operator=(const Updater&) = delete;
@@ -58,6 +59,7 @@ private:
 
     std::string source_;
     Activity& activity_;
+    std::vector<std::string> restart_args_;
     std::unique_ptr<Velopack::UpdateManager> manager_;
     std::unique_ptr<Velopack::UpdateInfo> found_;
     std::unique_ptr<Velopack::VelopackAsset> pending_;

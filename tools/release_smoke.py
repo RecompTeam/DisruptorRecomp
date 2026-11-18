@@ -22,6 +22,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tarfile
 import tempfile
 import time
 import tomllib
@@ -29,9 +30,13 @@ import zipfile
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
+if sys.platform == "win32":
+    import _winapi
+
 GAME_PACKAGE = "mods/bundled/disruptor.game"
 MISSING_PACKAGE = "The game's own package is missing"
 REQUIRED_CHECKS = {"windows": ("files", "launcher", "start", "capsule"), "linux": ("files", "launcher", "start")}
+LINUX_ARCHIVE = "DisruptorRecomp-linux-x64.tar.gz"
 LAUNCHER_SECONDS = 60
 MIN_SECONDS = 25.0
 PULSES_NEEDED = 2
@@ -39,6 +44,32 @@ REPLAY_SECONDS = 600
 PULSE = re.compile(r"pulse: (\d+) frames in ")
 SHOWN = re.compile(r", shown (\d+) pictures")
 START_SETTINGS = "[audio]\nmuted = true\n\n[disruptor]\ndetailed_logging = true\n"
+
+
+def wait_for_windows_launcher(stub: subprocess.Popen, status: Path, ack: Path, deadline: float) -> int:
+    """Hold a handle to the launcher started by the portable shortcut until it exits."""
+    if sys.platform != "win32":
+        raise OSError("The Windows portable shortcut must run on Windows")
+    while time.monotonic() < deadline:
+        if stub.poll() not in (None, 0):
+            raise ValueError(f"The portable shortcut exited with code {stub.returncode}")
+        if status.is_file():
+            match = re.search(r"^pid=(\d+)\n", status.read_text(encoding="utf-8"), re.MULTILINE)
+            if match:
+                break
+        time.sleep(0.05)
+    else:
+        raise TimeoutError("The portable launcher did not report its PID")
+    query_limited_information = 0x1000
+    handle = _winapi.OpenProcess(_winapi.SYNCHRONIZE | query_limited_information, False, int(match[1]))
+    try:
+        ack.touch()
+        remaining = max(0, int((deadline - time.monotonic()) * 1000))
+        if _winapi.WaitForSingleObject(handle, remaining) != _winapi.WAIT_OBJECT_0:
+            raise TimeoutError("The portable launcher did not exit after writing its status")
+        return _winapi.GetExitCodeProcess(handle)
+    finally:
+        _winapi.CloseHandle(handle)
 
 
 @dataclass
@@ -61,6 +92,7 @@ def judge_start(code: int | None, ran: float, said: str) -> tuple[bool, str]:
     ]
     moving = [pulse for pulse in pulses if all(count > 0 for count in pulse)]
     problems = [
+        *(["run shorter than the minimum"] if not math.isfinite(ran) or ran < MIN_SECONDS else []),
         *([f"ended with {code}"] if code is not None else []),
         *(["it said its own package is missing"] if MISSING_PACKAGE in said else []),
         *(["no first frame"] if "disruptor: first frame" not in said else []),
@@ -85,6 +117,10 @@ class Smoke:
     digest: str = field(init=False)
 
     @property
+    def portable_linux(self) -> bool:
+        return self.platform == "linux" and self.package.name == LINUX_ARCHIVE
+
+    @property
     def executable(self) -> Path:
         return self.program / ("DisruptorRecompiled.exe" if self.platform == "windows" else "DisruptorRecompiled")
 
@@ -94,6 +130,23 @@ class Smoke:
         self.snapshot = self.work / self.package.name
         shutil.copy2(self.package, self.snapshot)
         self.digest = hashlib.sha256(self.snapshot.read_bytes()).hexdigest()
+        if self.portable_linux:
+            self.program = self.work / "DisruptorRecomp"
+            self.program.mkdir()
+            with tarfile.open(self.snapshot, "r:gz") as archive:
+                for member in archive:
+                    name = Path(member.name)
+                    if name.parts[:1] != ("DisruptorRecomp",) or ".." in name.parts or not member.isfile():
+                        raise ValueError(f"Unexpected archive entry: {member.name}")
+                    target = self.work / name
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    source = archive.extractfile(member)
+                    if source is None:
+                        raise ValueError(f"Missing archive content: {member.name}")
+                    with source, target.open("xb") as output:
+                        shutil.copyfileobj(source, output)
+                    target.chmod(member.mode & 0o777)
+            return
         if self.platform == "windows":
             with zipfile.ZipFile(self.snapshot) as archive:
                 archive.extractall(self.work / "portable")
@@ -125,10 +178,49 @@ class Smoke:
 
     def check_launcher(self, version: str) -> None:
         """Starts the package's own entry as a player does and asks the launcher for its version, without a window."""
+        if self.portable_linux:
+            data = self.program / "data"
+            environment = dict(os.environ, XDG_DATA_HOME=str(self.work / "xdg"))
+            environment.pop("PSX_USER_DIR", None)
+            if data.exists():
+                raise ValueError("The archive already contains player data")
+            status = self.work / "launcher-status.txt"
+            subprocess.run(
+                [self.program / "DisruptorLauncher", "--status", status],
+                cwd=self.work,
+                env=environment,
+                capture_output=True,
+                check=True,
+                timeout=LAUNCHER_SECONDS,
+            )
+            if f"build={version}" not in status.read_text(encoding="utf-8").splitlines():
+                raise ValueError(f"The archive launcher did not report build {version}")
+            subprocess.run(
+                [self.program / "DisruptorLauncher", "--import", self.disc],
+                cwd=self.work,
+                env=environment,
+                capture_output=True,
+                check=True,
+                timeout=LAUNCHER_SECONDS * 5,
+            )
+            images = [
+                image for image in (data / "input/discs/SLUS-00224").glob("disc.*") if image.suffix in {".cue", ".chd"}
+            ]
+            same_version = (self.program / "VERSION.txt").read_text().splitlines()[0] == version
+            if len(images) != 1 or not same_version or not (self.program / ".portable").is_file():
+                raise ValueError(
+                    "The archive launcher did not import into its portable data directory or the version is wrong"
+                )
+            self.disc = images[0]
+            self.checks.append(Check("launcher", True, f"{version} imported {self.disc.name} into portable data"))
+            return
         status = self.work / "launcher-status.txt"
         data = self.work / "launcher-data"
         environment = dict(os.environ, PSX_USER_DIR=str(data), XDG_DATA_HOME=str(data), APPIMAGE_EXTRACT_AND_RUN="1")
         entry = self.work / "portable/Disruptor Recompiled.exe" if self.platform == "windows" else self.snapshot
+        ack = self.work / "status-read"
+        if self.platform == "windows":
+            environment["DISRUPTOR_SMOKE_STATUS_ACK"] = str(ack)
         process = subprocess.Popen(
             [str(entry), "--status", str(status)],
             cwd=self.work,
@@ -137,22 +229,30 @@ class Smoke:
             stderr=subprocess.DEVNULL,
         )
         deadline = time.monotonic() + LAUNCHER_SECONDS
-        while time.monotonic() < deadline and "installed=" not in (
-            status.read_text(errors="replace") if status.is_file() else ""
-        ):
-            time.sleep(0.25)
         try:
-            process.wait(max(0.0, deadline - time.monotonic()))
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait()
+            child_code = (
+                wait_for_windows_launcher(process, status, ack, deadline) if self.platform == "windows" else None
+            )
+            entry_code = process.wait(max(0.0, deadline - time.monotonic()))
+        finally:
+            if self.platform == "windows":
+                ack.touch()
+            if process.poll() is None:
+                process.kill()
+                process.wait()
         said = status.read_text(errors="replace") if status.is_file() else ""
-        installed = next((line.split("=", 1)[1] for line in said.splitlines() if line.startswith("installed=")), None)
+        fields = dict(line.split("=", 1) for line in said.splitlines() if "=" in line)
+        passed = (
+            entry_code == 0
+            and child_code in (None, 0)
+            and fields.get("installed") == version.removeprefix("v")
+            and fields.get("build") == version
+        )
         self.checks.append(
             Check(
                 "launcher",
-                installed == version.removeprefix("v"),
-                f"{entry.name} --status: installed {installed}, exit {process.returncode}: {' | '.join(said.splitlines())}",
+                passed,
+                f"{entry.name} --status: entry exit {entry_code}, launcher exit {child_code if child_code is not None else entry_code}: {' | '.join(said.splitlines())}",
             )
         )
 
@@ -161,7 +261,7 @@ class Smoke:
         if tomllib.loads(settings).get("audio", {}).get("muted") is not True:
             raise SystemExit("the settings to run with are not muted")
         data = self.work / name
-        data.mkdir()
+        data.mkdir(exist_ok=True)
         (data / "settings.toml").write_text(settings, encoding="utf-8", newline="\n")
         return data
 
@@ -169,6 +269,9 @@ class Smoke:
         """Starts the game as the launcher does: from the program's folder, the player's folder in PSX_USER_DIR."""
         log = data / "startup.log"
         environment = dict(os.environ, PSX_USER_DIR=str(data), PSX_HIDDEN_WINDOW="1", **extra)
+        if self.portable_linux and "PSX_DISRUPTOR_CAPSULE_REPLAY" not in extra:
+            environment.pop("PSX_USER_DIR")
+            environment["XDG_DATA_HOME"] = str(self.work / "xdg")
         for name in ("PSX_LOAD_SLOT", "PSX_DISRUPTOR_CAPSULE_RECORD", "PSX_DISRUPTOR_CAPSULE_REPLAY"):
             if name not in extra:
                 environment.pop(name, None)
@@ -179,7 +282,8 @@ class Smoke:
         return process, log
 
     def check_start(self, seconds: float) -> None:
-        process, log = self.start(self.data_folder("data", START_SETTINGS), {"SDL_AUDIODRIVER": "dummy"})
+        folder = "DisruptorRecomp/data" if self.portable_linux else "data"
+        process, log = self.start(self.data_folder(folder, START_SETTINGS), {"SDL_AUDIODRIVER": "dummy"})
         started = time.monotonic()
         while process.poll() is None and time.monotonic() - started < seconds:
             time.sleep(0.25)
@@ -235,7 +339,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--version", required=True, help="the release tag, such as v0.10.2")
     parser.add_argument("--platform", choices=sorted(REQUIRED_CHECKS), required=True)
-    parser.add_argument("--package", type=Path, required=True, help="the Portable ZIP or the AppImage")
+    parser.add_argument("--package", type=Path, required=True, help="the Portable ZIP, AppImage or Linux tarball")
     parser.add_argument("--disc", type=Path, required=True, help="the CUE of a supported disc")
     parser.add_argument("--capsule", type=Path, help="a capsule recorded on this build, needed on Windows")
     parser.add_argument(
@@ -262,7 +366,14 @@ def main() -> int:
             smoke.check_start(args.seconds)
             if args.capsule:
                 smoke.check_capsule(args.capsule.resolve())
-        except (OSError, ValueError, KeyError, subprocess.CalledProcessError, zipfile.BadZipFile) as error:
+        except (
+            OSError,
+            ValueError,
+            KeyError,
+            subprocess.SubprocessError,
+            tarfile.TarError,
+            zipfile.BadZipFile,
+        ) as error:
             checks.append(Check("error", False, f"{type(error).__name__}: {error}"))
     verdict = verdict_of(args.version, args.platform, package, digest, manifest, checks)
     args.stamp.parent.mkdir(parents=True, exist_ok=True)

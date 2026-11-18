@@ -14,10 +14,11 @@ namespace {
 constexpr std::streamoff most_bytes = 16384;
 } // namespace
 
-std::wstring log_tail(const fs::path& log, size_t lines) {
+std::string log_tail_utf8(const fs::path& log, size_t lines) {
     std::ifstream file(log, std::ios::binary | std::ios::ate);
     if (!file) return {};
     const std::streamoff size = file.tellg();
+    if (size <= 0) return {};
     const std::streamoff start = std::max<std::streamoff>(0, size - most_bytes);
     std::string text(static_cast<size_t>(size - start), '\0');
     file.seekg(start);
@@ -37,7 +38,11 @@ std::wstring log_tail(const fs::path& log, size_t lines) {
     }
     std::string joined;
     for (auto line = kept.rbegin(); line != kept.rend(); ++line) joined += *line + "\r\n";
-    return wide(joined);
+    return joined;
+}
+
+std::wstring log_tail(const fs::path& log, size_t lines) {
+    return wide(log_tail_utf8(log, lines));
 }
 
 bool FirstFrameWatch::seen(const fs::path& log) {

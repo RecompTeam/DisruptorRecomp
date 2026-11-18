@@ -58,7 +58,7 @@ fs::path fresh(const char* name) {
     const fs::path folder = fs::temp_directory_path() / name;
     fs::remove_all(folder);
     fs::create_directories(folder);
-    return folder;
+    return fs::canonical(folder);
 }
 
 // Velopack's layout: Update.exe in the root, the program in current with its sq.version.
@@ -108,7 +108,39 @@ void test_where_the_files_go() {
     const fs::path plain = root / "unzipped";
     fs::create_directories(plain);
     expect(folder_for(plain, {}, local) == plain, "a plain copy keeps the files with the program");
+#ifndef _WIN32
+    put(plain / ".portable", "");
+    expect(folder_for(plain, {}, local) == plain / "data", "the Linux archive keeps progress apart from its program files");
+    fs::create_directories(root / "releases/v2");
+    fs::create_directory_symlink(root / "releases/v2", root / "current-link");
+    expect(ensure_directory(plain, root / "current-link/../data") == root / "releases/data",
+           "the parent of a linked directory belongs to its target");
+    fs::create_directory_symlink(root / "missing", root / "dangling");
+    expect(throws([&] { ensure_directory(plain, root / "dangling/../data"); }), "a broken link cannot redirect a profile");
+#endif
     const fs::path program = velopack(root / "install", false);
+    expect(throws([&] { ensure_directory(program, program / "data"); }) && !fs::exists(program / "data"),
+           "a profile in a replaceable program folder is refused before writing");
+#ifdef _WIN32
+    put(program / "Input/notes.txt", "keep");
+    if (fs::exists(program / "input"))
+        expect(throws([&] { require_no_installed_inputs(program); }), "the input guard follows the volume's case rules");
+    fs::remove(program / "Input/notes.txt");
+    fs::remove(program / "Input");
+#endif
+    put(program / "input/discs/SLUS-00224/disc.bin", "retained");
+    expect(throws([&] { require_no_installed_inputs(program); }), "an update keeps an imported BIN even without its CUE");
+#ifndef _WIN32
+    fs::create_directory_symlink(plain, program / "external");
+    fs::create_directory_symlink(program / "external", root / "through-install");
+    expect(throws([&] { ensure_directory(program, root / "through-install/profile"); }),
+           "a link inside the installation cannot be part of a profile path even when its target is outside");
+    const auto pending = root / "pending-profile";
+    require_update_safe_folder(program, pending);
+    fs::create_directory_symlink(program, pending);
+    expect(throws([&] { require_update_safe_folder(program, fs::canonical(pending)); }),
+           "the final check catches an alias created after the initial profile check");
+#endif
     expect(folder_for(program, {}, local) == local / kInstalledName, "an installed copy keeps them in local application data");
     expect(throws([&] { folder_for(program, {}, {}); }), "and stops when there is no such folder, never falling back into current");
     put(root / "install" / ".portable", "");

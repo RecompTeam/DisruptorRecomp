@@ -237,7 +237,7 @@ require(
     '        step.status = L"The game started meanwhile, so the language is not saved\\nChoose it again once the game closes";\n'
     "    else if (step.save_language && !settings_.choose_language_disc(utf8(outcome.image))) step.status = settings_error();\n"
     "    if (!step.status.empty()) say(step.status);\n"
-    "    if (step.launch && !game_running()) launch();\n"
+    "    if (step.launch && !game_running()) launch(outcome.language);\n"
     in window
     and "        say(running_text(environment_overrides()));" in window
     and "complete()" not in window,
@@ -260,8 +260,8 @@ require(
 require(
     window.count("region_disc(") == worker.count("region_disc(") == 2
     and window.count("check_region_disc(") == 1
-    and worker.count("import_disc(") == 1
-    and window.count("import_disc(") == 2
+    and worker.count("import_player_disc(") == 1
+    and "verified = import_player_disc(executable_directory(), data, arguments.image, cancelled);" in window
     and worker.count("verify_installed(") == 1
     and window.count("verify_installed(") == 1
     and window.count("verify_disc(") == 2,
@@ -479,7 +479,9 @@ require(
     and "return (local / kInstalledName).lexically_normal();" in folder
     and 'case Copy::portable: return (folder_of(program).parent_path() / "data").lexically_normal();' in folder
     and 'kind(root / ".portable") == fs::file_type::not_found ? Copy::installed : Copy::portable' in folder
-    and "const fs::path data = disruptor::user_folder::prepare(program);" in window
+    and window.index("const fs::path data = disruptor::user_folder::ensure_directory(")
+    < window.index("const platform::Instance single(data);")
+    < window.index("disruptor::user_folder::activate(program, data);")
     and '    platform::Variables given{{"PSX_USER_DIR", utf8(data)}};\n' in window
     and "    launch.environment = platform::with(platform::environment(), given);\n" in window
     and '{{"PSX_USER_DIR", utf8(trial)},' in upgrade
@@ -516,7 +518,7 @@ require(
     and "    std::setvbuf(stdout, nullptr, _IONBF, 0);\n" in runtime_main
     and '    launch.output = data / "startup.log";\n' in window
     and 'if (first_frame_.seen(data_ / "startup.log")) game_showed_ = game_shown_ = true;' in session
-    and session.index("        if (!game_showed_ && (code || now >= next_look_)) {\n")
+    and session.index("        if (!direct_play_ && !game_showed_ && (code || now >= next_look_)) {\n")
     < session.index('if (first_frame_.seen(data_ / "startup.log"))')
     < session.index("        if (code) game_ended(*code);\n")
     and "        first_frame_ = {};\n" in session

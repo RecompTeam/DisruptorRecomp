@@ -30,7 +30,7 @@ const char *psx_game_session_problem(int netplay);
 /* Nonzero asks for a boot without the BIOS animation whatever the settings say. */
 int psx_game_fast_boot_forced(void);
 /* Called when save states have their folder, before any can be asked for. */
-void psx_game_states_configured(void);
+int psx_game_states_configured(void);
 /* Called after a save state is restored. */
 void psx_game_state_loaded(void);
 /* Called before a save state is written. */

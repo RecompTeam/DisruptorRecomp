@@ -11,6 +11,7 @@ set(CMAKE_CXX_STANDARD 20)
 # A Linux release runs on systems whose C++ library is older than the compiler's: glibc is all it asks of them.
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux" AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     add_link_options(-static-libstdc++ -static-libgcc)
+    set(ZLIB_USE_STATIC_LIBS ON)
 endif()
 # libGL.so.1 is on every Linux system that has OpenGL, GLVND's libOpenGL.so.0 only where its own package is installed.
 set(OpenGL_GL_PREFERENCE LEGACY)

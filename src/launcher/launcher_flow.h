@@ -36,6 +36,7 @@ struct Outcome {
     std::optional<RegionDisc> language;
     Regions regions;
     std::wstring error, language_error;
+    std::string spoken;
 };
 
 // What a task does with discs, so that a test can stand in for them.

@@ -15,6 +15,7 @@ Outcome run(Request request, const Discs& discs, const std::atomic_bool& cancell
     Outcome outcome;
     outcome.task = request.task;
     outcome.launch = request.launch;
+    outcome.spoken = request.spoken;
     outcome.image = request.source;
     try {
         if (request.task == Task::take && discs.look(request.source)) {
@@ -35,7 +36,7 @@ Outcome run(Request request, const Discs& discs, const std::atomic_bool& cancell
             } else if (request.launch && !request.spoken.empty()) {
                 if (discs.report) discs.report(L"Checking the language disc...", 100);
                 try {
-                    discs.check(outcome.disc.data, from_utf8(request.spoken));
+                    outcome.language = discs.check(outcome.disc.data, from_utf8(request.spoken));
                 } catch (const std::exception& error) {
                     outcome.language_error = L"The language disc cannot be used. " + error_text(error);
                 }

@@ -42,6 +42,14 @@ On Linux x64:
 - Your saves and settings are kept in `~/.local/share/DisruptorRecompData`.
 - The launcher updates the AppImage in place.
 
+The Linux x64 tarball contains the launcher, game and runtime files. Extract
+`DisruptorRecomp-linux-x64.tar.gz` and run `./DisruptorRecomp/DisruptorLauncher`.
+The archive uses its own `data/` folder. To update it, close both the game and
+the launcher, extract the new archive into an empty directory and move your
+old `data/` folder into the new `DisruptorRecomp/` folder. If you already
+use `--data-dir`, pass the absolute path of the existing data folder. A game manager
+can also manage these files. The AppImage offers the built-in updater.
+
 ### Add your disc
 
 1. Open **Disruptor Recompiled** from the desktop or the Start menu.
@@ -52,6 +60,10 @@ On Linux x64:
    the SHA-256 of every byte. A CHD stays a CHD, and the bytes checked are the
    sectors in it. Your original files stay where they are.
 4. Leave **Start the game after importing** on to play at once.
+
+After import, **Game disc** shows the installed copy. Keep that copy to play.
+You can move your original USA image back to your collection. An optional
+language disc is read from its original location.
 
 What the launcher accepts:
 
@@ -82,6 +94,31 @@ In the game's menu, pick **New Game** with the arrow keys and **Enter**, or
   did.
 - **Help** in the side bar shows this guide. F1 opens it too.
 - **EXIT**, under **CREDITS** in the game's main menu, closes the game.
+
+### Launch from Steam or another game manager
+
+Point the manager at the launcher and pass `--play` as its launch option.
+Use `current/DisruptorLauncher.exe` inside a Windows installation or portable
+copy, the AppImage itself, or `DisruptorLauncher` from the Linux archive.
+The top-level Windows shortcut forwards arguments and exits immediately.
+Managers that track play time should run the launcher directly. The launcher checks
+the imported game and selected language, starts the game directly and
+returns its exit code. If setup is incomplete, it writes the reason to
+standard error and returns a nonzero exit code.
+
+For example, to import a disc once and then play from the same library:
+
+```sh
+./DisruptorRecomp.AppImage --import "/media/games/Disruptor.chd" --data-dir "/media/games/Disruptor data"
+./DisruptorRecomp.AppImage --play --data-dir "/media/games/Disruptor data"
+```
+
+Use `--verify IMAGE` to check a source disc. `--check` verifies the imported
+disc and checks for the game executable, configuration, BIOS and bundled game
+manifest. Open the launcher window to check save states carried over from an
+older build. Prefix an image name beginning with two hyphens with `./`
+or use its absolute path. Run the launcher with `--help` for the available player
+commands. Opening it without a command shows its usual window.
 
 ### Older releases
 
@@ -543,6 +580,10 @@ replaces it:
 | Copy | Folder of your files |
 | --- | --- |
 | Installed by Setup | `%LOCALAPPDATA%\DisruptorRecompData` |
+| Windows Portable ZIP | `data/` in the extracted ZIP folder |
+| Linux AppImage | `$XDG_DATA_HOME/DisruptorRecompData`, normally `~/.local/share/DisruptorRecompData` |
+| Linux AppImage with `--portable` | `DisruptorRecompData/` beside the AppImage |
+| Linux tarball | `DisruptorRecomp/data/` in the extracted archive |
 | A ZIP of alpha.5 or earlier, or a build folder | the folder of the executable |
 
 - **Saves folder** in the launcher's side bar opens `saves/` there.
@@ -551,6 +592,24 @@ replaces it:
   Delete it by hand to remove your saves for good.
 - Setting `PSX_USER_DIR` to a whole path makes the launcher and the game use
   that folder instead.
+- `--data-dir DIR` selects the folder for this invocation and takes precedence
+  over `PSX_USER_DIR`. Relative paths are resolved from the working directory.
+  On Linux, `--portable` selects the portable location explicitly. Use the
+  same option for import and play. Existing saves stay in their original folder.
+
+### Clean up downloads
+
+After installation or extraction, you can delete the downloaded Setup.exe,
+Portable ZIP or tarball. You can also delete an older AppImage once the new
+one works. The AppImage you launch is the program itself. Leave the installed
+updater's packages to the updater, including any download awaiting restart.
+
+### Remove player data
+
+To keep progress when removing an extracted copy, move its `data/` folder
+somewhere safe first. The **Saves folder** button opens the memory cards and
+save states. **About** shows the active data folder. Delete that folder only
+if you intend to remove the imported disc, saves, settings and backups together.
 
 ### Bring files from an earlier copy
 
@@ -573,6 +632,12 @@ This also saves a second import after unzipping a new release.
 
 The launcher's home page says whether a newer release is out and offers to
 download and install it.
+
+If you run this installation with several data folders, close its other
+launchers and game sessions before applying an update.
+If the launcher reports player data inside the program folder, move it to a
+safe location, including any BIN referenced by a CUE. Choose a data folder
+outside the installation and import the saved image there before updating.
 
 - **What's new** beside it, **Update options** and the version at the foot of
   the side bar open the **Updates** window.

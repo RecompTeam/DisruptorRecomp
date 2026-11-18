@@ -19,7 +19,11 @@ std::filesystem::path folder_for(const std::filesystem::path& program, const std
                                  const std::filesystem::path& local);
 
 // Made when missing and seeded. Throws on failure, so files never fall back into a folder an update replaces.
-std::filesystem::path prepare(const std::filesystem::path& program);
+std::filesystem::path prepare(const std::filesystem::path& program, const std::filesystem::path& chosen = {});
+std::filesystem::path ensure_directory(const std::filesystem::path& program, const std::filesystem::path& chosen);
+void require_update_safe_folder(const std::filesystem::path& program, const std::filesystem::path& user);
+void require_no_installed_inputs(const std::filesystem::path& program);
+void activate(const std::filesystem::path& program, const std::filesystem::path& user);
 
 // Copies the shipped settings.toml and keybinds.ini that `user` lacks. Throws on failure.
 void seed(const std::filesystem::path& program, const std::filesystem::path& user);

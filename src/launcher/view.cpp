@@ -1162,6 +1162,12 @@ void View::cards(bool dialog_open) {
     ImGui::BeginDisabled(!free || dialog_open);
     if (ImGui::Button(change)) pick(Wanted::image);
     ImGui::EndDisabled();
+    if (disc.profile) {
+        muted("Keep this copy for play. A separate source image can be moved.");
+        const std::string path = utf8(disc.mount);
+        ImGui::TextWrapped("%s", path.c_str());
+        if (link("Show installed disc")) open_folder(disc.mount.parent_path());
+    }
     const float disc_wanted = card_end();
 
     ImGui::SameLine(0.0f, gap);

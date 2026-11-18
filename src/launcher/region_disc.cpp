@@ -27,7 +27,8 @@ std::optional<RegionDisc> region_disc(const fs::path& selected) {
 }
 
 RegionDisc check_region_disc(const fs::path& home_data, const fs::path& selected) {
-    const auto home = open_image(home_data), other = open_image(resolve_image(selected));
+    const auto image = fs::canonical(resolve_image(selected));
+    const auto home = open_image(home_data), other = open_image(image);
     KnownDisc known{};
     if (!known_disc(*other, known))
         throw std::runtime_error("The image is not a Disruptor disc of another region that this build knows");
@@ -35,7 +36,7 @@ RegionDisc check_region_disc(const fs::path& home_data, const fs::path& selected
     std::string why;
     if (!laid_out.build(*home, *other, why))
         throw std::runtime_error(std::string("The ") + known.language + " disc does not fit the US disc: " + why);
-    return {known.language, known.words};
+    return {known.language, known.words, image};
 }
 
 std::wstring describe(const RegionDisc& disc) {

@@ -35,7 +35,7 @@ public:
     Session& operator=(const Session&) = delete;
 
     // Reads the settings and checks the installed disc, as the window opens.
-    void open(double display_rate);
+    void open(double display_rate, bool play_now = false);
     // Takes what the worker and the game did since the last call: once a frame.
     void poll();
 
@@ -75,6 +75,7 @@ public:
     bool closed() const { return closed_; }
 
     bool busy() const { return busy_; }
+    bool waiting_for_play() const { return busy_ || game_ != nullptr; }
     bool cancellable() const { return busy_ && !closing_; }
     // A game this launcher started, or one started before it opened or beside it on the same player's files.
     bool game_running() const { return game_ != nullptr || other_game_; }
@@ -108,8 +109,8 @@ private:
     };
     void begin_earlier(std::function<Earlier()> work);
     void finish_earlier(Earlier& earlier);
-    void check_installed_disc();
-    void launch();
+    void check_installed_disc(bool launch = false);
+    void launch(const std::optional<RegionDisc>& language);
     void look();
     void game_ended(unsigned long code);
     void watch_other_game();
@@ -129,6 +130,7 @@ private:
     std::atomic_bool cancelled_{false};
     bool busy_ = false, closing_ = false, closed_ = false, upgraded_ = false;
     bool upgrading_ = false;  // save states of an earlier version are tried apart: Play stays open and stops it
+    bool direct_play_ = false;
     std::unique_ptr<GameProcess> game_;
     bool other_game_ = false;
     FirstFrameWatch first_frame_;

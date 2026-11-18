@@ -547,12 +547,11 @@ fs::path installed_cue(const fs::path& package, const DiscProfile& profile) {
     return package / "input" / "discs" / profile.id / "disc.cue";
 }
 
-VerifiedDisc import_disc(const fs::path& selected, const fs::path& package,
+VerifiedDisc import_disc(const fs::path& selected, const fs::path& library,
                          const std::atomic_bool& cancelled, const Progress& progress,
                          std::span<const DiscProfile> profiles) {
     check_cancel(cancelled);
     const auto source_path = resolve_image(selected);
-    const auto parent = package / "input" / "discs";
     Staging staging;
     const DiscProfile* profile = nullptr;
     if (is_chd(source_path)) {
@@ -562,8 +561,8 @@ VerifiedDisc import_disc(const fs::path& selected, const fs::path& package,
             match_size(uint64_t{checked.sectors()} * kRawSector, profiles);
         }
         File source(source_path);
-        fs::create_directories(parent);
-        staging.path = unique_directory(parent, ".import-");
+        fs::create_directories(library);
+        staging.path = unique_directory(library, ".import-");
         Stamp stamp;
         {
             File output(staging.path / "disc.chd", true);
@@ -580,8 +579,8 @@ VerifiedDisc import_disc(const fs::path& selected, const fs::path& package,
         {
             File source(source_path);
             match_size(source.size(), profiles);
-            fs::create_directories(parent);
-            staging.path = unique_directory(parent, ".import-");
+            fs::create_directories(library);
+            staging.path = unique_directory(library, ".import-");
             File output(staging.path / "disc.bin", true);
             const auto hash = hash_file(source, &output, cancelled, progress, L"Copying and verifying your disc image...");
             profile = &match_hash(source.size(), hash, profiles);
@@ -590,16 +589,18 @@ VerifiedDisc import_disc(const fs::path& selected, const fs::path& package,
     }
     { const auto verified = verify_disc(installed_image(staging.path), cancelled, progress, profiles); }
     check_cancel(cancelled);
-    const auto destination = installed_cue(package, *profile).parent_path();
+    const auto destination = library / profile->id;
     fs::path backup;
     if (fs::exists(destination)) {
+        if (!fs::equivalent(fs::canonical(destination).parent_path(), library))
+            throw std::runtime_error("The installed disc directory points outside its library");
         try {
             return verify_disc(installed_image(destination), cancelled, progress, profiles);
         } catch (const std::exception&) {
             check_cancel(cancelled);
         }
         // Nothing is deleted: the old installation moves to a sibling backup, unexpected user files included.
-        backup = unique_directory(parent, ".previous-" + std::string(profile->id) + "-");
+        backup = unique_directory(library, ".previous-" + std::string(profile->id) + "-");
         fs::remove(backup);
         fs::rename(destination, backup);
     }

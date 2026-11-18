@@ -2,6 +2,16 @@
 
 What changed in each release. The launcher shows the section of its own version on its home page.
 
+## v0.16.0
+
+### Launcher and Linux packages
+
+- Steam and other game managers can pass `--play` to start the game directly after disc import.
+- `--data-dir` selects the folder for the imported disc, saves and settings. On Linux, `--portable` keeps them beside the AppImage.
+- Linux x64 now also has a portable tar.gz archive. Extract it and run `DisruptorLauncher` from the extracted folder.
+- After import, Game disc shows the installed copy. The original USA image can be moved. Optional language discs are still read from their original location.
+- The updater checks for saves and disc images in folders it will replace and asks you to move them first.
+
 ## v0.15.0
 
 ### Enhancements

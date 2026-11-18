@@ -107,16 +107,16 @@ void chd_tests(const fs::path& root) {
     fs::create_directories(package / "input/discs");
     cancelled = false;
     fails([&] {
-        import_disc(chd, package, cancelled,
+        import_disc(chd, package / "input/discs", cancelled,
             [](const std::wstring& status, unsigned) { if (status.starts_with(L"Verifying")) cancelled = true; }, chd_fixture);
     }, "cancel during the CHD's decoding succeeded");
     cancelled = false;
     no_staging(package);
-    fails([&] { import_disc(root / "two_tracks.chd", package, cancelled, {}, chd_fixture); }, "a CHD of another layout installed");
+    fails([&] { import_disc(root / "two_tracks.chd", package / "input/discs", cancelled, {}, chd_fixture); }, "a CHD of another layout installed");
     no_staging(package);
     const auto folder = installed_cue(package, chd_fixture[0]).parent_path();
     {
-        auto imported = import_disc(chd, package, cancelled, {}, chd_fixture);
+        auto imported = import_disc(chd, package / "input/discs", cancelled, {}, chd_fixture);
         require(imported.mount == folder / "disc.chd" && imported.data == imported.mount, "the CHD was not installed as itself");
     }
     require(read(folder / "disc.chd") == read(chd) && !fs::exists(folder / "disc.cue") && !fs::exists(folder / "disc.bin"),
@@ -138,7 +138,7 @@ void chd_tests(const fs::path& root) {
     damaged[400] = static_cast<char>(damaged[400] ^ 0x5A);
     write(folder / "disc.chd", damaged);
     fails([&] { verify_disc(folder / "disc.chd", cancelled, {}, chd_fixture); }, "a damaged CHD verified");
-    { auto repaired = import_disc(chd, package, cancelled, {}, chd_fixture); }
+    { auto repaired = import_disc(chd, package / "input/discs", cancelled, {}, chd_fixture); }
     require(read(folder / "disc.chd") == read(chd) && read(stamp) == written, "the damaged CHD was not replaced");
 }
 } // namespace
@@ -172,7 +172,7 @@ int main() {
         }
         const auto package = root / fs::path(u8"Build with spaces ü 日本");
         {
-            auto imported = import_disc(cue, package, cancelled, {}, fixture);
+            auto imported = import_disc(cue, package / "input/discs", cancelled, {}, fixture);
             require(imported.mount == installed_cue(package, fixture[0]), "wrong install path");
             require(read(imported.data) == "abc", "installed bytes differ from source");
             require(resolve_image(imported.mount) == imported.data, "generated CUE is not self-contained");
@@ -186,7 +186,7 @@ int main() {
         { auto verified = verify_disc(iso, cancelled, {}, fixture); }
         const auto bad = root / "wrong.bin";
         write(bad, "abd");
-        fails([&] { import_disc(bad, package, cancelled, {}, fixture); }, "wrong hash was installed");
+        fails([&] { import_disc(bad, package / "input/discs", cancelled, {}, fixture); }, "wrong hash was installed");
         require(read(installed_cue(package, fixture[0]).parent_path() / "disc.bin") == "abc",
                 "failed import replaced the good installation");
         no_staging(package);
@@ -242,10 +242,10 @@ int main() {
             fails([&] { resolve_image(invalid); }, "invalid CUE was accepted");
         }
         cancelled = true;
-        fails([&] { import_disc(source, package, cancelled, {}, fixture); }, "pre-cancelled import succeeded");
+        fails([&] { import_disc(source, package / "input/discs", cancelled, {}, fixture); }, "pre-cancelled import succeeded");
         cancelled = false;
         fails([&] {
-            import_disc(source, package, cancelled,
+            import_disc(source, package / "input/discs", cancelled,
                 [](const std::wstring&, unsigned) { cancelled = true; }, fixture);
         }, "cancel during copy succeeded");
         cancelled = false;
@@ -253,7 +253,7 @@ int main() {
                 "cancellation changed installed data");
         no_staging(package);
         fails([&] {
-            import_disc(source, package, cancelled,
+            import_disc(source, package / "input/discs", cancelled,
                 [](const std::wstring& status, unsigned) {
                     if (status.starts_with(L"Verifying")) cancelled = true;
                 }, fixture);
@@ -265,7 +265,7 @@ int main() {
         const auto destination = installed_cue(package, fixture[0]).parent_path();
         write(destination / "keep.txt", "keep me");
         write(destination / "disc.bin", "abd");
-        { auto repaired = import_disc(source, package, cancelled, {}, fixture); }
+        { auto repaired = import_disc(source, package / "input/discs", cancelled, {}, fixture); }
         require(read(destination / "disc.bin") == "abc", "repair failed");
         bool backup_found = false;
         for (const auto& entry : fs::directory_iterator(destination.parent_path())) {
@@ -275,7 +275,7 @@ int main() {
             }
         }
         require(backup_found, "repair lost previous game data or user files");
-        { auto again = import_disc(destination / "disc.cue", package, cancelled, {}, fixture); }
+        { auto again = import_disc(destination / "disc.cue", package / "input/discs", cancelled, {}, fixture); }
         require(read(destination / "disc.bin") == "abc", "import from installed location failed");
         unsigned backup_count = 0;
         for (const auto& entry : fs::directory_iterator(destination.parent_path()))

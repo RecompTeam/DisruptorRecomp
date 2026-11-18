@@ -1,4 +1,5 @@
 #include "activity.h"
+#include "build_version.h"
 #include "art.h"
 #include "disc_import.h"
 #include "game/settings/user_folder.h"
@@ -33,6 +34,7 @@
 #include <charconv>
 #include <chrono>
 #include <cmath>
+#include <cstdlib>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -53,6 +55,13 @@ namespace {
 
 constexpr const char* kRepository = "https://github.com/RecompTeam/DisruptorRecomp";
 
+constexpr std::string_view usage =
+    "DisruptorLauncher [--play | --import IMAGE | --verify IMAGE | --check] [--data-dir DIR]\n"
+#ifndef _WIN32
+    "Use --portable instead of --data-dir to keep data beside the Linux archive or AppImage.\n"
+#endif
+    "With no command, opens the launcher. --play starts the imported game and returns its exit code.\n";
+
 #if DISRUPTOR_UPDATER
 void velopack_log(void* user, const char* level, const char* message) noexcept {
     const char kind = level && *level ? static_cast<char>(level[0] | 0x20) : 'i';
@@ -65,33 +74,11 @@ void velopack_log(void* user, const char* level, const char* message) noexcept {
 }
 #endif
 
-// Diagnostic modes run the window's checks with redirected output and no console. --root is the program and data folder.
-int diagnostic(int count, char** arguments, const fs::path& data) {
-    if (count < 2) return -1;
-    const std::string_view mode = arguments[1];
-    if (mode != "--verify" && mode != "--import" && mode != "--check") return -1;
-    const bool needs_image = mode != "--check";
-    if (needs_image && count < 3) throw std::runtime_error("A disc image path is required");
-    fs::path program = executable_directory();
-    fs::path files = data;
-    const int option = needs_image ? 3 : 2;
-    if (count == option + 2 && std::string_view(arguments[option]) == "--root") program = files = fs::absolute(from_utf8(arguments[option + 1]));
-    else if (count != option) throw std::runtime_error("Unexpected launcher arguments");
-    std::atomic_bool cancelled{false};
-    VerifiedDisc verified;
-    if (mode == "--verify") verified = verify_disc(from_utf8(arguments[2]), cancelled);
-    else if (mode == "--import") verified = import_disc(from_utf8(arguments[2]), files, cancelled);
-    else {
-        const auto installed = find_installed_disc(files);
-        if (installed.empty()) throw std::runtime_error("No supported disc image is installed");
-        verified = verify_disc(installed, cancelled);
-        check_package(program, *verified.profile);
-    }
-    platform::write_standard(std::string("Verified ") + verified.profile->id + "\n", false);
-    return 0;
-}
+enum class Command { window, play, import_image, verify, check, help };
 
 struct Arguments {
+    Command command = Command::window;
+    fs::path image, chosen, root;
     std::string source = kRepository;
     std::optional<fs::path> status, update_test, screenshot;
     bool apply = true;
@@ -112,8 +99,47 @@ struct Arguments {
 Arguments parse(int count, char** values) {
     Arguments arguments;
     const std::vector<std::string_view> words(values + 1, values + count);
+    bool window_options = false;
     for (std::size_t i = 0; i < words.size(); ++i) {
         const bool more = i + 1 < words.size();
+        const auto option = words[i];
+        const auto path_argument = [&]() {
+            if (!more || words[i + 1].empty() || words[i + 1].starts_with("--"))
+                throw std::runtime_error(std::string(option) + " requires a path");
+            return from_utf8(std::string(words[++i]));
+        };
+        if (option == "--data-dir" || option == "--root") {
+            if (!arguments.chosen.empty() || !arguments.root.empty()) throw std::runtime_error("Choose one data directory");
+            auto& folder = option == "--root" ? arguments.root : arguments.chosen;
+            const fs::path requested = path_argument();
+            folder = requested.is_absolute() ? requested : fs::absolute(requested.root_path() / ".") / requested.relative_path();
+            continue;
+        }
+#ifndef _WIN32
+        if (option == "--portable") {
+            if (!arguments.chosen.empty() || !arguments.root.empty()) throw std::runtime_error("Choose one data directory");
+            const fs::path program = executable_directory();
+            if (disruptor::user_folder::copy_of(program) == disruptor::user_folder::Copy::installed) {
+                const char* image = std::getenv("APPIMAGE");
+                if (!image || !fs::path(image).is_absolute()) throw std::runtime_error("Cannot locate the AppImage. Use --data-dir DIR");
+                arguments.chosen = fs::path(image).parent_path() / "DisruptorRecompData";
+            } else {
+                arguments.chosen = program / "data";
+            }
+            continue;
+        }
+#endif
+        if (option == "--play" || option == "--check" || option == "--verify" || option == "--import" || option == "--help") {
+            if (arguments.command != Command::window) throw std::runtime_error(std::string(usage));
+            if (option == "--import" || option == "--verify") {
+                arguments.image = path_argument();
+                arguments.command = option == "--import" ? Command::import_image : Command::verify;
+            } else if (option == "--play") arguments.command = Command::play;
+            else if (option == "--check") arguments.command = Command::check;
+            else arguments.command = Command::help;
+            continue;
+        }
+        window_options = true;
         if (words[i] == "--updates-from" && more) arguments.source = std::string(words[++i]);
         else if (words[i] == "--status" && more) arguments.status = from_utf8(std::string(words[++i]));
         else if (words[i] == "--update-test" && more) arguments.update_test = from_utf8(std::string(words[++i]));
@@ -154,11 +180,31 @@ Arguments parse(int count, char** values) {
         } else if (words[i] == "--virtual-pad") {
             arguments.virtual_pad = true;
         } else {
-            throw std::runtime_error("Usage: DisruptorLauncher.exe --verify IMAGE | --import IMAGE [--root FOLDER] | "
-                                     "--check [--root FOLDER]");
+            throw std::runtime_error(std::string(usage));
         }
     }
+    if (window_options && arguments.command != Command::window) throw std::runtime_error(std::string(usage));
+    if (!arguments.root.empty() && arguments.command != Command::check && arguments.command != Command::verify &&
+        arguments.command != Command::import_image) throw std::runtime_error("--root requires --check, --verify or --import");
     return arguments;
+}
+
+void diagnostic(const Arguments& arguments, const fs::path& program, const fs::path& data) {
+    std::atomic_bool cancelled{false};
+    VerifiedDisc verified;
+    if (arguments.command == Command::verify) verified = verify_disc(arguments.image, cancelled);
+    else if (arguments.command == Command::import_image) {
+        verified = import_player_disc(executable_directory(), data, arguments.image, cancelled);
+    } else {
+        const auto installed = checked_installed_disc(executable_directory(), data);
+        if (installed.empty()) throw std::runtime_error("No supported disc image is installed");
+        verified = verify_disc(installed, cancelled);
+        check_package(program, *verified.profile);
+    }
+    platform::write_standard(std::string("Verified ") + verified.profile->id + "\n", false);
+    if (arguments.command == Command::import_image)
+        platform::write_standard("Installed disc: " + utf8(verified.mount) +
+                                 "\nKeep this copy for play. A separate source image can be moved.\n", false);
 }
 
 void wait_for(const Updater& updater) {
@@ -250,7 +296,20 @@ int write_status(const Updater& updater, const fs::path& path) {
     std::ofstream status(path, std::ios::binary);
     if (!status) return 6;
     status << "installed=" << view.installed << "\nportable=" << view.portable << "\nstate=" << static_cast<int>(view.state)
-           << "\nlatest=" << view.latest << "\nerror=" << view.error << "\n";
+           << "\nlatest=" << view.latest << "\nerror=" << view.error << "\nbuild=" << DISRUPTOR_BUILD_VERSION << "\n";
+#ifdef _WIN32
+    if (const char* ack = std::getenv("DISRUPTOR_SMOKE_STATUS_ACK"); ack && *ack) {
+        status << "pid=" << GetCurrentProcessId() << "\n";
+        if (closed(status, 0) != 0) return 6;
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(60);
+        const fs::path file = from_utf8(ack);
+        while (!fs::exists(file)) {
+            if (std::chrono::steady_clock::now() >= deadline) return 6;
+            std::this_thread::sleep_for(std::chrono::milliseconds(20));
+        }
+        return 0;
+    }
+#endif
     return closed(status, 0);
 }
 
@@ -728,26 +787,57 @@ int main(int count, char** values) {
 #if DISRUPTOR_UPDATER
     Velopack::VelopackApp::Build().SetAutoApplyOnStartup(false).Run();
 #endif
+    bool errors_to_console = count > 1;
     static Activity activity;
     try {
-        const fs::path program = executable_directory();
-        const fs::path data = disruptor::user_folder::prepare(program);
+        const Arguments arguments = parse(count, values);
+        errors_to_console = arguments.command != Command::window || arguments.status || arguments.update_test || arguments.screenshot;
+        if (arguments.command == Command::help) {
+            platform::write_standard(usage, false);
+            return 0;
+        }
+        if (arguments.command == Command::verify) {
+            diagnostic(arguments, {}, {});
+            return 0;
+        }
+        const fs::path executable_folder = executable_directory();
+        const fs::path data = disruptor::user_folder::ensure_directory(executable_folder, arguments.root.empty() ? arguments.chosen : arguments.root);
+        const fs::path program = arguments.root.empty() ? executable_folder : data;
         // One launcher for a folder of the player's files: two would write them at once.
         const platform::Instance single(data);
         if (!single.first()) {
-            if (count > 1) write_error("The launcher of this copy is already open");
+            if (errors_to_console) write_error("The launcher of this copy is already open");
             else fail_window("The launcher is already open");
             return 1;
         }
-        const int result = diagnostic(count, values, data);
-        if (result >= 0) return result;
+        disruptor::user_folder::activate(program, data);
+        if (arguments.command != Command::play && arguments.command != Command::window) {
+            diagnostic(arguments, program, data);
+            return 0;
+        }
 #ifdef _WIN32
         SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
 #endif
         // The Language row names the disc and checks it: the game would let this variable replace it unchecked.
         platform::unset("PSX_DISRUPTOR_LANGUAGE_DISC");
-        const Arguments arguments = parse(count, values);
-        Updater updater(arguments.source, activity);
+        if (arguments.command == Command::play) {
+            Session session(program, data, activity);
+            session.open(0.0, true);
+            do {
+                session.poll();
+                if (auto code = session.take_game_end()) {
+                    if (*code) write_error("Game exited with code " + std::to_string(*code) + "\n" + log_tail_utf8(data / "startup.log", 8));
+                    return static_cast<int>(*code);
+                }
+                if (!session.waiting_for_play()) break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(50));
+            } while (true);
+            write_error(utf8(fs::path(session.status())));
+            return 1;
+        }
+        std::vector<std::string> restart_args;
+        if (!arguments.chosen.empty()) restart_args = {"--data-dir", utf8(data)};
+        Updater updater(arguments.source, activity, std::move(restart_args));
 #if DISRUPTOR_UPDATER
         if (updater.view().state != UpdateState::unavailable) vpkc_set_logger(velopack_log, &activity);
 #endif
@@ -755,7 +845,7 @@ int main(int count, char** values) {
         if (arguments.update_test) return update_test(updater, activity, *arguments.update_test, arguments.apply, data);
         return run_window(arguments, updater, activity, program, data);
     } catch (const std::exception& error) {
-        if (count > 1) {
+        if (errors_to_console) {
             write_error(error.what());
         } else {
             fail_window(utf8(fs::path(error_text(error))).c_str());

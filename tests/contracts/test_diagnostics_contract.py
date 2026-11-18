@@ -169,10 +169,11 @@ require(
     and "    if (found.size() > most_freeze_dumps) found.resize(most_freeze_dumps);\n" in report
     and '        note += utf8(name) + ": " + (present ? listed(root / name) : "none") + "\\r\\n";\n' in report
     and '    write(folder / "system.txt", without_user_names(note));\n' in report
-    and "    : process_(start_game(program, data, disc)), started_(std::chrono::steady_clock::now()) {}\n" in window
+    and "    : process_(start_game(program, data, disc, language)), started_(std::chrono::steady_clock::now()) {}\n"
+    in window
     and "        std::chrono::duration_cast<std::chrono::seconds>(std::chrono::steady_clock::now() - started_).count());\n"
     in window
-    and "        game_ = std::make_unique<GameProcess>(program_, data_, verified_);\n" in window
+    and "        game_ = std::make_unique<GameProcess>(program_, data_, verified_, language);\n" in window
     and '    note_exit(data_ / "startup.log", code, seconds);\n' in window
     and '"%slauncher: the game ended with code 0x%08lX after %llu s\\r\\n"' in log,
     "a report takes how the last run ended and lists every file with its time, and the launcher heads the log with when "

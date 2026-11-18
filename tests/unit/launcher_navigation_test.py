@@ -12,6 +12,9 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
+if sys.platform == "win32":
+    import _winapi
+
 SKIP = 77
 NO_DISPLAY = 5
 
@@ -225,9 +228,36 @@ def check_rows(launcher: Path, folder: Path) -> None:
     )
 
 
+def check_profile_parent(launcher: Path, folder: Path) -> None:
+    target = folder / "versions" / "v2"
+    target.mkdir(parents=True)
+    alias = folder / "library" / "current"
+    alias.parent.mkdir()
+    if sys.platform == "win32":
+        _winapi.CreateJunction(str(target), str(alias))
+    else:
+        alias.symlink_to(target, target_is_directory=True)
+    for mode in ("cli", "env"):
+        chosen = alias / ".." / mode
+        args = [str(launcher), "--check"]
+        env = os.environ.copy()
+        if mode == "cli":
+            args += ["--data-dir", str(chosen)]
+        else:
+            env["PSX_USER_DIR"] = str(chosen)
+        done = subprocess.run(args, env=env, capture_output=True, timeout=30, check=False)
+        require(
+            done.returncode == 1 and b"No supported disc image" in done.stderr, "the newly selected profile is empty"
+        )
+        require(
+            (target.parent / mode).is_dir() and not (alias.parent / mode).exists(), "use the linked directory's parent"
+        )
+
+
 def main() -> int:
     launcher = Path(sys.argv[1])
     with tempfile.TemporaryDirectory() as folder:
+        check_profile_parent(launcher, Path(folder))
         try:
             check(launcher, Path(folder))
             check_rows(launcher, Path(folder))
