@@ -396,7 +396,7 @@ static inline void psx_ddgi_fit_level(const DdgiNode *nodes, const DdgiBuildFace
     float chosen[3] = {0.0f, 0.0f, 0.0f};
     for (int i = 0; i < samples; i += DDGI_FIT_SUN_EVERY) {
         weights += work->sample[i].weight;
-        sum_b += work->sample[i].weight * work->sample[i].baked;
+        sum_b += (double)work->sample[i].weight * work->sample[i].baked;
     }
     for (int t = 0; t < DDGI_FIT_SUN_TRIES; ++t) {
         float dir[3];
