@@ -2,6 +2,43 @@
 
 What changed in each release. The launcher shows the section of its own version on its home page.
 
+## v0.17.0
+
+### Gamepad
+
+- Analog movement is on by default, with slower walking at a light stick tilt
+- Optional controller vibration for shots and hits, off by default
+
+### Sky, geometry and motion
+
+- New skyboxes for Chemical Factory and Rooftops
+- Buildings by the Rooftops bridge stay visible when the doors close
+- Smoother sky joins in Dream and Fortress, plus a corrected pipe texture in Dream
+- Sky colours stay consistent when looking up across a join
+- Triton's upper deck has a night sky, a repaired floor tile and a clean balcony edge
+- Triton's sky stays visible through openings and behind gameplay menus
+- Distant enemies fade into the night fog on Triton
+- The Fortress entrance stays visible on approach with extended Draw distance
+- The wall by Console 02 on Jupiter Station stays solid
+- Reduced slowdowns on Rooftops with In-between frames on
+- Steadier enemy sprites when firing, extending spikes or turning shields
+- Fixed brief black flashes during gameplay with In-between frames on
+- Fixed red outlines in the fog on Mars during in-between frames
+
+### Main menu
+
+- Load Game starts reading save-state slots ahead of time
+- Password opens promptly and Escape goes back from Password and Credits
+- The strafe keys and right-click can change the New Game difficulty
+
+### Launcher, controls and combat
+
+- Disc and language controls share one section in the launcher
+- The session options and activity log are beside Play
+- Mouse turning works while the map is open
+- Auto-aim accounts for your look angle and the target's height with Vertical mouse look
+- Drain checks the path between projectile updates in both aiming modes
+
 ## v0.16.0
 
 ### Launcher and Linux packages

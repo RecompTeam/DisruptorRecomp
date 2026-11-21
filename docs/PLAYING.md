@@ -61,7 +61,8 @@ can also manage these files. The AppImage offers the built-in updater.
    sectors in it. Your original files stay where they are.
 4. Leave **Start the game after importing** on to play at once.
 
-After import, **Game disc** shows the installed copy. Keep that copy to play.
+After import, open **Disc & language**, then **Disc details** to see the
+installed image. **Open folder** opens its directory. Keep that copy to play.
 You can move your original USA image back to your collection. An optional
 language disc is read from its original location.
 
@@ -85,13 +86,13 @@ start.
 In the game's menu, pick **New Game** with the arrow keys and **Enter**, or
 **Practice Mode** for a training mission.
 
-- **Close the launcher when the game starts**, under **Play**, closes the
+- Open the arrow beside **Play** for **Close the launcher when the game starts**. This closes the
   launcher once the game is on the screen. It comes back if the game stops
   with an error.
 - If the game stops with an error, the launcher says so in its banner, beside
   **Play**.
-- **Details** there shows the end of `startup.log` and everything the launcher
-  did.
+- **Details** opens the activity log for the error. You can also select **View activity log**
+  from the arrow beside **Play** to see background checks.
 - **Help** in the side bar shows this guide. F1 opens it too.
 - **EXIT**, under **CREDITS** in the game's main menu, closes the game.
 
@@ -252,7 +253,9 @@ These keys do the same in both schemes and cannot be changed:
   RESUME MISSION in the pause, NO while ABORT asks. On the main menu itself
   and while a screen asks a question it does nothing.
 - The strafe keys step left and right on the main menu and its screens, as
-  the arrows do. In play and in the pause they strafe.
+  the arrows do. In New Game, press A or D (the default strafe keys) or
+  right-click the difficulty row to switch between Regular and Hard.
+  In play and in the pause the keys strafe.
 - **Backquote** (`` ` ``) opens the settings.
 - **B** fast-forwards while held, except on the save-name screen.
 - **F1 to F11** load a save state. With Shift they save one.
@@ -300,6 +303,11 @@ Nintendo or GameCube.
 
 The original game read only the buttons, so the sticks here are an addition.
 In menus the left stick works as the D-pad in every layout.
+
+**Analog movement** lets you walk slowly with a small tilt of the movement
+stick and reach full speed at the edge. It is on by default.
+**Controller vibration** is off by default. Turn it on under Controls to feel
+shots and hits on a gamepad that supports vibration.
 
 | Xbox | PlayStation | In the game |
 | --- | --- | --- |

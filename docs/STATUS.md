@@ -1,22 +1,22 @@
 # Project status
 
-Last verified: **18 November 2026**, release 0.16.0. The project is in alpha.
+Last verified: **21 November 2026**, release build 0.17.0. The project is in alpha.
 The whole campaign can be played through.
 
 | Area | Current state |
 | --- | --- |
-| Release | 0.16.0. Since 0.10.0 the game runs on PSXRecomp v0.3.4-alpha. |
+| Release | 0.17.0. Since 0.10.0 the game runs on PSXRecomp v0.3.4-alpha. |
 | Platform and disc | Windows x64 and Linux x64 (glibc 2.35 or newer). Disruptor USA, SLUS-00224 only. Earlier AppImage checks covered the launcher and the game from power-on through the intro under WSLg on Ubuntu 22.04. A level has not been played on Linux yet. |
 | Gameplay | The whole campaign can be played through on Windows. 60 FPS gameplay is on at first. Doors, a ridden lift, enemies and shots move on every frame under it. |
 | Rendering | OpenGL supports 1x–8x resolution and widescreen up to 32:9 or the window's shape, with 4x and 4:3 at first. Exact geometry, perspective textures, gap filling, a depth-sorted world and a smooth distance fade are on at first. Ambient occlusion, anti-aliasing (MSAA / SSAA) and sprites that face the camera are optional. Movies show all 320 columns, cleaned of their blocks and scaled smoothly under Movie filter. Minor edge gaps and localized texture wobble can remain. |
 | Motion | 60 FPS gameplay, the render thread and smooth turning are on at first. In-between frames start off and add frames up to 320 FPS. |
-| Controls | Modern or Classic controls, a gamepad beside the keyboard with dual analog sticks, keys and gamepad buttons rebound in the launcher, and keyboard save naming. Vertical mouse look, with an Auto-aim option and a crosshair. Weapon and psionic wheels remain experimental. |
+| Controls | Modern or Classic controls, rebindable keys and gamepad buttons, and keyboard save naming. Gamepads support variable walking speed and optional vibration. Vertical mouse look has an Auto-aim option and a crosshair. Weapon and psionic wheels remain experimental. |
 | Settings | One settings table for the launcher and the in-game menu. The lighting options stay closed in releases while they are tested. |
 | Achievements | RetroAchievements sign-in in the launcher, with a choice of how unlocks show. |
 | Languages | A French, German or Japanese disc of the player's own can give the game its language. USA remains the required game disc. |
 | Save states | A save state loads in a build with the same generated code and memory layout, and in the language it was made in. After an update the launcher tries each older state once and carries over those that load. Memory cards carry across every release, so keep progress there. |
-| Automated checks | All CTests pass on Windows (MSVC), the source contracts among them, and on Ubuntu 22.04 (GCC 13). CI builds and tests the sources without the game on Linux (GCC) and Windows (MinGW-w64). |
-| Release checks | Publishing requires a successful CI build for the release commit and verifies package digests and signatures. The owner waived the package smoke tests and update rehearsal for 0.16.0. |
+| Automated checks | CI builds and runs unit tests and source contracts on Linux (GCC) and Windows (MinGW-w64). |
+| Release checks | Publishing requires a successful CI build for the release commit and verifies package digests and signatures. The owner waived the smoke tests and update rehearsal for 0.17.0. |
 | Player package | A Windows installer, a portable Windows ZIP, a Linux AppImage and a portable Linux tar.gz. Each holds the launcher, the game with its own enhancement package, OpenBIOS, the player's guide, the MIT license and dependency licenses. Each is signed with Sigstore. Players supply their own supported disc image. |
 | Launcher | Disc import and verification, direct play from a game manager, a choice of data folder, updates through Velopack for the installer, ZIP and AppImage, the player's guide, and a problem report with an optional detailed log. |
 

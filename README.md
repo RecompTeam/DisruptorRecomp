@@ -26,19 +26,20 @@
 1. Download from [Releases](https://github.com/RecompTeam/DisruptorRecomp/releases):
     - **Windows:** run [**DisruptorRecomp-win-Setup.exe**](https://github.com/RecompTeam/DisruptorRecomp/releases/latest/download/DisruptorRecomp-win-Setup.exe)
     - **Windows, without installing:** unpack [**DisruptorRecomp-win-Portable.zip**](https://github.com/RecompTeam/DisruptorRecomp/releases/latest/download/DisruptorRecomp-win-Portable.zip) and run `Disruptor Recompiled.exe`
-    - **Linux x64:** download [**DisruptorRecomp.AppImage**](https://github.com/RecompTeam/DisruptorRecomp/releases/latest/download/DisruptorRecomp.AppImage), make it executable and run it:\
-      `chmod +x DisruptorRecomp.AppImage`
+    - **Linux x64, AppImage:** download [**DisruptorRecomp.AppImage**](https://github.com/RecompTeam/DisruptorRecomp/releases/latest/download/DisruptorRecomp.AppImage), then run `chmod +x DisruptorRecomp.AppImage` and open it
+    - **Linux x64, portable archive:** unpack [**DisruptorRecomp-linux-x64.tar.gz**](https://github.com/RecompTeam/DisruptorRecomp/releases/latest/download/DisruptorRecomp-linux-x64.tar.gz) and run `DisruptorRecomp/DisruptorLauncher`
 2. Drop your **Disruptor (USA, SLUS-00224)** disc image on the launcher it opens
 3. Press **Play**
 
 For Steam and other game managers, see [launch options and data folders](docs/PLAYING.md#launch-from-steam-or-another-game-manager).
 
-**No game data is included** - a French, German or Japanese disc of yours can give the game its language
+Bring your own game disc image. Add a French, German or Japanese disc under **Disc & language** to play in that language.
 
 ## Launcher
 
-- Drop your disc image on the window and press **Play**
-- Updates install with one click and keep your saves and settings
+- Open **Disc & language** to change the game disc or add a language. **Disc details** shows the installed copy.
+- Use the arrow beside **Play** to change the close-on-start option or open the activity log.
+- The Windows and AppImage launchers can install updates while keeping saves and settings.
 - Sign in to [RetroAchievements](docs/PLAYING.md#retroachievements) and the game counts its 52 achievements
 
 <table>
@@ -56,9 +57,9 @@ For Steam and other game managers, see [launch options and data folders](docs/PL
   </tr>
   <tr>
     <td valign="top">
-      <img src="docs/images/controls.png" alt="The Controls page" width="100%"><br>
-      <b>Controls</b><br>
-      Mouse, gamepad, weapon and psionic keys
+      <img src="docs/images/controls.png" alt="Mouse settings in the Controls page" width="100%"><br>
+      <b>Mouse</b><br>
+      Turning, vertical look and the crosshair
     </td>
     <td valign="top">
       <img src="docs/images/keys.png" alt="The key table" width="100%"><br>
@@ -86,7 +87,9 @@ For Steam and other game managers, see [launch options and data folders](docs/PL
 | --- | --- | --- | --- |
 | **Picture** | Internal resolution scale | 4x | Up to 8x the original resolution |
 | | Aspect ratio | 4:3 | 16:9, 21:9, 32:9 or the window's shape |
+| | Dynamic resolution | Off | Adjusts internal resolution to match the frame budget |
 | | Anti-aliasing (MSAA / SSAA) | Off | Smoother edges |
+| | Texture filtering | Nearest (original) | Bilinear, Trilinear, Anisotropic or xBR filtering for the world and sprites |
 | | Movie filter | Smooth | Movies drawn smoothly at your screen's size, without their square blocks |
 | **Motion** | 60 FPS gameplay | On | The game runs at up to 60 FPS instead of 30 |
 | | In-between frames | Off | Adds frames for smoother motion, up to 320 FPS |
@@ -101,13 +104,15 @@ For Steam and other game managers, see [launch options and data folders](docs/PL
 | | Ambient occlusion | Off | Shaded corners and floors under things |
 | | Sprites face the camera | Off | Enemies, pickups and shots stand in the world like cut-outs and face you |
 | **Controls** | Control scheme | Modern | WASD and the mouse, or the original keys |
-| | Weapon and psionic keys | Off | Two keys a weapon or power, 1 to 9 and 0 at first |
+| | Weapon and psionic keys | Off | Bind up to two keys per weapon or power |
 | | Psionic keys use the power | Off | A power's key uses the power too, once it is in hand, which comes twice as fast |
 | | Weapon and psionic wheels | Off | **EXPERIMENTAL** Choose a weapon or a psionic on a wheel instead of the game's list |
 | | Vertical mouse look | Off | Under Mouse turning. Looks up and down with the mouse |
 | | Auto-aim | Off | Under vertical look. Shots go where you look, or with this on to the game's target as in the original |
 | | Crosshair | On | Under vertical look. A dot, a plus or a ring in the middle of the screen |
 | | Stick layout | Dual analog | On a gamepad the left stick moves and strafes, the right stick turns |
+| | Analog movement | On | A small tilt of the movement stick lets you walk slowly |
+| | Controller vibration | Off | Feel shots and hits on a controller that supports vibration |
 | **And more** | | | HUD size, VSync, mouse sensitivity, gamepad buttons, the bass of the sound, a skip of the intro and others, all in the [player's guide](docs/PLAYING.md#settings) |
 
 ---

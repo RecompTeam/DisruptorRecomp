@@ -76,11 +76,11 @@ PLATFORMS = {
         (f"{PACKAGE_ID}.AppImage", LINUX_ARCHIVE),
         "**Linux x64, glibc 2.35 or newer**\n\n"
         f"- Download **{PACKAGE_ID}.AppImage**\n"
-        f"- Make it executable: `chmod +x {PACKAGE_ID}.AppImage`\n"
+        f"- Make it executable with `chmod +x {PACKAGE_ID}.AppImage`\n"
         "- Run it\n"
         "- Your files are kept in `~/.local/share/DisruptorRecompData`\n"
-        f"- Or unpack **{LINUX_ARCHIVE}** and run `DisruptorRecomp/DisruptorLauncher`. "
-        "The archive keeps your files in its `data` folder.\n",
+        f"- For the portable archive, unpack **{LINUX_ARCHIVE}** and run `DisruptorRecomp/DisruptorLauncher`\n"
+        "- The archive keeps your files in its `data` folder\n",
     ),
 }
 # The player's file the smoke test starts on each system.
@@ -459,6 +459,9 @@ def payload_of(build: Path, version: str, zstd_license: Path, platform: Platform
         "licenses/SDL-LICENSE.txt": build / "_deps/sdl3-src/LICENSE.txt",
         "licenses/SDL-hidapi-BSD-LICENSE.txt": build / "_deps/sdl3-src/src/hidapi/LICENSE-bsd.txt",
         "licenses/SDL-yuv2rgb-LICENSE.txt": build / "_deps/sdl3-src/src/video/yuv2rgb/LICENSE",
+        "licenses/libwebp-COPYING.txt": build / "_deps/psx_libwebp-src/COPYING",
+        "licenses/libwebp-PATENTS.txt": build / "_deps/psx_libwebp-src/PATENTS",
+        "licenses/rcheevos-LICENSE.txt": build / "_deps/disruptor_rcheevos-src/LICENSE",
         "licenses/libchdr-LICENSE.txt": build / "_deps/psx_libchdr-src/LICENSE.txt",
         "licenses/LZMA-LICENSE.txt": lzma_license(build),
         "licenses/Zstd-LICENSE.txt": zstd_license,
@@ -496,6 +499,8 @@ def payload_of(build: Path, version: str, zstd_license: Path, platform: Platform
         b"(c) 2026 The FreeType Project (https://freetype.org). All rights reserved.\n"
         b"SDL: copyright Sam Lantinga and contributors; zlib, with bundled\n"
         b"hidapi and YUV conversion notices included.\n"
+        b"libwebp: copyright Google Inc. BSD and patent grant included.\n"
+        b"rcheevos: copyright RetroAchievements.org. MIT.\n"
         b"libchdr and its codecs: BSD/MIT/public-domain notices included.\n"
         b"Zstandard: copyright Meta Platforms, Inc. and affiliates; BSD.\n"
         b"OpenBIOS/PCSX-Redux and uC-sdk: see bios/OpenBIOS.LICENSE.\n\n"
