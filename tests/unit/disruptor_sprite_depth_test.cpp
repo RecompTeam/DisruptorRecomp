@@ -101,6 +101,8 @@ extern "C" void gpu_temporal_note_sprite(CPUState *, std::uint32_t packet, std::
     g_notes.push_back({packet, depth});
 }
 
+extern "C" void gpu_temporal_pose_sprite(std::uint32_t, const float[4], std::uint32_t) {}
+
 extern "C" void gpu_temporal_effect_sprite(std::uint32_t) {}
 
 std::vector<std::pair<std::uint32_t, float>> g_lights;
@@ -1609,6 +1611,59 @@ void test_the_nearest_depth_over_a_box() {
 }  // namespace
 
 int main() {
+    using disruptor::soldier_pose::displacement;
+    const std::array<float, 4> still{};
+    expect(displacement(61, 0x060015B8u, 92, 162, 3, 0x36525252u) == still, "the middle of a pose keeps the original picture");
+    expect(displacement(61, 0x060015B8u, 92, 162, 6, 0x36525252u) == std::array<float, 4>{0.0f, -1.0f / 162.0f, 1.5f / 92.0f, -2.5f / 162.0f},
+           "the attack starts halfway towards its preceding pose");
+    expect(displacement(61, 0x060015B7u, 92, 162, 6, 0x36525252u) == still, "a different sprite asset keeps its artwork");
+
+    expect(displacement(61, 0x060015B8u, 92, 162, 6, 0u) == still, "an unrecognized payload keeps its artwork");
+    const auto first = displacement(81, 0x040011DCu, 86, 102, 4, 0x03030D0Du, 2);
+    const auto second = displacement(81, 0x040011DCu, 86, 102, 4, 0x03030D0Du, 3);
+    expect(first != still && second != still && std::abs(first[0] - 3.0f * second[0]) < 1e-6f,
+           "the beast moves through both ticks of its held attack pose");
+    expect(displacement(81, 0x040011DCu, 86, 102, 4, 0u, 2) == still, "a different creature gets no attack offset");
+    const auto robot_first = displacement(40, 0x0400122Cu, 108, 142, 4, 0x110B0412u, 2);
+    const auto robot_second = displacement(40, 0x0400122Cu, 108, 142, 4, 0x110B0412u, 3);
+    expect(robot_first[1] < robot_second[1] && robot_second[1] < 0.0f && robot_first[1] == robot_first[3],
+           "the robot's visor approaches the measured pose on both ticks");
+    expect(displacement(40, 0x0400122Cu, 108, 142, 4, 0u, 2) == still &&
+           displacement(44, 0x040010B4u, 80, 136, 4, 0x110B0412u, 2) == still,
+           "an unmatched frame keeps its artwork");
+    bool preserve_art = false;
+    const auto firing = displacement(84, 0x06000F54u, 66, 142, 6, 0x24072424u, 2, &preserve_art);
+    expect(preserve_art && firing[1] > 0.0f &&
+           displacement(90, 0x06000F54u, 66, 142, 6, 0x24072424u, 2) == firing,
+           "both copies of the robot's firing frame have the same correction");
+    (void)displacement(84, 0x040013FCu, 92, 120, 4, 0x0D190D0Du, 2, &preserve_art);
+    expect(!preserve_art, "the beast uses its usual sprite interpolation");
+    const auto tunnel_aim = displacement(101, 0x06001398u, 126, 136, 6, 0x2E2E1B73u, 2, &preserve_art);
+    expect(preserve_art && tunnel_aim[1] > 0.0f &&
+           displacement(109, 0x06001398u, 126, 136, 6, 0x2E2E1B73u, 2) == tunnel_aim,
+           "both tunnel creature attack sequences have the same correction");
+    expect(displacement(109, 0x06001398u, 126, 136, 6, 0u, 2) == still,
+           "an unrelated sprite does not get the tunnel creature's correction");
+    CPUState reused{};
+    reused.read_byte = read_byte;
+    reused.read_half = read_half;
+    constexpr uint32_t reused_slot = 0x800B75E0u;
+    put(kLoadedMission, 5u, 1);
+    put(reused_slot + kActorSerial, 0x3174u, 2);
+    const auto old_actor = pose_actor_id(reused, reused_slot);
+    put(reused_slot + kActorSerial, 0x3274u, 2);
+    const auto new_actor = pose_actor_id(reused, reused_slot);
+    expect(old_actor != new_actor && !(new_actor & GPU_TEMPORAL_SPRITE_KEEP_ART),
+           "the allocation counter separates enemies in the same sprite slot");
+    disruptor_sprite_depth_state_loaded();
+    expect(pose_actor_id(reused, reused_slot) != new_actor, "loading a state separates the two sprite timelines");
+    disruptor_sprite_depth_state_loaded();
+    put(kLoadedMission, 13u, 1);
+    put(reused_slot + kActorSerial, 0xFFFFu, 2);
+    const auto carried_actor = pose_actor_id(reused, reused_slot) | GPU_TEMPORAL_SPRITE_KEEP_ART;
+    expect(static_cast<uint32_t>(static_cast<float>(carried_actor)) == carried_actor,
+           "the render thread preserves the full sprite ID and its flag");
+    g_memory.clear();
     test_a_range_comes_under_the_squash();
     test_every_funnel_hands_its_depth_over();
     test_a_depth_stays_in_its_funnel();

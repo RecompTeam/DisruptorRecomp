@@ -92,6 +92,18 @@ def body(text: str, head: str) -> str:
     return found[: found.index("\n}\n") + 3]
 
 
+for function, handoff_return in (
+    ("void gl_renderer_present_vram(", "return;"),
+    ("int gl_renderer_present_wide_fbo(", "return 1;"),
+):
+    present = body(renderer, function)
+    handoff = present.index("if (interp_pair) {")
+    require(
+        present.index("glClear(GL_COLOR_BUFFER_BIT)") > present.index(handoff_return, handoff),
+        f"{function} clears the window back buffer only on the path that presents natively",
+    )
+
+
 require(
     body(states, "static int header_accepted(")
     == "static int header_accepted(const uint8_t* state, size_t len) {\n"

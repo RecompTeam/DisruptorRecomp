@@ -57,6 +57,7 @@ namespace {
 
 constexpr char kMagic[8] = {'D', 'C', 'A', 'P', 'S', 'U', 'L', '5'};
 constexpr size_t kFrameBytes = 39, kHeadBytes = sizeof(kMagic) + 4 + 8;
+constexpr size_t kAnalogFrameBytes = kFrameBytes + 4;
 
 /* A frame of version 1 has no second byte write, one of version 2 no weapon list, one of version 3 no turn remainder or presenter
  * count, one of version 4 no late pitch. */
@@ -67,6 +68,7 @@ size_t frame_bytes_of(char version) {
     case '3': return 27;
     case '4': return 35;
     case '5': return kFrameBytes;
+    case '6': return kAnalogFrameBytes;
     default: return 0;
     }
 }
@@ -85,6 +87,8 @@ uint64_t take(std::string_view bytes, size_t at, int count) {
 
 std::string encode(const std::vector<Frame> &frames, uint64_t first_cycle) {
     std::string out(kMagic, sizeof(kMagic));
+    const bool analog = std::any_of(frames.begin(), frames.end(), [](const Frame &frame) { return static_cast<bool>(frame.movement); });
+    if (analog) out.back() = '6';
     put(out, frames.size(), 4);
     put(out, first_cycle, 8);
     for (const Frame &frame : frames) {
@@ -106,6 +110,10 @@ std::string encode(const std::vector<Frame> &frames, uint64_t first_cycle) {
         uint32_t late = 0;
         std::memcpy(&late, &frame.late_pitch, sizeof(late));
         put(out, late, 4);
+        if (analog) {
+            put(out, static_cast<uint16_t>(frame.movement.forward), 2);
+            put(out, static_cast<uint16_t>(frame.movement.strafe), 2);
+        }
     }
     return out;
 }
@@ -144,6 +152,18 @@ bool decode(std::string_view bytes, std::vector<Frame> &frames, uint64_t &first_
         if (frame_bytes > 35) {
             const auto late = static_cast<uint32_t>(take(bytes, at + 35, 4));
             std::memcpy(&frame.late_pitch, &late, sizeof(late));
+        }
+        if (frame_bytes == kAnalogFrameBytes) {
+            frame.movement.forward = static_cast<int16_t>(take(bytes, at + kFrameBytes, 2));
+            frame.movement.strafe = static_cast<int16_t>(take(bytes, at + kFrameBytes + 2, 2));
+            constexpr int64_t rounded_limit = sticks::kFullMovement + 1;
+            const int64_t forward = frame.movement.forward, strafe = frame.movement.strafe;
+            if (forward < -sticks::kFullMovement || strafe < -sticks::kFullMovement ||
+                forward * forward + strafe * strafe > rounded_limit * rounded_limit) {
+                frames.clear();
+                first_cycle = 0;
+                return false;
+            }
         }
     }
     return true;
@@ -628,6 +648,7 @@ void close_frame() {
     Capsule &capsule = g_capsule;
     capsule.open.pad[0] = sio_get_pad_buttons_slot(0);
     capsule.open.pad[1] = sio_get_pad_buttons_slot(1);
+    capsule.open.movement = disruptor::sticks::movement();
     capsule.open.byte_at = capsule.notes.byte_at;
     capsule.open.byte = capsule.notes.byte;
     capsule.open.byte2_at = capsule.notes.byte2_at;
@@ -879,6 +900,7 @@ void replay_frame() {
     if (++capsule.at == capsule.replayed.size()) finish_replay();
     psx_game_pad_word(0, frame.pad[0]);
     psx_game_pad_word(1, frame.pad[1]);
+    disruptor::sticks::set_movement(frame.movement);
     if (frame.byte_at != 0u) {
         psx_host_write_byte(frame.byte_at, frame.byte);
         disruptor_capsule_note_byte(frame.byte_at, frame.byte);  /* a recording made inside a replay holds the byte too */

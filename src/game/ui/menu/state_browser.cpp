@@ -76,7 +76,7 @@ void open(Ui &ui, browser::Place place) {
             }
     }
     ui.phase = Phase::open;
-    screen::reload();
+    ui.seen = screen::read_slots_on_open(place) - 1;
     ui.read = false;
     ui.waiting = false;
     ui.held.clear();
@@ -121,11 +121,13 @@ void poll(Ui &ui) {
     if (ui.phase == Phase::open && Clock::now() - ui.opened > kLeftAfter && !screen::context_alive(ui.model.place)) ui.phase = Phase::closed;
     /* Keys and buttons seen down stay the screen's until they go up: the game would take a held one for a new press. */
     if (ui.phase == Phase::closing && ui.held.empty()) ui.phase = Phase::closed;
-    if (std::optional<std::array<screen::Card, browser::kSlots>> cards = screen::cards_after(ui.seen); cards) {
-        ui.cards = std::move(*cards);
-        ui.renew.fill(true);
-        ui.read = true;
-        ui.model.read = true;
+    if (ui.phase == Phase::open) {
+        if (auto cards = screen::cards_after(ui.seen)) {
+            ui.cards = std::move(*cards);
+            ui.renew.fill(true);
+            ui.read = true;
+            ui.model.read = true;
+        }
     }
     if (ui.waiting && !screen::busy()) {
         ui.waiting = false;

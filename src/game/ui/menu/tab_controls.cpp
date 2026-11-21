@@ -192,6 +192,14 @@ void draw_controls_tab() {
     ImGui::SetNextItemWidth(260.0f);
     if (option_slider("controller.deadzone", &deadzone)) set_deadzone_live(deadzone);
     draw_status_badge("LIVE", ImVec4(0.35f, 0.90f, 0.45f, 1.0f));
+    if (option_toggle("disruptor.analog_movement", &sticks.analog_movement)) {
+        disruptor::sticks::tune(sticks);
+        mark("disruptor.analog_movement", sticks.analog_movement);
+    }
+    if (option_toggle("disruptor.vibration", &sticks.vibration)) {
+        disruptor::sticks::tune(sticks);
+        mark("disruptor.vibration", sticks.vibration);
+    }
     if (ImGui::TreeNode("Buttons")) {
 #if defined(PSX_SDL3)
         const disruptor::settings::PadFamily family = disruptor::settings::family_shown(g_menu.pad_in_use);

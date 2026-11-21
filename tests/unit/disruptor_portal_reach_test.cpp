@@ -439,10 +439,10 @@ struct Map {
         memory.set_byte(gate + sector_reach::kPortalSector, room);
         memory.set_byte(gate + kPortalLast, last);
     }
-    uint32_t add(Beside &beside) {
+    uint32_t add(Beside &beside, std::span<const uint8_t> exterior = {}) {
         return beside.add(kList, kList + 8u, 8u, 1000, 1000, kAhead, memory,
                           [this](uint32_t address, uint32_t word) { memory.set_word(address, word); },
-                          [this](uint32_t address, uint32_t byte) { memory.set_byte(address, byte); });
+                          [this](uint32_t address, uint32_t byte) { memory.set_byte(address, byte); }, exterior);
     }
     void close(Beside &beside) {
         beside.close(kEnd, [this](uint32_t address) { return memory.word(address); },
@@ -513,6 +513,13 @@ void test_beside_rooms() {
     behind_door.memory.set_word(0x80110000u + 16u, 0x80120000u);
     Beside walled;
     expect(behind_door.add(walled) == kList + 8u, "nor a room past a listed room whose own door is shut, as the walk stops there");
+    const std::array<uint8_t, 3> exterior{3u, 3u, 4u};
+    behind_door.memory.set_word(kEnd, behind_door.add(walled, exterior));
+    expect(behind_door.memory.word(kEnd) == kList + 16u && behind_door.memory.byte(kList + 8u + kRoomByte) == 3u,
+           "only the resident exterior room is drawn with the door shut");
+    behind_door.close(walled);
+    expect(behind_door.memory.word(kEnd) == kList + 8u && behind_door.memory.byte(kListedAt + 3u) == 0xFFu,
+           "the extra room is removed from the gameplay list");
 
     Map gone;
     gone.memory.set_word(sector_reach::kSectors + 4u * 2u, 0u);
@@ -540,6 +547,15 @@ void test_keep_bounds() {
 }  // namespace
 
 int main() {
+    constexpr uint32_t part = 0x8014A274u;
+    const auto read = [](uint32_t address) -> uint32_t {
+        if (address == 0x1F800054u) return part;
+        if (address == part) return 0x760FFu;
+        return address == part + 4u ? 0xE8u : 0u;
+    };
+    expect(console_wall(0x2789F12Cu, 0x26498200u, part + 1484u, read), "the console wall spans the portal");
+    expect(!console_wall(0x2789F12Cu, 0x26498200u, part + 1492u, read), "a different mesh record keeps its clipping");
+    expect(!console_wall(0x2789F12Cu, 0x26498000u, part + 1484u, read), "a changed face keeps its clipping");
     test_a_span_at_the_frame_edge_reaches_past_it();
     test_widened();
     test_refused();

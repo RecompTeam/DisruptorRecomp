@@ -33,7 +33,10 @@ require(
     '    "    float ramp = float(rows)*(into > 0.0 ? pow(min(into, 1.0), max(u_fade_power, 1.0)) : into);\\n"\n'
     '    "    level = clamp(ramp, 0.0, float(rows - 1));\\n"\n'
     '    "    past = clamp(ramp - float(rows - 1), 0.0, 1.0);\\n"\n'
-    '    "    if (u_dissolve.y > 0.5) dissolve = smoothstep(u_dissolve.x, u_dissolve.w, 1.0/(v_fade.x*u_fade_at.z));\\n"\n'
+    '    "    if (u_dissolve.y > 0.5) {\\n"\n'
+    '    "      dissolve = smoothstep(u_dissolve.x, u_dissolve.w, 1.0/(v_fade.x*u_fade_at.z));\\n"\n'
+    '    "      if (night) dissolve = max(dissolve, (u_clear.w-1.0)*smoothstep(0.0,1.0,past));\\n"\n'
+    '    "    }\\n"\n'
     '    "    g_row = first + int(level);\\n"\n'
     in renderer
     and '    "  int first = rows > 1 && v_fade.x > 0.0 && v_depth != 2 ? fade_first_row(rows) : -1;\\n"\n'
@@ -49,14 +52,15 @@ require(
     "and the palette's block of rows begins at the row a level's texture descriptor names, a palette no descriptor names keeps the game's row",
 )
 require(
-    '    "  int glyph = (v_raw & 2) == 0 && (u_twin.x | u_twin.y) == 0 ? (v_raw >> 2) & 0x3FFFF : 0;  '
+    '    "  int glyph = (v_raw & 0x200002) == 0 && (u_twin.x | u_twin.y) == 0 ? (v_raw >> 2) & 0x3FFFF : 0;  '
     '/* a texture window samples past the limits */\\n"\n'
     '    "  if (v_sky_on != 0 ? !sky_sample(rgb, stp)\\n"\n'
     '    "                    : !sample_texture(sample_uv, rgb, stp) && (glyph == 0 || !glyph_edge(sample_uv, glyph, rgb, stp))) discard;\\n"\n'
-    '    "  if (level >= 0.0 && int(level) < rows - 1 && u_semipass < 3) {  /* passes 3 and 4 write depth alone */\\n"\n'
+    '    "  float row_part = fract(level);\\n"\n'
+    '    "  if (level >= 0.0 && row_part > 0.0 && int(level) < rows - 1 && u_semipass < 3) {\\n"\n'
     '    "    vec3 next; int next_stp; g_row += 1;\\n"\n'
     '    "    if (v_sky_on != 0 ? sky_sample(next, next_stp) : sample_texture(sample_uv, next, next_stp)) '
-    'rgb = mix(rgb, next, fract(level));\\n"\n'
+    'rgb = mix(rgb, next, row_part);\\n"\n'
     '    "  }\\n"\n'
     in renderer
     and '    "  g_row = v_clut.y;\\n"\n' in renderer
@@ -180,9 +184,8 @@ require(
     in renderer
     and "    return s_smooth_fade && (s_edge_sky || s_clear_known) && s_fade_rows > 1 && s_edge_depth > EDGE_DISSOLVE_BAND && !s_uv_view;\n"
     in renderer
-    and "    if (!edge_dissolving()) { glDisable(GL_BLEND); return; }\n    glEnable(GL_BLEND);\n" in renderer
-    and "    p_glBlendFuncSeparate(GL_ONE, PSXGL_SRC1_ALPHA, GL_ONE, GL_ZERO);\n}\n\n/* Draw the queued textured batch"
-    in renderer
+    and "    if (night || edge_dissolving()) dual_source_blend(0);\n    else glDisable(GL_BLEND);\n" in renderer
+    and "    p_glBlendFuncSeparate(GL_ONE, PSXGL_SRC1_ALPHA, GL_ONE, GL_ZERO);\n" in renderer
     and "static int batch_dissolves(int semi, int check) { return edge_dissolving() && (semi < 0 || (semi == 4 && !check)); }\n"
     in renderer
     and "    p_glUniform4f(dissolve, s_edge_depth - EDGE_DISSOLVE_BAND, batch_dissolves(semi, check) ? 1.0f : 0.0f, s_edge_sky ? 1.0f : 0.0f,\n                  s_edge_depth);\n"
@@ -190,14 +193,14 @@ require(
     and "    p_glUniform4f(clear, s_clear_rgb[0], s_clear_rgb[1], s_clear_rgb[2], s_clear_known ? 1.0f : 0.0f);\n"
     in renderer
     and "temporal_colour_without_depth" not in presenter
-    and presenter.count("edge_dissolve_batch(u->dissolve,u->clear,c->semi,c->check);") == 2
-    and "    if (t) smooth_fade_uniforms(u->fade, u->fade_at, u->fade_power, u->fade_blocks, u->fade_block_count, s_temp_fade_nearer);\n    if (t) edge_dissolve_batch(u->dissolve,u->clear,c->semi,c->check);\n"
+    and presenter.count("edge_dissolve_batch(u->dissolve,u->clear,c->semi,c->check);") == 3
+    and "    if (t) smooth_fade_uniforms(u->fade, u->fade_at, u->fade_power, u->fade_blocks, u->fade_block_count, s_temp_fade_nearer);\n    if (t) {\n        edge_dissolve_batch(u->dissolve,u->clear,c->semi,c->check);\n        night_terrain_uniform(u->clear, &s_night_between);\n    }\n"
     in presenter
     and "    smooth_fade_uniforms(u->fade, u->fade_at, u->fade_power, u->fade_blocks, u->fade_block_count, s_temp_fade_nearer);\n    edge_dissolve_batch(u->dissolve,u->clear,c->semi,c->check);\n"
     in presenter
-    and "    if (semi < 0) {\n        opaque_blend();\n" in renderer
-    and presenter.count("opaque_blend()") == 4
-    and "    } else if (c->semi<0) {\n        opaque_blend(); temporal_mask(c->check,c->mask);\n        p_glUniform1i(u->pass,0);"
+    and "    if (semi < 0) {\n        opaque_blend(night);\n" in renderer
+    and presenter.count("opaque_blend(night)") == 4
+    and "    } else if (c->semi<0) {\n        opaque_blend(night); temporal_mask(c->check,c->mask);\n        p_glUniform1i(u->pass,0);"
     in presenter
     and "    gl_renderer_set_edge_sky(disruptor_backdrop_tiles_sky_behind(psx_mod_read_word(kVBlanks)));\n"
     in read("src/game/render/render_arena.cpp")

@@ -89,7 +89,11 @@ ROW = r'\b(toggle|choice|slider)(?:<[^>]*>)?\(\s*"([\w.]+)", "([^"]+)", (-?\d+)'
 rows = re.findall(ROW, options)
 keys = [key for _, key, _, _ in rows]
 initial = {key: int(value) for _, key, _, value in rows}
-require(len(rows) == 79 and len(set(keys)) == 79, "the shared table must hold its 79 options, each key once")
+require(len(rows) == 81 and len(set(keys)) == 81, "the shared table must hold its 81 options, each key once")
+require(
+    initial["disruptor.analog_movement"] == 1 and initial["disruptor.vibration"] == 0,
+    "the launcher must show analog movement on and controller vibration off by default",
+)
 bass_default = re.search(r"kDisruptorBassCutDefault = (\d+);", read("src/game/settings/game_user_settings.h"))
 require(
     bass_default is not None and initial["disruptor.bass_cut"] == int(bass_default.group(1)) == 1,
@@ -237,6 +241,7 @@ require(
     '        step.status = L"The game started meanwhile, so the language is not saved\\nChoose it again once the game closes";\n'
     "    else if (step.save_language && !settings_.choose_language_disc(utf8(outcome.image))) step.status = settings_error();\n"
     "    if (!step.status.empty()) say(step.status);\n"
+    "    if (outcome.task == Task::verify && step.disc == DiscAfter::taken && outcome.language_error.empty()) show({});\n"
     "    if (step.launch && !game_running()) launch(outcome.language);\n"
     in window
     and "        say(running_text(environment_overrides()));" in window

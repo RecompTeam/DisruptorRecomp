@@ -46,6 +46,7 @@ constexpr const char* kReleasesPage = "https://github.com/RecompTeam/DisruptorRe
 constexpr const char* kTeamPage = "https://github.com/RecompTeam";
 constexpr const char* kDiscord = "https://discord.gg/hWbFatkXpU";
 constexpr const char* kGuidePage = "https://github.com/RecompTeam/DisruptorRecomp/blob/main/docs/PLAYING.md";
+constexpr Uint64 kSceneIntervalMs = 12000;
 constexpr float kFontSize = 16.0f, kSmallSize = 15.0f;
 constexpr const char* kCloseChoice = "Close the launcher when the game starts";
 // Inter's thin stems drawn light on dark lose weight in grayscale blending: coverage of the regular face times 1.25.
@@ -230,28 +231,24 @@ std::string slider_format(const Option& option, int value) {
 
 
 // A bordered panel of the raised colour, as tall as its contents when `height` is 0.
-void card_begin(const char* id, float width, float height = 0.0f) {
+void card_begin(const char* id, float width, float height = 0.0f, float vertical_padding = -1.0f) {
     ImGui::PushStyleColor(ImGuiCol_ChildBg, rgb(kSurface));
-    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(ImGui::GetFontSize(), ImGui::GetFontSize() * 0.9f));
+    const float padding_y = vertical_padding >= 0.0f ? vertical_padding : ImGui::GetFontSize() * 0.9f;
+    ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(ImGui::GetFontSize(), padding_y));
     const ImGuiChildFlags fit = height > 0.0f ? ImGuiChildFlags_None : ImGuiChildFlags_AutoResizeY;
     ImGui::BeginChild(id, ImVec2(width, height),
                       ImGuiChildFlags_Borders | fit | ImGuiChildFlags_AlwaysUseWindowPadding | ImGuiChildFlags_NavFlattened,
                       ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
 }
 
-// How tall the card's contents want it, padding included.
 float toggle_width() { return ImGui::GetFrameHeight() * 0.78f * 1.8f; }
-
-float close_choice_width() { return ImGui::GetFrameHeight() + ImGui::GetStyle().ItemInnerSpacing.x + ImGui::CalcTextSize(kCloseChoice).x; }
 
 float settings_column(float scale) { return (kRowWidth + 2.0f * kRowsPadding) * scale + ImGui::GetStyle().ScrollbarSize; }
 
-float card_end() {
-    const float wanted = ImGui::GetCursorPosY() - ImGui::GetStyle().ItemSpacing.y + ImGui::GetStyle().WindowPadding.y;
+void card_end() {
     ImGui::EndChild();
     ImGui::PopStyleVar();
     ImGui::PopStyleColor();
-    return wanted;
 }
 
 void card_label(const char* glyph, const char* text) {
@@ -539,6 +536,7 @@ void View::load_art() {
     scenes_.clear();
     for (const Picture& scene : menu_scenes(disc))
         if (SDL_Texture* texture = picture_texture(renderer_, scene)) scenes_.push_back(texture);
+    next_scene_at_ = SDL_GetTicks() + kSceneIntervalMs;
     std::random_device seed;
     scene_ = scenes_.empty() ? 0 : std::uniform_int_distribution<std::size_t>(0, scenes_.size() - 1)(seed);
 }
@@ -885,7 +883,7 @@ bool View::home(const UpdateView& update) {
                              update.state == UpdateState::ready;
         return waiting && update_strip(update);
     }
-    cards(dialog_open);
+    disc_panel(dialog_open);
     // The update card stays while there is something to do about an update. Otherwise the notes take its place.
     const bool acting = update.state == UpdateState::available || update.state == UpdateState::downloading ||
                         update.state == UpdateState::ready || update.state == UpdateState::failed ||
@@ -947,11 +945,12 @@ void View::banner(float height, bool dialog_open) {
     const ImVec2 bottom = top + ImVec2(width, height);
     const float rounding = 12.0f * scale_;
     const bool game_art = !scenes_.empty();
+    if (game_art && SDL_GetTicks() >= next_scene_at_) {
+        scene_ = (scene_ + 1) % scenes_.size();
+        next_scene_at_ = SDL_GetTicks() + kSceneIntervalMs;
+    }
     SDL_Texture* art = game_art ? scenes_[scene_ % scenes_.size()] : first_run_;
-    // Whole pixels of the 320 by 240 picture, as many as fill the banner's width, from its top where the logo is.
-    const float pixel = std::max(std::ceil(width / 320.0f), std::ceil(height / 240.0f));
-    // The disc's logo ends by the picture's 45th row (42 to 44 measured), the first run's lettering 90 rows down.
-    const float logo_bottom = top.y + (game_art ? 45.0f * pixel : 90.0f * scale_);
+    const float pixel = std::max(width / 320.0f, height / 240.0f);
     if (art) {
         const float shown_x = width / pixel / 320.0f, shown_y = height / pixel / 240.0f;
         const float left = (1.0f - shown_x) * 0.5f;
@@ -967,52 +966,29 @@ void View::banner(float height, bool dialog_open) {
     draw->AddRect(top, bottom, colour(kBorder), rounding);
     const float pad = 24.0f * scale_;
     if (!game_art) {
-        draw->AddText(heavy_, 42.0f * scale_, top + ImVec2(28.0f * scale_, 26.0f * scale_), colour(0xf2f5f2), "DISRUPTOR");
+        draw->AddText(heavy_, 34.0f * scale_, top + ImVec2(28.0f * scale_, 26.0f * scale_), colour(0xf2f5f2), "DISRUPTOR");
         std::string spaced;
         for (const char letter : std::string_view("RECOMPILED")) (spaced += letter) += ' ';
-        draw->AddText(bold_, 13.0f * scale_, top + ImVec2(30.0f * scale_, 74.0f * scale_), colour(kRed), spaced.c_str());
+        draw->AddText(bold_, 13.0f * scale_, top + ImVec2(30.0f * scale_, 64.0f * scale_), colour(kRed), spaced.c_str());
     }
 
     const bool busy = session_.busy(), running = session_.game_running(), playable = session_.playable();
-    const unsigned dot = busy ? kAmber : running || playable ? kGreen : kAmber;
-    const std::string said = busy      ? first_line(text_of(session_.status()))
-                             : running ? std::string("Game running")
-                             : playable ? std::string("Ready to play")
-                                        : std::string("Add your game disc to play");
-    ImFont* pill_font = bold_;
-    const float pill_size = ImGui::GetFontSize() * 0.9f;
-    const ImVec2 said_size = pill_font->CalcTextSizeA(pill_size, width * 0.55f, 0.0f, said.c_str());
-    const float pill_height = 28.0f * scale_;
-    // The lowest row holds the choice to close the launcher, under PLAY: the rest stands above it.
-    const float floor_y = bottom.y - pad - ImGui::GetFrameHeight() - 8.0f * scale_;
-    const bool sub = playable && !busy;
-    const ImVec2 pill(top.x + pad, floor_y - pill_height - (sub ? 26.0f * scale_ : 0.0f));
-    draw->AddRectFilled(pill, pill + ImVec2(said_size.x + 40.0f * scale_, pill_height), colour(0x0a0e0b, 0.82f), pill_height * 0.5f);
-    draw->AddRect(pill, pill + ImVec2(said_size.x + 40.0f * scale_, pill_height), colour(kBorder), pill_height * 0.5f);
-    if (busy) {
-        spinner(draw, pill + ImVec2(17.0f * scale_, pill_height * 0.5f), 5.0f * scale_, colour(dot), 2.0f * scale_);
-    } else {
-        draw->AddCircleFilled(pill + ImVec2(17.0f * scale_, pill_height * 0.5f), 4.0f * scale_, colour(dot));
+    const float floor_y = bottom.y - pad;
+    const float menu_width = 40.0f * scale_;
+    const ImVec2 play_size(170.0f * scale_, 56.0f * scale_);
+    const ImVec2 play_at(bottom.x - pad - menu_width - play_size.x, floor_y - play_size.y);
+    if (busy || running) {
+        const ImVec2 at(top.x + pad, play_at.y + play_size.y * 0.5f);
+        if (busy) spinner(draw, at + ImVec2(6.0f * scale_, 0), 5.0f * scale_, colour(kAmber), 2.0f * scale_);
+        const std::string message = running ? "Game running" : first_line(text_of(session_.status()));
+        draw->PushClipRect(at - ImVec2(0, ImGui::GetFontSize()), ImVec2(play_at.x - pad, floor_y), true);
+        draw->AddText(ImVec2(at.x + (busy ? 20.0f * scale_ : 0.0f), at.y - ImGui::GetFontSize() * 0.5f), colour(kText), message.c_str());
+        draw->PopClipRect();
+    } else if (!last_activity(top.x + pad, play_at.x - pad, play_at.y + play_size.y * 0.5f)) {
+        status_below_ = true;
     }
-    draw->PushClipRect(pill, pill + ImVec2(said_size.x + 40.0f * scale_, pill_height), true);
-    draw->AddText(pill_font, pill_size, pill + ImVec2(30.0f * scale_, (pill_height - pill_size) * 0.5f), colour(kText), said.c_str());
-    draw->PopClipRect();
-    float taken = pill.x + said_size.x + 40.0f * scale_;
-    if (sub) {
-        const LanguageList languages = session_.languages();
-        std::string line = text_of(session_.verified().profile->label);
-        if (languages.selected > 0 && languages.selected < static_cast<int>(languages.labels.size()))
-            line += "  \xc2\xb7  " + text_of(languages.labels[static_cast<std::size_t>(languages.selected)]);
-        else line += "  \xc2\xb7  English";
-        draw->AddText(body_, ImGui::GetFontSize() * 0.9f, ImVec2(pill.x, pill.y + pill_height + 8.0f * scale_), colour(kMuted), line.c_str());
-        taken = std::max(taken, pill.x + body_->CalcTextSizeA(ImGui::GetFontSize() * 0.9f, FLT_MAX, 0.0f, line.c_str()).x);
-    }
-
-    const ImVec2 play_size(210.0f * scale_, 56.0f * scale_);
-    const ImVec2 play_at(bottom.x - pad - play_size.x, floor_y - play_size.y);
-    const float choice_left = bottom.x - pad - close_choice_width();
     if (busy && session_.cancellable()) {
-        ImGui::SetCursorScreenPos(ImVec2(bottom.x - pad - ImGui::CalcTextSize("Cancel").x - ImGui::GetStyle().FramePadding.x * 2.0f,
+        ImGui::SetCursorScreenPos(ImVec2(play_at.x + play_size.x - ImGui::GetStyle().ItemSpacing.x - ImGui::CalcTextSize("Cancel").x - ImGui::GetStyle().FramePadding.x * 2.0f,
                                          floor_y - ImGui::GetFrameHeight()));
         if (ImGui::Button("Cancel")) session_.cancel();
     } else {
@@ -1030,7 +1006,7 @@ void View::banner(float height, bool dialog_open) {
         // A press sinks the button by 3 percent, so it answers before the game window comes.
         const float sink = 1.0f - 0.03f * press;
         const ImVec2 shrunk((play_size.x * (1.0f - sink)) * 0.5f, (play_size.y * (1.0f - sink)) * 0.5f);
-        draw->AddRectFilled(play_at + shrunk, play_at + play_size - shrunk, colour(fill), 10.0f * scale_);
+        draw->AddRectFilled(play_at + shrunk, play_at + play_size - shrunk, colour(fill), 10.0f * scale_, ImDrawFlags_RoundCornersLeft);
         const float letters = 20.0f * scale_ * sink;
         const float spacing = 2.5f * scale_ * sink;
         float label_width = 0.0f;
@@ -1046,15 +1022,35 @@ void View::banner(float height, bool dialog_open) {
         }
         focus_ring(ImGui::GetItemID(), play_at, play_at + play_size, 10.0f * scale_);
         if (pressed && playable && !held_off("play")) session_.play();
-        // Beside PLAY, else beside the choice under it, else above PLAY where the logo leaves room, else under the banner.
-        const float above = play_at.y - 12.0f * scale_ - ImGui::GetTextLineHeight();
-        if (!busy && !last_activity(taken + pad, play_at.x - 18.0f * scale_, play_at.y + play_size.y * 0.5f) &&
-            !last_activity(top.x + pad, choice_left - 28.0f * scale_, bottom.y - pad - ImGui::GetFrameHeight() * 0.5f)) {
-            if (above - ImGui::GetTextLineHeight() * 0.5f >= logo_bottom) last_activity(top.x + pad, bottom.x - pad, above);
-            else status_below_ = true;
-        }
     }
-    close_choice(bottom.x - pad, bottom.y - pad, dialog_open);
+    const ImVec2 menu_at(play_at.x + play_size.x, play_at.y);
+    const ImVec2 menu_end(bottom.x - pad, floor_y);
+    ImGui::SetCursorScreenPos(menu_at);
+    ImGui::BeginDisabled(dialog_open);
+    if (control("Play options", menu_end - menu_at)) ImGui::OpenPopup("Play options");
+    const bool highlighted = ImGui::IsItemHovered() || ImGui::IsItemActive();
+    const unsigned menu_fill = playable ? (highlighted ? kRedHover : kRed) : (highlighted ? kHover : kRaised);
+    draw->AddRectFilled(menu_at, menu_end, colour(menu_fill), 10.0f * scale_, ImDrawFlags_RoundCornersRight);
+    draw->AddLine(menu_at, ImVec2(menu_at.x, menu_end.y), colour(kText, 0.28f));
+    const ImVec2 glyph = ImGui::CalcTextSize(icon::chevron_down);
+    draw->AddText(menu_at + ImVec2((menu_width - glyph.x) * 0.5f, (play_size.y - glyph.y) * 0.5f), colour(kText), icon::chevron_down);
+    focus_ring(ImGui::GetItemID(), menu_at, menu_end, 8.0f * scale_);
+    hand_when_hovered();
+    ImGui::EndDisabled();
+    tooltip("Play options");
+    ImGui::SetNextWindowPos(menu_end + ImVec2(0, 4.0f * scale_), ImGuiCond_Appearing, ImVec2(1.0f, 0.0f));
+    if (ImGui::BeginPopup("Play options")) {
+        close_choice();
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+        if (ImGui::Button("View activity log", ImVec2(-FLT_MIN, ImGui::GetFrameHeight() + 6.0f * scale_))) {
+            ImGui::CloseCurrentPopup();
+            details_ = true;
+        }
+        hand_when_hovered();
+        ImGui::EndPopup();
+    }
     if (busy) {
         const float done = std::clamp(static_cast<float>(session_.progress()) / 100.0f, 0.0f, 1.0f);
         const float inset = rounding;
@@ -1065,15 +1061,12 @@ void View::banner(float height, bool dialog_open) {
     ImGui::Dummy(ImVec2(width, height));
 }
 
-void View::close_choice(float right, float bottom, bool dialog_open) {
-    ImGui::SetCursorScreenPos(ImVec2(right - close_choice_width(), bottom - ImGui::GetFrameHeight()));
+void View::close_choice() {
     bool chosen = choices_.close_after_start;
-    ImGui::BeginDisabled(dialog_open);
     ImGui::PushStyleColor(ImGuiCol_Text, rgb(kMuted));
     const bool changed = ImGui::Checkbox(kCloseChoice, &chosen);
     ImGui::PopStyleColor();
     hand_when_hovered();
-    ImGui::EndDisabled();
     tooltip("The launcher closes as soon as the game is on the screen\nIt comes back if the game ends with an error");
     if (!changed) return;
     choices_.close_after_start = chosen;
@@ -1134,53 +1127,82 @@ void View::first_run(bool dialog_open) {
     ImGui::Dummy(ImVec2(width, height + 6.0f * scale_));
 }
 
-void View::cards(bool dialog_open) {
-    const bool free = !session_.busy() && !session_.game_running();
-    const float gap = 18.0f * scale_;
-    const float half = (ImGui::GetContentRegionAvail().x - gap) * 0.5f;
-    // The two cards stand side by side at the height the taller one wanted in the frame before.
-    card_begin("disc", half, cards_height_);
-    card_label(icon::disc_3, "GAME DISC");
+float View::disclosure_button(const char* title, bool& open, float height) {
+    ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(16.0f * scale_, 0));
+    ImGui::PushStyleVar(ImGuiStyleVar_ButtonTextAlign, ImVec2(0, 0.5f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, rgb(kSegmentHover));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, rgb(kSegmentChosen));
+    const std::string heading_label = std::string(open ? icon::chevron_down : icon::chevron_right) + "   " + title;
+    if (ImGui::Button((heading_label + "###" + title).c_str(), ImVec2(-FLT_MIN, height * scale_))) open = !open;
+    if (ImGui::IsItemFocused()) {
+        if (ImGui::IsKeyPressed(ImGuiKey_LeftArrow) || ImGui::IsKeyPressed(ImGuiKey_GamepadDpadLeft)) open = false;
+        if (ImGui::IsKeyPressed(ImGuiKey_RightArrow) || ImGui::IsKeyPressed(ImGuiKey_GamepadDpadRight)) open = true;
+    }
+    ImGui::PopStyleColor(2);
+    ImGui::PopStyleVar(2);
+    hand_when_hovered();
+    return ImGui::CalcTextSize(heading_label.c_str()).x;
+}
+
+void View::disc_panel(bool dialog_open) {
     const VerifiedDisc& disc = session_.verified();
+    const LanguageList languages = session_.languages();
+    const float inset = 16.0f * scale_;
+    ImGui::PushStyleColor(ImGuiCol_Button, rgb(kSurface));
     ImGui::PushFont(bold_, kFontSize * 1.1f);
-    ImGui::TextUnformatted(disc.profile ? text_of(disc.profile->label).c_str() : "Not verified yet");
+    const float title_width = disclosure_button("Disc & language", disc_panel_open_, 52.0f);
     ImGui::PopFont();
+    ImGui::PopStyleColor();
+    if (!disc_panel_open_) {
+        const float right = ImGui::GetItemRectMax().x - inset;
+        const float room = right - ImGui::GetItemRectMin().x - 2.0f * inset - title_width;
+        const std::string summary = disc.profile ? text_of(disc.profile->label) + "  ·  " + text_of(languages.selected_language)
+                                                 : session_.busy() ? "Checking disc..." : "Choose a disc";
+        if (room >= ImGui::CalcTextSize("...").x) {
+            const std::string shown = middle_cut(summary, room);
+            const float y = ImGui::GetItemRectMin().y + (ImGui::GetItemRectSize().y - ImGui::GetTextLineHeight()) * 0.5f;
+            ImGui::GetWindowDrawList()->AddText(ImVec2(right - ImGui::CalcTextSize(shown.c_str()).x, y), colour(kMuted), shown.c_str());
+        }
+        return;
+    }
+    card_begin("disc", 0.0f, 0.0f, ImGui::GetFontSize());
+    const float row_padding = std::round(5.0f * scale_);
+    ImGui::SetCursorPosY(ImGui::GetCursorPosY() - row_padding);
+    ImGui::PushStyleVar(ImGuiStyleVar_CellPadding, ImVec2(8.0f * scale_, row_padding));
+    if (!ImGui::BeginTable("disc and language", 3, ImGuiTableFlags_BordersInnerH)) {
+        ImGui::PopStyleVar();
+        card_end();
+        return;
+    }
+    const auto& style = ImGui::GetStyle();
+    const float action_width = ImGui::CalcTextSize("Change disc...").x + 2.0f * style.FramePadding.x;
+    ImGui::TableSetupColumn("Setting", ImGuiTableColumnFlags_WidthFixed, ImGui::CalcTextSize("Game disc").x + style.ItemSpacing.x);
+    ImGui::TableSetupColumn("Value", ImGuiTableColumnFlags_WidthStretch);
+    ImGui::TableSetupColumn("Action", ImGuiTableColumnFlags_WidthFixed, action_width);
+    ImGui::TableNextColumn();
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextDisabled("Game disc");
+    ImGui::TableNextColumn();
     ImGui::AlignTextToFramePadding();
     if (disc.profile) {
-        ImGui::PushStyleColor(ImGuiCol_Text, rgb(kGreen));
-        ImGui::TextUnformatted(icon::circle_check);
-        ImGui::PopStyleColor();
-        ImGui::SameLine(0.0f, 6.0f * scale_);
-        ImGui::TextDisabled("Verified");
+        ImGui::PushFont(bold_, 0.0f);
+        wrapped(text_of(disc.profile->label));
+        ImGui::PopFont();
     } else {
-        ImGui::TextDisabled("%s", session_.busy() ? "Checking..." : "Choose your disc image again");
+        muted(session_.busy() ? "Checking..." : "Choose your disc image again");
     }
-    ImGui::SameLine();
-    const char* change = "Change...";
-    ImGui::SetCursorPosX(ImGui::GetCursorPosX() + std::max(0.0f, ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize(change).x -
-                                                                     ImGui::GetStyle().FramePadding.x * 2.0f));
-    ImGui::BeginDisabled(!free || dialog_open);
-    if (ImGui::Button(change)) pick(Wanted::image);
+    ImGui::TableNextColumn();
+    ImGui::BeginDisabled(session_.busy() || session_.game_running() || dialog_open);
+    if (ImGui::Button("Change disc...", ImVec2(action_width, 0.0f))) pick(Wanted::image);
     ImGui::EndDisabled();
-    if (disc.profile) {
-        muted("Keep this copy for play. A separate source image can be moved.");
-        const std::string path = utf8(disc.mount);
-        ImGui::TextWrapped("%s", path.c_str());
-        if (link("Show installed disc")) open_folder(disc.mount.parent_path());
-    }
-    const float disc_wanted = card_end();
 
-    ImGui::SameLine(0.0f, gap);
-    card_begin("language", half, cards_height_);
-    card_label(icon::languages, "LANGUAGE");
-    const LanguageList languages = session_.languages();
-    const bool editable = session_.editable();
-    ImGui::BeginDisabled(!editable);
-    const float buttons = ImGui::CalcTextSize("Add disc...").x + ImGui::GetStyle().FramePadding.x * 2.0f +
-                          (languages.selected > 0 ? ImGui::CalcTextSize(icon::x).x + ImGui::GetStyle().FramePadding.x * 2.0f +
-                                                        ImGui::GetStyle().ItemSpacing.x
-                                                  : 0.0f);
-    ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x - buttons - ImGui::GetStyle().ItemSpacing.x);
+    ImGui::TableNextColumn();
+    ImGui::AlignTextToFramePadding();
+    ImGui::TextDisabled("Language");
+    ImGui::TableNextColumn();
+    ImGui::BeginDisabled(!session_.editable());
+    const float remove_width = languages.selected > 0 ? ImGui::CalcTextSize(icon::x).x + 2.0f * style.FramePadding.x + style.ItemSpacing.x : 0.0f;
+    ImGui::SetNextItemWidth(std::clamp(ImGui::GetContentRegionAvail().x - remove_width, 1.0f, 280.0f * scale_));
     const std::string chosen = languages.selected >= 0 && languages.selected < static_cast<int>(languages.labels.size())
                                    ? text_of(languages.labels[static_cast<std::size_t>(languages.selected)]) : std::string();
     if (ImGui::BeginCombo("##language", chosen.c_str())) {
@@ -1192,22 +1214,36 @@ void View::cards(bool dialog_open) {
         }
         ImGui::EndCombo();
     }
-    ImGui::SameLine();
-    ImGui::BeginDisabled(dialog_open);
-    if (ImGui::Button("Add disc...")) pick(Wanted::language);
-    ImGui::EndDisabled();
     if (languages.selected > 0) {
         ImGui::SameLine();
         if (ImGui::Button(icon::x)) session_.remove_language(static_cast<std::size_t>(languages.selected));
         tooltip("Takes this disc off the list\nIts file is left as it is");
     }
+    if (languages.selected > 0 && !languages.note.empty()) {
+        ImGui::PushFont(nullptr, kFontSize * 0.85f);
+        muted(text_of(languages.note), kFaint);
+        ImGui::PopFont();
+    }
+    ImGui::TableNextColumn();
+    ImGui::BeginDisabled(dialog_open);
+    if (ImGui::Button("Add disc...", ImVec2(action_width, 0.0f))) pick(Wanted::language);
+    tooltip("Add a French, German or Japanese disc to play in that language");
     ImGui::EndDisabled();
-    ImGui::PushFont(nullptr, kFontSize * 0.85f);
-    muted(languages.note.empty() ? "French, German or Japanese from your own disc" : text_of(languages.note), kFaint);
-    ImGui::PopFont();
-    const float wanted = std::max(disc_wanted, card_end());
-    if (wanted != cards_height_) redraw_ = true;
-    cards_height_ = wanted;
+    ImGui::EndDisabled();
+    ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, ImVec2(style.ItemSpacing.x, row_padding));
+    ImGui::EndTable();
+    ImGui::PopStyleVar(2);
+    if (disc.profile) {
+        ImGui::PushFont(bold_, 0.0f);
+        disclosure_button("Disc details", disc_details_open_, 44.0f);
+        ImGui::PopFont();
+        if (disc_details_open_) {
+            ImGui::TextColored(rgb(kGreen), "%s Verified · %s", icon::circle_check, disc.profile->id);
+            muted(utf8(disc.mount));
+            if (link("Open folder")) open_folder(disc.mount.parent_path());
+        }
+    }
+    card_end();
     ImGui::Dummy(ImVec2(0.0f, 2.0f * scale_));
 }
 
@@ -1335,21 +1371,23 @@ bool View::update_action(const UpdateView& update) {
 
 void View::details_popup() {
     if (details_) {
-        ImGui::OpenPopup("Details");
+        ImGui::OpenPopup("Activity log");
         details_ = false;
     }
-    const Opacity opacity(fade_in("Details"));
+    const Opacity opacity(fade_in("Activity log"));
     const ImGuiViewport* viewport = ImGui::GetMainViewport();
     ImGui::SetNextWindowSize(ImVec2(viewport->WorkSize.x * 0.72f, viewport->WorkSize.y * 0.72f), ImGuiCond_Appearing);
     ImGui::SetNextWindowPos(viewport->GetCenter(), ImGuiCond_Appearing, ImVec2(0.5f, 0.5f));
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(18.0f * scale_, 16.0f * scale_));
-    const bool open = ImGui::BeginPopupModal("Details", nullptr, ImGuiWindowFlags_NoSavedSettings);
+    const bool open = ImGui::BeginPopupModal("Activity log", nullptr, ImGuiWindowFlags_NoSavedSettings);
     ImGui::PopStyleVar();
     if (!open) return;
-    heading("Status");
-    wrapped(text_of(session_.status()));
-    ImGui::Spacing();
-    heading("Activity");
+    if (!session_.status().empty()) {
+        heading("Status");
+        wrapped(text_of(session_.status()));
+        ImGui::Spacing();
+        heading("Activity");
+    }
     const auto lines = activity_.lines();
     ImGui::BeginChild("lines", ImVec2(0.0f, -ImGui::GetFrameHeightWithSpacing() - 6.0f * scale_), ImGuiChildFlags_Borders);
     for (const auto& line : lines) {

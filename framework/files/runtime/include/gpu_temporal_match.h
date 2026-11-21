@@ -10,6 +10,8 @@
 #include <stdint.h>
 #include <stdlib.h>
 
+enum { GPU_TEMPORAL_SPRITE_ACTOR_BASE = 2 };
+
 typedef struct GpuTemporalTriangle {
     uint64_t material;
     float x[3], y[3], q[3];

@@ -300,9 +300,10 @@ void icon_entry(CPUState *cpu, uint32_t) {
  * or Triangle back. */
 void load_entry(CPUState *cpu, uint32_t) {
     if (!load_screen()) return;
-    /* The first entry reads the card while the main menu's last frame stays shown: the screen waits for the next. */
     if (psx_mod_read_word(kLoadSetUp) == 0u) {
         g_drawn = {};
+        screen::prepare_front_slots();
+        g_load_shown = true;
         return;
     }
     screen::note_context(browser::Place::front_end);
@@ -511,7 +512,14 @@ uint16_t pressed_on(Surface &surface, uint32_t screen, bool right) {
     const Live live(surface.shown_on(screen));
     const std::span<const rows::Drawn> drawn = live.view();
     const std::optional<int32_t> row = rows::row_under(drawn, *at);
-    if (!row) return 0;
+    if (!row) {
+        if (right && screen == rows::kNewGame && psx_mod_read_word(rows::kSlotSide) == 0u) {
+            const auto *difficulty = rows::live_draw(drawn, rows::kDifficultyRow, Guest{});
+            if (difficulty && at->y >= difficulty->box.y && at->y < difficulty->box.y + difficulty->box.h)
+                return rows::kLeft;
+        }
+        return 0;
+    }
     surface.asked = Asked{screen, *row, surface.pass};
     return rows::press_at(drawn, *row, *at, right);
 }
@@ -548,7 +556,8 @@ uint16_t hold_back(bool allowed, bool down) {
         key.held = 0;
     } else if (!key.was_down) {
         key.place = place_now();
-        key.held = pause_pointing() ? back_on(g_pause, rows::kPause)
+        key.held = key.place == rows::kCredits && pointing::allowed() ? rows::kStart
+                   : pause_pointing() ? back_on(g_pause, rows::kPause)
                    : rows_pointing() ? back_on(g_screens, psx_mod_read_word(rows::kScreen))
                                      : uint16_t{0};
     } else if (place_now() != key.place) {
@@ -586,7 +595,7 @@ extern "C" void disruptor_menu_back_taken(void) { g_escape_taken = true; }
 extern "C" void disruptor_menu_activity(void) { g_active.store(true); }
 
 extern "C" uint16_t disruptor_menu_sides(int left, int right) {
-    if (paused() || (!disruptor_main_menu_pointing() && !rows_pointing())) return 0;
+    if (pause_pointing() || (!disruptor_main_menu_pointing() && !rows_pointing())) return 0;
     return static_cast<uint16_t>((left != 0 ? rows::kLeft : 0u) | (right != 0 ? rows::kRight : 0u));
 }
 

@@ -86,7 +86,9 @@ Step after(const Outcome& outcome, bool cancelled) {
         if (!outcome.language_error.empty()) {
             step.status = outcome.language_error + L"\nChoose English or another disc, then press Play";
         } else {
-            step.status = L"Game data is installed and ready\nPress Play to start";
+            step.status = outcome.task == Task::import
+                ? L"Disc imported. Keep the installed copy for play.\nYou can move a separate source image back to your collection."
+                : L"Game data is installed and ready\nPress Play to start";
             step.launch = outcome.launch && !cancelled;
         }
     }
@@ -125,6 +127,7 @@ LanguageList language_list(const std::vector<std::string>& discs, const Regions&
         list.labels.push_back(kind + L" (" + from_utf8(discs[index]).filename().wstring() + L")");
         if (discs[index] != spoken) continue;
         list.selected = static_cast<int>(index) + 1;
+        list.selected_language = kind;
         list.note = disc ? describe(*disc) + L"\nThe image is used where it is"
             : looked == regions.end() ? L""
             : L"This image is missing or is not a known disc\nChoose another one or English";

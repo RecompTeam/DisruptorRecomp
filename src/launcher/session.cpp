@@ -168,6 +168,7 @@ void Session::finish(Outcome& outcome) {
         step.status = L"The game started meanwhile, so the language is not saved\nChoose it again once the game closes";
     else if (step.save_language && !settings_.choose_language_disc(utf8(outcome.image))) step.status = settings_error();
     if (!step.status.empty()) say(step.status);
+    if (outcome.task == Task::verify && step.disc == DiscAfter::taken && outcome.language_error.empty()) show({});
     if (step.launch && !game_running()) launch(outcome.language);
     else if (direct_play_ && step.launch) say(L"Disruptor is already running");
     else if (!direct_play_ && verified_.profile && !upgraded_) begin_upgrade();
@@ -186,10 +187,7 @@ void Session::begin_upgrade() {
     upgrade->lines.reserve(16);
     // Its own settings: the page may change them while the states are tried.
     worker_ = std::thread([this, disc = verified_, regions = regions_, settings = settings_, upgrade = std::move(upgrade)]() mutable {
-        const auto report = [this](const std::wstring& text, unsigned percent) {
-            std::scoped_lock lock(handed_mutex_);
-            handed_update_ = {text, percent};
-        };
+        const auto report = [this](const std::wstring& text, unsigned) { activity_.add(utf8(fs::path(text))); };
         try {
             *upgrade = upgrade_states(program_, data_, disc, settings, regions, cancelled_, report);
         } catch (...) {

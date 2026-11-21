@@ -572,6 +572,20 @@ void test_pause_holds_the_camera() {
     g_relative_x = 25.0f;
     mouse_aim_frame();
     expect(psx_read_byte(kTestYawAddress) == 98, "and turns again in play");
+
+    psx_write_byte(kSceneModeAddress, kMapScreen);
+    g_mouse.vertical_look_enabled = true;
+    g_relative_x = -25.0f;
+    g_relative_y = 25.0f;
+    mouse_aim_frame();
+    expect(psx_read_byte(kTestYawAddress) == 100 && g_mouse.captured && !disruptor_menu_pointing(),
+           "relative mouse motion turns the player on the map");
+    g_relative_x = 25.0f;
+    mouse_aim_frame();
+    expect(psx_read_byte(kTestYawAddress) == 98, "the map also accepts the opposite turn");
+    psx_write_byte(kSceneModeAddress, 0u);
+    mouse_aim_frame();
+    expect_close(g_mouse.vertical_pitch, 0.0, "vertical motion on the map never tilts the returning view");
 }
 
 void test_the_crosshair_waits_for_drawn_frames() {
@@ -2033,6 +2047,7 @@ void test_gamepad_sticks() {
     reset_state();
     g_mouse.configured = true;
     g_pad_open = true;
+    g_mouse.sticks.analog_movement = false;
     psx_write_byte(kTestYawAddress, 100);
     g_sticks = {-32767, 0, 32767, 0};
     mouse_aim_frame();
@@ -2079,6 +2094,14 @@ void test_gamepad_sticks() {
     g_pad_open = false;
     mouse_aim_frame();
     expect(g_pad_buttons == 0xFFFFu && psx_read_byte(kTestYawAddress) == 98, "without a gamepad nothing presses or turns");
+
+    g_pad_open = true;
+    g_mouse.sticks.analog_movement = true;
+    g_sticks = {0, -22000, 0, 0};
+    mouse_aim_frame();
+    const auto move = disruptor::sticks::movement();
+    expect(g_pad_buttons == 0xFFFFu && move.forward > 0 && move.forward < 32767 && move.strafe == 0,
+           "live analog input passes the movement speed without pressing a digital direction");
 }
 
 void test_mouse_and_stick_turn_together() {

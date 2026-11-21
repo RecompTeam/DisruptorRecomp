@@ -15,6 +15,7 @@ namespace {
 std::array<std::uint8_t, 2 * 1024 * 1024> g_ram{};
 PSXModFunctionEntryCallback g_renderer_callback = nullptr;
 std::uint32_t g_registered_address = 0;
+std::array<PSXModFunctionEntryCallback, 8> g_combat_callbacks{};
 bool g_game_started = false;
 bool g_netplay = false;
 int g_gte_writes = 0;
@@ -86,6 +87,21 @@ int psx_mod_register_function_entry_plugin(
 
 int psx_mod_game_started(void) {
     return g_game_started ? 1 : 0;
+}
+
+int psx_mod_register_instruction_plugin(const char *id, std::uint32_t address, std::uint32_t opcode,
+                                        PSXModFunctionEntryCallback callback) {
+    constexpr std::array<std::uint32_t, 8> sites{0x8003CE3Cu, 0x8002EB58u, 0x80022934u, 0x8002DFE0u,
+                                                 0x8002E128u, 0x8002E31Cu, 0x8002E48Cu, 0x80022918u};
+    constexpr std::array<std::uint32_t, 8> opcodes{0x00071880u, 0x00431023u, 0x0044102Au, 0x00021040u,
+                                                   0x00021040u, 0x00021040u, 0x00021040u, 0x0082102Au};
+    for (size_t i = 0; i < sites.size(); ++i) {
+        if (address == sites[i] && opcode == opcodes[i] && std::string(id) == "disruptor.vertical_camera.renderer") {
+            g_combat_callbacks[i] = callback;
+            return 1;
+        }
+    }
+    return 0;
 }
 
 int psx_netplay_active(void) {
@@ -493,6 +509,182 @@ void test_free_aim_takes_the_look() {
     disruptor_vertical_camera_set_free_aim(0);
 }
 
+void test_target_and_drain() {
+    reset_state();
+    seed_live_game();
+    CPUState cpu{};
+    for (auto callback : g_combat_callbacks) {
+        expect(callback != nullptr, "combat hook registered at its retail instruction");
+        if (!callback) return;
+    }
+    cpu.gpr[21] = 0x80013000u;
+    seed_byte(cpu.gpr[21] + 0x36u, 3);
+    seed_word(0x80076E3Cu + 12u, 0x80014000u);
+    seed_word(0x80014028u, 80u);
+    cpu.gpr[20] = 400;
+    cpu.gpr[22] = 0x80014000u;
+    cpu.gpr[7] = 39;
+    g_combat_callbacks[0](&cpu, 0x8003CE3Cu);
+    expect(cpu.gpr[7] == 39, "level sight keeps retail target ranking");
+    activate(&cpu, 10.0);
+    cpu.gpr[5] = 100;
+    cpu.gpr[7] = 100;
+    g_combat_callbacks[0](&cpu, 0x8003CE3Cu);
+    expect(cpu.gpr[7] == 0, "tilted sight crosses this enemy");
+    cpu.gpr[5] = 0;
+    g_combat_callbacks[0](&cpu, 0x8003CE3Cu);
+    expect(cpu.gpr[7] > 50, "enemy at the original horizon ranks behind it");
+    cpu.gpr[2] = 30;
+    cpu.gpr[3] = 40;
+    g_combat_callbacks[1](&cpu, 0x8002EB58u);
+    expect(cpu.gpr[2] - cpu.gpr[3] == 0, "distant Drain keeps homing until expiry");
+    cpu.gpr[3] = 10;
+    g_combat_callbacks[1](&cpu, 0x8002EB58u);
+    expect(cpu.gpr[2] - cpu.gpr[3] == 20, "ordinary Drain keeps its native homing window");
+    cpu.gpr[16] = kTestProjectile;
+    seed_word(kAimTargetPointer, cpu.gpr[21]);
+    seed_half(cpu.gpr[21] + 0x16u, 200u);
+    seed_half(cpu.gpr[21] + 0x1Au, 100u);
+    seed_word(0x80014024u, 20u);
+    seed_word(0x80014028u, 20u);
+    seed_projectile(8192, 0, 0);
+    for (unsigned distance = 1; distance < 4096; ++distance)
+        seed_half(0x80057E98u + 2u * distance, static_cast<uint16_t>(std::min(65535u, 65536u / distance)));
+    seed_half(0x80057E58u + 2u * 132u, 655u);
+    seed_half(0x80057E58u + 2u * 232u, 327u);
+    cpu.gpr[19] = 0x80015000u;
+    seed_byte(cpu.gpr[19] + 0x21u, 200u);
+    seed_byte(cpu.gpr[19] + 0x22u, 32u);
+    activate(&cpu, 0.0);
+    for (size_t index = 3; index < 7; ++index) {
+        constexpr uint32_t sites[]{0x8002DFE0u, 0x8002E128u, 0x8002E31Cu, 0x8002E48Cu};
+        const bool fixed = index < 5;
+        seed_byte(cpu.gpr[19] + 0x22u, fixed ? 40u : 24u);
+        const uint32_t corrected = fixed ? 232u : 182u;
+        seed_half(0x80057E58u + 2u * corrected, fixed ? 327u : 436u);
+        seed_half(0x80057E58u + 2u * 600u, 115u);
+        cpu.gpr[2] = 600u;
+        g_combat_callbacks[index](&cpu, sites[index - 3] & 0x1FFFFFFFu);
+        expect(cpu.gpr[2] == corrected, "level-view lock corrects the range for this weapon's speed");
+        g_combat_callbacks[index](&cpu, sites[index - 3]);
+        expect(cpu.gpr[2] == corrected, "an on-target trajectory retains its range");
+    }
+    seed_byte(cpu.gpr[19] + 0x22u, 32u);
+    seed_half(cpu.gpr[21] + 0x16u, 197u);
+    seed_word(0x80014024u, 10u);
+    seed_word(0x80014028u, 20u);
+    seed_word(0x8001407Cu, static_cast<uint32_t>(-9));
+    seed_half(0x80057E58u + 2u * 192u, 409u);
+    seed_half(0x80057E58u + 2u * 229u, 332u);
+    seed_word(0x80014028u, 120u);
+    cpu.gpr[2] = 192u;
+    g_combat_callbacks[3](&cpu, 0x8002DFE0u);
+    expect(cpu.gpr[2] == 192u, "prefer the original index when both shots hit");
+    seed_word(0x80014028u, 20u);
+    cpu.gpr[2] = 192u;
+    g_combat_callbacks[3](&cpu, 0x8002DFE0u);
+    expect(cpu.gpr[2] == 192u, "keep the retail hit at X=192 even when closest approach predicts a miss");
+    for (uint32_t missed_index : {600u, 229u}) {
+        cpu.gpr[2] = missed_index;
+        g_combat_callbacks[3](&cpu, 0x8002DFE0u);
+        const auto reciprocal = load_half(0x80057E58u + 2u * cpu.gpr[2]);
+        const int impact_y = 12 * ((91 * 32 * reciprocal >> 8) >> 6) >> 3;
+        expect(impact_y > 90 && impact_y < 110, "find a reachable substep for a stale or nominal index that misses");
+    }
+    seed_half(cpu.gpr[21] + 0x16u, 208u);
+    seed_word(0x80014024u, 1u);
+    seed_word(0x8001407Cu, 0u);
+    seed_projectile(8192, 63, 0);
+    seed_half(0x80057E58u + 2u * 240u, 315u);
+    cpu.gpr[2] = 132u;
+    g_combat_callbacks[3](&cpu, 0x8002DFE0u);
+    expect(cpu.gpr[2] == 240u, "substep rounding removes lateral drift");
+    seed_half(cpu.gpr[21] + 0x16u, 200u);
+    seed_word(0x80014024u, 60u);
+    seed_word(0x80014028u, 10u);
+    seed_byte(cpu.gpr[19] + 0x21u, 15u);
+    cpu.gpr[2] = 288u;
+    seed_half(0x80057E58u + 2u * 288u, 256u);
+    g_combat_callbacks[3](&cpu, 0x8002DFE0u);
+    expect(cpu.gpr[2] == 232u, "a retail hit after expiry does not veto an earlier hit");
+    seed_word(0x80014024u, 20u);
+    cpu.gpr[16] = cpu.gpr[21];
+    cpu.gpr[17] = kTestProjectile;
+    cpu.gpr[18] = 0x80015000u;
+    cpu.gpr[6] = 0x80014000u;
+    seed_byte(kTestProjectile + 0x1Au, 14u);
+    seed_byte(cpu.gpr[18] + 0x20u, 11u);
+    seed_word(kTestProjectile + 4u, 200u * 8u);
+    seed_word(kTestProjectile + 12u, 141u * 8u);
+    seed_projectile(0, 0, 4096);
+    cpu.gpr[3] = 40;
+    cpu.gpr[4] = 141;
+    cpu.gpr[5] = 100;
+    g_combat_callbacks[2](&cpu, 0x80022934u);
+    expect(cpu.gpr[4] > 60u && cpu.gpr[4] < 140u, "uphill Drain crosses the open top of the enemy cylinder");
+    seed_word(kTestProjectile + 12u, 59u * 8u);
+    seed_projectile(0, 0, -4096);
+    cpu.gpr[4] = 59u;
+    g_combat_callbacks[2](&cpu, 0x80022934u);
+    expect(cpu.gpr[4] > 60u && cpu.gpr[4] < 140u, "downhill Drain crosses the bottom");
+    disruptor_vertical_camera_set_free_aim(1);
+    cpu.gpr[2] = 200;
+    cpu.gpr[3] = 210;
+    g_combat_callbacks[1](&cpu, 0x8002EB58u);
+    expect(cpu.gpr[2] - cpu.gpr[3] == 0, "homing Drain retains its distant window with free aim");
+    cpu.gpr[3] = 40;
+    cpu.gpr[4] = 59u;
+    g_combat_callbacks[2](&cpu, 0x80022934u);
+    expect(cpu.gpr[4] > 60u && cpu.gpr[4] < 140u, "Drain collision also works with free aim");
+    seed_word(kTestProjectile + 4u, 181u * 8u);
+    seed_word(kTestProjectile + 12u, 141u * 8u);
+    seed_projectile(8192, 0, 4096);
+    cpu.gpr[4] = 141u;
+    g_combat_callbacks[2](&cpu, 0x80022934u);
+    expect(cpu.gpr[4] == 141u, "the endpoint is inside horizontally but the crossing is outside");
+    cpu.gpr[3] = 1;
+    seed_word(0x80014024u, 5u);
+    seed_half(cpu.gpr[16] + 0x16u, 4u);
+    seed_word(kTestProjectile + 4u, 0u);
+    seed_word(kTestProjectile + 8u, 23u);
+    seed_word(kTestProjectile + 12u, 815u);
+    seed_projectile(-49 * 64, -7 * 64, 49 * 64);
+    cpu.gpr[4] = 815u >> 3;
+    g_combat_callbacks[2](&cpu, 0x80022934u);
+    expect(cpu.gpr[4] == 100u, "the grazing segment reaches height 100");
+    seed_half(cpu.gpr[16] + 0x16u, 0u);
+    seed_word(kTestProjectile + 4u, 34u);
+    seed_word(kTestProjectile + 12u, 818u);
+    seed_projectile(3 * 64, -3 * 64, 22 * 64);
+    cpu.gpr[4] = 818u >> 3;
+    g_combat_callbacks[2](&cpu, 0x80022934u);
+    expect(cpu.gpr[4] == 100u, "test the in-band segment before it leaves the horizontal footprint");
+    seed_word(0x80014024u, 20u);
+    seed_half(cpu.gpr[16] + 0x16u, 200u);
+    seed_word(kTestProjectile + 4u, 221u * 8u);
+    seed_word(kTestProjectile + 8u, 0u);
+    seed_word(kTestProjectile + 12u, 104u * 8u);
+    seed_projectile(4 * 8 * 64, 0, 8 * 8 * 64);
+    cpu.gpr[2] = 20;
+    cpu.gpr[3] = 4;
+    cpu.gpr[4] = 21;
+    g_combat_callbacks[7](&cpu, 0xA0022918u);
+    expect(cpu.gpr[4] < cpu.gpr[2], "midstep Drain hit reaches the native height test after exiting horizontally");
+    cpu.gpr[3] >>= 1;
+    cpu.gpr[4] = 104;
+    g_combat_callbacks[2](&cpu, 0x80022934u);
+    expect(cpu.gpr[4] > 98u && cpu.gpr[4] < 102u, "the same crossing passes both native height comparisons");
+    seed_word(0x80014024u, 1u);
+    seed_word(kTestProjectile + 4u, 1596u);
+    seed_word(kTestProjectile + 12u, 804u);
+    seed_projectile(-8 * 64, 0, 8 * 64);
+    cpu.gpr[2] = 1;
+    cpu.gpr[3] = 2;
+    cpu.gpr[4] = 1;
+    g_combat_callbacks[7](&cpu, 0x80022918u);
+    expect(cpu.gpr[4] == 0u, "only the simultaneous crossing has both X=200 and Y=100");
+}
+
 void test_lockstep_replay_is_side_effect_free() {
     reset_state();
     seed_live_game();
@@ -564,6 +756,7 @@ int main() {
     test_gameplay_guards();
     test_cull_widening();
     test_projectile_alignment();
+    test_target_and_drain();
     test_live_frames_count_drawn_play();
     test_the_renderer_reads_the_mouse_again();
     test_free_aim_takes_the_look();

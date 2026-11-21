@@ -78,6 +78,7 @@ set(DISRUPTOR_EXTRA_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/language/save_words.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/session/restart.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/baton_choice.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/gamepad.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/mouse_aim.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/list_message.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/input/name_entry.cpp"
@@ -99,8 +100,14 @@ if(DISRUPTOR_DEV_TOOLS)
 endif()
 
 set(DISRUPTOR_SKY_SOURCES)
-foreach(sky earth city rooftop mars triton dusk green fire)
-    set(sky_input "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/assets/sky-${sky}.idx")
+set(DISRUPTOR_SKY_WEBP green_upper rooftops_clouds chemical_factory triton_night)
+foreach(sky earth city rooftop mars triton dusk green fire ${DISRUPTOR_SKY_WEBP})
+    if(sky IN_LIST DISRUPTOR_SKY_WEBP)
+        string(REPLACE "_" "-" sky_file "${sky}")
+        set(sky_input "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/assets/sky-${sky_file}.webp")
+    else()
+        set(sky_input "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/assets/sky-${sky}.idx")
+    endif()
     set(sky_source "${CMAKE_CURRENT_BINARY_DIR}/sky_${sky}.cpp")
     add_custom_command(OUTPUT "${sky_source}"
         COMMAND "${CMAKE_COMMAND}" "-DINPUT=${sky_input}" "-DOUTPUT=${sky_source}"
@@ -227,6 +234,7 @@ set(DISRUPTOR_PLUGINS
     disruptor.far_rendering.room_objects
     disruptor.far_rendering.sector_edges
     disruptor.frame_rate.vsync
+    disruptor.gamepad
     disruptor.god_mode.damage
     disruptor.intro_skip.renderer
     disruptor.language.briefing
@@ -254,6 +262,7 @@ set(DISRUPTOR_PLUGINS
     disruptor.mover_motion.world
     disruptor.name_entry
     disruptor.password_hint.draw
+    disruptor.password_hint.submit
     disruptor.psionic_change.tick
     disruptor.render_arena
     disruptor.save_words.text
@@ -540,7 +549,7 @@ if(BUILD_TESTING AND NOT CMAKE_CROSSCOMPILING)
 disruptor_unit_test(disruptor_portal_reach tests/unit/disruptor_portal_reach_test.cpp INCLUDES src)
 disruptor_unit_test(disruptor_sky_panorama tests/unit/disruptor_sky_panorama_test.cpp INCLUDES src)
 disruptor_unit_test(disruptor_sky_extension tests/unit/disruptor_sky_extension_test.cpp INCLUDES src)
-disruptor_unit_test(disruptor_sky_art tests/unit/disruptor_sky_art_test.cpp INCLUDES src
+disruptor_unit_test(disruptor_sky_art tests/unit/disruptor_sky_art_test.cpp INCLUDES src RUNTIME_HEADERS
     SOURCES src/game/render/sky_art.cpp ${DISRUPTOR_SKY_SOURCES})
 disruptor_unit_test(disruptor_misplaced_riser tests/unit/disruptor_misplaced_riser_test.cpp INCLUDES src)
 disruptor_unit_test(disruptor_near_split tests/unit/disruptor_near_split_test.cpp INCLUDES src)

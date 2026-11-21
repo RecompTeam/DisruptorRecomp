@@ -822,6 +822,52 @@ void billboards_keep_their_motion_through_a_new_picture() {
     expect(starts_at(from[sprite], animated.before[0]) && starts_at(from[sprite + 1], animated.before[1]),
            "a billboard with a new picture starts on the corners of its previous self, half by half");
 
+    Scene firing_scene = room(kStep);
+    Billboard firing = billboard(kStep, centre, {5, 0, 0}, {40, 115}, {69, 117}, 700, 800);
+    for (auto &face : firing.now) face.sprite = GPU_TEMPORAL_SPRITE_ACTOR_BASE | GPU_TEMPORAL_SPRITE_KEEP_ART;
+    for (auto &face : firing.before) face.sprite = GPU_TEMPORAL_SPRITE_ACTOR_BASE;
+    firing.now[0].x[0] += 1.0f;
+    firing.now[1].x[2] += 1.0f;
+    const int shooting = add_billboard(firing_scene, firing);
+    const Billboard neighbour_at_shooting = billboard(kStep, centre, {0, 0, 0}, {40, 115}, {69, 117}, 700, 800);
+    for (auto face : neighbour_at_shooting.before) {
+        face.sprite = GPU_TEMPORAL_SPRITE_ACTOR_BASE + 1;
+        firing_scene.previous.push_back(face);
+    }
+    firing_scene.prepare(from, stats);
+    GpuTemporalSpriteBox start{}, art{}, old{};
+    expect(gpu_temporal_sprite_box(from.data(), firing_scene.faces(), shooting, &start) &&
+           gpu_temporal_sprite_box(firing.now.data(), 2, 0, &art) &&
+           gpu_temporal_sprite_box(firing.before.data(), 2, 0, &old),
+           "both halves of the pose still share the same diagonal");
+    const double scale = firing.now[0].depth[0] / firing.before[0].depth[0];
+    expect(std::abs((start.right - start.left) - scale * (art.right - art.left)) < 0.01 &&
+           std::abs((start.bottom - start.top) - scale * (art.bottom - art.top)) < 0.01 &&
+           std::abs(start.left + start.right - old.left - old.right) < 0.01,
+           "a firing pose moves from the old centre at its own width and height");
+
+    std::array<int, 2> matched{0, -1}, reverse{0, -1}, trusted{};
+    GpuTemporalCamera stationary_camera{};
+    stationary_camera.m[0] = 320.0;
+    stationary_camera.m[2] = 160.0;
+    stationary_camera.m[5] = 240.0;
+    stationary_camera.m[6] = 120.0;
+    auto untouched = firing.now;
+    gpu_temporal_mesh_pair_sprites(firing.before.data(), 2, firing.now.data(), 2, &stationary_camera,
+                                   matched.data(), trusted.data(), reverse.data(), untouched.data());
+    expect(matched == std::array<int, 2>{0, 1} && reverse == matched &&
+           trusted == std::array<int, 2>{GPU_TEMPORAL_POSE_MOTION, GPU_TEMPORAL_POSE_MOTION},
+           "the same candidate pairs both halves when both are valid");
+    matched = reverse = {0, -1};
+    trusted = {};
+    auto rejected = firing.now;
+    rejected[1].q[0] = -1.0f;
+    untouched = rejected;
+    gpu_temporal_mesh_pair_sprites(firing.before.data(), 2, rejected.data(), 2, &stationary_camera,
+                                   matched.data(), trusted.data(), reverse.data(), untouched.data());
+    expect(matched == std::array<int, 2>{0, -1} && reverse == matched && trusted == std::array<int, 2>{},
+           "rejecting one half leaves existing correspondences alone");
+
     /* Two unclaimed billboards within reach: the nearer one is the previous self. */
     Scene crowd = room(kStep);
     const int own = add_billboard(crowd, animated);

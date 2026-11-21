@@ -34,7 +34,8 @@ def function_body(source: str, signature: str) -> str:
 
 def shader(source: str, name: str) -> str:
     match = re.search(rf"static const char \*{name} =\n((?:    \".*\"\n?)+?);", source)
-    require(match is not None, f"shader {name} not found")
+    if match is None:
+        raise AssertionError(f"shader {name} not found")
     return "".join(re.findall(r'"((?:[^"\\]|\\.)*)"', match.group(1)))
 
 
@@ -173,7 +174,7 @@ post = function_body(
 release = function_body(renderer, "static void interp_match_release(void)")
 builder = function_body(temporal, "static TemporalScene *temporal_builder(GLuint fbo, int y, int h)")
 reset = function_body(temporal, "static void temporal_reset(void)")
-begin = function_body(temporal, "static void temporal_begin(GLuint fbo, int y, int h, uint16_t color)")
+begin = function_body(temporal, "static void temporal_begin(GLuint fbo, int y, int h, uint16_t color,")
 require(
     job.index("    temporal_match_scene(job->scene, &job->against);") < job.index("    SDL_LockMutex(s_interp_mutex);")
     and "    if (job->generation == s_temp_generation) {\n" in job
@@ -247,10 +248,10 @@ require(
 draw = function_body(temporal, "static void temporal_draw(const float *vertices, const uint64_t *identities, int n,")
 require(
     "const int sprite = identities && identities[i]==TEMPORAL_SPRITE_IDENTITY &&" in draw
-    and "t->sprite = sprite;" in draw
-    and "t->modelled = !sprite && !partial && !cut && identities && identities[i] && identities[i+1] && identities[i+2] &&"
+    and "t->sprite = posed ? (int)(uint32_t)identities[i] : sprite;" in draw
+    and "t->modelled = !t->sprite && !partial && !cut && identities && identities[i] && identities[i+1] && identities[i+2] &&"
     in draw
-    and "if (v[textured ? 19 : 6] <= 0.5f && !sprite && !partial) t->world=0;" in draw,
+    and "if (v[textured ? 19 : 6] <= 0.5f && !t->sprite && !partial) t->world=0;" in draw,
     "a sprite with a camera depth must be a world face without model coordinates",
 )
 require(
@@ -343,7 +344,7 @@ require(
     and "+runtime/include/gpu_temporal_sprite.h" in read("framework/FILES.txt")
     and "    if (!t || t->stamp != (uint32_t)s_frame_count || !t->placed || width16 <= 0 || height16 <= 0) return;"
     in sizer
-    and "    t->placed = t->sized = t->shadow = t->whole = t->effect = 0;" in gpu,
+    and "    t->placed = t->sized = t->shadow = t->whole = t->effect = 0;\n    t->pose_actor = 0;" in gpu,
     "the renderer must hand a sprite's own numbers, the squash and the shadow setting to the tested side arithmetic, and a "
     "tag starts each sprite with none of its kinds",
 )

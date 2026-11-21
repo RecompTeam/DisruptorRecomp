@@ -1,4 +1,5 @@
 #include "game/render/sky_art.h"
+#include "game_host.h"
 
 #include <array>
 #include <iostream>
@@ -20,6 +21,14 @@ int main() {
             disruptor::sky_art::find(picture, art->rows - art->band + 1)) {
             std::cerr << "A prepared sky must cover the full look-up range and contain every palette index it uploads.\n";
             return 1;
+        }
+        size_t bytes = 0;
+        const auto *overlay = psx_game_sky_overlay(art->width, art->rows, art->band, art->indices.data(), &bytes);
+        if ((overlay != nullptr) != (hash == 0x4CAEF66DF7CE8E2Dull) || (bytes != 0) != (overlay != nullptr)) return 1;
+        if (overlay) {
+            auto altered = art->indices;
+            altered.back() ^= 1;
+            if (psx_game_sky_overlay(art->width, art->rows, art->band, altered.data(), &bytes) || bytes) return 1;
         }
         if (hash != 0xC9D53ACFE66EB10Bull) {
             for (int32_t row = 0; row < art->rows - art->band; ++row) {

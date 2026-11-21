@@ -243,6 +243,14 @@ void read_game_user_settings(const toml::value& doc, UserSettings& s) {
             s.invert_look = toml::find<bool>(d, "invert_look");
             s.has_invert_look = true;
         });
+        if (d.contains("analog_movement")) try_get([&]{
+            s.analog_movement = toml::find<bool>(d, "analog_movement");
+            s.has_analog_movement = true;
+        });
+        if (d.contains("vibration")) try_get([&]{
+            s.vibration = toml::find<bool>(d, "vibration");
+            s.has_vibration = true;
+        });
         if (d.contains("bass_cut")) try_get([&]{
             const std::string cut = toml::find<std::string>(d, "bass_cut");
             for (int index = 0; index < kDisruptorBassCutCount; ++index) {
@@ -505,7 +513,7 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
         s.has_vertical_look || s.has_vertical_sensitivity ||
         s.has_invert_vertical || s.has_auto_aim || s.has_crosshair || s.has_crosshair_shape || s.has_crosshair_size ||
         s.has_crosshair_colour || s.has_crosshair_opacity || s.has_separate_vertical_speed ||
-        s.has_stick_layout || s.has_look_speed || s.has_look_deadzone || s.has_invert_look ||
+        s.has_stick_layout || s.has_look_speed || s.has_look_deadzone || s.has_invert_look || s.has_analog_movement || s.has_vibration ||
         s.has_probe_lighting || s.has_probe_strength ||
         s.has_dynamic_shadows || s.has_shadow_strength || s.has_shadow_fill || s.has_shadow_underneath ||
         s.has_shot_lights || s.has_shot_light_strength || s.has_sun_lighting || s.has_sun_turn ||
@@ -586,6 +594,10 @@ void write_game_user_settings(std::ostream& f, const UserSettings& s) {
             f << "look_deadzone = " << s.look_deadzone << "\n";
         if (s.has_invert_look)
             f << "invert_look = " << (s.invert_look ? "true" : "false") << "\n";
+        if (s.has_analog_movement)
+            f << "analog_movement = " << (s.analog_movement ? "true" : "false") << "\n";
+        if (s.has_vibration)
+            f << "vibration = " << (s.vibration ? "true" : "false") << "\n";
         if (s.has_high_precision_camera)
             f << "high_precision_camera = " << (s.high_precision_camera ? "true" : "false") << "\n";
         if (s.has_geometry_correction)

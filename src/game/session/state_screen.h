@@ -113,6 +113,8 @@ std::string mission_name(uint32_t mission);
 
 /* Reads the slots again in the background. */
 void reload();
+void prepare_front_slots();
+uint64_t read_slots_on_open(state_browser::Place place);
 /* The cards when a reading newer than `seen` ended. */
 std::optional<std::array<Card, state_browser::kSlots>> cards_after(uint64_t &seen);
 

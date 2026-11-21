@@ -2,6 +2,7 @@
 #define PSXRECOMP_GPU_TEMPORAL_MESH_H
 
 #include "gpu_temporal_match.h"
+#include "gpu_temporal_sprite.h"
 #include <string.h>
 #if !defined(GPU_TEMPORAL_CAMERA_SCALAR) && (defined(__SSE2__) || defined(_M_X64) || defined(_M_AMD64))
 #define GPU_TEMPORAL_CAMERA_SSE2 1
@@ -741,14 +742,22 @@ typedef struct GpuTemporalSpriteBox {
 static inline int gpu_temporal_sprite_box(const GpuTemporalTriangle *faces, int count, int first,
                                           GpuTemporalSpriteBox *box) {
     const GpuTemporalTriangle *upper = &faces[first], *lower = upper + 1;
-    if (first + 1 >= count || !upper->sprite || !lower->sprite ||
+    if (first + 1 >= count || !upper->sprite || upper->sprite != lower->sprite ||
         !gpu_temporal_mesh_known_depth(upper->depth[0]) || !gpu_temporal_mesh_known_depth(upper->depth[1]) ||
         upper->depth[2] != upper->depth[0] || lower->depth[1] != upper->depth[0] ||
         lower->depth[0] != upper->depth[1] || lower->depth[2] != upper->depth[1] ||
-        !(upper->x[0] < upper->x[1]) || upper->x[2] != upper->x[0] || !(upper->y[0] < upper->y[2]) ||
-        lower->x[2] != upper->x[1] || !(lower->y[0] < lower->y[2]) ||
+        !(upper->x[0] < upper->x[1]) || !(upper->x[2] < lower->x[2]) ||
+        !(upper->y[0] < upper->y[2]) || !(lower->y[0] < lower->y[2]) ||
         lower->x[0] != upper->x[1] || lower->y[0] != upper->y[1] ||
         lower->x[1] != upper->x[2] || lower->y[1] != upper->y[2]) return 0;
+    if (upper->sprite >= GPU_TEMPORAL_SPRITE_ACTOR_BASE) {
+        box->left = (upper->x[0] + upper->x[2]) * 0.5;
+        box->right = (upper->x[1] + lower->x[2]) * 0.5;
+        box->top = (upper->y[0] + upper->y[1]) * 0.5;
+        box->bottom = (upper->y[2] + lower->y[2]) * 0.5;
+        return 1;
+    }
+    if (upper->x[2] != upper->x[0] || lower->x[2] != upper->x[1]) return 0;
     box->left = upper->x[0]; box->top = upper->y[0];
     box->right = upper->x[1]; box->bottom = upper->y[2];
     return 1;
@@ -758,6 +767,8 @@ typedef struct GpuTemporalSpritePair {
     double distance;
     int now, was;
 } GpuTemporalSpritePair;
+
+enum { GPU_TEMPORAL_POSE_MOTION = 4 };
 
 static inline int gpu_temporal_compare_sprite_pair(const void *left, const void *right) {
     const GpuTemporalSpritePair *a = (const GpuTemporalSpritePair *)left, *b = (const GpuTemporalSpritePair *)right;
@@ -770,7 +781,7 @@ static inline int gpu_temporal_compare_sprite_pair(const void *left, const void 
 static inline void gpu_temporal_mesh_pair_sprites(
         const GpuTemporalTriangle *prev, int prev_n,
         const GpuTemporalTriangle *curr, int curr_n,
-        const GpuTemporalCamera *camera, int *pairs, int *trusted, int *reverse) {
+        const GpuTemporalCamera *camera, int *pairs, int *trusted, int *reverse, GpuTemporalTriangle *from) {
     GpuTemporalSpritePair *candidates;
     size_t before = 0, now_count = 0;
     int count = 0;
@@ -786,16 +797,12 @@ static inline void gpu_temporal_mesh_pair_sprites(
             !gpu_temporal_camera_project(camera, (float)((now.left + now.right) * 0.5),
                                          (float)((now.top + now.bottom) * 0.5), curr[triangle].depth[0],
                                          &px, &py)) continue;
-        for (int half = triangle; half <= triangle + 1; ++half) {
-            if (pairs[half] >= 0 && pairs[half] < prev_n && reverse[pairs[half]] == half)
-                reverse[pairs[half]] = -1;
-            pairs[half] = -1;
-            trusted[half] = 0;
-        }
         reach = now.right - now.left > now.bottom - now.top ? now.right - now.left : now.bottom - now.top;
         for (int previous = 0; previous < prev_n; ++previous) {
             double dx, dy, ratio;
             if (!gpu_temporal_sprite_box(prev, prev_n, previous, &was)) continue;
+            if ((prev[previous].sprite & ~GPU_TEMPORAL_SPRITE_KEEP_ART) !=
+                (curr[triangle].sprite & ~GPU_TEMPORAL_SPRITE_KEEP_ART)) continue;
             ratio = (double)prev[previous].depth[0] / curr[triangle].depth[0];
             if (ratio < GPU_TEMPORAL_SPRITE_DEPTH_RATIO || ratio > 1.0 / GPU_TEMPORAL_SPRITE_DEPTH_RATIO) continue;
             dx = (was.left + was.right) * 0.5 - px;
@@ -809,11 +816,43 @@ static inline void gpu_temporal_mesh_pair_sprites(
     qsort(candidates, (size_t)count, sizeof(*candidates), gpu_temporal_compare_sprite_pair);
     for (int index = 0; index < count; ++index) {
         const GpuTemporalSpritePair *pair = &candidates[index];
-        if (pairs[pair->now] >= 0 || reverse[pair->was] >= 0) continue;
+        int available = 1;
+        for (int half = 0; half < 2; ++half) {
+            const int other = reverse[pair->was + half];
+            if (trusted[pair->now + half] >= 2 || (other >= 0 && trusted[other] >= 2)) available = 0;
+        }
+        if (!available) continue;
+        const GpuTemporalTriangle *now = &curr[pair->now], *was = &prev[pair->was];
+        if (!gpu_temporal_camera_pair_valid(&was[0], &now[0]) || !gpu_temporal_camera_pair_valid(&was[1], &now[1])) continue;
+        GpuTemporalSpriteBox prior_box, current_box;
+        const int preserve = (now->sprite & GPU_TEMPORAL_SPRITE_KEEP_ART) &&
+            (now[0].material != was[0].material || now[1].material != was[1].material) &&
+            gpu_temporal_sprite_box(prev, prev_n, pair->was, &prior_box) &&
+            gpu_temporal_sprite_box(curr, curr_n, pair->now, &current_box);
+        for (int half = 0; half < 2; ++half) {
+            const int current = pair->now + half, previous = pair->was + half;
+            const int old_previous = pairs[current], old_current = reverse[previous];
+            if (old_previous >= 0 && old_previous < prev_n && reverse[old_previous] == current)
+                reverse[old_previous] = -1;
+            if (old_current >= 0 && pairs[old_current] == previous) {
+                pairs[old_current] = -1;
+                trusted[old_current] = 0;
+            }
+        }
         for (int half = 0; half < 2; ++half) {
             pairs[pair->now + half] = pair->was + half;
-            trusted[pair->now + half] = 2; /* its own motion, whatever the camera says */
+            trusted[pair->now + half] = preserve ? GPU_TEMPORAL_POSE_MOTION : 2;
             reverse[pair->was + half] = pair->now + half;
+            if (preserve) {
+                const double scale = ((double)now->depth[0] + now->depth[1]) / ((double)was->depth[0] + was->depth[1]);
+                const double x = (prior_box.left + prior_box.right - scale * (current_box.left + current_box.right)) * 0.5;
+                const double y = (prior_box.top + prior_box.bottom - scale * (current_box.top + current_box.bottom)) * 0.5;
+                GpuTemporalTriangle *start = &from[pair->now + half];
+                for (int vertex = 0; vertex < 3; ++vertex) {
+                    start->x[vertex] = (float)(x + scale * now[half].x[vertex]);
+                    start->y[vertex] = (float)(y + scale * now[half].y[vertex]);
+                }
+            }
         }
     }
     free(candidates);
@@ -1345,7 +1384,7 @@ static inline int gpu_temporal_mesh_prepare_scene(
         for (int triangle = 0; triangle < prev_n; ++triangle) reverse[triangle] = -1;
         for (int triangle = 0; triangle < curr_n; ++triangle)
             if (pairs[triangle] >= 0 && pairs[triangle] < prev_n) reverse[pairs[triangle]] = triangle;
-        gpu_temporal_mesh_pair_sprites(prev, prev_n, curr, curr_n, &camera, pairs, trusted, reverse);
+        gpu_temporal_mesh_pair_sprites(prev, prev_n, curr, curr_n, &camera, pairs, trusted, reverse, from);
     }
     for (int triangle = 0; triangle < curr_n; ++triangle) {
         int previous = has_camera ? pairs[triangle] : matches[triangle];
@@ -1378,12 +1417,13 @@ static inline int gpu_temporal_mesh_prepare_scene(
             if (stayed >= 0 && stayed != triangle) dynamic = 0, aliased = 1;
         }
         faces[triangle].matched = !aliased;
+        const GpuTemporalTriangle *motion = trusted[triangle] == GPU_TEMPORAL_POSE_MOTION ? &from[triangle] : &prev[previous];
         for (int vertex = 0; vertex < 3; ++vertex) {
             const int root = gpu_temporal_mesh_root(nodes, triangle * 3 + vertex);
             GpuTemporalMeshNode *node = &nodes[root];
-            const double dx = (double)prev[previous].x[vertex] - curr[triangle].x[vertex];
-            const double dy = (double)prev[previous].y[vertex] - curr[triangle].y[vertex];
-            if (!aliased) from[triangle].q[vertex] = prev[previous].q[vertex];
+            const double dx = (double)motion->x[vertex] - curr[triangle].x[vertex];
+            const double dy = (double)motion->y[vertex] - curr[triangle].y[vertex];
+            if (!aliased) from[triangle].q[vertex] = motion->q[vertex];
             if (!dynamic) { ++node->statics; continue; }
             if (!node->votes) {
                 node->min_dx = node->max_dx = dx;

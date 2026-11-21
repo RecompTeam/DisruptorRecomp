@@ -25,8 +25,11 @@
 #include "game/render/far_rendering.h"
 #include "game/render/shot_lights.h"
 
+#include "game/render/soldier_pose.h"
+
 #include "cpu_state.h"
 #include "gpu.h"
+#include "gpu_temporal_sprite.h"
 #include "gte_precision.h"
 #include "lockstep.h"
 #include "mod_memory.h"
@@ -57,10 +60,13 @@ constexpr int64_t kOne = 65536;
 constexpr int32_t kFarColumn = 4096;  /* past this a 16.16 column no longer fits */
 constexpr uint32_t kReciprocals = 0x80057E98u;  /* 65536 / n in 16 bits, a table the game builds at start */
 constexpr uint32_t kCameraHeight = 0x800775D0u;
+constexpr uint32_t kActorSerial = 20u;    /* 0x80026BE8 and 0x80031B78 store the allocation counter here */
 constexpr uint32_t kActorFloor = 40u;     /* a halfword of the actor ($s5) the shadow block 0x8003D2FC hangs its shadow from */
 constexpr uint32_t kShadowDrop = 244u;    /* a word of the actor's type ($s6): how far under it the shadow lies */
 constexpr uint8_t kActorGpr = 21u;
 constexpr uint8_t kActorTypeGpr = 22u;
+constexpr uint32_t kAnimationTick = 0x800716F8u;
+constexpr uint32_t kLoadedMission = 0x80071518u;
 constexpr uint32_t kShadowPacketSite = 0x8003D488u;
 constexpr uint32_t kEffectPacketSite = 0x8003C848u;
 constexpr uint8_t kShotRecordGpr = 19u; /* $s3: the shot the draw 0x8003C000 is at, from 0x8003C03C to 0x8003CAF4 */
@@ -154,6 +160,8 @@ struct Sprite {
     int32_t led = 0;
     /* An actor's ground above the camera, in the depth's units: where the game lays its shadow. */
     std::optional<int32_t> ground;
+    std::array<float, 4> pose{};
+    uint32_t pose_actor = 0;
 };
 
 struct Box {
@@ -166,6 +174,7 @@ struct Box {
 uint32_t g_pending_projection = 0;
 Sprite g_pending{};
 std::array<Sprite, 256> g_record{};
+uint32_t g_pose_epoch = 0;
 
 [[nodiscard]] bool readable(const CPUState& cpu) {
     return cpu.read_word && cpu.read_half && cpu.read_byte;
@@ -286,6 +295,19 @@ struct Effect {
                  .shadow = true};
 }
 
+[[nodiscard]] std::optional<uint32_t> picture_signature(const CPUState& cpu, uint32_t picture, uint32_t packed) {
+    const uint32_t data = cpu.read_word(picture), size = packed & 0xFFFFu;
+    if (size < 8u || (data & 0xFFE00003u) != 0x80000000u || data > 0x80200000u - size) return std::nullopt;
+    return cpu.read_word(data + ((size / 2u) & ~3u));
+}
+
+[[nodiscard]] uint32_t pose_actor_id(const CPUState& cpu, uint32_t actor) {
+    const auto mission = static_cast<uint32_t>(cpu.read_byte(kLoadedMission)) & 15u;
+    const uint32_t serial = cpu.read_half(actor + kActorSerial);
+    // The render thread carries the ID as a float and bit 22 belongs to KEEP_ART.
+    return ((g_pose_epoch & 2u) << 22) | ((g_pose_epoch & 1u) << 21) | (mission << 17) | (serial + 2u);
+}
+
 [[nodiscard]] Sprite projected(const CPUState& cpu, const Funnel& funnel) {
     Sprite sprite{.depth = static_cast<int32_t>(cpu.gpr[funnel.depth_gpr])};
     const std::optional<int32_t> x = operand(cpu, funnel.x), y = operand(cpu, funnel.y);
@@ -324,6 +346,61 @@ struct Effect {
         const int32_t height = static_cast<int32_t>(cpu.read_half(cpu.gpr[kActorGpr] + kActorFloor)) - drop -
                                static_cast<int32_t>(cpu.read_word(kCameraHeight));
         sprite.ground = height * kGteDepthPerSpriteDepth;
+    }
+    if (funnel.size == Size::Body && sprite.shape) {
+        const auto actor = cpu.gpr[kActorGpr];
+        const auto kind = cpu.read_byte(actor + 0x3Au);
+        const auto pictures = cpu.read_word(cpu.gpr[kActorTypeGpr]);
+        const uint32_t frame = cpu.read_byte(actor + 0x3Bu) + (cpu.gpr[16] & 0xFFu);
+        const uint32_t first_packed = cpu.read_word(pictures + 4u);
+        const bool red_flyer = first_packed == disruptor::soldier_pose::red_flyer_first.packed_size_and_duration;
+        const bool flyer_attack = red_flyer && kind == 4u && frame >= 48u &&
+                                  frame - 48u < disruptor::soldier_pose::red_flyer_attack.size();
+        const bool tunnel_creature = first_packed == disruptor::soldier_pose::tunnel_creature_first.packed_size_and_duration;
+        const bool tunnel_attack = tunnel_creature && kind == 4u && frame >= disruptor::soldier_pose::tunnel_attack_start &&
+                                   frame < disruptor::soldier_pose::tunnel_attack_end;
+        bool preserve_art = false;
+        if (flyer_attack || tunnel_attack || (kind == 1u && frame >= 30u && frame < 80u) ||
+            (kind == 4u && ((frame >= 60u && frame < 68u) || (frame >= 80u && frame < 94u)))) {
+            const auto picture = pictures + 20u * frame;
+            const uint32_t packed = cpu.read_word(picture + 4u);
+            if (const auto signature = picture_signature(cpu, picture, packed)) {
+                sprite.pose = disruptor::soldier_pose::displacement(frame, packed, cpu.read_byte(picture + 8u),
+                    cpu.read_byte(picture + 9u), cpu.read_byte(actor + 0x3Cu), *signature, cpu.read_word(kAnimationTick), &preserve_art);
+            }
+        }
+        const auto &robot_first = disruptor::soldier_pose::robot_attack.front();
+        const auto &beast_first = disruptor::soldier_pose::red_eyed_beast_first;
+        const auto *first = &robot_first;
+        if (red_flyer) {
+            first = &disruptor::soldier_pose::red_flyer_first;
+        } else if (tunnel_creature) {
+            first = &disruptor::soldier_pose::tunnel_creature_first;
+        } else if (first_packed == disruptor::soldier_pose::spiked_mine_first.packed_size_and_duration) {
+            first = &disruptor::soldier_pose::spiked_mine_first;
+        } else if (first_packed == disruptor::soldier_pose::shield_robot_first.packed_size_and_duration) {
+            first = &disruptor::soldier_pose::shield_robot_first;
+        } else if (first_packed == disruptor::soldier_pose::red_robot_first.packed_size_and_duration) {
+            first = &disruptor::soldier_pose::red_robot_first;
+        } else if (first_packed == disruptor::soldier_pose::gold_helmet_soldier_first.packed_size_and_duration) {
+            first = &disruptor::soldier_pose::gold_helmet_soldier_first;
+        } else if (first_packed == disruptor::soldier_pose::armored_soldier_first.packed_size_and_duration) {
+            first = &disruptor::soldier_pose::armored_soldier_first;
+        } else if (first_packed == disruptor::soldier_pose::ice_drone_first.packed_size_and_duration) {
+            first = &disruptor::soldier_pose::ice_drone_first;
+        } else if (kind == 4u && first_packed == disruptor::soldier_pose::triton_soldier_first.packed_size_and_duration) {
+            first = &disruptor::soldier_pose::triton_soldier_first;
+        } else if ((kind == 1u || kind == 4u) && first_packed == disruptor::soldier_pose::chemical_fly_first.packed_size_and_duration) {
+            first = &disruptor::soldier_pose::chemical_fly_first;
+        } else if (((first_packed ^ beast_first.packed_size_and_duration) & 0x00FFFFFFu) == 0u) {
+            first = &beast_first;
+        }
+        if ((first == &beast_first || first_packed == first->packed_size_and_duration) &&
+            cpu.read_byte(pictures + 8u) == first->width && cpu.read_byte(pictures + 9u) == first->height &&
+            picture_signature(cpu, pictures, first_packed) == first->middle_word) {
+            const bool keep = preserve_art || first != &robot_first;
+            sprite.pose_actor = pose_actor_id(cpu, actor) | (keep ? GPU_TEMPORAL_SPRITE_KEEP_ART : 0u);
+        }
     }
     return sprite;
 }
@@ -765,6 +842,8 @@ void restore_fade(CPUState& cpu, const Sprite& record, uint32_t packet) {
 
 }  // namespace
 
+extern "C" void disruptor_sprite_depth_state_loaded(void) { ++g_pose_epoch; }
+
 extern "C" void disruptor_sprite_depth_instruction_hook(
         CPUState *cpu, uint32_t address, uint32_t instruction, int phase) {
     if (!cpu || phase != 1) return;
@@ -828,6 +907,8 @@ extern "C" void disruptor_sprite_depth_packet(
         const float gain = readable(*cpu) ? disruptor::shot_lights::gain(CpuMemory{*cpu}, cpu->gpr[kShotRecordGpr]) : 1.0f;
         if (gain != 1.0f) gpu_temporal_light_sprite(packet, gain);
     }
+    if (packet_site == kDeferredPacketSite && (sprite.pose_actor || sprite.pose != std::array<float, 4>{}))
+        gpu_temporal_pose_sprite(packet, sprite.pose.data(), sprite.pose_actor);
     if (!sprite.place) return;
     gpu_temporal_place_sprite(packet, sprite.place->x, sprite.place->dy);
     if (sprite.shape) {

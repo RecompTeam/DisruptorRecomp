@@ -2,6 +2,10 @@
 
 #include <cstdint>
 
+namespace disruptor::weapon_list {
+inline constexpr uint8_t kWeaponList = 2u, kPsionicList = 3u;
+}
+
 extern "C" {
 // A key changed to a weapon or a psionic power the player has: the game's list shows for a second, as while its button is held.
 void disruptor_weapon_list_show(void);

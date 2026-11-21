@@ -92,7 +92,7 @@ void test_frames_survive_the_file() {
     }
     expect(late == -12.5f, "the renderer's look is the frame's last four bytes");
     std::string later = bytes;
-    later[7] = '6';
+    later[7] = '7';
     expect(!disruptor::capsule::decode(later, back, first) && back.empty(), "a version not known yet is refused");
 
     std::vector<Frame> none;
@@ -110,6 +110,30 @@ void test_frames_survive_the_file() {
     std::string more = bytes;
     more[8] = 4;
     expect(!disruptor::capsule::decode(more, back, first), "a count the file does not hold is refused");
+}
+
+void test_analog_input_survives_the_file() {
+    std::vector<Frame> frames(2), decoded;
+    frames[0].movement = {-17832, 2301};
+    frames[0].pad[0] = 0xF7FF;
+    uint64_t first = 0;
+    const std::string bytes = disruptor::capsule::encode(frames, 23);
+    expect(bytes.size() == 20 + 2 * 43 && bytes.compare(0, 8, "DCAPSUL6") == 0 &&
+               disruptor::capsule::decode(bytes, decoded, first) && decoded.size() == 2 && first == 23 &&
+               decoded[0].pad[0] == 0xF7FF && decoded[0].movement.forward == -17832 && decoded[0].movement.strafe == 2301 &&
+               !decoded[1].movement,
+           "signed movement and digital buttons survive alongside a neutral frame");
+    frames.back().movement = {23170, -23170};
+    expect(disruptor::capsule::decode(disruptor::capsule::encode(frames, 23), decoded, first),
+           "a rounded full diagonal is accepted");
+    frames.back().movement = {32767, 32767};
+    expect(!disruptor::capsule::decode(disruptor::capsule::encode(frames, 23), decoded, first) && decoded.empty() && first == 0,
+           "a movement vector above the full speed limit is refused");
+    for (const disruptor::sticks::Movement invalid : {disruptor::sticks::Movement{-32768, 0}, {0, -32768}}) {
+        frames.back().movement = invalid;
+        expect(!disruptor::capsule::decode(disruptor::capsule::encode(frames, 23), decoded, first),
+               "the unused negative endpoint is refused for either axis");
+    }
 }
 
 void test_simultaneous_mouse_and_weapon_writes() {
@@ -442,6 +466,7 @@ int main() {
     test_a_recording_keeps_pictures_for_the_list();
     test_a_folder_is_a_url_for_the_host();
     test_frames_survive_the_file();
+    test_analog_input_survives_the_file();
     test_simultaneous_mouse_and_weapon_writes();
     test_the_digest_sees_every_byte();
     test_a_picture_is_a_bitmap();

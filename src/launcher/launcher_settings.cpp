@@ -68,6 +68,8 @@ constexpr Placement placed[] = {
     {"disruptor.look_deadzone", Page::controls, nullptr, 1},
     {"disruptor.invert_look", Page::controls, nullptr, 1},
     {"controller.deadzone", Page::controls},
+    {"disruptor.analog_movement", Page::controls},
+    {"disruptor.vibration", Page::controls},
     {"audio.master_volume", Page::audio},
     {"disruptor.bass_cut", Page::audio},
     {"disruptor.mute_in_background", Page::audio},

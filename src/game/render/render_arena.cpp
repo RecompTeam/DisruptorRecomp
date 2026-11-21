@@ -52,6 +52,8 @@ constexpr uint32_t kDescriptors = 0x8007162Cu;      /* gp+0x4E0, set at 0x80015B
 constexpr uint32_t kDescriptorCount = 0x800717B4u;  /* gp+0x668, set at 0x80015B58 */
 constexpr uint32_t kMostDescriptors = 1024u;        /* the mesh renderer's index (0x80046D14) reaches no further */
 constexpr int kFadeBlocks = 64;
+struct DrawHeading { int top = -1; int yaw = 0; int32_t eye[3]{}; };
+DrawHeading g_draw_headings[2];
 uint32_t g_arena_base = 0;
 bool g_relocated = false;  /* the frame entered last draws into the moved arena */
 
@@ -110,6 +112,19 @@ extern "C" void disruptor_render_arena_publish_fades(void) {
 }
 
 /* Read by far_rendering.cpp: it opens the rooms' spans only into the moved arena. */
+extern "C" void disruptor_reset_draw_headings() {
+    for (auto &page : g_draw_headings) page = {};
+}
+
+extern "C" int disruptor_draw_camera(int top, int fallback, int32_t *eye) {
+    for (const auto &page : g_draw_headings) {
+        if (page.top != top) continue;
+        if (eye) for (int axis = 0; axis < 3; ++axis) eye[axis] = page.eye[axis];
+        return page.yaw;
+    }
+    return fallback;
+}
+
 extern "C" int disruptor_render_arena_relocated(void) { return g_relocated ? 1 : 0; }
 
 namespace {
@@ -124,7 +139,16 @@ void renderer_entry(CPUState *cpu, uint32_t address) {
     unsigned index;
     for (index = 0; index < 2u; ++index)
         if (cpu->gpr[4] == kContexts[index]) break;
-    if (index == 2u) return;
+    if (index == 2u) {
+        disruptor_reset_draw_headings();
+        return;
+    }
+    // The GPU receives this page after the next mouse tick has already written a new player heading.
+    g_draw_headings[index] = {static_cast<int>(psx_mod_read_word(kContexts[index]) >> 16),
+                              psx_mod_read_byte(0x80077624u),
+                              {static_cast<int32_t>(psx_mod_read_word(0x800775BCu)),
+                               static_cast<int32_t>(psx_mod_read_word(0x800775D0u)),
+                               static_cast<int32_t>(psx_mod_read_word(0x800775C0u))}};
 
     const uint32_t original = psx_mod_read_word(kOriginalRoots[index]);
     if (original < 0x80000000u || original > 0x80200000u - kRetailBytes ||

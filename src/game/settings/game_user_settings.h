@@ -34,6 +34,8 @@ struct GameUserSettings {
     bool has_look_speed = false; int look_speed = 100;       // percent of the D-pad's turn at a full push
     bool has_look_deadzone = false; int look_deadzone = 20;  // percent of the stick's length
     bool has_invert_look = false; bool invert_look = false;
+    bool has_analog_movement = false; bool analog_movement = true;
+    bool has_vibration = false; bool vibration = false;
     bool has_high_precision_camera = false; bool high_precision_camera = false;
     bool has_frame_unlock = false; bool frame_unlock = false;
     bool has_skip_intro = false; bool skip_intro = false;

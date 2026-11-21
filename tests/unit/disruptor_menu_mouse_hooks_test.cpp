@@ -149,6 +149,8 @@ int psx_mod_finish_function(CPUState *) {
 }
 
 namespace disruptor::state_screen {
+uint64_t slot_reads = 0;
+void prepare_front_slots() { ++slot_reads; }
 void publish_font(Font) { ++g_fonts; }
 void publish_menu_font(Font font) { g_menu_fonts += font.menu ? 1 : 0; }
 void publish_pause_row(std::vector<Run> runs) { g_runs = std::move(runs); }
@@ -313,6 +315,28 @@ void test_screens(bool replaying) {
     slot_pass();
     expect(cursor() == (replaying ? 2u : 1u) && g_words[rows::kSlotSide] == 0u, "a slot takes the cursor and the slot side back");
     expect(g_notes[rows::kSlotSide] == (replaying ? 0 : 2), "both writes noted for a capsule");
+
+    g_words[rows::kCursor] = 4u;
+    g_bytes[rows::kPauseState] = rows::kPaused;
+    for (int pass = 0; pass < 2; ++pass) {
+        draw(0x8001CA50u, 0, 204, put(0, "RETURN"));
+        draw(0x8001CA88u, 48, 110, put(1, "DIFFICULTY MODE"));
+        draw(0x8001CAD0u, 198, 110, put(2, "REGULAR"));
+    }
+    expect(disruptor_menu_sides(1, 0) == (replaying ? 0u : rows::kLeft) && disruptor_menu_sides(0, 1) == (replaying ? 0u : rows::kRight),
+           "both strafe keys reach New Game even when its saved pause byte is set");
+    for (const double x : {50.0, 220.0, 10.0}) {
+        point_at(x, 115.0);
+        expect(disruptor_menu_buttons(0, 1) == (replaying ? 0u : rows::kLeft), "right-click cycles the focused difficulty");
+        disruptor_menu_buttons(0, 0);
+    }
+    point_at(10.0, 80.0);
+    expect(disruptor_menu_buttons(0, 1) == 0u, "right-click above the difficulty leaves it alone");
+    disruptor_menu_buttons(0, 0);
+    point_at(160.0, 208.0);
+    expect(disruptor_menu_buttons(0, 1) == 0u, "right-click on Return leaves the difficulty alone");
+    disruptor_menu_buttons(0, 0);
+    g_bytes[rows::kPauseState] = 0u;
 }
 
 /* A press waiting for its row's draw while lockstep starts, and a press on a row the game left since its pass. */
@@ -468,7 +492,9 @@ void test_load_game(bool replaying) {
     expect(g_finished == 0 && !g_saves, "without the screen LOAD GAME is the game's own");
     g_screen_ready = true;
     g_words[kLoadSetUp] = 0u;
+    const uint64_t previous_reads = disruptor::state_screen::slot_reads;
     load_frame(0u);
+    expect(disruptor::state_screen::slot_reads == previous_reads + (replaying ? 0u : 1u), "start reading state slots on entry");
     expect(!g_saves, "on the handler's first entry, which reads the card under the main menu's last frame, nothing is shown yet");
     g_words[kLoadSetUp] = 1u;
     g_words[rows::kMenuText] = kText;
@@ -478,6 +504,7 @@ void test_load_game(bool replaying) {
     load_frame(0u);
     g_finished = 0;
     const uint32_t a0 = load_frame(0u);
+    expect(disruptor::state_screen::slot_reads == previous_reads + (replaying ? 0u : 1u), "do not rescan on subsequent menu frames");
     expect(g_finished == (replaying ? 0 : 5), replaying ? "a replay keeps the game's own LOAD GAME" : "with it the game draws none of its lines or icons");
     if (!replaying) {
         expect(g_saves && g_saves->title == "SELECT SAVED GAME" && g_saves->back == "RETURN TO MAIN MENU" && g_saves->slots[1].name == "HELLO" &&
@@ -653,11 +680,19 @@ void test_escape(bool replaying) {
     g_words[rows::kScreen] = rows::kPassword;
     draw(0x8001E830u, 0, 204, put(0, "RETURN"));
     draw(0x8001E830u, 0, 204, put(0, "RETURN"));
+    expect(disruptor_menu_back(1, 1) == (replaying ? 0u : rows::kStart), "Esc on PASSWORD confirms RETURN without typing Cross");
+    disruptor_menu_back(1, 0);
     expect(disruptor_menu_delete(1) == (replaying ? 0u : rows::kLeft) && disruptor_menu_delete(0) == 0u,
            "on PASSWORD Backspace is Left, which takes a symbol back");
     g_words[rows::kScreen] = rows::kOptions;
     expect(disruptor_menu_delete(1) == 0u, "on another screen Backspace is nothing");
+    g_words[rows::kScreen] = rows::kCredits;
+    expect(disruptor_menu_back(0, 1) == 0u, "captured Esc does not dismiss the credits");
+    disruptor_menu_back(1, 0);
+    expect(disruptor_menu_back(1, 1) == (replaying ? 0u : rows::kStart), "Esc exits the credits without a RETURN row");
     g_words[rows::kScreen] = 0u;
+    expect(disruptor_menu_back(1, 1) == 0u, "held Esc does not choose an item after leaving the credits");
+    disruptor_menu_back(1, 0);
 
     g_bytes[rows::kPauseState] = rows::kPaused;
     g_words[rows::kPauseAsks] = 0u;

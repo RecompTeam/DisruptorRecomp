@@ -183,6 +183,8 @@ require(
     and "int gr_has_column_band(void) { return g_b->set_column_band != NULL; }\n"
     in read("psxrecomp/runtime/src/gpu_render.c")
     and "    const int count = psx_coverage_span_pieces(left, right, pieces);" in pieces
+    and "left > -PSX_SUPPLEMENTAL_FAR && left < (int32_t)draw_area_left" in pieces
+    and "right < PSX_SUPPLEMENTAL_FAR && right > (int32_t)draw_area_right + 1" in pieces
     and "    const int kind = psx_supplemental_span_kind(s_near_face, least, most, visible_left, visible_right);"
     in pieces
     and "        if (pieces[piece].outside) pieces[piece].outside = kind;" in pieces

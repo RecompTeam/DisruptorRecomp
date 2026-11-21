@@ -63,6 +63,8 @@ std::atomic<bool> g_opening{false};
 std::array<Clock::time_point, 2> g_context{};
 std::array<Card, browser::kSlots> g_cards;
 uint64_t g_generation = 0;
+uint64_t g_requested_generation = 0;
+uint64_t g_front_read = 0;
 files::Picture g_scene;
 std::atomic<bool> g_watching{false};
 
@@ -249,6 +251,7 @@ std::optional<GameSaves> game_saves() {
 void note_load_left() {
     std::scoped_lock lock(g_mutex);
     g_saves_at = {};
+    g_front_read = 0;
 }
 
 void ask_game(GameAsk ask) {
@@ -311,19 +314,37 @@ std::string mission_name(uint32_t mission) {
     return browser::mission_name(mission, known, disruptor_language_disc_name());
 }
 
-void reload() {
+static uint64_t queue_slot_read_locked() {
     g_watching.store(true);
-    worker().push([] {
+    const uint64_t generation = ++g_requested_generation;
+    worker().push([generation] {
         std::array<Card, browser::kSlots> cards = read_cards();
         std::scoped_lock lock(g_mutex);
         g_cards = std::move(cards);
-        ++g_generation;
+        g_generation = generation;
     });
+    return generation;
+}
+
+void reload() {
+    std::scoped_lock lock(g_mutex);
+    queue_slot_read_locked();
+}
+
+void prepare_front_slots() {
+    std::scoped_lock lock(g_mutex);
+    g_front_read = queue_slot_read_locked();
+}
+
+uint64_t read_slots_on_open(browser::Place place) {
+    std::scoped_lock lock(g_mutex);
+    if (place == browser::Place::front_end && g_front_read) return std::exchange(g_front_read, 0);
+    return queue_slot_read_locked();
 }
 
 std::optional<std::array<Card, browser::kSlots>> cards_after(uint64_t &seen) {
     std::scoped_lock lock(g_mutex);
-    if (g_generation == seen) return std::nullopt;
+    if (g_generation <= seen) return std::nullopt;
     seen = g_generation;
     return g_cards;
 }
@@ -447,6 +468,7 @@ extern "C" void disruptor_state_screen_loaded(void) {
         /* The screens the game showed before the load are gone at once, not when their last draw grows old. */
         std::scoped_lock lock(screen::g_mutex);
         screen::g_saves_at = {};
+        screen::g_front_read = 0;
         screen::g_context = {};
         screen::g_pause_row.clear();
     }

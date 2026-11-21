@@ -17,10 +17,10 @@ struct Pick {
     Look look;
 };
 
-/* Mission 1's city: 191 texels a radian (Codex: the least slip over the middle third of 16:9), so 160/191 of its size, smoothed.
- * The owner chose it from four clips of one turn on 2026-11-07. */
-inline constexpr std::array<Pick, 1> kPicks = {{
+/* Mission 1's city: 191 texels a radian over the middle third of 16:9, so 160/191 of its size, smoothed. */
+inline constexpr std::array<Pick, 2> kPicks = {{
     {0xA6A30DE71D65100Dull, {838, true}},
+    {0x4CAEF66DF7CE8E2Dull, {1000, true}},
 }};
 
 inline Look look(uint64_t picture) {

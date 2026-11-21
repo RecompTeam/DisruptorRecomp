@@ -216,10 +216,11 @@ void test_the_window_acts_on_an_outcome() {
     step = after(made(Task::verify, true, L"The image is damaged."), false);
     require(same(step, DiscAfter::cleared, false, false, false) && step.status == L"The image is damaged.", "a failed check forgets the disc");
     step = after(made(Task::import, true), false);
-    require(same(step, DiscAfter::taken, false, false, true) && step.status == L"Game data is installed and ready\nPress Play to start",
-            "a verified disc is taken and the game is started when that was asked");
+    require(same(step, DiscAfter::taken, false, false, true) && step.status.find(L"separate source image") != std::wstring::npos,
+            "a successful import explains which copy to keep and starts the game when asked");
     step = after(made(Task::verify, false), false);
-    require(same(step, DiscAfter::taken, false, false, false), "and is not started when it was not");
+    require(same(step, DiscAfter::taken, false, false, false) && step.status == L"Game data is installed and ready\nPress Play to start",
+            "a later check omits the import hint and waits for Play");
     step = after(made(Task::verify, true), true);
     require(same(step, DiscAfter::taken, false, false, false), "nor after Cancel");
     step = after(made(Task::verify, true, L"", L"The language disc cannot be used."), false);
@@ -256,10 +257,12 @@ void test_the_language_box() {
     require(list.labels == std::vector<std::wstring>{L"English (US disc)", L"Disc image (Disruptor (Germany).cue)",
                                                      L"French (Disruptor (France).cue)", L"Unknown or missing (gone.cue)"},
             "a disc is listed by its language and file name, one not looked at yet as a disc image");
-    require(list.selected == 2 && starts(list.note, L"French disc: ") && ends(list.note, L"\nThe image is used where it is"),
+    require(list.selected == 2 && list.selected_language == L"French" && starts(list.note, L"French disc: ") &&
+                ends(list.note, L"\nThe image is used where it is"),
             "the disc in use is selected and described");
     list = language_list({kGerman, french, missing}, regions, missing);
-    require(list.selected == 3 && starts(list.note, L"This image is missing"), "a missing disc in use is called missing");
+    require(list.selected == 3 && list.selected_language == L"Unknown or missing" && starts(list.note, L"This image is missing"),
+            "a missing disc in use is called missing");
     list = language_list({kGerman, french, missing}, regions, kGerman);
     require(list.selected == 1 && list.note.empty(), "a disc not looked at yet has no note");
     list = language_list({kGerman}, regions, kUnlisted);

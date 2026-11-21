@@ -4,6 +4,8 @@
 #include <stdint.h>
 
 #ifdef __cplusplus
+#include "game/input/sticks.h"
+
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -24,6 +26,7 @@ struct Frame {
     uint64_t memory = 0;                /* 0 for a frame no recording saw: a scripted walk's */
     float residual = 0.0f;              /* the part of a game step smooth aim turned the picture by */
     uint32_t captures = 0;              /* game frames handed to the presenter since the recording began */
+    sticks::Movement movement;
 
     void note_byte(uint32_t address, uint8_t value) {
         if (byte_at == 0u || byte_at == address) {

@@ -21,7 +21,9 @@ constexpr int kPsionicModeRegister = 3;            /* $v1 */
  * last pass gives its state back where every path ends: lw $ra at 0x8003E8C8. */
 constexpr uint32_t kHudEndSite = 0x8003E8C8u, kHudEndWord = 0x8FBF00DCu;
 constexpr uint32_t kPsionicHand = 0x80071320u, kHandState = 0x62u;
-constexpr uint32_t kPlay = 0u, kWeaponList = 2u, kPsionicList = 3u;
+constexpr uint32_t kPlay = 0u;
+using disruptor::weapon_list::kWeaponList;
+using disruptor::weapon_list::kPsionicList;
 
 struct MoveSite {
     uint32_t address, word;

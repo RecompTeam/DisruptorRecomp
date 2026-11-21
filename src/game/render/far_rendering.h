@@ -157,8 +157,7 @@ int disruptor_far_rendering_edge_margin(void);
 /* 1 grows the fog evenly, 2 and 3 keep it thinner near the viewer. Applies under the smooth fade. */
 void disruptor_far_rendering_set_fog_exponent(int exponent);
 int disruptor_far_rendering_get_fog_exponent(void);
-/* The share of the next palette row, in 256ths, that the sprite whose packet sits at `resolved_packet` blends in; -1 for none.
- * The words first drawn there own the share: other words at that address later are another primitive. */
+/* Sprite blend or fogged passage visibility for a matching packet, or -1. */
 int disruptor_far_rendering_packet_fraction(uint32_t resolved_packet, uint32_t signature);
 /* Nonzero when the frame's fog shaped the fade of the list body in `packet`: `rows` from range `from` to `to` by that fog. */
 int disruptor_far_rendering_list_fade_rows(uint32_t packet, int32_t from, int32_t to, int32_t *rows);
@@ -167,6 +166,7 @@ int disruptor_far_rendering_list_fade_rows(uint32_t packet, int32_t from, int32_
 int disruptor_far_rendering_save_deferred(void);
 /* Nonzero unless PSX_DISRUPTOR_PORTAL_REACH=0: rooms seen beside their portals are drawn, the arena must hold them. */
 int disruptor_far_rendering_portal_reach(void);
+void disruptor_far_rendering_trim_triton_balcony(void);
 
 /* Version-pinned runtime seams for SLUS-00224. */
 void disruptor_far_rendering_renderer_entry(struct CPUState *cpu,

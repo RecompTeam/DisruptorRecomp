@@ -37,6 +37,7 @@
 #include "game/session/state_screen.h"
 #include "game/ui/state_browser.h"
 #include "game/input/selection_wheel.h"
+#include "game/input/gamepad.h"
 #include "game/input/sticks.h"
 #include "game/frame/present_rate.h"
 #include "game/session/restart.h"

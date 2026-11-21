@@ -287,8 +287,7 @@ require(
 
 writes = re.findall(r"psx_mod_write_word\(([^,]+),", source)
 require(
-    sorted(writes)
-    == ["address"] * 5 + ["kFadeStart", "kFadeStart", "kFarDistance", "kFarDistance"] + ["kVisibleEnd"] * 2
+    sorted(writes) == ["address"] * 5 + ["kFadeStart"] * 2 + ["kFarDistance"] * 4 + ["kVisibleEnd"] * 2
     and body(source, "void restore_distances").count("psx_mod_read_word(") == 2
     and body(source, "void close_spans").count("psx_mod_write_word(") == 2
     and body(source, "void show_objects").count("psx_mod_write_word(") == 1
@@ -299,11 +298,16 @@ require(
     "test's)",
 )
 require(
-    re.findall(r"psx_mod_write_(?:byte|half)\(", source) == ["psx_mod_write_byte("] * 4
-    and body(source, "void relist_room").count("psx_mod_write_byte(") == 1
+    re.findall(r"psx_mod_write_(?:byte|half)\(", source) == ["psx_mod_write_byte("] * 5
+    and "const uint32_t address = disruptor::portal_reach::kListedAt + room.room;"
+    in body(source, "void restore_room_entry")
+    and "if (psx_mod_read_byte(address) == 0xFFu) psx_mod_write_byte(address, room.entry);"
+    in body(source, "void restore_room_entry")
     and body(source, "void face_portal").count("psx_mod_write_byte(") == 1
     and body(source, "void close_spans").count("psx_mod_write_byte(") == 1
-    and body(source, "void open_spans").count("psx_mod_write_byte(") == 1,
+    and "restore_room_entry(g_unlisted_mesh_rooms[--g_unlisted_mesh_count]);" in body(source, "void close_spans")
+    and body(source, "void open_spans").count("psx_mod_write_byte(") == 2
+    and "psx_mod_write_byte(listed_at, 0xFFu);" in body(source, "void open_spans"),
     "the only byte far rendering writes is a room's place in the visible list, and it gives that back",
 )
 host = read("src/game/host.cpp")
@@ -311,6 +315,7 @@ require(
     "    disruptor_far_rendering_state_saving();" in body(host, "void psx_game_state_saving")
     and "disruptor_far_rendering_abandon_metrics();" in body(host, "void psx_game_state_loaded")
     and "    restore_distances();" in body(source, 'extern "C" void disruptor_far_rendering_state_saving')
+    and "    close_spans();" in body(source, 'extern "C" void disruptor_far_rendering_state_saving')
     and "    show_objects();" in body(source, 'extern "C" void disruptor_far_rendering_state_saving')
     and "    g_written = WrittenDistances{};\n"
     in body(source, 'extern "C" void disruptor_far_rendering_abandon_metrics'),
@@ -361,12 +366,14 @@ require(
     in gpu
     and "static uint32_t gp0_cmd_buf[16];" in gpu
     and "    return disruptor_far_rendering_packet_fraction(resolved_packet, signature);\n" in host
-    and "    const int packet_raw = packet_fade >= 0 ? 2 | (packet_fade << 2) : ctx_hud_glyph() << 2;\n" in renderer
+    and "packet_raw = 2 | (packet_fade << 2) | (s_took_supplemental ? RAW_SUPPLEMENTAL : 0);\n" in renderer
     and "vp[13] = (float)((rawtex ? 1 : 0) | packet_raw | sky_raw);" in renderer
-    and '"  } else if ((v_raw & 2) != 0) level = float(v_raw >> 2)/256.0;' in renderer
+    and '"  float sprite_fog = (v_raw & 2) != 0 ? float((v_raw >> 2) & 4095)/256.0 : -1.0;\\n"' in renderer
+    and '"  } else if (sprite_fog >= 0.0) level = sprite_fog < float(rows - 1) ? fract(sprite_fog) : 0.0;\\n"'
+    in renderer
     and '"  if ((v_raw & 1) == 0) rgb = clamp(rgb * v_col.rgb * 2.0, 0.0, 1.0);\\n"' in renderer
     and "v_raw == 0" not in renderer,
-    "a sprite the game faded carries its share of the next row from its packet to the renderer, the colour bit apart",
+    "a sprite carries its fog level from its packet to the renderer, and blends toward the next palette row before the last",
 )
 require(
     "void gl_renderer_set_palette_fade_power(int power)" in renderer
@@ -395,7 +402,7 @@ require(
     "constexpr uint32_t kDrawSector = 0x80046134u;" in source
     and '"disruptor.far_rendering.sector_edges", kDrawSector,\n            disruptor_far_rendering_sector_entry)'
     in source
-    and "!gpu_geometry_correction_enabled()) return;" in sector_entry
+    and "if (gpu_geometry_correction_enabled()) {" in sector_entry
     and "cpu->read_word(span + 12u), right = cpu->read_word(span + 16u);" in sector_entry
     and "inline constexpr int32_t kTurnGuard = 8;" in reach_header
     and "return left == 0u ? static_cast<uint32_t>(-kTurnGuard) : left;" in reach_header
@@ -406,7 +413,7 @@ require(
 )
 require(
     sector_entry.index("disruptor::misplaced_riser::fixed_parts(guest, cpu->gpr[4]);")
-    < sector_entry.index("    if (!gpu_geometry_correction_enabled()) return;\n")
+    < sector_entry.index("    if (gpu_geometry_correction_enabled()) {\n")
     and '#include "game/render/misplaced_riser.h"' in source
     and "disruptor_unit_test(disruptor_misplaced_riser tests/unit/disruptor_misplaced_riser_test.cpp INCLUDES src)"
     in read("CMakeLists.txt"),

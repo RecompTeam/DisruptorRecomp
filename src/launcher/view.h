@@ -107,9 +107,10 @@ private:
     bool home(const UpdateView& update);
     void banner(float height, bool dialog_open);
     // The choice to close the launcher once the game shows, its lower right corner at `right` and `bottom`.
-    void close_choice(float right, float bottom, bool dialog_open);
+    void close_choice();
     void first_run(bool dialog_open);
-    void cards(bool dialog_open);
+    void disc_panel(bool dialog_open);
+    float disclosure_button(const char* title, bool& open, float height);
     // The last task's line between `left` and `right`. False, with nothing drawn, when it has no room there.
     bool last_activity(float left, float right, float middle);
     bool update_strip(const UpdateView& update);
@@ -206,8 +207,9 @@ private:
     bool version_hidden_ = false;
     bool dragging_ = false;
     bool details_ = false;
+    bool disc_panel_open_ = false;
+    bool disc_details_open_ = false;
     bool updates_open_ = false;
-    float cards_height_ = 0.0f;
     bool redraw_ = false;
     std::string listening_;
     std::string key_note_;
@@ -235,6 +237,7 @@ private:
     bool pad_quiet_ = false;
     bool status_below_ = false; // the banner had no room for the last task's line: it stands under the banner
     std::size_t scene_ = 0;
+    std::uint64_t next_scene_at_ = 0;
     std::filesystem::path art_disc_;
     std::vector<SDL_Texture*> scenes_;
     SDL_Texture* first_run_ = nullptr;

@@ -96,9 +96,28 @@ int main() {
         psx_mod_write_word(kContexts[i] + kArenaOffset, original[i]);
         psx_mod_write_word(original[i], 0x12345678u + i);
     }
+    margin = 0;
+    psx_mod_write_word(kContexts[1], 240u << 16);
+    psx_mod_write_word(0x800775BCu, 317u);
+    psx_mod_write_word(0x800775D0u, 87u);
+    psx_mod_write_word(0x800775C0u, 605u);
+    psx_mod_write_word(0x80077624u, 255u);
+    cpu.gpr[4] = kContexts[1];
+    renderer_entry(&cpu, kRendererEntry);
+    psx_mod_write_word(0x80077624u, 0u);
+    psx_mod_write_word(0x800775BCu, 948u);
+    psx_mod_write_word(0x800775D0u, 231u);
+    psx_mod_write_word(0x800775C0u, 417u);
     cpu.gpr[4] = kContexts[0];
     margin = 0;
     renderer_entry(&cpu, kRendererEntry);
+    int32_t eye[3]{};
+    require(disruptor_draw_camera(240, 12, eye) == 255 && eye[0] == 317 && eye[1] == 87 && eye[2] == 605 &&
+            disruptor_draw_camera(0, 12, eye) == 0 && eye[0] == 948 && eye[1] == 231 && eye[2] == 417,
+            "each draw page keeps the heading used to build its geometry");
+    disruptor_reset_draw_headings();
+    require(disruptor_draw_camera(240, 12, nullptr) == 12 && disruptor_draw_camera(0, 11, eye) == 11 &&
+            eye[0] == 948 && eye[1] == 231 && eye[2] == 417, "a restored state inherited a draw page heading");
     require(!allocated, "4:3 allocated an enhancement arena");
     margin = 267;
     allocation_fails = true;

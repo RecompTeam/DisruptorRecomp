@@ -245,12 +245,6 @@ void apply_lighting(const PSXRecompV4::UserSettings &settings) {
     gl_renderer_set_ddgi_air(value("disruptor.air_light"));
 }
 
-void apply_sticks(const PSXRecompV4::UserSettings &settings) {
-    const auto value = [&](const char *key) { return stored(settings, *find_option(key)); };
-    disruptor::sticks::tune({static_cast<disruptor::sticks::Layout>(value("disruptor.stick_layout")), value("disruptor.look_speed"),
-                             value("disruptor.look_deadzone"), value("disruptor.invert_look") != 0});
-}
-
 // The player's turn and raise of the sun each level's fit finds.
 void apply_sun(const PSXRecompV4::UserSettings &settings) {
     const auto value = [&](const char *key) { return stored(settings, *find_option(key)); };
@@ -452,7 +446,7 @@ void apply_saved_preferences(const PSXRecompV4::UserSettings &settings) {
         gl_renderer_set_world_depth(settings.depth_sorted_world ? 1 : 0);
     if (settings.has_facing_sprites) gpu_facing_sprites_set(settings.facing_sprites ? 1 : 0);
     if (settings.has_sprite_depth_read) gl_renderer_set_sprite_depth_read(settings.sprite_depth_read ? 1 : 0);
-    apply_sticks(settings);
+    disruptor::gamepad::apply_settings(settings);
     // The renderer reads the PSX_DDGI variables at its first update, after this: they still win.
     apply_sun(settings);
     apply_lighting(settings);
@@ -506,6 +500,8 @@ void apply_pending_preferences() {
     if (changed("disruptor.look_speed")) sticks.look_speed = pending.look_speed;
     if (changed("disruptor.look_deadzone")) sticks.look_deadzone = pending.look_deadzone;
     if (changed("disruptor.invert_look")) sticks.invert_look = pending.invert_look;
+    if (changed("disruptor.analog_movement")) sticks.analog_movement = pending.analog_movement;
+    if (changed("disruptor.vibration")) sticks.vibration = pending.vibration;
     disruptor::sticks::tune(sticks);
     if (changed("disruptor.geometry_correction"))
         gpu_geometry_correction_set(pending.geometry_correction ? 1 : 0);

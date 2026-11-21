@@ -170,28 +170,28 @@ def check(launcher: Path, folder: Path) -> None:
     require("page 2" in pad[3].view and not pad[3].in_sidebar, "A on a side bar entry opens its page and goes into it")
     require("page 3" in pad[4].view and pad[4].in_sidebar, "the right bumper steps to the next page")
 
-    # The Gamepad tab's stops: four tabs, the layout's three parts, two turning sliders, the dead zone, then Fire, confirm.
-    steps = " ".join(["Tab"] * 11) + " Pad:A Pad:A Pad:A Pad:B Pad:A Pad:Down Pad:B Pad:Down"
-    capture = drive(launcher, folder, "capture", steps, page=2, tab=1, pad=True)
-    first = capture[10].place, capture[10].scroll
-    require(" button " in capture[11].view, "A on a gamepad button waits for the new button")
+    steps_to_fire = 13
+    steps = " ".join(["Tab"] * steps_to_fire) + " Pad:A Pad:A Pad:A Pad:B Pad:A Pad:Down Pad:B Pad:Down"
+    capture = drive(launcher, folder, "capture", steps, page=2, tab=1, pad=True)[steps_to_fire - 1 :]
+    first = capture[0].place, capture[0].scroll
+    require(" button " in capture[1].view, "A on a gamepad button waits for the new button")
     require(
-        " button " not in capture[12].view and (capture[12].place, capture[12].scroll) == first,
+        " button " not in capture[2].view and (capture[2].place, capture[2].scroll) == first,
         "A taken for the button starts no capture again and leaves the cursor where it was",
     )
-    require(" button " in capture[13].view, "a new press of A waits again")
+    require(" button " in capture[3].view, "a new press of A waits again")
     require(
-        " button " not in capture[14].view
-        and (capture[14].place, capture[14].scroll) == first
-        and not capture[14].in_sidebar,
+        " button " not in capture[4].view
+        and (capture[4].place, capture[4].scroll) == first
+        and not capture[4].in_sidebar,
         "B taken for the button does not also take the cursor back to the side bar",
     )
     require(
-        " button " in capture[16].view and (capture[16].place, capture[16].scroll) == first,
+        " button " in capture[6].view and (capture[6].place, capture[6].scroll) == first,
         "the D-pad is no button to take and moves nothing",
     )
     require(
-        " button " not in capture[17].view and (capture[18].place, capture[18].scroll) != first,
+        " button " not in capture[7].view and (capture[8].place, capture[8].scroll) != first,
         "after B is taken and let go the D-pad moves the cursor again",
     )
 

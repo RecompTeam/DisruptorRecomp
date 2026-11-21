@@ -1,5 +1,5 @@
 diff --git a/runtime/include/gpu.h b/runtime/include/gpu.h
-index 12e9533d7a880b9de3d42a11187216f44b8d217c..fe2735d341f5ee2e1a45f2db9d275cfc2f54fe63 100644
+index 12e9533d7a880b9de3d42a11187216f44b8d217c..9fe574854d3806131b3ad4db36861b61eb980c1e 100644
 --- a/runtime/include/gpu.h
 +++ b/runtime/include/gpu.h
 @@ -1,4 +1,4 @@
@@ -137,7 +137,7 @@ index 12e9533d7a880b9de3d42a11187216f44b8d217c..fe2735d341f5ee2e1a45f2db9d275cfc
  /* Widescreen proportion correction (active only when aspect != 4:3 and the
   * game's [widescreen] block opts in — see config_loader.h). Tagged
   * character/billboard prims are re-squashed around their projected anchor;
-@@ -193,6 +315,70 @@
+@@ -193,6 +315,72 @@
   * (render the wider FOV into a wider frame, present 1:1; GTE not squashed). */
  void gpu_ws_configure(int aspect_num, int aspect_den,
                        uint32_t sprite_anchor_addr, int hud_sprt_squash, int mode);
@@ -156,11 +156,13 @@ index 12e9533d7a880b9de3d42a11187216f44b8d217c..fe2735d341f5ee2e1a45f2db9d275cfc
 +void gpu_temporal_size_sprite(uint32_t primitive_addr, int32_t row16, int32_t width16, int32_t height16,
 +                              int shadow, int whole);
 +/* The height of the ground under the sprite just noted above the camera, and half its width, both in its depth's units. */
++void gpu_temporal_pose_sprite(uint32_t primitive_addr, const float upper[4], uint32_t pose_actor);
 +void gpu_temporal_ground_sprite(uint32_t primitive_addr, float ground, float reach);
 +/* Shadows as the game shapes them (0), which is the 4:3 picture's, or flattened the way the floor recedes (1), a wider picture's. */
 +int gpu_shadow_shape(void);
 +int gpu_sprite_placement_available(void);
-+/* The game's blend toward the next palette row for the packet being drawn, in 256ths, or -1. */
++/* Packet fade: -1 for none, sprite fog rows in 256ths, or the base plus passage visibility in 256ths. */
++#define PSX_PACKET_FOG_DETAIL_BASE 4096
 +int gpu_current_packet_fade(void);
 +/* The sky tile being drawn is painted with its opening's last fog step (gpu_sky_fog.h). */
 +int gpu_sky_fogged(void);
@@ -208,7 +210,7 @@ index 12e9533d7a880b9de3d42a11187216f44b8d217c..fe2735d341f5ee2e1a45f2db9d275cfc
  /* [widescreen] full_2d: opt a pure-2D sprite game into the widescreen present
   * path (treat every in-game frame as gameplay, since it never tags 3D prims). */
  void gpu_ws_set_full_2d(int on);
-@@ -315,6 +501,13 @@
+@@ -315,6 +503,13 @@
   * full-2D menu/title screen), so the squash is suppressed and content drawn
   * pixel-native. The present path uses the same predicate to pillarbox. */
  int  gpu_ws_present_native_43(void);
@@ -222,7 +224,7 @@ index 12e9533d7a880b9de3d42a11187216f44b8d217c..fe2735d341f5ee2e1a45f2db9d275cfc
  /* Per-side X cull-margin (screen/world units) emitted into the game's draw-
   * cull immediates by the recompiler ([widescreen.cull]); 0 unless stretching. */
  int  psx_ws_x_margin(void);
-@@ -428,6 +621,8 @@
+@@ -428,6 +623,8 @@
  int psx_ws_cull_packed_x_site(uint32_t pc, uint32_t instr, uint32_t x,
                                uint32_t width, uint32_t *out);
  uint32_t psx_ws_angle_widen(uint32_t vanilla);
@@ -231,7 +233,7 @@ index 12e9533d7a880b9de3d42a11187216f44b8d217c..fe2735d341f5ee2e1a45f2db9d275cfc
  int psx_ws_angle_site(uint32_t pc, uint32_t instr, uint32_t *out);
  /* bound * (half_extent + margin) / half_extent; identity at 4:3. */
  int32_t psx_ws_cull_scale(int32_t bound, int32_t half_extent);
-@@ -461,6 +656,9 @@
+@@ -461,6 +658,9 @@
   * widen for the paired `bltz maxSX` reject. Identity at 4:3. */
  int  psx_ws_cull_slti(uint32_t sx, uint32_t imm);
  int  psx_ws_cull_slti_lower(uint32_t sx, uint32_t imm);
@@ -241,7 +243,7 @@ index 12e9533d7a880b9de3d42a11187216f44b8d217c..fe2735d341f5ee2e1a45f2db9d275cfc
  int  psx_ws_cull_bltz(uint32_t v);
  /* [widescreen.cull] bgez_sites: `bgez SX, keep` keeps while SX >= -margin
   * (the exact partner of bltz_sites; see ws_cull_edge.h). Identity at 4:3. */
-@@ -625,6 +823,9 @@
+@@ -625,6 +825,9 @@
   * final screenX store to squash it around the screen centre (identity at 4:3).
   * Pulls far backdrop pieces in from past the 320px edge to cover the 16:9 FOV. */
  int  psx_ws_backdrop_x(int x);

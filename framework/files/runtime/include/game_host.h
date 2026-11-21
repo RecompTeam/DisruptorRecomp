@@ -29,6 +29,16 @@ int psx_game_configure(const char *game_id, size_t length);
 const char *psx_game_session_problem(int netplay);
 /* Nonzero asks for a boot without the BIOS animation whatever the settings say. */
 int psx_game_fast_boot_forced(void);
+enum { PSX_ROOFTOPS_SKY = -4 };
+int psx_game_night_sky_view(int top, int32_t camera[4], int *balcony);
+int psx_game_chemical_sky_view(int top, int32_t camera[4]);
+int psx_game_rooftops_sky_view(int top, int32_t camera[4]);
+const uint8_t *psx_game_sky_overlay(int width, int rows, int band, const uint8_t *indices, size_t *bytes);
+typedef struct PsxNightVertex {
+    float position[3], uv[2];
+    uint16_t clut, page;
+} PsxNightVertex;
+const PsxNightVertex *psx_game_night_geometry(int area, int *vertices);
 /* Called when save states have their folder, before any can be asked for. */
 int psx_game_states_configured(void);
 /* Called after a save state is restored. */
@@ -59,7 +69,7 @@ int psx_game_smooth_movies(void);
  * before it, grown outwards. Then each corner's source address and source word are those of the first copy's corner. */
 int psx_game_grown_quad_sources(uint32_t command_address, const uint32_t *packet, uint32_t source_address[4],
                                 uint32_t source_word[4]);
-/* The share of the next palette row, in 256ths, the game gives the packet at `resolved_packet` whose words hash to `signature`, or -1. */
+/* Packet fade metadata as defined by gpu_current_packet_fade, validated against the command signature. */
 int psx_game_packet_fade(uint32_t resolved_packet, uint32_t signature);
 /* Supplied by the generated code, from [[recompiler.instruction_hook]]: the game's calls for an instruction that ran from RAM. */
 void psx_game_instruction_ran(CPUState *cpu, uint32_t address, uint32_t instruction);

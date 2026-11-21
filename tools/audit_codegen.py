@@ -13,7 +13,24 @@ CODE_END = 0x80056938
 EXPECTED_SHARDS = 25
 EXPECTED_FUNCTIONS = 579
 EXPECTED_DISPATCH_ENTRIES = 12_797
-EXPECTED_FUSED_STEPS = 13_105
+EXPECTED_FUSED_STEPS = 13_103
+COMBAT_SITES = {
+    0x8003CE3C: 0x00071880,
+    0x8002DFE0: 0x00021040,
+    0x8002E128: 0x00021040,
+    0x8002E31C: 0x00021040,
+    0x8002E48C: 0x00021040,
+    0x8002EB58: 0x00431023,
+    0x80022918: 0x0082102A,
+    0x80022934: 0x0044102A,
+}
+COMBAT_OPERATIONS = {
+    0x00071880: "cpu->gpr[3] = cpu->gpr[7] << 2;",
+    0x00021040: "cpu->gpr[2] = cpu->gpr[2] << 1;",
+    0x00431023: "cpu->gpr[2] = cpu->gpr[2] - cpu->gpr[3];",
+    0x0082102A: "cpu->gpr[2] = ((int32_t)cpu->gpr[4] < (int32_t)cpu->gpr[2]) ? 1 : 0;",
+    0x0044102A: "cpu->gpr[2] = ((int32_t)cpu->gpr[2] < (int32_t)cpu->gpr[4]) ? 1 : 0;",
+}
 FINITE_SKYLINE_RENDERER = 0x8003A0F0
 
 FUNCTION_DEFINITION = re.compile(r"^void func_([0-9A-F]{8})\(CPUState\* cpu\)$", re.MULTILINE)
@@ -507,6 +524,46 @@ def main() -> int:
 
     shard_text = "\n".join(path.read_text(encoding="utf-8") for path in shards)
     dispatch_text = dispatch_path.read_text(encoding="utf-8")
+
+    combat_source = shard_text.replace("\\\n", "")
+    combat_calls = re.finditer(
+        r'//[^\n]*|/\*(?s:.*?)\*/|"(?:\\.|[^"\\])*"|'
+        r"\bpsx_mod_instruction\s*\(\s*cpu\s*,\s*0x([0-9A-Fa-f]{8})u\s*,\s*0x([0-9A-Fa-f]{8})u\s*\)\s*;",
+        combat_source,
+    )
+    trivia = re.compile(r"(?:\s+|//[^\n]*|/\*(?s:.*?)\*/)*")
+    seen: set[int] = set()
+    for call in combat_calls:
+        if call.lastindex is None:
+            continue
+        address, opcode = (int(value, 16) for value in call.groups())
+        if address not in COMBAT_SITES:
+            continue
+        after_call = trivia.match(combat_source, call.end())
+        assert after_call is not None
+        emitted = combat_source[after_call.end() : after_call.end() + 600].splitlines()[:2]
+        expected = COMBAT_SITES[address]
+        shift = expected & 63 == 0
+        left = (expected >> (16 if shift else 21)) & 31
+        right = (expected >> 16) & 31
+        dest = (expected >> 11) & 31
+        operands = f"uint32_t _pgx1 = cpu->gpr[{left}];"
+        if not shift:
+            operands += f" uint32_t _pgx2 = cpu->gpr[{right}];"
+        second = f"{(expected >> 6) & 31}u" if shift else "_pgx2"
+        if (
+            address in seen
+            or opcode != expected
+            or emitted
+            != [
+                f"{{ {operands} {COMBAT_OPERATIONS[expected]}",
+                f"    PGXP_ALU(0x{expected:08X}u, cpu->gpr[{dest}], _pgx1, {second}); }}  /* 0x{address:08X}: 0x{expected:08X} */",
+            ]
+        ):
+            failures.append(f"invalid combat hook before 0x{address:08X}")
+        seen.add(address)
+    if seen != COMBAT_SITES.keys():
+        failures.append("missing combat hooks: " + format_addresses(COMBAT_SITES.keys() - seen))
 
     fused_heads, fusion_violations = fused_step_violations(shard_text)
     failures.extend(fusion_violations[:10])

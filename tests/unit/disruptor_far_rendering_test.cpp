@@ -160,6 +160,14 @@ extern "C" int gpu_geometry_correction_enabled(void) { return g_geometry_correct
 extern "C" int psx_ws_project_x(int x) { return x; }
 extern "C" int disruptor_render_arena_relocated(void) { return g_arena_relocated; }
 
+static int floor_draws;
+extern "C" void func_override_guest_call(CPUState *cpu, uint32_t target, uint32_t site) {
+    ++floor_draws;
+    expect(target == kDrawSector && site == 0x800411A4u && load_word(cpu->gpr[4]) == 0x2CFFu &&
+           ((load_word(cpu->gpr[4] + 32u) >> 2) & 1023u) == 246u, "the missing panel uses the native floor tile");
+    cpu->gpr[4] = 0;
+}
+
 extern "C" void disruptor_render_arena_publish_fades(void) {
     ++g_published;
     disruptor_far_rendering_drawn_distances(&g_published_far, &g_published_fade);
@@ -1026,25 +1034,25 @@ void test_fog_for_sprites() {
         invoke_load(&cpu, site, saved_ra);
         return range - static_cast<std::int32_t>(cpu.gpr[(site.opcode >> 16u) & 31u]);
     };
-    expect(pressed(sprites, 18u, 900, 0x800411ACu) == 386 && disruptor_far_rendering_packet_fraction(kPrimitiveBuffer, kSprite) == 8,
+    expect(pressed(sprites, 18u, 900, 0x800411ACu) == 386 && disruptor_far_rendering_packet_fraction(kPrimitiveBuffer, kSprite) == 1544,
            "a sprite gets row 6 of the stretched fog and a share of 2/64 of row 7, by its packet");
     expect(pressed(sprites, 18u, 200, 0x800411ACu) == -56, "short of the fog's start a sprite gets the nearest row");
-    expect(pressed(sprites, 18u, 1535, 0x800411ACu) == 767 && disruptor_far_rendering_packet_fraction(kPrimitiveBuffer, kSprite) == 0,
-           "the last row blends with nothing past it");
+    expect(pressed(sprites, 18u, 1535, 0x800411ACu) == 767 && disruptor_far_rendering_packet_fraction(kPrimitiveBuffer, kSprite) == 3068,
+           "the packet keeps the sprite's distance into the last fog row");
     expect(pressed(sprites, 18u, 5000, 0x800411ACu) == 768, "past the far plane the game clamps to its last row itself");
     cpu.gpr[kListPacketRegister] = 0x80050000u;
-    expect(pressed(enemies, 20u, 1000, 0x80043FE0u) == 446 && disruptor_far_rendering_packet_fraction(0x80050000u, kSprite) == 248,
-           "an enemy from the list gets the same fog, its share by the packet in s5");
+    expect(pressed(enemies, 20u, 1000, 0x80043FE0u) == 446 && disruptor_far_rendering_packet_fraction(0x80050000u, kSprite) == 1784,
+           "an enemy from the list gets the same fog, its level by the packet in s5");
     exit_renderer(&cpu);
     cpu.gpr[kListPacketRegister] = 0x80050100u;
-    expect(pressed(enemies, 20u, 1000, 0x80043FE0u) == 446 && disruptor_far_rendering_packet_fraction(0x80050100u, kSprite) == 248,
+    expect(pressed(enemies, 20u, 1000, 0x80043FE0u) == 446 && disruptor_far_rendering_packet_fraction(0x80050100u, kSprite) == 1784,
            "the list drawn after the renderer's epilogue gets the frame's fog from the game's own fade start");
     disruptor_far_rendering_fog_ramp(&start, &length, &power);
     expect(start == 256 && length == 1280, "until the next entry the renderer keeps the frame's fog");
 
     disruptor_far_rendering_set_fog_exponent(2);
     enter(&cpu);
-    expect(disruptor_far_rendering_packet_fraction(0x80050100u, kSprite) == 248, "the last frame's shares hold through the next frame");
+    expect(disruptor_far_rendering_packet_fraction(0x80050100u, kSprite) == 1784, "the last frame's fog levels hold through the next frame");
     expect(pressed(sprites, 18u, 900, 0x800411ACu) == 194, "a squared fog stays thinner near the viewer");
     disruptor_far_rendering_fog_ramp(&start, &length, &power);
     expect(power == 2, "the renderer gets the power too");
@@ -1081,7 +1089,7 @@ void test_fog_for_sprites() {
     g_smooth_fade = 1;
     disruptor_far_rendering_set_preset(DISRUPTOR_FAR_RENDERING_RETAIL);
     enter(&cpu);
-    expect(pressed(sprites, 18u, 900, 0x800411ACu) == 644 && disruptor_far_rendering_packet_fraction(kPrimitiveBuffer, kSprite) == 16,
+    expect(pressed(sprites, 18u, 900, 0x800411ACu) == 644 && disruptor_far_rendering_packet_fraction(kPrimitiveBuffer, kSprite) == 2576,
            "at the original distance a sprite blends rows under the smooth fade too");
     exit_renderer(&cpu);
 }
@@ -1101,9 +1109,9 @@ void test_fog_shares_belong_to_their_packet() {
     };
     enter(&cpu);
     fade(sprites, 18u, 900, 0x800411ACu);
-    expect(disruptor_far_rendering_packet_fraction(kPrimitiveBuffer, kSprite) == 8 &&
-               disruptor_far_rendering_packet_fraction(kPrimitiveBuffer, kSprite) == 8,
-           "the sprite's packet keeps its share for every draw of the same words");
+    expect(disruptor_far_rendering_packet_fraction(kPrimitiveBuffer, kSprite) == 1544 &&
+               disruptor_far_rendering_packet_fraction(kPrimitiveBuffer, kSprite) == 1544,
+           "the sprite's packet keeps its fog level for every draw of the same words");
     expect(disruptor_far_rendering_packet_fraction(kPrimitiveBuffer, kSprite + 1u) == -1 &&
                disruptor_far_rendering_packet_fraction(kPrimitiveBuffer, kSprite) == -1,
            "other words at the address are another primitive, and the share is gone");
@@ -1113,7 +1121,7 @@ void test_fog_shares_belong_to_their_packet() {
     std::int32_t rows = 0;
     expect(disruptor_far_rendering_list_fade_rows(0x80050000u, 1000, 1300, &rows) == 1 && rows == 3,
            "a body faded by its led key moves by the stretched fog's rows to its own key");
-    expect(disruptor_far_rendering_packet_fraction(0x80050000u, kSprite) == 200, "and its share is its own key's");
+    expect(disruptor_far_rendering_packet_fraction(0x80050000u, kSprite) == 2504, "and its level follows its own depth");
     expect(disruptor_far_rendering_list_fade_rows(0x80050100u, 1000, 1300, &rows) == 0,
            "another body's packet is not the one the fog shaped");
     invoke_load(&cpu, enemies, 0x80041000u);
@@ -1197,6 +1205,92 @@ void test_presets_up_to_twice() {
     exit_renderer(&cpu);
     expect(disruptor_far_rendering_set_preset(DISRUPTOR_FAR_RENDERING_PRESET_COUNT) == DISRUPTOR_FAR_RENDERING_INVALID_PRESET,
            "no preset past 2x");
+}
+
+void test_fortress_entrance() {
+    const AllowedWrites allowed{__func__, {kFar, kFade}};
+    reset_state();
+    CPUState cpu{};
+    seed_live_game(&cpu, 1408u, 640);
+    seed_byte(0x80071354u, 13u);
+    seed_word(disruptor::sector_reach::kSectors + 4u * 186u, 0x80090000u);
+    seed_word(disruptor::sector_reach::kCamera, 3328u);
+    seed_word(disruptor::sector_reach::kCamera + 4u, 8480u);
+    seed_word(disruptor::portal_reach::kCosines, 256u);
+    disruptor_far_rendering_set_preset(DISRUPTOR_FAR_RENDERING_EXTENDED);
+    enter(&cpu);
+    expect(load_word(kFarDistance) == 1760u && load_word(kFadeStart) == 992u, "the courtyard keeps the selected distances");
+    constexpr uint32_t gate = 0x80090080u;
+    seed_word(disruptor::sector_reach::kSectors, 0x80090100u);
+    seed_word(0x80090100u + disruptor::portal_reach::kSectorPortals, gate);
+    cpu.gpr[18] = gate;
+    seed_byte(gate + disruptor::sector_reach::kPortalSector, 186u);
+    invoke_first_far(&cpu);
+    expect(cpu.gpr[12] == 2880u, "the portal walk reaches the closed door");
+    seed_byte(gate + disruptor::sector_reach::kPortalSector, 19u);
+    invoke_first_far(&cpu);
+    expect(cpu.gpr[12] == 1760u, "courtyard portals use the selected distance");
+    hook_after(&cpu, kAfterTraversal, kAfterTraversalOpcode);
+    seed_word(kFadeStart, 636u);
+    cpu.gpr[2] = kReviewedVisibleSpanBase;
+    hook_after(&cpu, kBeforeVisibleLoop, kBeforeVisibleLoopOpcode);
+    expect(load_word(kFarDistance) == 1760u && load_word(kFadeStart) == 988u, "the visible loop preserves the screen effect's fade");
+    seed_word(kVisibleEnd, kVisibleSpanBase + kVisibleSpanStride);
+    seed_byte(kVisibleSpanBase + disruptor::portal_reach::kRoomByte, 186u);
+    cpu.gpr[17] = kVisibleSpanBase;
+    cpu.gpr[31] = 0x800411A4u;
+    cpu.gpr[4] = 0x80090900u;
+    seed_word(0x80090000u + 16u, cpu.gpr[4]);
+    cpu.gpr[5] = kStackSpan;
+    seed_word(kStackSpan + 12u, 3u);
+    seed_word(kStackSpan + 16u, 317u);
+    cpu.read_word = psx_mod_read_word;
+    cpu.write_word = psx_mod_write_word;
+    for (const uint32_t invalid : {0xffffffffu, kPrimitiveBuffer + 0x11000u}) {
+        seed_word(kPrimitivePointer, invalid);
+        g_sector_callback(&cpu, kDrawSector);
+        expect(load_word(kFarDistance) == 1760u, "a cursor outside this arena leaves the cull distance alone");
+    }
+    seed_word(kPrimitivePointer, kPrimitiveBuffer);
+    g_sector_callback(&cpu, kDrawSector);
+    expect(load_word(kFarDistance) == 2880u && load_word(kFadeStart) == 988u, "only mesh culling reaches farther");
+    const std::array<uint32_t, 7> triangle{0x24808080u};
+    seed_word(kPrimitiveBuffer, 7u << 24);
+    seed_word(kPrimitiveBuffer + 4u, triangle[0]);
+    auto translucent = triangle;
+    translucent[0] = 0x26808080u;
+    seed_word(kPrimitiveBuffer + 32u, 7u << 24);
+    seed_word(kPrimitiveBuffer + 36u, translucent[0]);
+    seed_word(kPrimitivePointer, kPrimitiveBuffer + 64u);
+    g_objects_callback(&cpu, kRoomObjects);
+    expect(load_word(kFarDistance) == 1760u, "objects keep the original range");
+    expect(disruptor_far_rendering_packet_fraction(kPrimitiveBuffer + 32u, psx_gpu_command_signature(translucent.data(), 7)) == -1,
+           "translucent polygons retain the game's blending");
+    const uint32_t signature = psx_gpu_command_signature(triangle.data(), 7);
+    expect(disruptor_far_rendering_packet_fraction(kPrimitiveBuffer, signature) == PSX_PACKET_FOG_DETAIL_BASE + 256,
+           "the door triangle retains its texture under fog");
+    seed_word(kPrimitivePointer, kPrimitiveBuffer);
+    seed_byte(kVisibleSpanBase + disruptor::portal_reach::kRoomByte, 19u);
+    g_sector_callback(&cpu, kDrawSector);
+    expect(disruptor_far_rendering_packet_fraction(kPrimitiveBuffer, signature) == -1, "reuse by an identical courtyard packet loses the fog limit");
+    exit_renderer(&cpu);
+    expect(load_word(kFarDistance) == 1408u && load_word(kFadeStart) == 636u, "the game regains its distances");
+    for (const uint32_t x : {2960u, 3706u}) {
+        seed_word(disruptor::sector_reach::kCamera, x);
+        enter(&cpu);
+        expect(g_frame.entrance_reach == 0u, "the door sightline misses the arch on either side");
+        exit_renderer(&cpu);
+    }
+    seed_word(disruptor::sector_reach::kCamera, 3328u);
+    seed_word(disruptor::sector_reach::kCamera + 4u, 6655u);
+    enter(&cpu);
+    expect(g_frame.entrance_reach == 0u, "a facade lost in fog cannot show a detached door");
+    exit_renderer(&cpu);
+    seed_word(disruptor::sector_reach::kCamera + 4u, 8480u);
+    seed_word(disruptor::portal_reach::kCosines, 0xff00u);
+    enter(&cpu);
+    expect(g_frame.entrance_reach == 0u, "turning away uses the selected distance");
+    exit_renderer(&cpu);
 }
 
 void test_edge_margin_under_the_smooth_fade() {
@@ -1447,10 +1541,13 @@ void test_rooms_only_the_wider_walk_reaches() {
     const std::uint32_t far_head = disruptor::portal_reach::kObjectTables[2] + 4u * 3u;
     const std::uint32_t sector_head = kSectorData + 0x300u + disruptor::portal_reach::kSectorObjects;
     const std::uint32_t near_head = disruptor::portal_reach::kObjectTables[2] + 4u * 2u;
+    constexpr std::uint32_t wider_room_flag = disruptor::portal_reach::kListedAt + 3u;
     seed_word(far_head, 0x80081000u);
     seed_word(sector_head, 0x80082000u);
     seed_word(near_head, 0x80083000u);
-    const AllowedWrites allowed{__func__, {entries(3u), kListEnd, word_at(far_head), word_at(sector_head)}};
+    seed_byte(wider_room_flag, 1u);
+    const AllowedWrites allowed{__func__, {entries(3u), kListEnd, word_at(far_head), word_at(sector_head),
+                                              {wider_room_flag, wider_room_flag + 1u}}};
 
     const auto walk = [&cpu] {
         walk_into(&cpu, 0u, portal_of(1u), kScreenWedge);
@@ -1462,7 +1559,9 @@ void test_rooms_only_the_wider_walk_reaches() {
     reach_visible_loop(&cpu, 3u);
     expect(load_word(far_head) == 0u && load_word(sector_head) == 0u && load_word(near_head) == 0x80083000u,
            "the room only the wider walk reached draws none of its objects, the others draw theirs");
+    expect(psx_mod_read_byte(wider_room_flag) == 0xFFu, "the original stand-ins remain visible during the widened draw");
     hook_after(&cpu, kAfterVisibleLoop, kAfterVisibleLoopOpcode);
+    expect(psx_mod_read_byte(wider_room_flag) == 1u, "closing the visible loop restores the room flag");
     expect(load_word(far_head) == 0x80081000u && load_word(sector_head) == 0x80082000u, "after the visible loop its lists are back");
     expect(load_word(kVisibleEnd) == kReviewedVisibleSpanBase + 2u * kVisibleSpanStride &&
                load_word(kReviewedVisibleSpanBase + 4u) == 0x7701u &&
@@ -1482,6 +1581,7 @@ void test_rooms_only_the_wider_walk_reaches() {
     reach_visible_loop(&cpu, 3u);
     disruptor_far_rendering_state_saving();
     expect(load_word(far_head) == 0x80081000u, "a save inside the visible loop finds every list");
+    expect(psx_mod_read_byte(wider_room_flag) == 1u, "a save inside the visible loop finds the original room flag");
     exit_renderer(&cpu);
 
     enter(&cpu);
@@ -1543,7 +1643,8 @@ void drop_test(CPUState *cpu, std::uint32_t packet, std::array<std::int32_t, 4> 
 }
 
 void test_faces_only_the_wider_walk_admits() {
-    const AllowedWrites allowed{__func__, {entries(3u), kListEnd, kStackSpanSides}};
+    constexpr std::uint32_t wider_room_flag = disruptor::portal_reach::kListedAt + 3u;
+    const AllowedWrites allowed{__func__, {entries(3u), kListEnd, kStackSpanSides, {wider_room_flag, wider_room_flag + 1u}}};
     reset_state();
     CPUState cpu{};
     seed_live_game(&cpu);
@@ -2057,6 +2158,27 @@ void test_a_sector_span_reaches_past_the_frame_edge() {
     g_geometry_correction = 1;
 }
 
+void test_upper_deck_floor() {
+    constexpr uint32_t mesh = 0x80150000u, stack = 0x801F0000u;
+    const AllowedWrites allowed{__func__, {{stack - 48u, stack}}};
+    CPUState cpu{};
+    cpu.read_word = psx_mod_read_word;
+    cpu.write_word = psx_mod_write_word;
+    cpu.gpr[4] = mesh;
+    cpu.gpr[29] = stack;
+    cpu.gpr[31] = 0x800411A4u;
+    seed_word(mesh, 0xA00Du);
+    seed_word(mesh + 0x4D0u, 0xBD4FFu);
+    seed_word(mesh + 0xBC0u, 0x110433CCu);
+    draw_upper_deck_floor(&cpu, mesh);
+    expect(floor_draws == 0, "another floor is left alone");
+    seed_word(mesh + 0xBC4u, 0x0F445240u);
+    seed_word(stack - 48u, 0x12345678u);
+    draw_upper_deck_floor(&cpu, mesh);
+    expect(floor_draws == 1 && cpu.gpr[4] == mesh && cpu.gpr[29] == stack && load_word(stack - 48u) == 0x12345678u,
+           "the additional floor draw restores the caller and its stack");
+}
+
 void test_the_split_middle_moves_to_the_diagonal() {
     constexpr std::uint32_t kMiddle = 0x1F8000C0u;
     const AllowedWrites allowed{__func__, {{kMiddle, kMiddle + 8u}}};
@@ -2168,6 +2290,7 @@ void test_the_split_quarters_meet_at_texel_16() {
 }
 
 int main() {
+    test_upper_deck_floor();
     test_a_sector_span_reaches_past_the_frame_edge();
     test_the_split_middle_moves_to_the_diagonal();
     test_a_face_with_a_marked_corner_is_tested_on_its_real_sides();
@@ -2191,6 +2314,7 @@ int main() {
     test_fog_shares_belong_to_their_packet();
     test_transitions_inside_a_written_frame();
     test_presets_up_to_twice();
+    test_fortress_entrance();
     test_edge_margin_under_the_smooth_fade();
     test_far_plane_kept_inside_the_ordering_table();
     test_rooms_reach_past_their_portals();

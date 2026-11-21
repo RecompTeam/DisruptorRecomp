@@ -386,6 +386,12 @@ constexpr Option option_list[] = {
         "disruptor.invert_look", "Invert vertical stick", 0,
         "Looks down when the turning stick is pushed forward\nNeeds Vertical mouse look, under Mouse look",
         needs_layout_and_vertical),
+    toggle<&Settings::has_analog_movement, &Settings::analog_movement>(
+        "disruptor.analog_movement", "Analog movement", 1,
+        "Tilt the movement stick gently to walk slowly"),
+    toggle<&Settings::has_vibration, &Settings::vibration>(
+        "disruptor.vibration", "Controller vibration", 0,
+        "Feel shots and hits on a controller that supports vibration"),
 
     slider("audio.master_volume", "Master volume", 100,
            "", 0, 100, Unit::percent,

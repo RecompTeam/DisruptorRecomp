@@ -85,6 +85,7 @@ struct LanguageList {
     std::vector<std::wstring> labels;
     int selected = 0;
     std::wstring note;
+    std::wstring selected_language = L"English";
 };
 
 // A disc the worker has not described yet is absent from the regions, one it could not name has no value there.

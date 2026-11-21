@@ -1,8 +1,16 @@
 diff --git a/runtime/src/gpu_render.c b/runtime/src/gpu_render.c
-index e1fbe0f34a0755a07c6afc740dbae278042a517e..2513824c7f8e8cf96916f527843d8078fb6a3fff 100644
+index e1fbe0f34a0755a07c6afc740dbae278042a517e..62efacee37cbaeb70d30c095e9c57bc87737d5fd 100644
 --- a/runtime/src/gpu_render.c
 +++ b/runtime/src/gpu_render.c
-@@ -27,8 +27,18 @@
+@@ -11,6 +11,7 @@
+  * so the software path is byte-for-byte unchanged. */
+ 
+ #include "gpu_render.h"
++#include <string.h>
+ #include "gpu_sw_renderer.h"
+ #include "gpu_hd_textures.h"
+ #include "gpu_uv.h"
+@@ -27,8 +28,18 @@
      .set_mask_bits                 = sw_set_mask_bits,
      .set_texture_window            = sw_set_texture_window,
      .set_color_modulation          = sw_set_color_modulation,
@@ -22,7 +30,7 @@ index e1fbe0f34a0755a07c6afc740dbae278042a517e..2513824c7f8e8cf96916f527843d8078
      .fill_rect                     = sw_fill_rect,
      .copy_rect                     = sw_copy_rect,
      .draw_flat_triangle            = sw_draw_flat_triangle,
-@@ -168,6 +178,68 @@
+@@ -168,6 +179,74 @@
  void gr_set_mask_bits(int s, int c)                  { g_b->set_mask_bits(s, c); }
  void gr_set_texture_window(uint32_t raw)             { g_b->set_texture_window(raw); g_hd_texture_window=raw; }
  void gr_set_color_modulation(int r, int g, int b, int raw) { g_b->set_color_modulation(r, g, b, raw); }
@@ -70,7 +78,13 @@ index e1fbe0f34a0755a07c6afc740dbae278042a517e..2513824c7f8e8cf96916f527843d8078
 +    if (g_b->set_temporal_sprite_ground) g_b->set_temporal_sprite_ground(ground, reach);
 +}
 +void gr_set_sprite_card(const float card[8]) {
-+    if (g_b->set_sprite_card) g_b->set_sprite_card(card);
++    float placed[10] = {0};
++    if (card) memcpy(placed, card, 8 * sizeof(float));
++    gr_set_animated_sprite_card(card ? placed : NULL, 0);
++}
++
++void gr_set_animated_sprite_card(const float card[10], uint32_t pose_actor) {
++    if (g_b->set_sprite_card) g_b->set_sprite_card(card, pose_actor);
 +}
 +void gr_set_screen_tile(const struct PsxWsPlacedTile *tile) {
 +    if (g_b->set_screen_tile) g_b->set_screen_tile(tile);
@@ -91,7 +105,7 @@ index e1fbe0f34a0755a07c6afc740dbae278042a517e..2513824c7f8e8cf96916f527843d8078
  void gr_set_precise_triangle(int enabled, int32_t x0, int32_t y0, int32_t x1, int32_t y1,
                               int32_t x2, int32_t y2) {
      if (g_b->set_precise_triangle)
-@@ -294,6 +366,12 @@
+@@ -294,6 +373,12 @@
      if (g_b->wide_clear_margins)
          g_b->wide_clear_margins(base_x, y, h, color, sides);
  }

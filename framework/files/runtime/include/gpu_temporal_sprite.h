@@ -4,6 +4,8 @@
 #include <math.h>
 #include <stdint.h>
 
+enum { GPU_TEMPORAL_SPRITE_KEEP_ART = 1 << 22 };
+
 /* What the game's seams hand over for one sprite, in pixels. */
 typedef struct {
     int placed, sized, shadow, whole;

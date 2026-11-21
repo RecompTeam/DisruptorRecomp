@@ -11,8 +11,8 @@
  *
  * Every site is pinned by both PC and opcode.  At zero pitch, during lockstep
  * replay, in netplay, or outside verified live gameplay, the original guest
- * results and memory are left byte-for-byte untouched, except that free aim
- * (Auto-aim off) levels a shot the game raised to its target.
+ * camera projection stays neutral. During live play, locked shots can use a
+ * corrected range even at zero pitch. Drain collision and homing apply in both aim modes.
  */
 
 #include "game/input/vertical_camera.h"
@@ -329,7 +329,179 @@ void adjust_projectile(CPUState *cpu) {
                        static_cast<uint16_t>(adjusted));
 }
 
+bool player_combat_active() {
+    return plausible_live_gameplay() && psx_mod_read_byte(kSceneMode) == 0u &&
+           psx_mod_read_byte(kGameMode) != kDemoMode && psx_mod_read_byte(kMenuState) != kMainMenu;
+}
+
+void rank_aim_target(CPUState *cpu, uint32_t) {
+    const double slope = g_effective_slope.load(std::memory_order_relaxed);
+    if (slope == 0.0 || g_free_aim.load(std::memory_order_relaxed) || !player_combat_active()) return;
+    const uint32_t body = cpu->gpr[22];
+    if (!valid_main_ram_pointer(body, 0x2Bu)) return;
+    const int32_t height = static_cast<int32_t>(psx_mod_read_word(body + 0x28u));
+    if (height < 2) return;
+    const int64_t offset = signed_register(cpu, 5) - std::llround(signed_register(cpu, 20) * slope);
+    cpu->gpr[7] = static_cast<uint32_t>(std::max<int64_t>(0, std::abs(offset) - (height / 2 - 1)));
+}
+
+double horizontal_distance(double x, double z) {
+    x = std::abs(x);
+    z = std::abs(z);
+    return std::max(x, z) + std::min(x, z) * 0.375;
+}
+
+double shot_position(uint32_t projectile, uint32_t field) {
+    return static_cast<int32_t>(psx_mod_read_word(projectile + field)) / 8.0;
+}
+
+void correct_aim_range(CPUState *cpu, uint32_t pc) {
+    if (g_free_aim.load(std::memory_order_relaxed) || !player_combat_active()) return;
+    const uint32_t projectile = cpu->gpr[16], target = psx_mod_read_word(kAimTargetPointer);
+    if (!valid_main_ram_pointer(projectile, 0x15u) || !valid_main_ram_pointer(target, 0x36u)) return;
+    const uint32_t body = psx_mod_read_word(0x80076E3Cu + 4u * psx_mod_read_byte(target + 0x36u));
+    if (!valid_main_ram_pointer(body, 0x7Fu)) return;
+    const int half_height = static_cast<int32_t>(psx_mod_read_word(body + 0x28u)) / 2;
+    const int64_t aim_offset = static_cast<int32_t>(psx_mod_read_word(body + 0x7Cu));
+    if (std::abs(aim_offset) >= half_height) return;
+    const int vx = load_signed_half(projectile + kVelocityXOffset);
+    const int vz = load_signed_half(projectile + kVelocityZOffset);
+    const double step_x = (vx >> 6) / 8.0, step_z = (vz >> 6) / 8.0;
+    const double step_squared = step_x * step_x + step_z * step_z;
+    if (!step_squared) return;
+    const double dx = psx_mod_read_half(target + 0x16u) - shot_position(projectile, 4u);
+    const double dz = psx_mod_read_half(target + 0x18u) - shot_position(projectile, 8u);
+    const double substeps = (dx * step_x + dz * step_z) / step_squared;
+    const uint32_t physical_pc = pc & 0x1FFFFFFFu;
+    const bool fixed_speed = physical_pc == 0x2DFE0u || physical_pc == 0x2E128u;
+    const uint32_t weapon = cpu->gpr[19];
+    if (!valid_main_ram_pointer(weapon, 0x22u) || psx_mod_read_byte(weapon + 0x20u) > 8u) return;
+    const int weapon_speed = psx_mod_read_byte(weapon + 0x22u);
+    const int speed = fixed_speed ? 32 : weapon_speed;
+    const double distance = substeps * speed / 2.0;
+    if (distance < 1 || distance > 4095) return;
+    const uint32_t old_depth = cpu->gpr[2];
+    // The retail lookup starts 32 halfwords before the 4096 reciprocals at 0x80057E98.
+    const uint32_t new_depth = static_cast<uint32_t>(std::lround(distance)) + 32u;
+    if (old_depth >= 4128u) return;
+    int64_t x = static_cast<int32_t>(psx_mod_read_word(projectile + 4u));
+    int64_t z = static_cast<int32_t>(psx_mod_read_word(projectile + 8u));
+    const int64_t y = static_cast<int32_t>(psx_mod_read_word(projectile + 12u));
+    const int target_x = psx_mod_read_half(target + 0x16u), target_z = psx_mod_read_half(target + 0x18u);
+    const int target_y = psx_mod_read_half(target + 0x1Au);
+    const int radius = static_cast<int32_t>(psx_mod_read_word(body + 0x24u));
+    const int64_t rise = target_y + aim_offset - (y >> 3);
+    const auto raw_velocity = [&](uint32_t depth) {
+        const uint32_t reciprocal = psx_mod_read_half(0x80057E58u + 2u * depth);
+        return (rise * speed * reciprocal) >> 8;
+    };
+    const auto vertical_step = [&](uint32_t depth) {
+        int velocity = static_cast<int16_t>(raw_velocity(depth));
+        velocity = std::clamp(velocity, -160 * weapon_speed, 160 * weapon_speed);
+        return velocity >> 6;
+    };
+    const int old_step = vertical_step(old_depth), new_step = vertical_step(new_depth);
+    if (rise == 0) return;
+    const int timer = psx_mod_read_byte(weapon + 0x21u);
+    const int lifetime = timer ? timer : 256;
+    uint32_t selected = old_depth;
+    for (int step = 1; step < lifetime; ++step) {
+        x += vx >> 6;
+        z += vz >> 6;
+        if (horizontal_distance((x >> 3) - target_x, (z >> 3) - target_z) >= radius) continue;
+        if (std::abs(((y + step * old_step) >> 3) - target_y) < half_height) return;
+        if (std::abs(((y + step * new_step) >> 3) - target_y) < half_height) {
+            selected = new_depth;
+        } else if (selected == old_depth) {
+            // Find an unwrapped retail slope that reaches the open height band on this substep.
+            uint32_t first = 33u, last = 4128u;
+            while (first < last) {
+                const uint32_t middle = first + (last - first) / 2u;
+                const auto velocity = raw_velocity(middle);
+                const auto error = ((y + step * vertical_step(middle)) >> 3) - target_y;
+                if (velocity < INT16_MIN || velocity > INT16_MAX || (rise < 0 ? -error : error) >= half_height)
+                    first = middle + 1u;
+                else
+                    last = middle;
+            }
+            if (first < 4128u && std::abs(((y + step * vertical_step(first)) >> 3) - target_y) < half_height)
+                selected = first;
+        }
+    }
+    cpu->gpr[2] = selected;
+}
+
+void limit_drain_flight_time(CPUState *cpu, uint32_t) {
+    if (player_combat_active()) cpu->gpr[3] = std::min(cpu->gpr[3], cpu->gpr[2]);
+}
+
+void check_drain_crossing(CPUState *cpu, uint32_t pc) {
+    const bool horizontal = (pc & 0x1FFFFFFFu) == 0x22918u;
+    if (horizontal) {
+        const auto gap = signed_register(cpu, 4) - signed_register(cpu, 2);
+        // A signed halfword velocity moves at most 64 world units per axis, or 88 in the collision metric.
+        if (gap < 0 || gap > 88) return;
+    } else if (std::abs(signed_register(cpu, 4) - signed_register(cpu, 5)) < signed_register(cpu, 3)) {
+        return;
+    }
+    const uint32_t projectile = cpu->gpr[17], weapon = cpu->gpr[18], target = cpu->gpr[16], body = cpu->gpr[6];
+    if (!valid_main_ram_pointer(projectile, 0x1Du) || !valid_main_ram_pointer(weapon, 0x20u) ||
+        !valid_main_ram_pointer(target, 0x1Bu) || !valid_main_ram_pointer(body, 0x27u) ||
+        psx_mod_read_byte(projectile + 0x1Au) != 14u || psx_mod_read_byte(weapon + 0x20u) != 11u ||
+        !player_combat_active()) return;
+    const std::array<int, 3> step{load_signed_half(projectile + kVelocityXOffset) >> 6,
+                                  load_signed_half(projectile + kVelocityZOffset) >> 6,
+                                  load_signed_half(projectile + kVelocityYOffset) >> 6};
+    const int64_t center = psx_mod_read_half(target + 0x1Au);
+    const int64_t half = horizontal ? signed_register(cpu, 3) >> 1 : signed_register(cpu, 3);
+    if (half < 1) return;
+    const int64_t end = static_cast<int32_t>(psx_mod_read_word(projectile + 12u)) >> 3;
+    const std::array<int64_t, 3> start{
+        static_cast<int64_t>(static_cast<int32_t>(psx_mod_read_word(projectile + 4u))) - step[0],
+        static_cast<int64_t>(static_cast<int32_t>(psx_mod_read_word(projectile + 8u))) - step[1],
+        static_cast<int64_t>(static_cast<int32_t>(psx_mod_read_word(projectile + 12u))) - step[2]};
+    if (std::abs(end - center) >= half && std::abs((start[2] >> 3) - center) >= half &&
+        ((start[2] >> 3) < center) == (end < center)) return;
+    const int target_x = psx_mod_read_half(target + 0x16u), target_z = psx_mod_read_half(target + 0x18u);
+    const int radius = static_cast<int32_t>(psx_mod_read_word(body + 0x24u));
+    const auto intersects = [&](int numerator, int denominator, bool after) {
+        const auto cell = [&](size_t axis) {
+            const int64_t fixed = start[axis] * denominator + static_cast<int64_t>(step[axis]) * numerator -
+                                  (after && step[axis] < 0);
+            const int scale = 8 * denominator;
+            return (fixed - (fixed < 0 ? scale - 1 : 0)) / scale;
+        };
+        const int64_t height = cell(2);
+        if (std::abs(height - center) >= half) return false;
+        const int64_t distance = static_cast<int64_t>(horizontal_distance(cell(0) - target_x, cell(1) - target_z));
+        if (distance >= radius) return false;
+        cpu->gpr[4] = static_cast<uint32_t>(horizontal ? distance : height);
+        return true;
+    };
+    if (intersects(0, 1, false)) return;
+    // At simultaneous grid crossings the exact cell can differ from both adjacent cells.
+    for (size_t axis = 0; axis < step.size(); ++axis) {
+        const int distance = std::abs(step[axis]);
+        const int phase = static_cast<int>(static_cast<uint64_t>(start[axis]) & 7u);
+        if (!distance) continue;
+        for (int crossed = step[axis] > 0 ? 8 - phase : phase; crossed <= distance; crossed += 8) {
+            if (intersects(crossed, distance, false) || (crossed < distance && intersects(crossed, distance, true)))
+                return;
+        }
+    }
+}
+
 PSX_MOD_CONSTRUCTOR(register_disruptor_vertical_camera) {
+    constexpr char plugin[] = "disruptor.vertical_camera.renderer";
+    bool registered = psx_mod_register_instruction_plugin(plugin, 0x8003CE3Cu, 0x00071880u, rank_aim_target) != 0;
+    for (uint32_t pc : {0x8002DFE0u, 0x8002E128u, 0x8002E31Cu, 0x8002E48Cu})
+        registered &= psx_mod_register_instruction_plugin(plugin, pc, 0x00021040u, correct_aim_range) != 0;
+    registered &= psx_mod_register_instruction_plugin(plugin, 0x8002EB58u, 0x00431023u, limit_drain_flight_time) != 0;
+    registered &= psx_mod_register_instruction_plugin(plugin, 0x80022918u, 0x0082102Au, check_drain_crossing) != 0;
+    registered &= psx_mod_register_instruction_plugin(plugin, 0x80022934u, 0x0044102Au, check_drain_crossing) != 0;
+    if (!registered) {
+        std::fprintf(stderr, "disruptor: failed to register combat hooks\n");
+    }
     if (!psx_mod_register_function_entry_plugin(
             "disruptor.vertical_camera.renderer", kRendererEntry,
             renderer_entry)) {

@@ -5,6 +5,7 @@
 #include <bitset>
 #include <cmath>
 #include <cstdint>
+#include <span>
 
 #include "game/render/sector_reach.h"
 
@@ -138,6 +139,20 @@ inline bool beside_span(const std::array<uint32_t, 4> &screen, int32_t left, int
 
 inline constexpr int32_t kBandFar = 1 << 20;  /* a band's side with no edge, as PSX_SUPPLEMENTAL_FAR */
 inline constexpr Span kWholeFace{kBandFar, -kBandFar};
+
+// These four panels beside console 02 span the portal through which their room was listed.
+template <typename Read>
+bool console_wall(uint32_t first, uint32_t second, uint32_t next_face, Read read) {
+    constexpr std::array<uint32_t, 4> first_words{0x2609911Cu, 0x2789F12Cu, 0x284A2124u, 0x290A511Cu};
+    constexpr std::array<uint32_t, 4> second_words{0x26C9D200u, 0x26498200u, 0x27C9E200u, 0x288A1200u};
+    for (unsigned i = 0; i < first_words.size(); ++i) {
+        if (first != first_words[i] || second != second_words[i]) continue;
+        const uint32_t part = read(0x1F800054u);
+        return ram_word(part) && part <= 0x80200000u - 0x760u && next_face == part + 1476u + 8u * i &&
+               read(part) == 0x760FFu && read(part + 4u) == 0xE8u;
+    }
+    return false;
+}
 
 /* Pinned corners cannot prove that a precisely projected near face stays inside its room. */
 inline bool room_band(int32_t left, int32_t right, Span &band) {
@@ -383,13 +398,24 @@ public:
     /* The list's new end. */
     template <class Memory, typename Write, typename WriteByte>
     uint32_t add(uint32_t first, uint32_t end, uint32_t stride, int32_t x, int32_t z, const View &view, const Memory &memory,
-                 Write write, WriteByte write_byte) {
+                 Write write, WriteByte write_byte, std::span<const uint8_t> exterior = {}) {
         count_ = 0u;
         if (stride == 0u || end < first || (end - first) % stride != 0u || (end - first) / stride >= kMostRooms) return end;
         std::bitset<kMostRooms> listed;
         for (uint32_t entry = first; entry < end; entry += stride) listed.set(memory.byte(entry + kRoomByte) & 0xFFu);
         const uint32_t limit = first + kMostRooms * stride;
         uint32_t at = end;
+        const auto add_loaded = [&](uint32_t room) {
+            if (room == sector_reach::kNoSector || listed.test(room) || at >= limit || !visit_at(memory, room).loaded) return;
+            const uint32_t index = (at - first) / stride;
+            added_[count_++] = {room, memory.byte(kListedAt + room) & 0xFFu, index, at, memory.word(at),
+                                memory.word(at + kRoomByte)};
+            write(at, kFullSpan);
+            write(at + kRoomByte, room);
+            write_byte(kListedAt + room, index);
+            listed.set(room);
+            at += stride;
+        };
         for (uint32_t entry = first; entry < end; entry += stride) {
             const uint32_t source = memory.byte(entry + kRoomByte) & 0xFFu;
             const uint32_t sector = memory.word(sector_reach::kSectors + 4u * source);
@@ -398,21 +424,12 @@ public:
             for (uint32_t walked = 0u; ram_word(gate) && walked < kMostPortals; ++walked, gate += kPortalStride) {
                 const uint32_t room = memory.byte(gate + sector_reach::kPortalSector) & 0xFFu;
                 if (room != sector_reach::kNoSector && !listed.test(room) && at < limit &&
-                    beside(sector_reach::portal_at(memory, gate), x, z, view)) {
-                    if (visit_at(memory, room).loaded) {
-                        const uint32_t index = (at - first) / stride;
-                        added_[count_++] = {room, memory.byte(kListedAt + room) & 0xFFu, index, at, memory.word(at),
-                                            memory.word(at + kRoomByte)};
-                        write(at, kFullSpan);
-                        write(at + kRoomByte, room);
-                        write_byte(kListedAt + room, index);
-                        listed.set(room);
-                        at += stride;
-                    }
-                }
+                    beside(sector_reach::portal_at(memory, gate), x, z, view)) add_loaded(room);
                 if ((memory.byte(gate + kPortalLast) & 0xFFu) == 0xFFu) break;
             }
         }
+        for (const uint8_t room : exterior)
+            if (ram_word(memory.word(sector_reach::kSectors + 4u * room))) add_loaded(room);
         old_end_ = end;
         new_end_ = at;
         return at;

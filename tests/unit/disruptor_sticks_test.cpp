@@ -23,6 +23,7 @@ bool close(double actual, double expected) { return std::abs(actual - expected) 
 Tuning layout(Layout chosen) {
     Tuning tuning;
     tuning.layout = chosen;
+    tuning.analog_movement = false;
     return tuning;
 }
 
@@ -79,6 +80,32 @@ void test_menus_keep_the_d_pad() {
     }
 }
 
+void test_analog_movement() {
+    expect(Tuning{}.analog_movement && !Tuning{}.vibration, "analog movement starts on and vibration starts off");
+    Tuning dual = layout(Layout::dual_analog);
+    dual.analog_movement = true;
+    const Reading resting = read(dual, {0, -kThreshold, 0, 0}, kThreshold, true, false);
+    const Reading half = read(dual, {0, -(kFull + kThreshold) / 2, 0, 0}, kThreshold, true, false);
+    const Reading full = read(dual, {0, -32768, 0, 0}, kThreshold, true, false);
+    expect(!resting.movement && resting.press == 0, "there is no movement at the edge of the dead zone");
+    expect(half.press == 0 && std::abs(half.movement.forward - kFull / 2) <= 1 && half.movement.strafe == 0,
+           "half the travel after the dead zone gives half speed");
+    expect(full.press == 0 && full.movement.forward == kFull, "the end of the stick gives the original full speed");
+    const Reading diagonal = read(dual, {kFull, kFull, 0, 0}, kThreshold, true, false);
+    expect(diagonal.movement.forward < 0 && diagonal.movement.strafe > 0 &&
+               std::abs(std::hypot(diagonal.movement.forward, diagonal.movement.strafe) - kFull) <= 1.0,
+           "diagonal movement keeps the full speed limit");
+    dual.layout = Layout::southpaw;
+    const Reading swapped = read(dual, {0, 0, -kFull, 0}, kThreshold, true, false);
+    expect(swapped.press == 0 && swapped.movement.strafe == -kFull, "Southpaw moves on the right stick");
+    dual.layout = Layout::classic;
+    const Reading classic = read(dual, {-kFull, kFull, 0, 0}, kThreshold, true, false);
+    expect(classic.press == kLeft && classic.movement.forward == -kFull && classic.movement.strafe == 0,
+           "Classic still turns left or right and moves at analog speed along the Y axis");
+    const Reading menu = read(dual, {-kFull, kFull, 0, 0}, kThreshold, false, false);
+    expect(menu.press == (kLeft | kDown) && !menu.movement, "menu navigation still uses both digital axes");
+}
+
 void test_uses() {
     const auto classic = disruptor::settings::stick_uses(0), dual = disruptor::settings::stick_uses(1),
                southpaw = disruptor::settings::stick_uses(2);
@@ -97,6 +124,7 @@ int main() {
     test_tilt();
     test_speed_and_southpaw();
     test_menus_keep_the_d_pad();
+    test_analog_movement();
     test_uses();
     if (g_failures != 0) return 1;
     std::cout << "disruptor sticks: PASS\n";

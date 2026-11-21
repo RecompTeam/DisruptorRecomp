@@ -138,6 +138,10 @@ int main() {
         written.look_deadzone = 0;
         written.has_invert_look = true;
         written.invert_look = true;
+        written.has_analog_movement = true;
+        written.analog_movement = false;
+        written.has_vibration = true;
+        written.vibration = true;
         written.has_language_disc = true;
         written.language_disc = "C:\\Games \"old\"\\Disruptor (France).cue";
         written.has_language_discs = true;
@@ -268,6 +272,7 @@ int main() {
                     loaded.has_bass_cut && loaded.bass_cut == 2 &&
                     loaded.has_stick_layout && loaded.stick_layout == 2 && loaded.has_look_speed && loaded.look_speed == 175 &&
                     loaded.has_look_deadzone && loaded.look_deadzone == 0 && loaded.has_invert_look && loaded.invert_look &&
+                    loaded.has_analog_movement && !loaded.analog_movement && loaded.has_vibration && loaded.vibration &&
                     loaded.has_language_disc && loaded.language_disc == "C:\\Games \"old\"\\Disruptor (France).cue" &&
                     loaded.has_language_discs && loaded.language_discs == written.language_discs &&
                     loaded.has_hud_scale && loaded.hud_scale == 70 &&

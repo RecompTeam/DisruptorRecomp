@@ -28,7 +28,7 @@ namespace fs = std::filesystem;
 namespace disruptor::launcher {
 namespace {
 constexpr DiscProfile discs[] = {
-    {"SLUS-00224", L"Disruptor (USA, SLUS-00224)", 636350064,
+    {"SLUS-00224", L"Disruptor (USA)", 636350064,
      "3b49f9874e30c613ca9d17720716764cd76d0ac968c0acd0f53159366c0cf3a4",
      L"game.toml"},
 };

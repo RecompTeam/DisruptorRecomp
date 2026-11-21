@@ -33,6 +33,9 @@ typedef struct {
     TemporalCommand *commands;
     int *matches;
     int nv, nt, nc, active, bad, clear_y, clear_h, width, height, scale;
+    NightView night_view;
+    int night_raw;
+    float night_focal;
     int origin_y, texture_count, texture_quiet, matched, world, moving;
     int backdrop;  /* it has placed backdrop tiles: the panorama's numbers below are theirs, see PsxWsPlacedTile */
     float backdrop_origin, backdrop_period, backdrop_scale, backdrop_column;
@@ -222,7 +225,8 @@ static int temporal_allocate(TemporalScene *s) {
     return s->vertices && s->triangles && s->from && s->start && s->gone_to && s->gone &&
            s->commands && s->matches;
 }
-static void temporal_begin(GLuint fbo, int y, int h, uint16_t color) {
+static int temporal_texture(TemporalScene *s);
+static void temporal_begin(GLuint fbo, int y, int h, uint16_t color, NightView sky_view) {
     TemporalScene *s=NULL;
     for (int i=0;i<TEMP_BUILD_SLOTS;++i)
         if (!s_temp_held[i] && s_temp_build[i].capture_fbo==fbo && s_temp_build[i].clear_y==y) { s=&s_temp_build[i]; break; }
@@ -241,12 +245,16 @@ static void temporal_begin(GLuint fbo, int y, int h, uint16_t color) {
     s->active = 1; s->bad = 0; s->nv = s->nt = s->nc = 0;
     s->backdrop = 0; s->backdrop_back = 0.0f; s->sky_known = 0; s->sky_frame[3] = 0.0f;
     s->near_count = 0;
+    s->night_view = sky_view;
+    s->night_focal = s_yaw_focal_x;
     if (s->texture_count > TEMP_KEPT_TEXTURES) s->texture_quiet = 0;
     else if (s->texture_quiet < TEMP_QUIET_USES && ++s->texture_quiet == TEMP_QUIET_USES) {
         glDeleteTextures(TEMP_MAX_TEXTURES - TEMP_KEPT_TEXTURES, s->textures + TEMP_KEPT_TEXTURES);
         memset(s->textures + TEMP_KEPT_TEXTURES, 0, (TEMP_MAX_TEXTURES - TEMP_KEPT_TEXTURES) * sizeof(s->textures[0]));
     }
-    s->texture_count = 0; s->clear_y = y; s->clear_h = h;
+    s->texture_count = 0;
+    s->night_raw = sky_view.view >= 0 && sky_view.camera[3] > 0 ? temporal_texture(s) : -1;
+    s->clear_y = y; s->clear_h = h;
     s->width = g_wide_w; s->scale = s_scale;
     s->clear[0] = (color & 31) / 31.0f;
     s->clear[1] = ((color >> 5) & 31) / 31.0f;
@@ -430,13 +438,19 @@ static void temporal_draw(const float *vertices, const uint64_t *identities, int
         uint64_t hash=command_hash;
         const int sprite = identities && identities[i]==TEMPORAL_SPRITE_IDENTITY &&
             identities[i+1]==TEMPORAL_SPRITE_IDENTITY && identities[i+2]==TEMPORAL_SPRITE_IDENTITY;
+        const int posed = identities && (identities[i] >> 32) == (TEMPORAL_POSE_IDENTITY >> 32) &&
+            identities[i+1] == identities[i] && identities[i+2] == identities[i];
         const int partial = identities && identities[i]==TEMPORAL_PARTIAL_IDENTITY &&
             identities[i+1]==TEMPORAL_PARTIAL_IDENTITY && identities[i+2]==TEMPORAL_PARTIAL_IDENTITY;
         const int cut = identities && identities[i]==TEMPORAL_CUT_IDENTITY &&
             identities[i+1]==TEMPORAL_CUT_IDENTITY && identities[i+2]==TEMPORAL_CUT_IDENTITY;
         t->world = !cut;
-        t->sprite = sprite;
-        t->modelled = !sprite && !partial && !cut && identities && identities[i] && identities[i+1] && identities[i+2] &&
+        t->sprite = posed ? (int)(uint32_t)identities[i] : sprite;
+        if (posed) {
+            const int actor = t->sprite & ~GPU_TEMPORAL_SPRITE_KEEP_ART;
+            hash = temporal_hash(hash, &actor, sizeof(actor));
+        }
+        t->modelled = !t->sprite && !partial && !cut && identities && identities[i] && identities[i+1] && identities[i+2] &&
             !((identities[i] | identities[i+1] | identities[i+2]) & PSX_NEAR_IDENTITY);
         for (int j=0; t->modelled && j<3; ++j)
             for (int axis=0; axis<3; ++axis)
@@ -451,7 +465,7 @@ static void temporal_draw(const float *vertices, const uint64_t *identities, int
                 s->near_corners[s->near_count++].place[2]=v[22];
             }
             t->depth[j]=v[textured ? 23 : 9]>0.0f ? v[textured ? 23 : 9] : 0.0f;  /* negative: the display mirror's own, see take_visual_triangle */
-            if (v[textured ? 19 : 6] <= 0.5f && !sprite && !partial) t->world=0;
+            if (v[textured ? 19 : 6] <= 0.5f && !t->sprite && !partial) t->world=0;
             if (textured) {
                 hash=temporal_hash(hash,v+2,2*sizeof(float));
                 hash=temporal_hash(hash,v+8,11*sizeof(float));
@@ -837,6 +851,24 @@ static void temporal_supp_mark(const TemporalScene *s,const TemporalCommand *c,c
 }
 /* Draw part of one retained command with the scene's own state. */
 static float s_temp_fade_nearer=1.0f;  /* a carried face drawn over the scene has its depth handed over that much nearer */
+static int temporal_bind_depth_program(const TemporalScene *s, const TemporalCommand *c) {
+    if (!s_temp_clear_prog) return 0;
+    TemporalUniforms *u = &s_temp_clear_uniforms;
+    p_glUseProgram(s_temp_clear_prog);
+    smooth_fade_uniforms(u->fade,u->fade_at,u->fade_power,u->fade_blocks,u->fade_block_count,s_temp_fade_nearer);
+    edge_dissolve_batch(u->dissolve,u->clear,c->semi,c->check);
+    night_terrain_uniform(u->clear, &s_night_between);
+    p_glUniform1f(u->shift,0.5f/s->scale-1.0f/64.0f);
+    p_glUniform1f(u->xhalf,s->width/2.0f); p_glUniform1f(u->visual,1);
+    p_glUniform4i(u->twin,c->twin[0],c->twin[1],c->twin[2],c->twin[3]);
+    p_glUniform1i(u->filter,c->filter); p_glUniform1i(u->semi,c->semi<0?0:c->semi);
+    p_glUniform1i(u->pass,c->semi<0?3:4);
+    if (s->sky_known) sky_uniforms(u->sky,u->sky_frame,u->sky_cells,u->sky_shape,u->sky_irregular,u->sky_grown,
+        &u->sky_sent,&s->sky,s->sky_frame[0],s->sky_frame[1],s->sky_frame[2],s->sky_frame[3]+s_temp_sky_moved);
+    p_glUniform4f(u->options,0,0,s->tint,0);
+    return 1;
+}
+
 static void temporal_submit_faces(const TemporalScene *s,const TemporalCommand *c,int height,
                                   const float *vertices,int count);
 /* How the frame being shown was placed, for a screen recording's list. */
@@ -863,6 +895,7 @@ static void temporal_submit(const TemporalScene *s,const TemporalCommand *c,int 
     p_glUseProgram(s_temp_tex_prog);
     smooth_fade_uniforms(u->fade, u->fade_at, u->fade_power, u->fade_blocks, u->fade_block_count, s_temp_fade_nearer);
     edge_dissolve_batch(u->dissolve,u->clear,c->semi,c->check);
+    night_terrain_uniform(u->clear, &s_night_between);
     p_glUniform1f(u->shift,0.5f/s->scale-1.0f/64.0f);
     p_glUniform1f(u->xhalf,s->width/2.0f); p_glUniform1f(u->visual,1);
     p_glUniform4f(u->options,0,0,s->tint,-1.0f);
@@ -886,6 +919,12 @@ static void temporal_submit(const TemporalScene *s,const TemporalCommand *c,int 
     p_glUniform4f(u->options,0,0,s->tint,0.0f);
 }
 
+static int temporal_has_sprite_fog(const float *vertices, int count) {
+    for (int i=0; i<count; i+=3)
+        if (((int)(vertices[i*TEXV+13]+0.5f) & (RAW_SUPPLEMENTAL | 2)) == 2) return 1;
+    return 0;
+}
+
 static void temporal_submit_faces(const TemporalScene *s,const TemporalCommand *c,int height,
                                   const float *vertices,int count) {
     if (s_zbuffer_oracle && c->supp==1) return;  /* the z-buffer view shows the game's own faces alone */
@@ -898,7 +937,10 @@ static void temporal_submit_faces(const TemporalScene *s,const TemporalCommand *
     glEnable(GL_SCISSOR_TEST); glScissor(0,sy*s->scale,s->width*s->scale,sh*s->scale);
     p_glUseProgram(t?s_temp_tex_prog:s_temp_geo_prog);
     if (t) smooth_fade_uniforms(u->fade, u->fade_at, u->fade_power, u->fade_blocks, u->fade_block_count, s_temp_fade_nearer);
-    if (t) edge_dissolve_batch(u->dissolve,u->clear,c->semi,c->check);
+    if (t) {
+        edge_dissolve_batch(u->dissolve,u->clear,c->semi,c->check);
+        night_terrain_uniform(u->clear, &s_night_between);
+    }
     p_glUniform1f(u->shift,0.5f/s->scale-1.0f/64.0f);
     p_glUniform1f(u->xhalf,s->width/2.0f); p_glUniform1f(u->visual,1);
     p_glUniform4f(u->options,0,0,s->tint,s_temp_underlaying ? -1.0f : 0.0f);
@@ -912,6 +954,7 @@ static void temporal_submit_faces(const TemporalScene *s,const TemporalCommand *
                        t && c->mode==GL_TRIANGLES && s_temp_part!=1;
     const int held=c->held && s_temp_marked && s_temp_scene_depth && !s_temp_underlaying && t &&
                    c->mode==GL_TRIANGLES && s_temp_part!=1;
+    const int night=t && !s_uv_view && night_terrain_active(&s_night_between);
     if (s_temp_fill) {
         /* Under the depth test the departed faces drawn under the world wrote no depth. Where the scene left none either
          * they leave theirs now: a pass at the far sentinel depth tags those pixels in stencil bit 1, a second writes. The
@@ -964,22 +1007,10 @@ static void temporal_submit_faces(const TemporalScene *s,const TemporalCommand *
     if (!supp && s_temp_scene_depth && !s_temp_underlaying && s_temp_part!=1) {
         p_glUniform1i(u->pass,c->semi<0?3:4);
         if (s_temp_supplemental_depth) {
-            TemporalUniforms *clear=s_temp_clear_prog?&s_temp_clear_uniforms:u;
-            if (s_temp_clear_prog) {
-                p_glUseProgram(s_temp_clear_prog);
-                smooth_fade_uniforms(clear->fade,clear->fade_at,clear->fade_power,clear->fade_blocks,clear->fade_block_count,s_temp_fade_nearer);
-                p_glUniform1f(clear->shift,0.5f/s->scale-1.0f/64.0f);
-                p_glUniform1f(clear->xhalf,s->width/2.0f); p_glUniform1f(clear->visual,1);
-                p_glUniform4i(clear->twin,c->twin[0],c->twin[1],c->twin[2],c->twin[3]);
-                p_glUniform1i(clear->filter,c->filter); p_glUniform1i(clear->semi,c->semi<0?0:c->semi);
-                p_glUniform1i(clear->pass,c->semi<0?3:4);
-                if (s->sky_known) sky_uniforms(clear->sky,clear->sky_frame,clear->sky_cells,clear->sky_shape,clear->sky_irregular,clear->sky_grown,
-                    &clear->sky_sent,&s->sky,s->sky_frame[0],s->sky_frame[1],s->sky_frame[2],s->sky_frame[3]+s_temp_sky_moved);
-            }
-            p_glUniform4f(clear->options,0,0,s->tint,0);
+            const int depth_program = temporal_bind_depth_program(s,c);
+            if (!depth_program) p_glUniform4f(u->options,0,0,s->tint,0);
             clear_supplemental_depth((GLenum)c->mode,count,c->check);
-            if (s_temp_clear_prog) p_glUseProgram(s_temp_tex_prog);
-            else p_glUniform4f(u->options,0,0,s->tint,0);
+            if (depth_program) p_glUseProgram(s_temp_tex_prog);
         }
         glDepthMask(write_after);
     }
@@ -988,7 +1019,7 @@ static void temporal_submit_faces(const TemporalScene *s,const TemporalCommand *
         p_glUniform4f(u->options,0,0,s->tint,2.0f);
         glPolygonMode(GL_FRONT_AND_BACK,GL_LINE); glLineWidth(filler_line_width(s->scale));
         glDepthFunc(GL_LESS); glDepthMask(GL_FALSE); glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_FALSE);
-        if (c->semi<0) opaque_blend(); else glDisable(GL_BLEND);
+        if (c->semi<0) opaque_blend(night); else glDisable(GL_BLEND);
         s_temp_filling=1; temporal_mask(c->check,c->mask); s_temp_filling=0;
         p_glUniform1i(u->pass,c->semi<0?0:4); glDrawArrays(GL_TRIANGLES,0,count);
         glPolygonMode(GL_FRONT_AND_BACK,GL_FILL); glDepthFunc(GL_ALWAYS); glDepthMask(GL_TRUE);
@@ -1016,23 +1047,24 @@ static void temporal_submit_faces(const TemporalScene *s,const TemporalCommand *
         else glDisable(GL_STENCIL_TEST);
         if (c->supp) { glEnable(GL_POLYGON_OFFSET_FILL); glPolygonOffset(1.0f,1.0f); s_temp_won=s_temp_supp; }
         glDepthFunc(c->supp?GL_LESS:GL_LEQUAL); glDepthMask(GL_TRUE);
-        p_glUniform1i(u->pass,c->semi<0?3:4); glDrawArrays(GL_TRIANGLES,0,count);
+        const int depth_program = !s_zbuffer_oracle && temporal_bind_depth_program(s,c);
+        if (!depth_program) p_glUniform1i(u->pass,c->semi<0?3:4);
+        glDrawArrays(GL_TRIANGLES,0,count);
+        if (depth_program) p_glUseProgram(s_temp_tex_prog);
         glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE); glDepthMask(GL_FALSE);
         p_glUniform1f(s_temp_uPull,c->supp?0.0f:s_world_margin);
         if (c->supp) glDepthFunc(GL_EQUAL);
         if (!c->check && c->semi==4) {
-            glEnable(GL_BLEND);
-            p_glBlendEquationSeparate(PSXGL_FUNC_ADD,PSXGL_FUNC_ADD);
-            p_glBlendFuncSeparate(GL_ONE,PSXGL_SRC1_ALPHA,GL_ONE,GL_ZERO);
+            dual_source_blend(0);
             temporal_mask(0,c->mask);
             p_glUniform1i(u->pass,0); glDrawArrays(GL_TRIANGLES,0,count);
         } else if (c->semi<0) {
-            opaque_blend(); temporal_mask(c->check,c->mask);
+            opaque_blend(night); temporal_mask(c->check,c->mask);
             p_glUniform1i(u->pass,0); glDrawArrays(GL_TRIANGLES,0,count);
         } else {
-            temporal_mask(c->check,c->mask);
+            split_texel_blend(c->semi,1,1,night); temporal_mask(c->check,c->mask);
             p_glUniform1i(u->pass,1); glDrawArrays(GL_TRIANGLES,0,count);
-            apply_texel_blend(c->semi, 1); temporal_mask(c->check,1);
+            split_texel_blend(c->semi,2,1,night); temporal_mask(c->check,1);
             p_glUniform1i(u->pass,2); glDrawArrays(GL_TRIANGLES,0,count);
         }
         p_glUniform1f(s_temp_uPull,0.0f); glDepthFunc(GL_ALWAYS); glDepthMask(GL_TRUE);
@@ -1046,18 +1078,16 @@ static void temporal_submit_faces(const TemporalScene *s,const TemporalCommand *
         if (read) temporal_hold_begin(s,u);
         else { glDepthFunc(GL_LEQUAL); glDepthMask(GL_FALSE); p_glUniform1f(s_temp_uHold,s_sprite_hold_share); }
         if (!c->check && c->semi==4) {
-            glEnable(GL_BLEND);
-            p_glBlendEquationSeparate(PSXGL_FUNC_ADD,PSXGL_FUNC_ADD);
-            p_glBlendFuncSeparate(GL_ONE,PSXGL_SRC1_ALPHA,GL_ONE,GL_ZERO);
+            dual_source_blend(0);
             temporal_mask(0,c->mask); glStencilMask(write_mask);
             p_glUniform1i(u->pass,0); glDrawArrays(GL_TRIANGLES,0,count);
         } else if (c->semi<0) {
-            opaque_blend(); temporal_mask(c->check,c->mask); glStencilMask(write_mask);
+            opaque_blend(night); temporal_mask(c->check,c->mask); glStencilMask(write_mask);
             p_glUniform1i(u->pass,0); glDrawArrays(GL_TRIANGLES,0,count);
         } else {
-            glDisable(GL_BLEND); temporal_mask(c->check,c->mask); glStencilMask(write_mask);
+            split_texel_blend(c->semi,1,1,night); temporal_mask(c->check,c->mask); glStencilMask(write_mask);
             p_glUniform1i(u->pass,1); glDrawArrays(GL_TRIANGLES,0,count);
-            apply_texel_blend(c->semi, 1); temporal_mask(c->check,1); glStencilMask(write_mask);
+            split_texel_blend(c->semi,2,1,night); temporal_mask(c->check,1); glStencilMask(write_mask);
             p_glUniform1i(u->pass,2); glDrawArrays(GL_TRIANGLES,0,count);
         }
         if (read) temporal_hold_end(u);
@@ -1069,29 +1099,31 @@ static void temporal_submit_faces(const TemporalScene *s,const TemporalCommand *
         glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE); glDepthFunc(GL_ALWAYS);
         continue;
     }
+    const int split_depth=(opaque && !c->check && c->semi==4) ||
+                          (!round && night && s_smooth_fade && s_temp_marked && s_temp_scene_depth && !s_temp_underlaying &&
+                           s_temp_part!=1 && c->mode==GL_TRIANGLES && temporal_has_sprite_fog(vertices,count));
+    if (split_depth) {
+        glColorMask(GL_FALSE,GL_FALSE,GL_FALSE,GL_FALSE); glDisable(GL_BLEND);
+        temporal_mask(c->check,c->mask); glStencilMask(0); glDepthMask(GL_TRUE);
+        p_glUniform1i(u->pass,c->semi<0?3:4); glDrawArrays(GL_TRIANGLES,0,count);
+        glDepthMask(GL_FALSE); glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
+    }
     if (!c->check && c->semi==4) {
-        glEnable(GL_BLEND);
-        p_glBlendEquationSeparate(PSXGL_FUNC_ADD,PSXGL_FUNC_ADD);
-        p_glBlendFuncSeparate(GL_ONE,PSXGL_SRC1_ALPHA,GL_ONE,GL_ZERO);
+        dual_source_blend(0);
         temporal_mask(0,c->mask);
-        if (opaque) glDepthMask(GL_FALSE);
         p_glUniform1i(u->pass,0); glDrawArrays(GL_TRIANGLES,0,count);
-        if (opaque) {
-            glColorMask(GL_FALSE,GL_FALSE,GL_FALSE,GL_FALSE); glDisable(GL_BLEND); glDepthMask(GL_TRUE);
-            p_glUniform1i(u->pass,4); glDrawArrays(GL_TRIANGLES,0,count);
-            glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE);
-        }
     } else if (c->semi<0) {
-        opaque_blend(); temporal_mask(c->check,c->mask);
+        opaque_blend(night); temporal_mask(c->check,c->mask);
         p_glUniform1i(u->pass,0); glDrawArrays(GL_TRIANGLES,0,count);
     } else {
-        glDisable(GL_BLEND); temporal_mask(c->check,c->mask);
+        split_texel_blend(c->semi,1,1,night); temporal_mask(c->check,c->mask);
         p_glUniform1i(u->pass,1); glDrawArrays(GL_TRIANGLES,0,count);
-        apply_texel_blend(c->semi, 1); temporal_mask(c->check,1);
+        split_texel_blend(c->semi,2,1,night); temporal_mask(c->check,1);
         if (opaque) glDepthMask(GL_FALSE);
         p_glUniform1i(u->pass,2); glDrawArrays(GL_TRIANGLES,0,count);
-        if (opaque) glDepthMask(GL_TRUE);
+        if (opaque && !split_depth) glDepthMask(GL_TRUE);
     }
+    if (split_depth) glDepthMask(GL_TRUE);
     }
     if (s_temp_part==1 && fillers) {
         glDepthFunc(GL_ALWAYS); glDepthMask(GL_TRUE); p_glUniform4f(u->options,0,0,s->tint,0);
@@ -1227,6 +1259,10 @@ static int temporal_present(float alpha,int lx,int ly,int lw,int lh) {
     glEnable(GL_DEPTH_TEST); glDepthFunc(GL_ALWAYS); glDepthMask(GL_TRUE); glClearDepth(1.0);
     glEnable(PSXGL_DEPTH_CLAMP);
     glClear(GL_COLOR_BUFFER_BIT|GL_STENCIL_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
+    glEnable(GL_SCISSOR_TEST);
+    glScissor(0,0,s->width*s->scale,s->height*s->scale);
+    night_draw(&s_night_between, s->night_view, s_temp_prev.active ? s_temp_prev.night_view : s->night_view, alpha, s->width, 0, s->scale, s->night_focal, s->night_raw >= 0 ? s->textures[s->night_raw] : 0);
+    glDisable(GL_SCISSOR_TEST);
     s_temp_supplemental_depth=0;
     gz_end(GZ_BETWEEN_CLEAR);
     gz_begin(GZ_BETWEEN_DRAW);

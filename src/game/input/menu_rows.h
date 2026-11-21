@@ -24,12 +24,13 @@ inline constexpr uint32_t kMenuText = 0x800776DCu;    /* where the menu text lie
 inline constexpr uint32_t kMenuOffsets = 0x80071444u;
 
 /* The pad's own bits, as a press is put in. */
-inline constexpr uint16_t kUp = 1u << 4, kRight = 1u << 5, kDown = 1u << 6, kLeft = 1u << 7, kCross = 1u << 14;
+inline constexpr uint16_t kStart = 1u << 3, kUp = 1u << 4, kRight = 1u << 5, kDown = 1u << 6, kLeft = 1u << 7, kCross = 1u << 14;
 
 /* A written value that is the loop's counter s0, the item the loop draws now. */
 inline constexpr int32_t kCounter = INT32_MIN;
+inline constexpr int32_t kDifficultyRow = 11;
 
-inline constexpr uint32_t kNewGame = 1u, kLoadGame = 2u, kPractice = 3u, kPassword = 4u, kOptions = 7u, kDeath = 9u,
+inline constexpr uint32_t kNewGame = 1u, kLoadGame = 2u, kPractice = 3u, kPassword = 4u, kOptions = 7u, kCredits = 8u, kDeath = 9u,
                           kMissionDone = 10u, kFormat = 12u;
 /* The pause menu in play, no screen of the front end: its lines are 0x800429DC's, its buttons read by the tick. */
 inline constexpr uint32_t kPause = 0xFFFF0000u;
@@ -109,9 +110,9 @@ inline constexpr std::array kRows = {
         .when = {{{kCursor, 4, 4}}}},
     Row{.returns = 0x8001CA50u, .screen = kNewGame, .row = 10, .left = kCross, .writes = {{{kCursor, 7}}},
         .when = {{{kCursor, 5, 7}}}},
-    Row{.returns = 0x8001CA88u, .screen = kNewGame, .row = 11, .left = kCross, .writes = {{{kSlotSide, 0}}},
+    Row{.returns = 0x8001CA88u, .screen = kNewGame, .row = kDifficultyRow, .left = kCross, .right = kLeft, .writes = {{{kSlotSide, 0}}},
         .when = {{{kCursor, 4, 4}}}},
-    Row{.returns = 0x8001CAD0u, .screen = kNewGame, .row = 11, .left = kRight, .right = kLeft, .writes = {{{kSlotSide, 0}}},
+    Row{.returns = 0x8001CAD0u, .screen = kNewGame, .row = kDifficultyRow, .left = kRight, .right = kLeft, .writes = {{{kSlotSide, 0}}},
         .when = {{{kCursor, 4, 4}}}},
     Row{.returns = 0x8001CD64u, .screen = kNewGame, .row = 0, .looped = true, .left = kCross,
         .writes = {{{kCursor, kCounter}, {kSlotSide, 0}}}, .when = {{{kCursor, 0, 3}, {kOverwrite, 0, 0}}}},
@@ -132,8 +133,9 @@ inline constexpr std::array kRows = {
     Row{.returns = 0x8001E810u, .screen = kPassword, .row = 0, .writes = {{{kCursor, 0}}}},
     Row{.returns = 0x8001E92Cu, .screen = kPassword, .row = 0, .writes = {{{kCursor, 0}}}},
     Row{.returns = 0x8001E9E8u, .screen = kPassword, .row = 0, .writes = {{{kCursor, 0}}}},
-    Row{.returns = 0x8001E830u, .screen = kPassword, .row = 1, .left = kCross, .writes = {{{kCursor, 1}}}},
-    Row{.returns = 0x8001E94Cu, .screen = kPassword, .row = 1, .left = kCross, .writes = {{{kCursor, 1}}}},
+    // Start confirms RETURN without also typing a password symbol when this frame began in the field.
+    Row{.returns = 0x8001E830u, .screen = kPassword, .row = 1, .left = kStart, .writes = {{{kCursor, 1}}}},
+    Row{.returns = 0x8001E94Cu, .screen = kPassword, .row = 1, .left = kStart, .writes = {{{kCursor, 1}}}},
     /* The pause menu: RESUME MISSION, ABORT MISSION, the two volumes, which Left and Right step; ABORT's YES and NO */
     Row{.returns = kResumeDrawn, .screen = kPause, .row = 0, .left = kCross, .writes = {{{kPauseCursor, 0}, {kStates, 0}}},
         .when = {{{kPauseAsks, 0, 0}}}},

@@ -81,6 +81,7 @@ constexpr uint32_t kCurrentWeaponAddress = 0x80077627u;
 constexpr uint32_t kHeldWeaponAddress = 0x80071484u;  // gp + 0x338: the weapon a change has reached
 constexpr uint32_t kWeaponOwnershipBase = 0x800770F4u;
 constexpr uint32_t kSceneModeAddress = 0x8007145Cu;
+constexpr uint8_t kMapScreen = 1u;
 constexpr uint32_t kGameModeAddress = 0x800716F0u;  // gp + 0x5A4: the menu's idle timer sets 3 for a demo (0x80020848)
 constexpr uint8_t kDemoMode = 3u;
 constexpr uint32_t kMenuStateAddress = 0x800715FCu;
@@ -169,6 +170,7 @@ struct MouseAimState {
     int use_waited = 0;
     int use_ready = 0;         // frames that power has been ready
     disruptor::sticks::Tuning sticks;
+    disruptor::sticks::Movement movement;
     bool replaying = false;  // a capsule's replay turns and moves as its recording did: the sticks leave it alone
     bool invert_horizontal = false;
     bool invert_vertical = false;
@@ -775,8 +777,9 @@ bool strafe_down(const Uint8 *keys, int key_total, int field) {
 }
 
 /* A menu of the front end takes the pointer: the mouse is let go and shown, and a press over a row holds its buttons. */
-bool menu_pointer_frame() {
-    const bool pointing = sdl_window && disruptor_menu_pointing() != 0 && !psx_host_ui_game_input_captured();
+bool menu_pointer_frame(bool front_end) {
+    const bool game_input = sdl_window && !psx_host_ui_game_input_captured();
+    const bool pointing = game_input && disruptor_menu_pointing() != 0;
     const uint32_t buttons = get_mouse_buttons();
     if (pointing && g_mouse.captured) set_capture(false, "menu-pointer");
 #if defined(PSX_SDL3)
@@ -788,7 +791,7 @@ bool menu_pointer_frame() {
     const Uint8 *keys = SDL_GetKeyboardState(&key_total);
     const uint16_t held = static_cast<uint16_t>(disruptor_menu_buttons(pointing && (buttons & SDL_BUTTON_LMASK) != 0,
                                                                        pointing && (buttons & SDL_BUTTON_RMASK) != 0) |
-                                                disruptor_menu_back(pointing, key_down(keys, SDL_SCANCODE_ESCAPE)));
+                                                disruptor_menu_back(game_input && (front_end || pointing), key_down(keys, SDL_SCANCODE_ESCAPE)));
     if (held != 0u) {
         /* A press chooses the row it was made on: a direction down with it would move the cursor first. */
         psx_game_pad_press(0, held);
@@ -841,9 +844,10 @@ void mouse_aim_frame() {
         return;
     }
     g_mouse.wheel_open = false;
-    const bool pointing = menu_pointer_frame();
+    const bool front_end = psx_read_byte(kMenuStateAddress) == kMainMenu;
+    const bool pointing = menu_pointer_frame(front_end);
     /* Between two screens of the menus none points for a few frames: the mouse stays free there, or the next screen's pointer would jump. */
-    const bool in_menus = pointing || disruptor_front_end_shown() != 0 || psx_read_byte(kMenuStateAddress) == kMainMenu;
+    const bool in_menus = pointing || disruptor_front_end_shown() != 0 || front_end;
     // A network game's pads are the runtime's alone: there the map's stick sources press, as in Classic.
     const bool netplay = psx_netplay_active() != 0;
     int16_t axes[4] = {};
@@ -927,9 +931,10 @@ void mouse_aim_frame() {
     g_mouse.escape_was_down = escape_down;
     g_mouse.left_was_down = left_down;
 
-    // Scene mode 0 is play: the pause (4), the game's own lists and a demo leave the camera to the game, the motion is dropped.
     const bool demo = demo_playing();
-    const bool playing = psx_read_byte(kSceneModeAddress) == 0u && !demo;
+    const uint8_t scene = psx_read_byte(kSceneModeAddress);
+    const bool playing = scene == 0u && !demo;
+    const bool map_turn = scene == kMapScreen && !demo && !front_end && !netplay && !g_mouse.replaying;
     const bool live = disruptor_vertical_camera_input_allowed() != 0;
     const bool tilting = vertical_active() && !vertical_netplay_blocked && live;
     const bool steering = playing && live && psx_read_byte(kMenuStateAddress) != kMainMenu;
@@ -942,19 +947,20 @@ void mouse_aim_frame() {
     const disruptor::sticks::Reading stick =
         pad ? disruptor::sticks::read(g_mouse.sticks, {axes[0], axes[1], axes[2], axes[3]}, psx_input_deadzone(), steering, tilting)
             : disruptor::sticks::Reading{};
+    if (pad && focused) disruptor::sticks::set_movement(stick.movement);
     apply_number_keys(keys, focused);
     apply_modern_controls(keys, g_mouse.swallow_left ? buttons & ~static_cast<uint32_t>(SDL_BUTTON_LMASK) : buttons, stick.press);
     if (demo) g_mouse.fractional_yaw = 0.0;
     double mouse_x = 0.0, mouse_y = 0.0;
-    if (g_mouse.captured && playing && g_mouse.mouse_aim_enabled) {
+    if (g_mouse.captured && (playing || map_turn) && g_mouse.mouse_aim_enabled) {
         /* SDL drains both relative axes in one call.  Keep this a single
          * coherent sample so enabling one axis can never consume the other. */
         RelativeMotion motion = take_relative_motion();
         motion.x += g_mouse.late_x;
         g_mouse.late_x = 0.0;
         g_mouse.hook_ticks = SDL_GetPerformanceCounter();
-        if (g_mouse.mouse_aim_enabled) mouse_x = motion.x;
-        if (tilting) mouse_y = motion.y;
+        mouse_x = motion.x;
+        if (playing && tilting) mouse_y = motion.y;
     } else {
         if (g_mouse.captured) discard_relative_motion();
         g_mouse.late_x = 0.0;
@@ -1419,3 +1425,7 @@ extern "C" int disruptor_mouse_set_captured(int captured) {
 disruptor::sticks::Tuning disruptor::sticks::tuning() { return g_mouse.sticks; }
 
 void disruptor::sticks::tune(const Tuning &tuning) { g_mouse.sticks = tuning; }
+
+disruptor::sticks::Movement disruptor::sticks::movement() { return g_mouse.movement; }
+
+void disruptor::sticks::set_movement(Movement movement) { g_mouse.movement = movement; }

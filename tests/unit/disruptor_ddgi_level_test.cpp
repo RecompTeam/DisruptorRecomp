@@ -11,6 +11,7 @@ namespace {
 
 std::array<std::uint8_t, 2 * 1024 * 1024> g_ram{};
 int g_sun = 1, g_accept = 1, g_calls = 0, g_reads = 0; /* g_sun: some lighting is on */
+std::uint32_t g_trim_address = 0, g_trim_corner = 0;
 std::vector<GpuDdgiTriangle> g_level;
 int g_failures = 0;
 
@@ -44,6 +45,10 @@ std::uint32_t psx_mod_read_word(std::uint32_t address) {
 int gl_renderer_ddgi(void) { return 0; }
 int gl_renderer_ddgi_shadows(void) { return g_sun; }
 int gl_renderer_ddgi_lamps(void) { return 0; }
+
+void disruptor_far_rendering_trim_triton_balcony(void) {
+    if (g_trim_address) seed_word(g_trim_address, g_trim_corner);
+}
 
 int gpu_ddgi_set_level(const GpuDdgiTriangle *tris, int count) {
     ++g_calls;
@@ -171,6 +176,89 @@ void stand_ins_left_out() {
     g_sun = 1;
     draws(1);
     expect(g_level.size() == 2, "a block drawn only while another room is unseen is left out, the room's own block stays");
+}
+
+void sky_occlusion_keeps_the_native_surface_material() {
+    one_room();
+    Chunk stand_in = square(2);
+    stand_in.room = 4;
+    write_texture(237, 0x4321, 64, 32, 0x81, 95, 32);
+    write_mesh(0x80110000u, {stand_in, square(1), square(237)});
+    constexpr uint32_t gate = 0x80130000u;
+    seed_word(0x80100014u, gate);
+    seed_word(gate, 16u << 16 | 8u);
+    seed_word(gate + 4, 16u << 16 | 24u);
+    seed_word(gate + 8, 0x40000000u);
+    seed_word(gate + 12, 0x00FF0040u);
+    int count = -1;
+    using namespace disruptor::ddgi_level;
+    expect(night_geometry(0, &count) == nullptr && !count, "no sky mesh before publication");
+    const auto solid_mesh = 0x80110000u + (psx_mod_read_word(0x80110000u) >> 8);
+    g_trim_address = solid_mesh + 8u + psx_mod_read_word(solid_mesh + 4u);
+    g_trim_corner = corner(2, 2, 3);
+    const auto *vertices = night_geometry(night_area(), &count);
+    g_trim_address = 0;
+    expect(vertices && count == 18, "two native faces and the unloaded portal enter the mask");
+    if (vertices && count == 18) {
+        expect(vertices[0].clut == 0x7A40 && vertices[0].position[0] == 14, "the cached face has its native palette and trimmed corner");
+        expect(vertices[6].clut == 0x4321 && vertices[6].page == 0x81 && vertices[6].uv[0] == 64 &&
+               vertices[11].uv[1] == 63, "grate uses its own page, palette and coordinates");
+        expect(vertices[12].page == 0xFFFF && vertices[17].position[1] == 17 && vertices[12].uv[1] == 16,
+               "the outward portal spans only the native opening up to the loaded skyline");
+    }
+    seed_word(0x800715A0u, 2);
+    seed_byte(0x80075E9Du, 1);
+    write_room(1, 0x80101000u, 0x80111000u, 100, 0, 0);
+    write_mesh(0x80111000u, {square()});
+    seed_word(0x80100028u, 6u << 16);
+    seed_word(0x80101028u, 7u << 16);
+    const int mixed = night_area();
+    seed_word(0x80100028u, 7u << 16);
+    seed_word(0x80101028u, 6u << 16);
+    const int exchanged = night_area();
+    expect(mixed > 0 && exchanged > 0 && mixed != exchanged, "sector aliases retain their own streaming source");
+    int latest = 0;
+    for (uint32_t source = 10u; source < 80u; ++source) {
+        seed_word(0x80100028u, source << 16);
+        latest = night_area();
+        expect(latest > 0, "a new room layout can replace an old sky mask");
+    }
+    expect(night_geometry(mixed, &count) == nullptr && count == 0, "an expired ID never gives another room's mask");
+    expect(night_area() == latest && night_geometry(latest, &count) && count > 0, "the current room keeps its sky mask");
+    invalidate_night_area();
+    expect(night_area() != latest, "a loaded state gets a fresh sky mask for the same room layout");
+}
+
+void sky_occlusion_reads_the_frame_and_skips_the_door() {
+    using namespace disruptor::ddgi_level;
+    constexpr uint32_t room = 0x80100000u, mesh = 0x80110000u;
+    for (const uint8_t sector : std::array<uint8_t, 2>{126u, 127u}) {
+        one_room();
+        const uint32_t offset = sector == 127 ? 0xFCu : 0xF4u;
+        const int32_t origin_x = sector == 127 ? 12416 : 11840;
+        seed_byte(kRoomOrder, sector);
+        write_room(sector, room, mesh, origin_x, 12032, 1408);
+        auto frame = square();
+        auto door = square();
+        const auto quad = frame.quads.front();
+        frame.quads.resize(1u + (offset - 0x2Cu) / 8u, quad);
+        door.table.resize(30);
+        door.quads.resize(1u + (0x238u - 0x68u) / 8u, quad);
+        write_mesh(mesh, {frame, door});
+
+        LevelReader reader;
+        std::vector<GpuDdgiTriangle> triangles;
+        uint64_t digest = 0;
+        const auto frame_triangles = frame.quads.size() * 2u;
+        const auto all_triangles = (frame.quads.size() + door.quads.size()) * 2u;
+        std::bitset<256> remaining;
+        remaining.set(sector);
+        expect(reader.read(triangles, digest, &remaining) && triangles.size() == frame_triangles, "the sky mask keeps the fixed doorway");
+        expect(reader.read(triangles, digest) && triangles.size() == all_triangles, "the ordinary reader also sees the moving door");
+        seed_word(room + 0x18u, static_cast<uint32_t>(origin_x + 1));
+        remaining.set(sector);
+        expect(reader.read(triangles, digest, &remaining) && triangles.size() == all_triangles, "an unrelated room retains both chunks");
+    }
 }
 
 // The (y, z) cross product of a triangle of the face's plane: its winding.
@@ -382,6 +470,8 @@ int main() {
     lighting_off_forgets();
     copies_and_order();
     malformed_levels();
+    sky_occlusion_keeps_the_native_surface_material();
+    sky_occlusion_reads_the_frame_and_skips_the_door();
     if (g_failures) {
         std::cerr << g_failures << " failure(s)\n";
         return 1;

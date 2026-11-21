@@ -225,14 +225,14 @@ static void rtb_set_temporal_sprite_ground(float ground, float reach) {
     if (rth_record_mode() && rth_put(RTH_SPRITE_GROUND, 0, v, sizeof v)) return;
     glb_set_temporal_sprite_ground(ground, reach);
 }
-static void rtb_set_sprite_card(const float card[8]) {
+static void rtb_set_sprite_card(const float card[10], uint32_t pose_actor) {
     if (rth_record_mode()) {
-        float v[9] = {0};
-        if (card) memcpy(v, card, 8 * sizeof(float));
-        v[8] = card ? 1.0f : 0.0f;
+        float v[11] = {0};
+        if (card) memcpy(v, card, 10 * sizeof(float));
+        v[10] = card ? (pose_actor ? (float)pose_actor : 1.0f) : 0.0f;
         if (rth_put(RTH_SPRITE_CARD, 0, v, sizeof v)) return;
     }
-    glb_set_sprite_card(card);
+    glb_set_sprite_card(card, pose_actor);
 }
 #endif
 static void rtb_set_screen_tile(const PsxWsPlacedTile *tile) {
@@ -383,8 +383,9 @@ static void rtb_wide_configure(int wide_w, int offset) {
 static void rtb_wide_set_target(int base_x) { if (rth_record_mode()) RTH_REC(RTH_WIDE_TARGET, 0, base_x); glb_wide_set_target(base_x); }
 static void rtb_wide_disable_target(void) { if (rth_record_mode()) RTH_REC(RTH_WIDE_DISABLE, 0, 0); glb_wide_disable_target(); }
 static void rtb_wide_clear(int base_x, int y, int h, uint16_t color) {
-    if (rth_record_mode()) RTH_REC(RTH_WIDE_CLEAR, 0, base_x, y, h, color);
-    glb_wide_clear(base_x, y, h, color);
+    const NightView sky = night_view(color, h, y);
+    if (rth_record_mode()) RTH_REC(RTH_WIDE_CLEAR, 0, base_x, y, h, color, sky.view, sky.camera[0], sky.camera[1], sky.camera[2], sky.camera[3], sky.balcony);
+    glb_wide_clear_view(base_x, y, h, color, sky);
 }
 static void rtb_wide_clear_margins(int base_x, int y, int h, uint16_t color, int sides) {
     if (rth_record_mode()) RTH_REC(RTH_WIDE_CLEAR_MARGINS, 0, base_x, y, h, color, sides);
@@ -516,7 +517,7 @@ static void gl_rth_exec(void *user, const RtCmd *c, const void *payload) {
         break;
     }
     case RTH_SPRITE: glb_set_temporal_sprite(fv[0], fv[5] != 0.0f ? &fv[1] : NULL); break;
-    case RTH_SPRITE_CARD: glb_set_sprite_card(fv[8] != 0.0f ? fv : NULL); break;
+    case RTH_SPRITE_CARD: glb_set_sprite_card(fv[10] != 0.0f ? fv : NULL, (uint32_t)fv[10]); break;
     case RTH_SPRITE_GROUND: glb_set_temporal_sprite_ground(fv[0], fv[1]); break;
 #endif
     case RTH_TILE: {
@@ -570,7 +571,11 @@ static void gl_rth_exec(void *user, const RtCmd *c, const void *payload) {
     case RTH_WIDE_CONFIGURE: glb_wide_configure(v[0], v[1]); break;
     case RTH_WIDE_TARGET: glb_wide_set_target(v[0]); break;
     case RTH_WIDE_DISABLE: glb_wide_disable_target(); break;
-    case RTH_WIDE_CLEAR: glb_wide_clear(v[0], v[1], v[2], (uint16_t)v[3]); break;
+    case RTH_WIDE_CLEAR: {
+        NightView sky = {v[4], {v[5], v[6], v[7], v[8]}};
+        sky.balcony = v[9];
+        glb_wide_clear_view(v[0], v[1], v[2], (uint16_t)v[3], sky); break;
+    }
     case RTH_WIDE_CLEAR_MARGINS: glb_wide_clear_margins(v[0], v[1], v[2], (uint16_t)v[3], v[4]); break;
     case RTH_WIDE_COPY_FRAME: glb_wide_copy_frame(v[0], v[1], v[2], v[3], v[4]); break;
     case RTH_WIDE_COPY_ROWS: glb_wide_copy_rows(v[0], v[1], v[2], v[3], v[4], v[5], v[6]); break;

@@ -1,12 +1,23 @@
 #include "game/render/ddgi_level.h"
 
+#include "game/render/far_rendering.h"
+#include "game_host.h"
 #include "gpu_ddgi.h"
 #include "mod_plugins.h"
+#include "game/render/portal_reach.h"
 
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <bitset>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <limits>
+#include <list>
+#include <memory>
+#include <mutex>
 #include <vector>
 
 namespace disruptor::ddgi_level {
@@ -49,10 +60,21 @@ bool vertex_light(uint8_t byte, uint32_t block, uint32_t end, uint8_t out[3]) {
     return true;
 }
 
+uint32_t balcony_door_leaf(uint8_t sector, uint32_t mesh, const int32_t origin[3]) {
+    if ((sector != 126u && sector != 127u) || origin[1] != 12032 || origin[2] != 1408) return 0;
+    const bool east = sector == 127u;
+    const uint32_t offset = east ? 0xFCu : 0xF4u;
+    if (origin[0] != (east ? 12416 : 11840) || !in_ram(mesh, offset + 0x238u) ||
+        psx_mod_read_word(mesh) != ((offset << 8) | 0xFFu)) return 0;
+    const uint32_t leaf = mesh + offset;
+    return psx_mod_read_word(leaf) == 0x238FFu && psx_mod_read_word(leaf + 4u) == 0x40u ? leaf : 0u;
+}
+
 class LevelReader {
 public:
     /* The faces of every room, or false when a structure does not read as the mesh renderer's. */
-    bool read(std::vector<GpuDdgiTriangle> &out, uint64_t &digest) {
+    bool read(std::vector<GpuDdgiTriangle> &out, uint64_t &digest, std::bitset<256> *remaining = nullptr,
+              std::array<float, kMostRooms> *ceilings = nullptr) {
         out.clear();
         digest = faces_ = materials_ = 1469598103934665603ull;
         stand_ins_ = 0;
@@ -60,7 +82,10 @@ public:
         if (rooms == 0 || rooms > kMostRooms || !in_ram(textures, 8)) return false;
         mix(digest, rooms);
         for (uint32_t i = 0; i < rooms; ++i) {
-            const uint32_t room = psx_mod_read_word(kRooms + 4u * psx_mod_read_byte(kRoomOrder + i));
+            const auto sector = psx_mod_read_byte(kRoomOrder + i);
+            if (remaining && !remaining->test(sector)) continue;
+            if (remaining) remaining->reset(sector);
+            const uint32_t room = psx_mod_read_word(kRooms + 4u * sector);
             if (!in_ram(room, 0x24)) return false;
             const uint32_t mesh = psx_mod_read_word(room + 0x10);
             const int32_t origin[3] = {signed_word(room + 0x18), signed_word(room + 0x1C), signed_word(room + 0x20)};
@@ -68,7 +93,16 @@ public:
                 if (value <= -kMostOrigin || value >= kMostOrigin) return false;
             mix(digest, mesh);
             for (const int32_t value : origin) mix(digest, static_cast<uint32_t>(value));
-            if (mesh && !read_mesh(mesh, origin, textures, out, digest)) return false;
+            const size_t first = out.size();
+            // A moving door is drawn by the game at its current height, while the night mask keeps its mesh for the whole area.
+            const uint32_t moving_door = remaining ? balcony_door_leaf(sector, mesh, origin) : 0u;
+            if (mesh && !read_mesh(mesh, origin, textures, out, digest, moving_door)) return false;
+            if (ceilings) {
+                float &top = (*ceilings)[sector];
+                top = static_cast<float>(origin[2]);
+                for (size_t face = first; face < out.size(); ++face)
+                    for (const auto &point : out[face].world) top = std::max(top, -point[1] / 8.0f);
+            }
         }
         return true;
     }
@@ -81,7 +115,7 @@ private:
     static void mix(uint64_t &digest, uint32_t value) { digest = (digest ^ value) * 1099511628211ull; }
 
     bool read_mesh(uint32_t at, const int32_t origin[3], uint32_t textures, std::vector<GpuDdgiTriangle> &out,
-                   uint64_t &digest) {
+                   uint64_t &digest, uint32_t moving_door) {
         for (int chunk = 0; chunk < kMostChunks; ++chunk) {
             if (!in_ram(at, 8)) return false;
             const uint32_t header = psx_mod_read_word(at), size = header >> 8, lights = psx_mod_read_word(at + 4);
@@ -91,8 +125,9 @@ private:
             mix(digest, header);
             mix(digest, lights);
             /* 0x800461AC: a block whose low byte names a room draws only while that room is unseen, a stand-in for it. */
-            if ((header & 255u) != 255u) {
-                ++stand_ins_;
+            const bool stand_in = (header & 255u) != 255u;
+            if (stand_in || at == moving_door) {
+                stand_ins_ += stand_in;
                 at = end;
                 continue;
             }
@@ -133,7 +168,8 @@ private:
                 if (refs[0] >= entries_.size() || refs[1] >= entries_.size() || refs[2] >= entries_.size() ||
                     refs[3] >= entries_.size())
                     return false;
-                const uint32_t texture = textures + ((first >> 2) & 1023u) * 8u;
+                const uint32_t tile = (first >> 2) & 1023u;
+                const uint32_t texture = textures + tile * 8u;
                 if (!in_ram(texture, 8)) return false;
                 const uint32_t clut_uv = psx_mod_read_word(texture), page_uv = psx_mod_read_word(texture + 4);
                 mix(materials_, clut_uv);
@@ -179,7 +215,123 @@ uint64_t g_published = 0, g_shape = 0, g_face_words = 0, g_materials = 0;
 int g_draws = kEveryDraws; /* the first draw with lighting on reads at once */
 bool g_told = false;
 
+struct NightRooms {
+    std::bitset<256> rooms;
+    std::array<std::array<uint32_t, 7>, kMostRooms> layouts{};
+    uint32_t textures = 0, generation = 0;
+    bool operator==(const NightRooms &) const = default;
+};
+struct NightArea {
+    NightRooms key;
+    std::vector<PsxNightVertex> vertices;
+    int id = 0;
+};
+constexpr size_t kNightAreaLimit = 64;
+std::list<std::shared_ptr<const NightArea>> night_areas;
+std::mutex night_mutex;
+int next_night_id = 1;
+uint32_t night_generation = 0;
+std::atomic<bool> night_requested{false};
+NightRooms failed_rooms;
+uint32_t failed_at = 0;
+
+void add_unloaded_portals(NightArea &area, const std::array<float, kMostRooms> &ceilings) {
+    namespace portal = disruptor::portal_reach;
+    for (unsigned sector = 0; sector < kMostRooms; ++sector) {
+        if (!area.key.rooms.test(sector)) continue;
+        const uint32_t room = psx_mod_read_word(kRooms + 4u * sector);
+        uint32_t gate = psx_mod_read_word(room + portal::kSectorPortals);
+        for (unsigned i = 0; i < portal::kMostPortals && in_ram(gate, portal::kPortalStride); ++i, gate += portal::kPortalStride) {
+            const uint32_t a = psx_mod_read_word(gate), b = psx_mod_read_word(gate + 4);
+            if (a == 0xFFFFFFFFu) break;
+            const uint8_t next = psx_mod_read_byte(gate + sector_reach::kPortalSector);
+            if (next != sector_reach::kNoSector && !area.key.rooms.test(next)) {
+                const uint32_t heights = psx_mod_read_word(gate + 8);
+                const float low = static_cast<int16_t>(heights), high = std::min(ceilings[sector], float(static_cast<int16_t>(heights >> 16)));
+                const float ax = static_cast<int16_t>(a), az = static_cast<int16_t>(a >> 16);
+                const float bx = static_cast<int16_t>(b), bz = static_cast<int16_t>(b >> 16);
+                if (low < high) {
+                    for (const int corner : {0, 1, 2, 2, 1, 3})
+                        area.vertices.push_back({{corner & 1 ? bx : ax, corner < 2 ? low : high, corner & 1 ? bz : az},
+                                                 {az - bz, bx - ax}, static_cast<uint16_t>(corner), 0xFFFFu});
+                }
+            }
+            if (psx_mod_read_byte(gate + portal::kPortalLast) == 255u) break;
+        }
+    }
+}
 }  // namespace
+
+int night_area(std::size_t queued_frames) {
+    if (!night_requested.load(std::memory_order_relaxed)) return 0;
+    const uint32_t count = psx_mod_read_word(kRoomCount);
+    if (!count || count > kMostRooms) return 0;
+    NightRooms key;
+    key.textures = psx_mod_read_word(kTextures);
+    key.generation = night_generation;
+    for (uint32_t i = 0; i < count; ++i) {
+        const auto sector = psx_mod_read_byte(kRoomOrder + i);
+        const auto room = psx_mod_read_word(kRooms + 4u * sector);
+        if (!in_ram(room, 44)) return 0;
+        key.rooms.set(sector);
+        key.layouts[sector] = {room, psx_mod_read_word(room + 0x10), psx_mod_read_word(room + 0x14),
+                               psx_mod_read_word(room + 0x18), psx_mod_read_word(room + 0x1C),
+                               psx_mod_read_word(room + 0x20), psx_mod_read_word(room + 0x28)};
+    }
+    {
+        const std::scoped_lock lock(night_mutex);
+        const auto known = std::find_if(night_areas.begin(), night_areas.end(),
+                                        [&](const auto &area) { return area->key == key; });
+        if (known != night_areas.end()) {
+            night_areas.splice(night_areas.begin(), night_areas, known);
+            return night_areas.front()->id;
+        }
+    }
+    const uint32_t tick = psx_mod_read_word(0x8005B920u);
+    if (key == failed_rooms && tick - failed_at < 60u) return 0;
+    disruptor_far_rendering_trim_triton_balcony();
+    LevelReader reader;
+    std::vector<GpuDdgiTriangle> triangles;
+    uint64_t digest;
+    auto remaining = key.rooms;
+    std::array<float, kMostRooms> ceilings{};
+    if (!reader.read(triangles, digest, &remaining, &ceilings) || triangles.empty()) {
+        failed_rooms = key;
+        failed_at = tick;
+        return 0;
+    }
+    auto area = std::make_shared<NightArea>();
+    area->key = key;
+    area->vertices.reserve(triangles.size() * 3);
+    for (const auto &triangle : triangles) {
+        for (int i = 0; i < 3; ++i) {
+            const auto &point = triangle.world[i];
+            area->vertices.push_back({{point[2] / 8.0f, -point[1] / 8.0f, -point[0] / 8.0f},
+                                      {float(triangle.uv[i][0]), float(triangle.uv[i][1])}, triangle.clut, triangle.texpage});
+        }
+    }
+    add_unloaded_portals(*area, ceilings);
+    const std::scoped_lock lock(night_mutex);
+    area->id = next_night_id;
+    next_night_id = next_night_id == std::numeric_limits<int>::max() ? 1 : next_night_id + 1;
+    night_areas.push_front(area);
+    while (night_areas.size() > kNightAreaLimit + queued_frames) night_areas.pop_back();
+    return area->id;
+}
+
+const PsxNightVertex *night_geometry(int area, int *vertices) {
+    night_requested.store(true, std::memory_order_relaxed);
+    // The draw can upload its geometry after releasing the cache lock.
+    static thread_local std::shared_ptr<const NightArea> reading;
+    const std::scoped_lock lock(night_mutex);
+    const auto found = std::find_if(night_areas.begin(), night_areas.end(),
+                                    [area](const auto &candidate) { return candidate->id == area; });
+    reading = found != night_areas.end() ? *found : nullptr;
+    *vertices = reading ? static_cast<int>(reading->vertices.size()) : 0;
+    return reading ? reading->vertices.data() : nullptr;
+}
+
+void invalidate_night_area() { ++night_generation; }
 
 void publish_if_changed() {
     if (!gl_renderer_ddgi() && !gl_renderer_ddgi_shadows() && !gl_renderer_ddgi_lamps()) {

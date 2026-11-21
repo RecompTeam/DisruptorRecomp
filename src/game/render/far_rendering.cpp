@@ -25,12 +25,15 @@
 #include "game/render/misplaced_riser.h"
 #include "game/render/near_split.h"
 #include "game/render/portal_reach.h"
+#include "game/render/rooftops_houses.h"
 #include "game/render/quad_visibility.h"
 #include "game/render/sector_reach.h"
 
 #include "cpu_state.h"
+#include "func_override.h"
 #include "game/session/weapon_load.h"
 #include "gpu.h"
+#include "gpu_ws_tag_match.h"
 #include "lockstep.h"
 #include "mod_plugins.h"
 #include "mod_memory.h"
@@ -56,6 +59,8 @@ extern "C" int gl_renderer_smooth_fade(void);
 namespace {
 
 constexpr uint32_t kRendererEntry = 0x80040E68u;
+constexpr uint32_t kPlayerSectorAddress = 0x80077630u;
+constexpr uint8_t kConsole02Sector = 0xE5u;
 constexpr uint32_t kDrawSector = 0x80046134u;  /* $a1: the span's left at +12, its right at +16, words */
 constexpr uint32_t kRendererRestore = 0x8004279Cu;
 constexpr uint32_t kRendererRestoreOpcode = 0x8FBF016Cu;
@@ -141,6 +146,11 @@ struct ActiveFrame {
     uint32_t primitive_before_visible_loop = 0u;
     uint32_t primitive_after_visible_loop = 0u;
 
+    uint32_t entrance_reach = 0u;
+    uint32_t entrance_mesh_start = 0u;
+    uint32_t entrance_saved_far = 0u;
+    uint32_t entrance_tagged_end = 0u;
+    double entrance_visibility = 0.0;
     bool rewrite_after_effects = false;
     bool extended = false;  /* written at some point of this frame: a save waits for its end */
     bool reach = false;  /* the walk's wedge widens and the rooms' spans open for the visible loop, see portal_reach.h */
@@ -336,6 +346,8 @@ struct Unlisted {
     uint32_t room = disruptor::sector_reach::kNoSector;
     uint8_t entry = 0u;
 } g_unlisted;
+std::array<Unlisted, disruptor::portal_reach::kMostRooms> g_unlisted_mesh_rooms;
+uint32_t g_unlisted_mesh_count = 0u;
 
 /* Active only inside an active frame: every way a frame ends gives the values back. */
 struct WrittenDistances {
@@ -361,9 +373,10 @@ int g_fog_exponent = 1;
 uint32_t g_fog_serial = 0u;
 struct PacketFraction {
     uint32_t serial;
-    uint8_t fraction;
+    int fade;
     bool drawn = false;       /* the packet's words hash to `signature` since its first draw */
     uint32_t signature = 0u;
+    uint32_t arena = 0u;
 };
 std::unordered_map<uint32_t, PacketFraction> g_packet_fractions;
 uint32_t g_list_shaped = 0u;  /* the list body whose fade load took the frame's fog, by its packet */
@@ -377,6 +390,117 @@ bool comparator_active() {
 bool valid_main_ram_pointer(uint32_t pointer, uint32_t trailing_bytes) {
     return pointer >= kRamFirst && pointer <= kRamLast &&
            trailing_bytes <= kRamLast - pointer;
+}
+
+void repair_pipe_elbow(CPUState *cpu, uint32_t mesh) {
+    constexpr uint32_t elbow_part = 0x4A8u, face = elbow_part + 0x7F4u;
+    if ((mesh & 3u) || !valid_main_ram_pointer(mesh, face + 15u) || cpu->read_word(mesh) != 0x1CC0Au ||
+        cpu->read_word(mesh + elbow_part) != 0xEB8FFu || cpu->read_word(mesh + elbow_part + 4u) != 0x160u) return;
+    const uint32_t first = cpu->read_word(mesh + face), second = cpu->read_word(mesh + face + 4u);
+    if (first != 0x0A43016Cu || second != 0x12827000u ||
+        cpu->read_word(mesh + face + 8u) != 0x09C2A330u || cpu->read_word(mesh + face + 12u) != 0x1244A200u) return;
+    // Transposing corners B and D aligns the ribs and keeps the same diagonal with the opposite winding.
+    constexpr uint32_t corner_b = 0x003FF000u, pipe_tile = 205u;
+    cpu->write_word(mesh + face, (first & 0xFFC00003u) | (second & corner_b) | (pipe_tile << 2));
+    cpu->write_word(mesh + face + 4u, (second & ~corner_b) | (first & corner_b) |
+                    disruptor::quad_visibility::kReverseWinding | disruptor::quad_visibility::kSecondTriangle);
+}
+
+struct BalconyCorner {
+    uint16_t offset;
+    uint32_t shipped;
+    uint16_t x, z;
+};
+
+template <size_t N>
+void trim_balcony(uint32_t sector, uint32_t origin_x, uint32_t part_offset, uint32_t part_header,
+                  const std::array<BalconyCorner, N>& corners) {
+    disruptor::Guest memory;
+    const uint32_t room = memory.word(disruptor::sector_reach::kSectors + 4u * sector);
+    if ((room & 3u) || !valid_main_ram_pointer(room, 35u) || memory.word(room + 24u) != origin_x ||
+        memory.word(room + 28u) != 11616u || memory.word(room + 32u) != 1408u) return;
+    const uint32_t mesh = memory.word(room + 16u);
+    if ((mesh & 3u) || !valid_main_ram_pointer(mesh, corners.back().offset + 3u) ||
+        memory.word(mesh + part_offset) != part_header) return;
+    const auto clipped = [](const BalconyCorner& corner) {
+        return (corner.shipped & 0xC00003FFu) | (uint32_t{corner.x} << 20) | (uint32_t{corner.z} << 10);
+    };
+    if (memory.word(mesh + corners.front().offset) != corners.front().shipped) return;
+    for (const auto& corner : corners)
+        if (memory.word(mesh + corner.offset) != corner.shipped) return;
+    for (const auto& corner : corners) memory.write(mesh + corner.offset, clipped(corner));
+}
+
+void trim_triton_balcony() {
+    if (psx_mod_read_byte(0x80071354u) != 5u) return;
+    // Only these vertices of ceiling material 248 extend beyond the balcony beams.
+    static constexpr std::array<BalconyCorner, 11> east{{
+        {0x2C4, 0x0C008080, 192, 60}, {0x2D0, 0x0A008080, 160, 43}, {0x2FC, 0x10010080, 256, 96},
+        {0x300, 0x4E010080, 224, 78}, {0x344, 0x08000080, 128, 25}, {0x348, 0x06000080, 112, 16},
+        {0x34C, 0x04000080, 64, 16}, {0x350, 0x02000080, 32, 16}, {0x354, 0x00000080, 0, 16},
+        {0x4CC, 0x0E008080, 224, 78}, {0x4D4, 0x0A000080, 160, 43}
+    }};
+    static constexpr std::array<BalconyCorner, 10> west{{
+        {0x3C4, 0x06008080, 96, 43}, {0x3CC, 0x04008080, 64, 60}, {0x3D0, 0x02010080, 32, 78},
+        {0x3D4, 0x00010080, 0, 96}, {0x410, 0x0E000080, 224, 16}, {0x414, 0x0C000080, 192, 16},
+        {0x418, 0x0A000080, 144, 16}, {0x41C, 0x08000080, 128, 25}, {0x5A4, 0x02008080, 32, 78},
+        {0x5AC, 0x06000080, 96, 43}
+    }};
+    trim_balcony(86, 12224, 0, 0xA94FFu, east);
+    trim_balcony(87, 11776, 0x120, 0x9DCFFu, west);
+}
+
+static thread_local bool drawing_mesh_addition = false;
+
+template <size_t N>
+void draw_mesh_addition(CPUState *cpu, const std::array<uint32_t, N> &words) {
+    constexpr uint32_t bytes = static_cast<uint32_t>(sizeof(words));
+    const uint32_t scratch = cpu->gpr[29] - ((bytes + 15u) & ~15u);
+    if ((scratch & 3u) || !valid_main_ram_pointer(scratch, bytes)) return;
+    std::array<uint32_t, N> old{};
+    for (size_t i = 0; i < words.size(); ++i) {
+        const uint32_t address = scratch + static_cast<uint32_t>(i) * 4u;
+        old[i] = cpu->read_word(address);
+        cpu->write_word(address, words[i]);
+    }
+    std::array<uint32_t, 32> registers, gte_data, gte_ctrl;
+    std::copy_n(cpu->gte_data, gte_data.size(), gte_data.begin());
+    std::copy_n(cpu->gte_ctrl, gte_ctrl.size(), gte_ctrl.begin());
+    std::copy_n(cpu->gpr, registers.size(), registers.begin());
+    const uint32_t pc = cpu->pc, hi = cpu->hi, lo = cpu->lo;
+    cpu->gpr[4] = cpu->gpr[29] = scratch;
+    drawing_mesh_addition = true;
+    func_override_guest_call(cpu, kDrawSector, registers[31]);
+    drawing_mesh_addition = false;
+    std::copy(registers.begin(), registers.end(), cpu->gpr);
+    std::copy(gte_data.begin(), gte_data.end(), cpu->gte_data);
+    std::copy(gte_ctrl.begin(), gte_ctrl.end(), cpu->gte_ctrl);
+    cpu->pc = pc;
+    cpu->hi = hi;
+    cpu->lo = lo;
+    for (size_t i = 0; i < old.size(); ++i) cpu->write_word(scratch + static_cast<uint32_t>(i) * 4u, old[i]);
+}
+
+void draw_upper_deck_floor(CPUState *cpu, uint32_t mesh) {
+    if (cpu->gpr[31] != 0x800411A4u || comparator_active() || psx_netplay_active()) return;
+    constexpr auto tile = [](uint32_t far_z, uint32_t material, uint32_t lights) {
+        const auto vertex = [](uint32_t x, uint32_t z) { return (x << 20) | (z << 10); };
+        const uint32_t near_z = far_z - 32u;
+        return std::array<uint32_t, 12>{0x2CFFu, 4u, lights,
+            vertex(96u, far_z), vertex(96u, near_z), vertex(64u, near_z), vertex(64u, far_z), 0xFFFFFFFFu,
+            (1u << 12) | (material << 2), (2u << 22) | (3u << 12) | 0x240u, 0xFFFFFFFFu, 0xFFFFFFFFu};
+    };
+    if (valid_main_ram_pointer(mesh, 0xBC7u) && cpu->read_word(mesh) == 0xA00Du &&
+        cpu->read_word(mesh + 0x4D0u) == 0xBD4FFu && cpu->read_word(mesh + 0xBC0u) == 0x110433CCu &&
+        cpu->read_word(mesh + 0xBC4u) == 0x0F445240u) {
+        draw_mesh_addition(cpu, tile(196u, 246u, 0x3A3A2121u));
+    } else if (psx_mod_read_byte(0x80071354u) == 5u && psx_mod_read_byte(0x80071518u) == 5u &&
+               valid_main_ram_pointer(mesh, 0xE6Fu) && cpu->read_word(mesh) == 0xF405u &&
+               cpu->read_word(mesh + 0x52Cu) == 0xFC0FFu && cpu->read_word(mesh + 0xE68u) == 0x17C5D3C0u &&
+               cpu->read_word(mesh + 0xE6Cu) == 0x15461240u) {
+        // Sector 74 owns this tile, but its portal can be behind the eye while the tile is still visible in sector 71.
+        draw_mesh_addition(cpu, tile(212u, 243u, 0x3A213A3Au));
+    }
 }
 
 bool valid_primitive_pointer(uint32_t pointer, uint32_t trailing_bytes) {
@@ -539,8 +663,16 @@ bool portal_reach_enabled() {
     return enabled;
 }
 
+void restore_room_entry(const Unlisted &room) {
+    if (room.room == disruptor::sector_reach::kNoSector) return;
+    const uint32_t address = disruptor::portal_reach::kListedAt + room.room;
+    if (psx_mod_read_byte(address) == 0xFFu) psx_mod_write_byte(address, room.entry);
+}
+
 /* Caller owns g_mutex. */
 void close_spans() {
+    while (g_unlisted_mesh_count != 0u)
+        restore_room_entry(g_unlisted_mesh_rooms[--g_unlisted_mesh_count]);
     g_spans.close([](uint32_t address) { return psx_mod_read_word(address); },
                   [](uint32_t address, uint32_t word) { psx_mod_write_word(address, word); });
     g_beside.close(
@@ -558,9 +690,7 @@ void show_objects() {
 
 /* Caller owns g_mutex. */
 void relist_room() {
-    using disruptor::portal_reach::kListedAt;
-    if (g_unlisted.room == disruptor::sector_reach::kNoSector) return;
-    if (psx_mod_read_byte(kListedAt + g_unlisted.room) == 0xFFu) psx_mod_write_byte(kListedAt + g_unlisted.room, g_unlisted.entry);
+    restore_room_entry(g_unlisted);
     g_unlisted = Unlisted{};
 }
 
@@ -622,6 +752,21 @@ void widen_walk(CPUState *cpu) {
     cpu->gpr[7] = static_cast<uint32_t>(wider.right.z);
 }
 
+std::span<const uint8_t> rooftops_facades(const disruptor::Guest &guest) {
+    namespace reach = disruptor::sector_reach;
+    const uint32_t sector = guest.byte(kPlayerSectorAddress);
+    if (guest.byte(0x80071354u) != 3u || guest.byte(0x80071518u) != 3u) return {};
+    const bool first_bridge = sector >= 208u && sector <= 210u;
+    if (!first_bridge && sector != 219u && sector != 220u && sector != 222u) return {};
+    const uint32_t door = guest.word(reach::kSectors + 4u * (first_bridge ? 253u : 249u));
+    if (!valid_main_ram_pointer(door, 36u) || guest.word(door + 24u) != (first_bridge ? 9008u : 10672u) ||
+        guest.word(door + 28u) != 2528u || guest.word(door + 32u) != 2112u) return {};
+    static constexpr std::array<uint8_t, 2> first_facades{214u, 217u};
+    static constexpr std::array<uint8_t, 4> facades{224u, 226u, 227u, 228u};
+    if (first_bridge) return first_facades;
+    return facades;
+}
+
 void open_spans(CPUState *cpu) {
     std::lock_guard<std::mutex> lock(g_mutex);
     if (!g_frame.active || !g_frame.reach || !g_frame.visible_spans_valid || !disruptor_render_arena_relocated()) return;
@@ -629,11 +774,12 @@ void open_spans(CPUState *cpu) {
     const auto write = [](uint32_t address, uint32_t word) { psx_mod_write_word(address, word); };
     g_spans.open(kVisibleSpanBase, cpu->gpr[2], kVisibleSpanStride, read, write);
     if (g_sight.judged() && valid_visible_end(cpu->gpr[2])) {
+        const disruptor::Guest guest;
         const uint32_t end = g_beside.add(
             kVisibleSpanBase, cpu->gpr[2], kVisibleSpanStride, static_cast<int32_t>(psx_mod_read_word(disruptor::sector_reach::kCamera)),
             static_cast<int32_t>(psx_mod_read_word(disruptor::sector_reach::kCamera + 4u)),
-            disruptor::portal_reach::view_at(disruptor::Guest{}), disruptor::Guest{}, write,
-            [](uint32_t address, uint32_t byte) { psx_mod_write_byte(address, static_cast<uint8_t>(byte)); });
+            disruptor::portal_reach::view_at(guest), guest, write,
+            [](uint32_t address, uint32_t byte) { psx_mod_write_byte(address, static_cast<uint8_t>(byte)); }, rooftops_facades(guest));
         if (end != cpu->gpr[2]) {
             psx_mod_write_word(kVisibleEnd, end);
             cpu->gpr[2] = end;
@@ -643,7 +789,15 @@ void open_spans(CPUState *cpu) {
     if (g_sight.judged())
         for (uint32_t entry = kVisibleSpanBase; entry < last; entry += kVisibleSpanStride) {
             const uint32_t room = psx_mod_read_byte(entry + disruptor::portal_reach::kRoomByte);
-            if (!g_sight.seen(room)) g_objects.hide(room, read, write);
+            if (g_sight.seen(room)) continue;
+            g_objects.hide(room, read, write);
+            if (g_beside.added_at(entry)) continue;
+            // Stand-in meshes use the original walk's room visibility.
+            const uint32_t listed_at = disruptor::portal_reach::kListedAt + room;
+            const uint8_t index = psx_mod_read_byte(listed_at);
+            if (index == 0xFFu || g_unlisted_mesh_count == g_unlisted_mesh_rooms.size()) continue;
+            g_unlisted_mesh_rooms[g_unlisted_mesh_count++] = {room, index};
+            psx_mod_write_byte(listed_at, 0xFFu);
         }
     if (g_spans.open() || g_objects.hidden() || g_beside.added() != 0u) g_frame.extended = true;
 }
@@ -664,13 +818,103 @@ bool visible_entry(uint32_t entry) {
     return valid_visible_end(end) && entry >= kVisibleSpanBase && entry < end && (entry - kVisibleSpanBase) % kVisibleSpanStride == 0u;
 }
 
+struct PassageGate {
+    uint32_t source, target, slot;
+};
+
+constexpr std::array<PassageGate, 5> kPassageGates{{{19, 15, 0}, {15, 14, 0}, {14, 13, 1}, {13, 0, 1}, {0, 186, 0}}};
+
+bool entrance_mesh(uint32_t sector, uint32_t mesh) {
+    for (const auto &gate : kPassageGates) {
+        if (gate.target != sector) continue;
+        const uint32_t room = psx_mod_read_word(disruptor::sector_reach::kSectors + 4u * sector);
+        return valid_main_ram_pointer(room, 20u) && valid_main_ram_pointer(mesh, 4u) && psx_mod_read_word(room + 16u) == mesh;
+    }
+    return false;
+}
+
+uint32_t portal_far(uint32_t gate) {
+    if (!g_frame.entrance_reach || !valid_main_ram_pointer(gate, 15u)) return g_written.effective_far;
+    const uint32_t target = psx_mod_read_byte(gate + disruptor::sector_reach::kPortalSector);
+    for (const auto &link : kPassageGates) {
+        if (link.target != target) continue;
+        const uint32_t source = psx_mod_read_word(disruptor::sector_reach::kSectors + 4u * link.source);
+        if (!valid_main_ram_pointer(source, disruptor::portal_reach::kSectorPortals + 4u)) break;
+        if (psx_mod_read_word(source + disruptor::portal_reach::kSectorPortals) != gate - link.slot * disruptor::portal_reach::kPortalStride) break;
+        if (disruptor::portal_reach::ram_word(psx_mod_read_word(disruptor::sector_reach::kSectors + 4u * target)))
+            return std::min(kMaximumSafeEffectiveFar, g_written.effective_far + g_frame.entrance_reach);
+    }
+    return g_written.effective_far;
+}
+
+void discard_reallocated_fog(uint32_t cursor) {
+    if (cursor >= g_frame.entrance_tagged_end || !valid_primitive_pointer(cursor, 4u)) return;
+    const uint32_t first = psx_mod_gpu_dma_resolve_address(cursor);
+    std::erase_if(g_packet_fractions, [first](const auto &entry) {
+        return entry.second.arena == g_frame.primitive_start && entry.first >= first;
+    });
+    g_frame.entrance_tagged_end = cursor;
+}
+
+void restore_entrance_far() {
+    if (g_frame.entrance_saved_far && g_written.active) {
+        if (psx_mod_read_word(kFarDistance) == g_written.effective_far)
+            psx_mod_write_word(kFarDistance, g_frame.entrance_saved_far);
+        g_written.effective_far = g_frame.entrance_saved_far;
+    }
+    g_frame.entrance_saved_far = 0u;
+}
+
+bool entrance_packet_range(uint32_t packet, uint32_t bytes) {
+    const uint32_t root = g_frame.primitive_start;
+    const uint32_t capacity = valid_main_ram_pointer(root, 0u) ? 0x11000u : PSX_MOD_GPU_DMA_APERTURE_SIZE / 2u;
+    return packet >= root && (packet & 3u) == 0u && packet - root < capacity && bytes <= capacity - (packet - root) &&
+           valid_primitive_pointer(packet, bytes);
+}
+
+void tag_entrance_mesh(uint32_t end) {
+    uint32_t packet = g_frame.entrance_mesh_start;
+    g_frame.entrance_mesh_start = 0u;
+    if (!packet || end <= packet || !entrance_packet_range(packet, end - packet)) return;
+    g_frame.entrance_tagged_end = end;
+    const int detail = static_cast<int>(std::lround(std::min(g_frame.entrance_reach, 256u) * g_frame.entrance_visibility));
+    while (end - packet >= 8u) {
+        const uint32_t words = psx_mod_read_word(packet) >> 24;
+        if (!words || words >= (end - packet) / 4u) break;
+        const uint32_t op = psx_mod_read_word(packet + 4u) >> 24;
+        const uint32_t corners = (op & 8u) ? 4u : 3u;
+        const uint32_t textured_words = 1u + 2u * corners + ((op & 16u) ? corners - 1u : 0u);
+        if ((op & 0xe6u) == 0x24u && words == textured_words) {
+            std::array<uint32_t, 12> command{};
+            for (uint32_t i = 0; i < words; ++i) command[i] = psx_mod_read_word(packet + 4u + 4u * i);
+            const uint32_t key = psx_mod_gpu_dma_resolve_address(packet);
+            if (key) g_packet_fractions[key] = {g_fog_serial, PSX_PACKET_FOG_DETAIL_BASE + detail, true,
+                                                psx_gpu_command_signature(command.data(), static_cast<int>(words)), g_frame.primitive_start};
+        }
+        packet += 4u + 4u * words;
+    }
+}
+
 /* A room's mesh begins: $s1 is the visible loop's entry. A room Beside adds is drawn as the game draws its own. */
 void note_room(const CPUState *cpu) {
     using disruptor::portal_reach::turn_guarded_left, disruptor::portal_reach::turn_guarded_right;
-    close_admitted(psx_mod_read_word(kPrimitivePointer));
+    const uint32_t start = psx_mod_read_word(kPrimitivePointer);
+    close_admitted(start);
     g_face_rule = FaceRule{};
     std::lock_guard<std::mutex> lock(g_mutex);
+    discard_reallocated_fog(start);
     const uint32_t entry = cpu->gpr[17];
+    restore_entrance_far();
+    g_frame.entrance_mesh_start = 0;
+    if (g_frame.active && g_written.active && g_frame.entrance_reach && cpu->gpr[31] == 0x800411A4u && visible_entry(entry) &&
+        entrance_mesh(psx_mod_read_byte(entry + disruptor::portal_reach::kRoomByte), cpu->gpr[4]) &&
+        entrance_packet_range(start, 4u) &&
+        psx_mod_read_word(kFarDistance) == g_written.effective_far) {
+        g_frame.entrance_mesh_start = start;
+        g_frame.entrance_saved_far = g_written.effective_far;
+        g_written.effective_far = std::min(kMaximumSafeEffectiveFar, g_written.effective_far + g_frame.entrance_reach);
+        psx_mod_write_word(kFarDistance, g_written.effective_far);
+    }
     if (!g_frame.active || !g_frame.reach || !g_sight.judged() || !visible_entry(entry) || g_beside.added_at(entry)) return;
     const uint32_t room = psx_mod_read_byte(entry + disruptor::portal_reach::kRoomByte);
     const disruptor::portal_reach::Span span = g_sight.span(room);
@@ -683,12 +927,15 @@ void note_face(const CPUState *cpu) {
     const uint32_t packet = cpu->gpr[25];
     close_admitted(packet);
     if (!g_face_rule.active || cpu->gpr[1] != 0u || !cpu->read_word) return;
+    const bool console_wall = disruptor::portal_reach::console_wall(cpu->gpr[6], cpu->gpr[7], cpu->gpr[4], cpu->read_word);
+    if (console_wall && psx_mod_read_byte(kPlayerSectorAddress) == kConsole02Sector) return;
     const std::array<uint32_t, 4> screen = {cpu->read_word(cpu->gpr[8] + 4u), cpu->read_word(cpu->gpr[9] + 4u),
                                             cpu->read_word(cpu->gpr[10] + 4u), cpu->read_word(cpu->gpr[11] + 4u)};
     if (g_face_rule.whole || disruptor::portal_reach::beside_span(screen, g_face_rule.left, g_face_rule.right)) {
         g_admitted_from = packet;
         g_admitted_band = disruptor::portal_reach::kWholeFace;
     } else if (disruptor::portal_reach::room_band(g_face_rule.left, g_face_rule.right, g_admitted_band)) {
+        if (console_wall) return;
         g_admitted_from = packet;
     }
 }
@@ -716,6 +963,35 @@ bool edge_margin_active() {
            !comparator_active() && !psx_netplay_active();
 }
 
+uint32_t fortress_entrance_reach(uint32_t far, double &visibility) {
+    constexpr uint32_t mission_number = 0x80071354u, fortress = 13u, door_sector = 186u;
+    if (g_preset == DISRUPTOR_FAR_RENDERING_RETAIL || psx_mod_read_byte(mission_number) != fortress) return 0;
+    const disruptor::Guest guest;
+    if (!disruptor::portal_reach::ram_word(guest.word(disruptor::sector_reach::kSectors + 4u * door_sector))) return 0;
+
+    constexpr double door_x = 3328.0, door_z = 10592.0;
+    constexpr double entrance_x = 3336.0, entrance_z = 9072.0, entrance_half_width = 208.0;
+    constexpr double max_far = kMaximumSafeEffectiveFar - kLeastEdgeMargin;
+    const double dx = door_x - static_cast<int32_t>(guest.word(disruptor::sector_reach::kCamera));
+    const double dz = door_z - static_cast<int32_t>(guest.word(disruptor::sector_reach::kCamera + 4u));
+    if (dz <= 0.0 || dz > max_far + kFadeDepth) return 0;
+
+    const double distance = std::hypot(dx, dz);
+    const double required = std::min(distance + kFadeDepth, max_far);
+    if (required <= far) return 0;
+    const auto view = disruptor::portal_reach::view_at(guest);
+    const double facing = (dx * view.sine + dz * view.cosine) / (256.0 * distance);
+    // Intersect the sightline to the door with the courtyard arch.
+    const double crossing_x = door_x - dx * std::min(1.0, (door_z - entrance_z) / dz);
+    const double through_arch = std::clamp((entrance_half_width - std::abs(crossing_x - entrance_x)) / kFadeRowDepth, 0.0, 1.0);
+    const double in_view = std::clamp(2.0 * facing, 0.0, 1.0);
+    const double arch_distance = distance * std::max(0.0, 1.0 - (door_z - entrance_z) / dz);
+    const double remaining = std::clamp((far - arch_distance) / kFadeDepth, 0.0, 1.0);
+    visibility = remaining * remaining * (3.0 - 2.0 * remaining);
+    if (visibility == 0.0) return 0;
+    return static_cast<uint32_t>(std::lround((required - far) * through_arch * in_view));
+}
+
 /* Caller owns g_mutex.  Near the ordering table's limit a far plane the preset lengthened gives the least margin its room, the game's own never shrinks. */
 void make_room_for_margin(uint32_t source_far, uint32_t *effective_far, int32_t *effective_fade) {
     constexpr uint32_t kRoom = kMaximumSafeEffectiveFar - kLeastEdgeMargin;
@@ -734,8 +1010,7 @@ void write_distances(uint32_t source_far, int32_t source_fade, uint32_t effectiv
     g_written = WrittenDistances{true, source_far, source_fade, written_far, effective_fade, effective_far};
 }
 
-/* Caller owns g_mutex.  Under the renderer's smooth fade the fog begins at the game's own start and spreads to the far
- * plane drawn with, shaped by the chosen power; else it is the game's own ramp from the start drawn with. */
+/* Caller owns g_mutex. Smooth fog begins at the game's own start. */
 void set_frame_fog(int32_t game_start, uint32_t far_drawn, int32_t start_drawn) {
     const bool smooth = gl_renderer_smooth_fade() != 0 && g_depth_fade_mode == DISRUPTOR_FAR_RENDERING_DEPTH_FADE_RETAIL;
     const int64_t stretched = static_cast<int64_t>(far_drawn) - game_start;
@@ -950,6 +1225,7 @@ void observe_renderer_boundary(const CPUState *cpu, uint32_t pc) {
         int32_t effective_fade = 0;
         if (effective_distances(g_preset, g_depth_fade_mode, source_far, source_fade, &effective_far, &effective_fade)) {
             make_room_for_margin(source_far, &effective_far, &effective_fade);
+            g_frame.entrance_reach = fortress_entrance_reach(effective_far, g_frame.entrance_visibility);
             write_distances(source_far, source_fade, effective_far, effective_fade);
             set_frame_fog(source_fade, effective_far, effective_fade);
         }
@@ -1159,9 +1435,8 @@ int64_t pressed_into_fog(int64_t into) {
 
 int fog_row(int64_t pressed) { return static_cast<int>(std::clamp<int64_t>(pressed, 0, kFadeDepth - 1) / kFadeRowDepth); }
 
-uint8_t next_row_share(int64_t pressed) {
-    const int64_t within = std::clamp<int64_t>(pressed, 0, kFadeDepth - 1);
-    return fog_row(pressed) >= kFadeRows - 1 ? 0u : static_cast<uint8_t>(within % kFadeRowDepth * 4);
+int sprite_fog_level(int64_t pressed) {
+    return static_cast<int>(std::clamp<int64_t>(pressed, 0, kFadeDepth)) * (256 / kFadeRowDepth);
 }
 
 /* The fade start a fade load hands its code: the one that makes the game's own arithmetic land on the frame's fog. */
@@ -1188,7 +1463,7 @@ void shape_fade_load(CPUState *cpu, const DistanceLoadSite& site) {
     if (fog->packet_in_register) g_list_shaped = packet;
     if (!fog->rows || !g_fog.smooth) return;
     if (const uint32_t key = psx_mod_gpu_dma_resolve_address(packet))
-        g_packet_fractions[key] = PacketFraction{g_fog_serial, next_row_share(pressed)};
+        g_packet_fractions[key] = PacketFraction{g_fog_serial, sprite_fog_level(pressed)};
 }
 
 void observe_distance_load(CPUState *cpu, const DistanceLoadSite& site) {
@@ -1217,7 +1492,8 @@ void observe_distance_load(CPUState *cpu, const DistanceLoadSite& site) {
         /* Rooms are walked to the margin, objects stop where the fog ends. */
         const bool object = site.pc != kPortalFarLoad;
         if (object) cpu->gpr[loaded] = g_written.visual_far;
-        arm_pending_decision(site.pc, g_written.source_far, object ? g_written.visual_far : g_written.effective_far);
+        else cpu->gpr[loaded] = portal_far(cpu->gpr[18]);
+        arm_pending_decision(site.pc, g_written.source_far, cpu->gpr[loaded]);
     } else {
         ++g_diagnostics.fade_load_substitutions;
     }
@@ -1265,7 +1541,8 @@ void observe_instruction(CPUState *cpu, uint32_t pc, uint32_t opcode) {
             std::max(g_frame.traversal_max_depth, depth);
         if (!g_written.active) return;
         const disruptor::sector_reach::Entry entry = disruptor::sector_reach::enter(
-            disruptor::Guest{}, g_walk, cpu->gpr[29], depth, g_written.source_far, g_written.effective_far);
+            disruptor::Guest{}, g_walk, cpu->gpr[29], depth, g_written.source_far,
+            portal_far(psx_mod_read_word(cpu->gpr[29] + disruptor::sector_reach::kPortalOnStack)));
         if (!entry.agrees) ++g_diagnostics.portal_model_mismatches;
         if (entry.hold) {
             cpu->gpr[19] = disruptor::sector_reach::kDepthCap;
@@ -1307,6 +1584,13 @@ double percentile(std::array<double, kTimingHistory> values, size_t count,
 
 void room_objects_entry(CPUState *cpu, uint32_t address) {
     if (!cpu || address != kRoomObjects) return;
+    if (g_frame.entrance_saved_far) {
+        std::lock_guard<std::mutex> lock(g_mutex);
+        const uint32_t end = psx_mod_read_word(kPrimitivePointer);
+        restore_entrance_far();
+        discard_reallocated_fog(end);
+        tag_entrance_mesh(end);
+    }
     close_admitted(psx_mod_read_word(kPrimitivePointer));
     g_face_rule = FaceRule{};
 }
@@ -1373,6 +1657,10 @@ void meet_quarters_on_texel_16(CPUState *cpu, disruptor::near_split::Quarter qua
 }
 
 }  // namespace
+
+extern "C" void disruptor_far_rendering_trim_triton_balcony(void) {
+    if (!comparator_active() && !psx_netplay_active()) trim_triton_balcony();
+}
 
 extern "C" void disruptor_far_rendering_force_from_environment(void) {
     const char *forced = std::getenv("PSX_DISRUPTOR_DRAW_DISTANCE");
@@ -1604,6 +1892,7 @@ extern "C" void disruptor_far_rendering_abandon_metrics(void) {
     g_objects.forget();
     g_sight.clear();
     g_unlisted = Unlisted{};
+    g_unlisted_mesh_count = 0u;
     g_face_rule = FaceRule{};
     g_admitted_from = 0u;
 }
@@ -1659,7 +1948,7 @@ extern "C" int disruptor_far_rendering_packet_fraction(uint32_t resolved_packet,
         g_packet_fractions.erase(found);
         return -1;
     }
-    return share.fraction;
+    return share.fade;
 }
 
 extern "C" int disruptor_far_rendering_list_fade_rows(uint32_t packet, int32_t from, int32_t to, int32_t *rows) {
@@ -1669,7 +1958,7 @@ extern "C" int disruptor_far_rendering_list_fade_rows(uint32_t packet, int32_t f
     const int64_t pressed = pressed_into_fog(int64_t{to} - g_fog.start);
     *rows = fog_row(pressed) - fog_row(pressed_into_fog(int64_t{from} - g_fog.start));
     const auto found = g_fog.smooth ? g_packet_fractions.find(psx_mod_gpu_dma_resolve_address(packet)) : g_packet_fractions.end();
-    if (found != g_packet_fractions.end()) found->second.fraction = next_row_share(pressed);
+    if (found != g_packet_fractions.end()) found->second.fade = sprite_fog_level(pressed);
     return 1;
 }
 
@@ -1687,18 +1976,51 @@ extern "C" void disruptor_far_rendering_renderer_entry(
     if (!comparator_active()) disruptor_render_arena_publish_fades();
 }
 
+static void draw_rooftops_house_sides(CPUState *cpu, uint32_t mesh, const disruptor::Guest &guest) {
+    namespace houses = disruptor::rooftops_houses;
+    if (cpu->gpr[31] != 0x800411A4u || !visible_entry(cpu->gpr[17]) ||
+        guest.byte(0x80071354u) != 3u || guest.byte(0x80071518u) != 3u ||
+        comparator_active() || psx_netplay_active() || !disruptor_render_arena_relocated()) return;
+    const uint32_t sector = guest.byte(cpu->gpr[17] + disruptor::portal_reach::kRoomByte);
+    if (sector < 214u || sector > 245u) return;
+    struct House {
+        uint32_t sector, x, z, y, header, lights;
+        decltype(houses::south) *walls;
+    };
+    static constexpr std::array<House, 7> scenery{{
+        {214u, 8992u, 1620u, 1600u, 0x4015u, 0x08u, &houses::inner_north},
+        {224u, 10752u, 2720u, 1772u, 0x2C02u, 0x04u, &houses::outer_south},
+        {226u, 10752u, 1860u, 1772u, 0x8C21u, 0x14u, &houses::outer_north},
+        {242u, 8288u, 3360u, 1472u, 0x44CFFu, 0x80u, &houses::south},
+        {243u, 8096u, 1680u, 1472u, 0x450FFu, 0x84u, &houses::north},
+        {244u, 9728u, 3296u, 1520u, 0x44CFFu, 0x80u, &houses::south},
+        {245u, 9922u, 1738u, 1640u, 0x444FFu, 0x78u, &houses::narrow_north},
+    }};
+    const auto house = std::find_if(scenery.begin(), scenery.end(), [sector](const House &side) { return side.sector == sector; });
+    if (house == scenery.end()) return;
+    const uint32_t room = guest.word(disruptor::sector_reach::kSectors + 4u * sector);
+    if (!valid_main_ram_pointer(room, 36u) || guest.word(room + 16u) != mesh ||
+        guest.word(room + 24u) != house->x || guest.word(room + 28u) != house->z || guest.word(room + 32u) != house->y ||
+        !valid_main_ram_pointer(mesh, 8u) || guest.word(mesh) != house->header || guest.word(mesh + 4u) != house->lights) return;
+    draw_mesh_addition(cpu, *house->walls);
+}
+
 extern "C" void disruptor_far_rendering_sector_entry(CPUState *cpu, uint32_t address) {
-    if (!cpu || address != kDrawSector || !cpu->read_word || !cpu->write_word) return;
+    if (!cpu || address != kDrawSector || !cpu->read_word || !cpu->write_word || drawing_mesh_addition) return;
     note_room(cpu);
     disruptor::Guest guest;
+    repair_pipe_elbow(cpu, cpu->gpr[4]);
     disruptor::misplaced_riser::fixed_parts(guest, cpu->gpr[4]);
-    if (!gpu_geometry_correction_enabled()) return;
-    const uint32_t span = cpu->gpr[5];
-    const uint32_t left = cpu->read_word(span + 12u), right = cpu->read_word(span + 16u);
-    if (disruptor::portal_reach::turn_guarded_left(left) != left)
-        cpu->write_word(span + 12u, disruptor::portal_reach::turn_guarded_left(left));
-    if (disruptor::portal_reach::turn_guarded_right(right) != right)
-        cpu->write_word(span + 16u, disruptor::portal_reach::turn_guarded_right(right));
+    if (gpu_geometry_correction_enabled()) {
+        const uint32_t span = cpu->gpr[5];
+        const uint32_t left = cpu->read_word(span + 12u), right = cpu->read_word(span + 16u);
+        if (disruptor::portal_reach::turn_guarded_left(left) != left)
+            cpu->write_word(span + 12u, disruptor::portal_reach::turn_guarded_left(left));
+        if (disruptor::portal_reach::turn_guarded_right(right) != right)
+            cpu->write_word(span + 16u, disruptor::portal_reach::turn_guarded_right(right));
+    }
+    draw_rooftops_house_sides(cpu, cpu->gpr[4], guest);
+    draw_upper_deck_floor(cpu, cpu->gpr[4]);
 }
 
 static void begin_renderer_frame(CPUState *cpu) {
@@ -1749,6 +2071,8 @@ static void begin_renderer_frame(CPUState *cpu) {
         return;
     }
 
+    trim_triton_balcony();
+
     /* 0x80040ECC resets $gp+0x390 from *(renderer_context+0x70).
      * Reading that source at entry obtains this frame's real arena start,
      * rather than the prior frame's end still present in the global. */
@@ -1792,7 +2116,9 @@ static void begin_renderer_frame(CPUState *cpu) {
     g_walk = disruptor::sector_reach::Walk{};
     g_frame.active = true;
     g_frame.primitive_start = primitive_start;
+    std::erase_if(g_packet_fractions, [primitive_start](const auto &entry) { return entry.second.arena == primitive_start; });
     g_frame.started = Clock::now();
+    g_frame.entrance_reach = fortress_entrance_reach(effective_far, g_frame.entrance_visibility);
     write_distances(source_far, source_fade, effective_far, effective_fade);
     g_frame.extended = g_written.active;
     g_frame.reach = portal_reach_enabled();

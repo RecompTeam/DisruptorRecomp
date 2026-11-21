@@ -10,12 +10,15 @@ constexpr uint32_t kItemDraw = 0x8001A46Cu;
 constexpr uint32_t kScreen = 0x800715B0u;
 constexpr uint32_t kPassword = 4u;
 constexpr uint32_t kReturnDrawn = 0x8001E830u, kReturnDrawnBelow = 0x8001E94Cu; /* RETURN TO MAIN MENU, once a frame */
+constexpr uint32_t kDrawOTag = 0x8004D684u, kMenuSubmitReturn = 0x80020604u;
 constexpr std::chrono::milliseconds kStillShown{200};
 constexpr std::array<const char *, 4> kFaces = {"cross", "circle", "square", "triangle"};
 
 /* Built on the emulation thread at the screen's draw, drawn by the frame's drawing on another. */
 std::mutex g_mutex;
-std::vector<hint::Run> g_runs;
+std::vector<hint::Run> g_pending;
+std::array<std::vector<hint::Run>, 2> g_pages;
+size_t g_displayed = 0;
 std::atomic<std::chrono::steady_clock::rep> g_built{0};
 
 std::string key_of(const char *field, std::string_view language) {
@@ -48,7 +51,7 @@ void draw_entry(CPUState *cpu, uint32_t) {
     const uint32_t returns = cpu->gpr[31];
     if ((returns != kReturnDrawn && returns != kReturnDrawnBelow) || psx_mod_read_word(kScreen) != kPassword) return;
     const uint32_t font = psx_mod_read_word(hint::kFont);
-    std::vector<hint::Run> runs = hint::raster(
+    g_pending = hint::raster(
         lines_now(),
         [font](int shape, int column, int row) {
             return static_cast<int>(psx_mod_read_byte(font + static_cast<uint32_t>(shape * hint::kGlyphBytes + row * hint::kGlyphWide + column)));
@@ -62,15 +65,32 @@ void draw_entry(CPUState *cpu, uint32_t) {
             if (shape < 0 || shape >= 64) return 0;
             return static_cast<int>(static_cast<int8_t>(psx_mod_read_byte(pointer::kGlyphWidths + static_cast<uint32_t>(shape))));
         });
-    {
-        std::scoped_lock lock(g_mutex);
-        g_runs = std::move(runs);
+}
+
+void menu_submit(CPUState *cpu, uint32_t) {
+    if (cpu->gpr[31] != kMenuSubmitReturn) return;
+    // The menu submits DRAWENV + 0x870 after selecting the opposite 320x240 page for display.
+    const uint32_t draw_origin = psx_mod_read_word(cpu->gpr[4] - 0x870u);
+    GpuDisplayInfo display{};
+    gpu_get_display_info(&display);
+    std::scoped_lock lock(g_mutex);
+    if ((draw_origin != 0u && draw_origin != (240u << 16)) || display.display_x != 0u ||
+        (display.display_y != 0u && display.display_y != 240u)) {
+        g_pending.clear();
+        g_pages = {};
+        g_built.store(0, std::memory_order_relaxed);
+        return;
     }
-    g_built.store(std::chrono::steady_clock::now().time_since_epoch().count(), std::memory_order_relaxed);
+    g_pages[draw_origin != 0u].swap(g_pending);
+    g_pending.clear();
+    g_displayed = display.display_y != 0u;
+    g_built.store(g_pages[g_displayed].empty() ? 0 : std::chrono::steady_clock::now().time_since_epoch().count(),
+                  std::memory_order_relaxed);
 }
 
 PSX_MOD_CONSTRUCTOR(register_disruptor_password_hint) {
-    if (!psx_mod_register_function_entry_plugin("disruptor.password_hint.draw", kItemDraw, draw_entry))
+    if (!psx_mod_register_function_entry_plugin("disruptor.password_hint.submit", kDrawOTag, menu_submit) ||
+        !psx_mod_register_function_entry_plugin("disruptor.password_hint.draw", kItemDraw, draw_entry))
         std::fprintf(stderr, "disruptor: no password hint hook, the password screen shows no keys\n");
 }
 
@@ -101,7 +121,7 @@ std::array<std::string, 4> face_names(std::string_view language) {
 
 bool password_hint_shown() {
     const std::chrono::steady_clock::duration built{g_built.load(std::memory_order_relaxed)};
-    return std::chrono::steady_clock::now().time_since_epoch() - built < kStillShown;
+    return built.count() != 0 && std::chrono::steady_clock::now().time_since_epoch() - built < kStillShown;
 }
 
 void draw_password_hint(int width, int height) {
@@ -109,7 +129,7 @@ void draw_password_hint(int width, int height) {
     std::vector<hint::Run> runs;
     {
         std::scoped_lock lock(g_mutex);
-        runs = g_runs;
+        runs = g_pages[g_displayed];
     }
     int numerator = 4, denominator = 3;
     psx_host_video_get_display_aspect(&numerator, &denominator);
