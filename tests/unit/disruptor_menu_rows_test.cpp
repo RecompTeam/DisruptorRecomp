@@ -200,10 +200,11 @@ void test_backs() {
     bool chosen = true;
     for (const rows::Back &back : rows::kBacks) {
         bool found = false;
-        for (const rows::Row &row : rows::kRows) found = found || (row.screen == back.screen && row.row == back.row && row.left == rows::kCross);
+        const auto button = back.screen == rows::kPassword ? rows::kStart : rows::kCross;
+        for (const rows::Row &row : rows::kRows) found = found || (row.screen == back.screen && row.row == back.row && row.left == button);
         chosen = chosen && found;
     }
-    expect(chosen, "every back row is a row of its screen chosen with Cross");
+    expect(chosen, "back rows use Cross, except for Start on Password");
     Guest guest;
     const rows::Row *sound = rows::match(0x8001F248u, rows::kOptions, 0u, 0u, guest);
     const rows::Row *back = rows::match(0x8001F394u, rows::kOptions, 0u, 0u, guest);

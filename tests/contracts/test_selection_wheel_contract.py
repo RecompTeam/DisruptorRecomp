@@ -59,8 +59,12 @@ require(
     "loading a save state must cancel stale wheel input",
 )
 require("disruptor_capsule_note_byte(address" in wheel, "wheel selections must be present in replay capsules")
+after_input = read("src/game/host.cpp").partition("void psx_game_after_input(void) {\n")[2].partition("\n}")[0]
 require(
-    "    disruptor_capsule_after_input();\n    disruptor_selection_wheel_guard_input();" in read("src/game/host.cpp"),
+    0
+    <= after_input.find("disruptor_capsule_after_input();")
+    < after_input.find("disruptor_selection_wheel_guard_input();")
+    and after_input.count("disruptor_selection_wheel_guard_input();") == 1,
     "open wheels must also neutralise input on fast-forward frames with no presentation hook",
 )
 

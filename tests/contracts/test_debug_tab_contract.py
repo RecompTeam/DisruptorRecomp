@@ -150,6 +150,8 @@ require(
 )
 
 flush = body(renderer, "static void flush_tex_batch_now(void) {")
+draw_passes = body(renderer, "static void tex_batch_draw_passes(int nverts, int semi) {")
+split_blend = body(renderer, "static void split_texel_blend(int semi, int pass, int mirror, int night) {")
 require(
     "static int s_uv_view = 0;\n" in renderer
     and "void gl_renderer_set_uv_view(int enabled) {\n    GL_RT_SYNC(__func__);\n    s_uv_view = enabled != 0;\n    ssao_mode();\n}\nint gl_renderer_uv_view(void) { return s_uv_view; }\n"
@@ -170,23 +172,24 @@ require(
     and "inline constexpr int kDisruptorDiagnosticViewCount = 8;\n" in settings
     and "static void apply_texel_blend(int mode, int mirror) {\n    if (s_uv_view && mirror) glDisable(GL_BLEND);\n    else apply_psx_blend(mode);\n}\n"
     in renderer
-    and "        apply_texel_blend(semi, s_visual_on);          /* Pass 2: STP=1 texels (blended) */\n" in renderer
+    and "    else if (pass == 2) apply_texel_blend(semi, mirror);\n" in split_blend
+    and "    const int night = s_visual_on && !s_uv_view && night_terrain_active(&s_night_game);\n" in draw_passes
+    and "        split_texel_blend(semi, 2, s_visual_on, night);\n" in draw_passes
     and "    s_visual_on = on > 0.0f;\n"
     in body(renderer, "static void geometry_visual_uniforms(GLint visual, GLint camera, GLint options,")
     and flush.index("    hr_begin(1);\n")
     < flush.index("geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 0);")
     < flush.index("    if (!s_tb_held_back) tex_batch_draw_passes(nverts, semi);")
-    < flush.index(
-        "        wide_target_begin(dx, s_tex_uXoff, s_tex_uXhalf);\n"
-        "        geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 1);\n"
-    )
+    < flush.index("        wide_target_begin(dx, s_tex_uXoff, s_tex_uXhalf);\n")
+    < flush.index("        geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 1);\n")
     < flush.index(
         "        geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 0);\n        wide_target_end("
     )
     and flush.count("geometry_visual_uniforms(") == 3
-    and "apply_psx_blend" not in body(renderer, "static void tex_batch_draw_passes(int nverts, int semi) {")
-    and temporal.count("apply_texel_blend(c->semi, 1); temporal_mask(c->check,1);") == 3
-    and "apply_texel_blend" not in temporal.replace("apply_texel_blend(c->semi, 1); temporal_mask(c->check,1);", ""),
+    and "apply_psx_blend" not in draw_passes
+    and "    const int night=t && !s_uv_view && night_terrain_active(&s_night_between);\n" in temporal
+    and temporal.count("split_texel_blend(c->semi,2,1,night); temporal_mask(c->check,1);") == 3
+    and "apply_texel_blend" not in temporal,
     "the UV view starts off and shows, on the mirror alone, where a textured pixel lies in its texture: u and v as waves of 16 "
     "texels down and 16 up with no step, and the 16-texel cell, with the world's blended fragments left out and a flat "
     "picture's (the HUD, the held weapon) drawn opaque in real and in-between frames while the canonical picture blends as "

@@ -32,14 +32,20 @@ before = host.find(
 after = host.find(
     "            env_pad_hold_apply();\n        }\n#ifdef PSX_HAS_GAME_HOST\n        psx_game_after_input();\n#endif\n"
 )
+game_before = game_side.partition("void psx_game_before_input(void) {\n")[2].partition("\n}")[0]
+game_after = game_side.partition("void psx_game_after_input(void) {\n")[2].partition("\n}")[0]
 require(
     0 <= offline < before < after
     and host.find("\n    }\n", offline + 80) > after
     and host.count("psx_game_before_input();") == host.count("psx_game_after_input();") == 1
-    and "void psx_game_before_input(void) { disruptor_capsule_before_input(); }\n" in game_side
-    and "void psx_game_after_input(void) {\n    disruptor_capsule_after_input();\n    disruptor_selection_wheel_guard_input();\n"
-    "    disruptor_achievements_frame();\n    disruptor_state_screen_frame();\n}\n"
-    in game_side
+    and 0
+    <= game_before.find("disruptor_capsule_before_input();")
+    < game_before.find("disruptor::sticks::set_movement({});")
+    and 0
+    <= game_after.find("disruptor_capsule_after_input();")
+    < game_after.find("disruptor_selection_wheel_guard_input();")
+    < game_after.find("disruptor_achievements_frame();")
+    < game_after.find("disruptor_state_screen_frame();")
     and game_side.count("disruptor_capsule_before_input();") == game_side.count("disruptor_capsule_after_input();") == 1
     and game_side.count("disruptor_capsule_state_loaded();") == 1
     and "disruptor_capsule_" not in host,
@@ -51,10 +57,11 @@ require(
     and sampling < host.index("    if (g_headless || module_fast_forward) {\n#ifndef PSX_NO_DEBUG_TOOLS\n"),
     "a replay must put its frame in before the frame loop's early ways out: module hooks never run without a window",
 )
+game_load = game_side.partition("void psx_game_state_loaded(void) {\n")[2].partition("\n}")[0]
 require(
     "#ifdef PSX_HAS_GAME_HOST\n    psx_game_state_loaded();\n#endif\n"
     in host[host.index('extern "C" void psx_frontend_on_savestate_loaded(void) {\n') :][:1200].split("\n}\n")[0]
-    and "void psx_game_state_loaded(void) {\n    disruptor_capsule_state_loaded();\n" in game_side,
+    and "    disruptor_capsule_state_loaded();\n" in game_load,
     "the capsule must hear of a loaded state before the game runs on from it",
 )
 require(

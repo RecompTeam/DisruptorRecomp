@@ -96,7 +96,7 @@ require(
     glDepthMask(GL_TRUE);
     p_glUniform1i(s_uSemimode, semi < 0 ? 0 : semi);
     p_glUniform1i(s_uSemipass, semi < 0 ? 3 : 4);
-    glDrawArrays(GL_TRIANGLES, 0, nverts);
+    if (s_zbuffer_oracle || !native_depth_draw(nverts, semi, wide_dx(), 0)) glDrawArrays(GL_TRIANGLES, 0, nverts);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     glDepthMask(GL_FALSE);
     p_glUniform1f(s_tex_uPull, held_back ? 0.0f : s_world_margin);
@@ -274,7 +274,7 @@ require(
     and held.index("        p_glUniform1f(s_temp_uHold,0.0f);\n") < held.index("glDepthMask(GL_TRUE)")
     and held.rstrip().endswith("glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE); glDepthFunc(GL_ALWAYS);")
     and presenter.index("    if (!round && held) {")
-    < presenter.index("    if (!c->check && c->semi==4) {\n        glEnable(GL_BLEND);"),
+    < presenter.index("    if (!c->check && c->semi==4) {\n        dual_source_blend(0);"),
     "an in-between frame tests a sprite batch the same way: the share nearer while its colours are drawn with no depth "
     "written, its true depth after, and with the hold on its blended texels write no depth, as on the real frames",
 )

@@ -141,11 +141,12 @@ require(
     "the frame's presses are the one register changed, "
     "and the name, the cursor and the row the only memory written",
 )
+game_key = game_side.partition("int psx_game_key(int scancode, uint32_t keycode, int down, int plain) {\n")[
+    2
+].partition("\n}")[0]
 require(
     '#ifdef PSX_HAS_GAME_HOST\n#include "game_host.h"\n#endif\n' in host
-    and "int psx_game_key(int scancode, uint32_t keycode, int down, int plain) {\n"
-    "    return disruptor_name_entry_key(scancode, keycode, down, plain);\n}\n"
-    in game_side
+    and game_key.endswith("    return disruptor_name_entry_key(scancode, keycode, down, plain);")
     and "        if (ev.type == SDL_KEYUP) {\n#if defined(PSX_SDL3)\n"
     "            (void)psx_game_key((int)ev.key.scancode, (uint32_t)ev.key.key, 0, 1);\n#else\n"
     "            (void)psx_game_key((int)ev.key.keysym.scancode, (uint32_t)ev.key.keysym.sym, 0, 1);\n"

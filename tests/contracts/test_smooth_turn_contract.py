@@ -148,7 +148,7 @@ require(
     "            identities[i+1]==TEMPORAL_CUT_IDENTITY && identities[i+2]==TEMPORAL_CUT_IDENTITY;\n"
     "        t->world = !cut;\n"
     in temporal
-    and "        t->modelled = !sprite && !partial && !cut && identities && identities[i] && identities[i+1] && identities[i+2] &&\n"
+    and "        t->modelled = !t->sprite && !partial && !cut && identities && identities[i] && identities[i+1] && identities[i+2] &&\n"
     in temporal,
     "the whole of a cut triangle is marked, and the in-between presenter takes a marked triangle for no world face",
 )

@@ -176,7 +176,7 @@ require(
     "            triangle->q[vertex] < 0.0f) return 0;\n" in matching
     and "        if (textured && s->vertices[(s->nv+i)*TEXV+19]>3.5f && s->vertices[(s->nv+i)*TEXV+19]<4.5f) t->q[0]=t->q[1]=t->q[2]=-1.0f;\n"
     in presenter
-    and "        t->modelled = !sprite && !partial && !cut && identities && identities[i] && identities[i+1] && identities[i+2] &&\n"
+    and "        t->modelled = !t->sprite && !partial && !cut && identities && identities[i] && identities[i+1] && identities[i+2] &&\n"
     "            !((identities[i] | identities[i+1] | identities[i+2]) & PSX_NEAR_IDENTITY);\n"
     in presenter,
     "a near face takes no part in the matching by look, and no face is paired by a level point the view alone gave",
