@@ -2,6 +2,37 @@
 
 What changed in each release. The launcher shows the section of its own version on its home page.
 
+## v0.18.0
+
+### Performance and display
+
+- Less GPU work in busy areas of Triton and Rooftops with regular frames and In-between frames
+- Steadier frame pacing with In-between frames enabled
+- Less rendering work during Blast
+- Lower overhead for ambient occlusion and the crosshair on the render thread
+- Less CPU work around moving doors
+- Dynamic resolution starts adjusting sooner and waits for usable GPU timings
+- Dynamic resolution holds its scale while the pause, weapon or psionic menu is open
+- The pause menu and the weapon and psionic lists stay sharp at lower render resolutions
+- Fixed clipped digits in the weapon and psionic lists
+
+### Chemical Factory
+
+- Smoother joins on the river and in the pools
+- A darker river that animates in the direction of the current, including during In-between frames
+- Smoke rises from the three chimneys and fades into the yellow fog
+- Clearer DANGER and BIOHAZARD lettering on the fence signs
+
+### Motion, rendering and combat
+
+- Steadier lift platforms and railings when moving on a lift
+- Steadier pickups near the edges of the picture with In-between frames on
+- Steadier firing poses for Triton guards and Reactor soldiers
+- Less wobble when soldiers with red visors die
+- Fixed a dark grid on some ceiling lights and flicker at the screen edges with ambient occlusion on
+- Fixed enemy legs and pickups showing through the upper floor in Reactor
+- More reliable projectile auto-aim for nearby enemies on steps and ledges
+
 ## v0.17.0
 
 ### Gamepad
