@@ -83,7 +83,7 @@ void incomplete_timing_skips_down_step_verification() {
     int level = 3;
     for (int index = 0; index < 4; ++index) {
         now += 1.5 * period;
-        const DynresSample sample{period, 1.5 * period, index < 3 ? 1.6 * period : 0.0, 0, index < 3};
+        const DynresSample sample{period, 1.5 * period, index < 3 ? 1.6 * period : 0.0, 0, index < 3 ? 1 : -1};
         level = dynres_sample(&controller, now, &sample);
     }
     expect(level == 2 && !controller.post_active, "an incomplete window can ask for a lower resolution without scheduling verification");
@@ -148,7 +148,7 @@ void batched_gpu_results_cover_every_measured_frame() {
         dynres_init(&controller, &params, 1, 3, 3);
         double now = 10.0;
         for (const int frames : window) {
-            const DynresSample sample{period, period, frames * period * 0.75, 0, frames};
+            const DynresSample sample{period, period, frames * period * 0.75, 0, frames ? frames : -1};
             dynres_sample(&controller, now += period, &sample);
         }
         expect(controller.last_valid && !controller.last_complete && controller.last_load == 0.75,
@@ -158,7 +158,7 @@ void batched_gpu_results_cover_every_measured_frame() {
     dynres_init(&controller, &params, 1, 3, 2);
     double now = 10.0;
     for (const int frames : readings[0]) {
-        const DynresSample sample{period, period, frames * period * 0.25, 0, frames};
+        const DynresSample sample{period, period, frames * period * 0.25, 0, frames ? frames : -1};
         dynres_sample(&controller, now += period, &sample);
     }
     const DynresSample quiet{period, period, period * 0.25, 0, 1};

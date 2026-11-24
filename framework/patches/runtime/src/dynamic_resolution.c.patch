@@ -1,5 +1,5 @@
 diff --git a/runtime/src/dynamic_resolution.c b/runtime/src/dynamic_resolution.c
-index e99e75aab0af7e3b7b1af10b6f6a4a0de444a6a1..20296601907e47da8e59e23e7d5995bf7e2e563d 100644
+index e99e75aab0af7e3b7b1af10b6f6a4a0de444a6a1..35588959c2664a7901a5b780240993557d70b419 100644
 --- a/runtime/src/dynamic_resolution.c
 +++ b/runtime/src/dynamic_resolution.c
 @@ -77,8 +77,8 @@
@@ -107,22 +107,23 @@ index e99e75aab0af7e3b7b1af10b6f6a4a0de444a6a1..20296601907e47da8e59e23e7d5995bf
          c->up_streak_s += dur;
      else {
          c->up_streak_s = 0.0;
-@@ -285,6 +293,7 @@
+@@ -285,6 +293,8 @@
          return c->level;
      }
      double work = s->work_s < 0.0 ? 0.0 : s->work_s;
-+    if (s->measured_frames != 1) c->up_ready = 0;
++    const int measured_frames = s->measured_frames == 0 ? 1 : s->measured_frames;
++    if (measured_frames != 1) c->up_ready = 0;
      if (c->up_ready) {
          /* Up steps land in an interval whose idle time covers the step. */
          double idle = s->period_s - work;
-@@ -292,7 +301,11 @@
+@@ -292,7 +302,11 @@
              return step_up(c, now_s, c->last_load, c->level + 1, "headroom");
      }
      c->win_period += s->period_s;
 -    c->win_work += work;
-+    if (s->measured_frames != 1) c->win_unpaired = 1;
-+    if (s->measured_frames > 0) {
-+        c->win_measured += s->measured_frames * s->period_s;
++    if (measured_frames != 1) c->win_unpaired = 1;
++    if (measured_frames > 0) {
++        c->win_measured += measured_frames * s->period_s;
 +        c->win_work += work;
 +    }
      c->win_wall += s->wall_s;
