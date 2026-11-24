@@ -61,7 +61,8 @@ require(
 
 triangle = between(renderer, "static void gpu_textured_triangle(const int *xs, const int *ys,", "\n}\n")
 require(
-    "    int plain_lim[4], marked_lim = 0;\n    if (!lim) {\n" in triangle
+    "    int plain_lim[4], marked_lim = 0;\n" in triangle
+    and triangle.index("int plain_lim[4], marked_lim = 0;") < triangle.index("if (!lim) {")
     and "        psx_uv_tri_limits(xs, ys, mu, mv, lim_buf);\n"
     "        psx_uv_tri_mirror_offset(xs, ys, mu, mv);\n"
     "        if (visual_flags) {\n"

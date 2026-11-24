@@ -29,9 +29,12 @@ int psx_game_configure(const char *game_id, size_t length);
 const char *psx_game_session_problem(int netplay);
 /* Nonzero asks for a boot without the BIOS animation whatever the settings say. */
 int psx_game_fast_boot_forced(void);
+uint64_t psx_game_crosshair_snapshot(void);
+uint64_t psx_game_take_drawn_crosshair(void);
 enum { PSX_ROOFTOPS_SKY = -4 };
+enum { PSX_FACTORY_SMOKE_CYCLE = 1024 };
 int psx_game_night_sky_view(int top, int32_t camera[4], int *balcony);
-int psx_game_chemical_sky_view(int top, int32_t camera[4]);
+int psx_game_chemical_sky_view(int top, int32_t camera[4], int64_t *smoke_tick);
 int psx_game_rooftops_sky_view(int top, int32_t camera[4]);
 const uint8_t *psx_game_sky_overlay(int width, int rows, int band, const uint8_t *indices, size_t *bytes);
 typedef struct PsxNightVertex {

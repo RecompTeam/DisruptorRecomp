@@ -12,6 +12,7 @@
 #include "game/render/far_rendering.h"
 
 #include "cpu_state.h"
+#include "game/frame/stock_frames.h"
 #include "gpu.h"
 #include "gte_precision.h"
 #include "lockstep.h"
@@ -19,6 +20,7 @@
 #include "mod_memory.h"
 #include "psx_netplay.h"
 
+#include <array>
 #include <cstdint>
 #include <cstdlib>
 
@@ -52,7 +54,12 @@ constexpr uint32_t kDescriptors = 0x8007162Cu;      /* gp+0x4E0, set at 0x80015B
 constexpr uint32_t kDescriptorCount = 0x800717B4u;  /* gp+0x668, set at 0x80015B58 */
 constexpr uint32_t kMostDescriptors = 1024u;        /* the mesh renderer's index (0x80046D14) reaches no further */
 constexpr int kFadeBlocks = 64;
-struct DrawHeading { int top = -1; int yaw = 0; int32_t eye[3]{}; };
+struct DrawHeading {
+    int top = -1;
+    int yaw = 0;
+    int32_t eye[3]{};
+    uint32_t tick = 0;
+};
 DrawHeading g_draw_headings[2];
 uint32_t g_arena_base = 0;
 bool g_relocated = false;  /* the frame entered last draws into the moved arena */
@@ -61,15 +68,16 @@ bool g_relocated = false;  /* the frame entered last draws into the moved arena 
  * there. Two blocks of one column closer than twelve rows, or more blocks than the renderer holds, leave the game's rows. */
 void publish_fade_blocks() {
     int blocks[2 * kFadeBlocks];
+    std::array<uint64_t, 512> seen{};
     int found = 0;
     const uint32_t table = psx_mod_read_word(kDescriptors), count = psx_mod_read_word(kDescriptorCount);
     if (count <= kMostDescriptors && table >= 0x80000000u && table <= 0x80200000u - count * 8u) {
         for (uint32_t index = 0; index < count; ++index) {
             const uint32_t clut = psx_mod_read_word(table + index * 8u) >> 16;
             const int x = static_cast<int>(clut & 63u) * 16, row = static_cast<int>((clut >> 6) & 511u);
-            bool known = false;
-            for (int seen = 0; seen < found && !known; ++seen) known = blocks[2 * seen] == x && blocks[2 * seen + 1] == row;
-            if (known) continue;
+            const uint64_t column = uint64_t{1} << (clut & 63u);
+            if (seen[row] & column) continue;
+            seen[row] |= column;
             if (found == kFadeBlocks) {
                 found = 0;
                 break;
@@ -116,10 +124,11 @@ extern "C" void disruptor_reset_draw_headings() {
     for (auto &page : g_draw_headings) page = {};
 }
 
-extern "C" int disruptor_draw_camera(int top, int fallback, int32_t *eye) {
+extern "C" int disruptor_draw_camera(int top, int fallback, int32_t *eye, int64_t *tick) {
     for (const auto &page : g_draw_headings) {
         if (page.top != top) continue;
         if (eye) for (int axis = 0; axis < 3; ++axis) eye[axis] = page.eye[axis];
+        if (tick) *tick = page.tick;
         return page.yaw;
     }
     return fallback;
@@ -148,7 +157,8 @@ void renderer_entry(CPUState *cpu, uint32_t address) {
                               psx_mod_read_byte(0x80077624u),
                               {static_cast<int32_t>(psx_mod_read_word(0x800775BCu)),
                                static_cast<int32_t>(psx_mod_read_word(0x800775D0u)),
-                               static_cast<int32_t>(psx_mod_read_word(0x800775C0u))}};
+                               static_cast<int32_t>(psx_mod_read_word(0x800775C0u))},
+                              psx_mod_read_word(disruptor::stock_frames::kTicks)};
 
     const uint32_t original = psx_mod_read_word(kOriginalRoots[index]);
     if (original < 0x80000000u || original > 0x80200000u - kRetailBytes ||

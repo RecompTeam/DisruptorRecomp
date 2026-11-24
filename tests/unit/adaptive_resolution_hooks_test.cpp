@@ -1,4 +1,5 @@
 #include "game/render/adaptive_resolution.h"
+#include "game/input/menu_rows.h"
 
 #include <cstdarg>
 #include <cstdint>
@@ -17,6 +18,8 @@ void expect(bool condition, const char *message) {
 void (*g_frame_hook)(void) = nullptr;
 double g_now = 100.0, g_busy_ms = 0.0, g_weight = 1.0, g_step_seconds = 0.0;
 int g_scale = 3, g_sets = 0, g_refuse = 0, g_busy_wanted = 0;
+std::uint8_t g_scene = 0;
+int g_timing_complete = 1;
 
 constexpr double kPeriod = 1.0 / 59.94;
 
@@ -55,7 +58,12 @@ void stall(double seconds, double busy) {
 extern "C" {
 void mod_register_frame_hook(void (*hook)(void)) { g_frame_hook = hook; }
 void gl_renderer_gpu_busy_enable(int enabled) { g_busy_wanted = enabled; }
-double gl_renderer_gpu_busy_ms(void) { return g_busy_ms; }
+double gl_renderer_gpu_busy_ms(int *complete) {
+    *complete = g_timing_complete;
+    return g_busy_ms;
+}
+std::uint8_t psx_mod_read_byte(std::uint32_t) { return g_scene; }
+int disruptor_weapon_list_visible(void) { return 0; }
 int gpu_ws_displayed_flat(void) { return 0; }
 int gpu_ws_displayed_menu(void) { return 0; }
 uint32_t psx_host_ui_gl_flags(void) { return 0; }
@@ -81,6 +89,27 @@ int main() {
     frames(900);
     expect(g_scale < 3, "a GPU over its frame for fifteen seconds lowers the scale");
     expect(disruptor_adaptive_resolution_scale() == 3, "the menu keeps showing and saving the player's scale");
+    const int scale_before_missing_samples = g_scale;
+    g_timing_complete = 0;
+    for (int i = 0; i < 480; ++i) stall(kPeriod, 0.0);
+    expect(g_scale == scale_before_missing_samples, "a missing GPU timestamp does not let the resolution rise");
+    for (int i = 0; i < 480; ++i) {
+        g_timing_complete = i % 10 == 0;
+        stall(kPeriod, g_timing_complete ? 0.014 : 0.0);
+    }
+    expect(g_scale == scale_before_missing_samples, "sparse GPU timing does not count toward a higher resolution");
+    g_timing_complete = 0;
+    for (int i = 0; i < 480; ++i) stall(kPeriod, 0.004);
+    expect(g_scale == scale_before_missing_samples, "a positive but incomplete GPU reading cannot raise the resolution");
+    g_timing_complete = 1;
+    g_weight = 0.2;
+    g_scene = disruptor::menu_rows::kPaused;
+    frames(480);
+    expect(g_scale == scale_before_missing_samples, "the original pause holds the scale of the retained world");
+    g_scene = 0;
+    frames(900);
+    expect(g_scale == 3, "fresh GPU time with headroom lets the resolution rise again");
+    g_weight = 1.0;
 
     disruptor_adaptive_resolution_set_enabled(0);
     expect(g_scale == 3 && g_busy_wanted == 0, "turning it off draws at the player's scale again and stops the timing");

@@ -42,12 +42,22 @@ settings = read("src/game/settings/game_user_settings.h")
 
 require("    disruptor_contract(ambient_occlusion)\n" in cmake, "this contract is registered")
 
+ao_shader = between(renderer, "static const char *SSAO_FS =", "static const char *SSAO_MIX_FS =")
+require(
+    "float half_pixel = 0.5*u_ao.w*u_texel.y;" in ao_shader
+    and ao_shader.index("uv.y < u_uv_rect.y - half_pixel || uv.y >= u_uv_rect.w + half_pixel")
+    < ao_shader.index("texture(u_depth, uv)"),
+    "SSAO checks the displayed VRAM band's row bounds before sampling depth",
+)
+
 require(
     '"  v_deep = abs(a_camz) > 16.0 ? 1.0 : -1000.0;\\n"' in renderer
     and '"  if (v_bill > 0.5 && v_deep > -999.5 && v_deep < 0.999) frag.a = 0.25;' in renderer
     and "static float         s_ssao_tilt = 0.35f;" in renderer
     and '"float flat_surf(vec2 uv){\\n"' in renderer
-    and '"    float a = flat_surf(v_uv - step), b = flat_surf(v_uv + step);\\n"' in renderer,
+    and "return vec2(flat_surf(v_uv - step), flat_surf(v_uv + step));" in renderer
+    and "d = mend(d, step_x, step_y, depth_x, depth_y);" in renderer
+    and "cross(edge(step_y, p, d, depth_y), edge(step_x, p, d, depth_x))" in renderer,
     "a polygon with a corner that has no depth is marked as no surface, a joint under 20 degrees is no corner, and a depth "
     "is mended from surfaces alone",
 )
@@ -207,11 +217,11 @@ require(
 temporal = read("psxrecomp/runtime/src/gpu_gl_temporal.c.inc")
 require(
     "(v0 + v1) * 0.5f * (float)h + horizon * (float)scale);" in renderer
-    and "lx, ly, lw, lh, s_yaw_center_y_relative - 120.0f))" in renderer
-    and "s_temp_curr.sky_known ? s_temp_curr.sky_frame[3] : 0.0f);" in renderer
+    and "lx, ly, lw, lh, s_yaw_center_y_relative - 120.0f);" in renderer
+    and "picture->horizon = s_yaw_center_y_relative - 120.0f;" in renderer
+    and "picture->horizon);" in renderer
     and "s->sky_known ? s->sky_frame[3]+(1.0f-alpha)*s->sky_back : 0.0f);" in temporal,
     "the occlusion takes positions back from the depth about the projection's own centre row: the frame's horizon, an "
     "in-between picture's on its way from the frame before",
 )
-
 print("Disruptor ambient occlusion source contract: PASS")

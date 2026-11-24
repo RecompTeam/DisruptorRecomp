@@ -12,6 +12,7 @@
 #include "game/input/sticks.h"
 #include "game/input/weapon_list.h"
 #include "game/render/far_rendering.h"
+#include "game/render/archive_terminal.h"
 #include "game/render/ddgi_level.h"
 #include "game/render/movie_smoothing.h"
 #include "game/session/capsule.h"
@@ -52,7 +53,7 @@ extern "C" int disruptor_name_entry_withholds(int scancode);
 extern "C" void disruptor_name_entry_keys_for_pad(const uint8_t *keys, uint8_t *kept, int count);
 extern "C" void disruptor_name_entry_state_loaded(void);
 extern "C" void disruptor_reset_draw_headings();
-extern "C" int disruptor_draw_camera(int top, int fallback, int32_t *eye);
+extern "C" int disruptor_draw_camera(int top, int fallback, int32_t *eye, int64_t *tick);
 extern "C" void disruptor_mover_motion_state_loaded(void);
 extern "C" void disruptor_mover_motion_state_saving(void);
 extern "C" void disruptor_stock_frames_state_loaded(void);
@@ -222,11 +223,20 @@ static bool chemical_factory_playing() {
     return sky_level_visible(2u) && psx_mod_read_byte(0x8007145Cu) == 0u;
 }
 
-int psx_game_chemical_sky_view(int top, int32_t camera[4]) {
+static int sky_draw_camera(int top, int yaw, int32_t camera[3], int64_t *tick = nullptr) {
+    camera[0] = static_cast<int32_t>(psx_mod_read_word(0x800775BCu));
+    camera[1] = static_cast<int32_t>(psx_mod_read_word(0x800775D0u));
+    camera[2] = static_cast<int32_t>(psx_mod_read_word(0x800775C0u));
+    return disruptor_draw_camera(top, yaw, camera, tick);
+}
+
+int psx_game_chemical_sky_view(int top, int32_t camera[4], int64_t *smoke_tick) {
     if (chemical_preview_start < 0 || !sky_level_visible(2u)) return -1;
-    camera[3] = -chemical_variant.load(std::memory_order_relaxed);
     const int view = sky_direction();
-    return view < 0 ? -1 : (view & ~255) | disruptor_draw_camera(top, view & 255, nullptr);
+    if (view < 0) return -1;
+    camera[3] = -chemical_variant.load(std::memory_order_relaxed);
+    const bool world = psx_mod_read_byte(0x8007145Cu) == 0u;
+    return (view & ~255) | sky_draw_camera(top, view & 255, camera, world ? smoke_tick : nullptr);
 }
 
 int psx_game_rooftops_sky_view(int top, int32_t camera[4]) {
@@ -234,17 +244,14 @@ int psx_game_rooftops_sky_view(int top, int32_t camera[4]) {
     const int direction = sky_direction();
     if (direction < 0) return -1;
     camera[3] = PSX_ROOFTOPS_SKY;
-    return (direction & ~255) | disruptor_draw_camera(top, direction & 255, nullptr);
+    return (direction & ~255) | disruptor_draw_camera(top, direction & 255, nullptr, nullptr);
 }
 
 int psx_game_night_sky_view(int top, int32_t camera[4], int *balcony) {
     if (!sky_level_visible(5u)) return -1;
     const int direction = sky_direction();
     if (direction < 0) return -1;
-    camera[0] = static_cast<int32_t>(psx_mod_read_word(0x800775BCu));
-    camera[1] = static_cast<int32_t>(psx_mod_read_word(0x800775D0u));
-    camera[2] = static_cast<int32_t>(psx_mod_read_word(0x800775C0u));
-    const int yaw = disruptor_draw_camera(top, direction & 255, camera);
+    const int yaw = sky_draw_camera(top, direction & 255, camera);
     RtStats render{};
     rt_get_stats(&render);
     camera[3] = disruptor::ddgi_level::night_area(render.running ? static_cast<size_t>(render.max_frames) : 0u);
@@ -265,6 +272,7 @@ void psx_game_state_loaded(void) {
     disruptor::sticks::set_movement({});
     disruptor::gamepad::stop_vibration();
     disruptor::ddgi_level::invalidate_night_area();
+    disruptor::archive_terminal::state_loaded();
     disruptor_sprite_depth_state_loaded();
     disruptor_reset_draw_headings();
     disruptor_capsule_state_loaded();
@@ -356,6 +364,7 @@ void psx_game_after_input(void) {
     disruptor_capsule_after_input();
     disruptor::gamepad::update_vibration();
     disruptor_selection_wheel_guard_input();
+    disruptor::archive_terminal::after_input();
     disruptor_achievements_frame();
     disruptor_state_screen_frame();
 }

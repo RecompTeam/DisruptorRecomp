@@ -141,7 +141,7 @@ require(
     "                vp[26] = banded ? 1.0f : 0.0f;\n"
     "            }\n"
     in renderer
-    and renderer.count("    glEnable(PSXGL_DEPTH_CLAMP);") == 1
+    and renderer.count("    glEnable(PSXGL_DEPTH_CLAMP);") == 2
     and presenter.count("    glEnable(PSXGL_DEPTH_CLAMP);") == 1,
     "a near triangle is an exact one of the marked shader whose corners no other triangle can take, is never cut by the turn clip, "
     "is depth-sorted by its own w, carries the mark 4 with its place and w, and both contexts clamp depth instead of clipping it",
@@ -206,13 +206,15 @@ require(
     "                        psx_near_towards(before,alpha,&v[20]);\n"
     "                    else psx_near_between(nx[k],ny[k],weight[k],alpha,&v[20]);\n"
     in presenter
-    and "                show=p->gone[ti] && opaque && s->onward_ok;\n"
+    and "            if (!show) continue;\n            if (t && source[19]>3.5f && source[19]<4.5f) {\n" in presenter
+    and "                show=opaque && s->onward_ok;\n"
     "                for (int k=0;k<3 && show;++k) {\n"
-    "                    const float *v=&s_temp_under[(j+k)*TEXV];\n"
+    "                    const float *v=&source[k*TEXV];\n"
     "                    show=gpu_temporal_camera_project_h(&s->onward,v[20],v[21],v[22],&nx[k],&ny[k],&weight[k]);\n"
     "                }\n"
+    "                if (!show) continue;\n"
     in presenter
-    and "                    else if (temporal_near_find(p,c->first+j+k,s,s->camera.shift,-1,nx[k],ny[k],weight[k],v[22],after)) "
+    and "                    if (temporal_near_find(p,c->first+j+k,s,s->camera.shift,-1,nx[k],ny[k],weight[k],v[22],after)) "
     "psx_near_towards(after,1.0f-alpha,&v[20]);\n"
     "                    else psx_near_between(nx[k],ny[k],weight[k],1.0f-alpha,&v[20]);\n"
     "                    if (covered) psx_near_farther(&v[20],TEMP_ORDER_CLEARANCE);\n"
@@ -220,7 +222,6 @@ require(
     in presenter
     and "        s->onward_ok=s->camera.inliers>=GPU_TEMPORAL_CAMERA_MIN_INLIERS && gpu_temporal_camera_invert(&s->camera,&s->onward);\n"
     in presenter
-    and "                    if (!show) psx_near_hide(&v[20]);\n" in presenter
     and "    place[0] = place[1] = 0.0f;\n    place[2] = 1.0f;\n" in header,
     "between frames a near face moves only when the camera carries all three corners, each from its own place in the frame before "
     "or by the camera, and a near face the game dropped goes under the scene the same way by the camera's inverse or not at all",

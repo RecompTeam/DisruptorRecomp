@@ -184,7 +184,7 @@ require(
     and "wide_fbo_for(src_base_x)" not in wide_copy
     and wide_copy.index("temporal_invalidate_surface(to);")
     < wide_copy.index("    const GLuint target = wide_drawn(to);")
-    < wide_copy.index("    wide_resolved(from, src_y, h);\n")
+    < wide_copy.index("    if (!wide_resolved(from, src_y, h)) return;\n")
     < wide_copy.index(
         "    p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, from);\n    p_glBindFramebuffer(PSXGL_DRAW_FRAMEBUFFER, target);\n"
         "    glDisable(GL_SCISSOR_TEST);\n"
@@ -207,7 +207,7 @@ require(
     in wide_rows
     and wide_rows.index("    temporal_invalidate_surface(fbo);\n")
     < wide_rows.index("    wide_drawn(fbo);")
-    < wide_rows.index("    wide_resolved(fbo, src_y, h);\n")
+    < wide_rows.index("    if (!wide_resolved(fbo, src_y, h)) return;\n")
     < wide_rows.index("    p_glBindFramebuffer(PSXGL_DRAW_FRAMEBUFFER, s_scratch_fbo);\n")
     < wide_rows.index("    const GLuint target = wide_drawn(fbo);")
     < wide_rows.index("    p_glBindFramebuffer(PSXGL_DRAW_FRAMEBUFFER, target);\n")

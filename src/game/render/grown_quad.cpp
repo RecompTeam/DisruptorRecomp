@@ -25,28 +25,23 @@ constexpr uint32_t kGuestBase = 0x80000000u;
 /* Word index of each position in a POLY_GT4, counted from its command word. */
 constexpr std::array<uint32_t, 4> kPositions{1u, 4u, 7u, 10u};
 
-int32_t sra4(int32_t value) {
-    return value >= 0 ? value / 16 : -((-value + 15) / 16);
-}
-
 /* One axis of 0x80046E1C..0x80046EB8: a corner moves away from its two neighbours, which may have moved already. */
-void grow(std::array<int32_t, 4>& a) {
-    a[0] += sra4(2 * a[0] - a[1] - a[2]);
-    a[1] += sra4(2 * a[1] - a[0] - a[3]);
-    a[3] += sra4(2 * a[3] - a[1] - a[2]);
-    a[2] += sra4(2 * a[2] - a[0] - a[3]);
+std::array<int32_t, 4> grow_axis(const uint32_t positions[4], unsigned shift) {
+    std::array<int32_t, 4> axis{};
+    for (int corner = 0; corner < 4; ++corner)
+        axis[corner] = static_cast<int16_t>(positions[corner] >> shift);
+    axis[0] += (2 * axis[0] - axis[1] - axis[2]) >> 4;
+    axis[1] += (2 * axis[1] - axis[0] - axis[3]) >> 4;
+    axis[3] += (2 * axis[3] - axis[1] - axis[2]) >> 4;
+    axis[2] += (2 * axis[2] - axis[0] - axis[3]) >> 4;
+    return axis;
 }
 
 }  // namespace
 
 extern "C" void disruptor_grown_quad_positions(const uint32_t first[4], uint32_t second[4]) {
-    std::array<int32_t, 4> x{}, y{};
-    for (int corner = 0; corner < 4; ++corner) {
-        x[corner] = static_cast<int16_t>(first[corner] & 0xFFFFu);
-        y[corner] = static_cast<int16_t>(first[corner] >> 16);
-    }
-    grow(x);
-    grow(y);
+    const auto x = grow_axis(first, 0);
+    const auto y = grow_axis(first, 16);
     for (int corner = 0; corner < 4; ++corner) {
         second[corner] = (static_cast<uint32_t>(x[3 - corner]) & 0xFFFFu) +
                          (static_cast<uint32_t>(y[3 - corner]) << 16);
@@ -62,13 +57,16 @@ extern "C" int disruptor_grown_quad_sources(
     }
     const uint32_t first = command_address - kPacketBytes;
     if (psx_mod_read_word(kGuestBase | first) >> 24 != packet[0] >> 24) return 0;
-    uint32_t positions[4], grown[4];
+    uint32_t positions[4];
     for (int corner = 0; corner < 4; ++corner) {
         positions[corner] = psx_mod_read_word(kGuestBase | (first + kPositions[corner] * 4u));
     }
-    disruptor_grown_quad_positions(positions, grown);
-    for (int corner = 0; corner < 4; ++corner) {
-        if (grown[corner] != packet[kPositions[corner]]) return 0;
+    for (const unsigned shift : {0u, 16u}) {
+        const auto axis = grow_axis(positions, shift);
+        for (int corner = 0; corner < 4; ++corner) {
+            if (static_cast<uint16_t>(axis[3 - corner]) !=
+                static_cast<uint16_t>(packet[kPositions[corner]] >> shift)) return 0;
+        }
     }
     for (int corner = 0; corner < 4; ++corner) {
         source_address[corner] = first + kPositions[3 - corner] * 4u;

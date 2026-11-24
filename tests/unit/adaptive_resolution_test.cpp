@@ -61,10 +61,111 @@ void the_controller_steps_down_under_load_and_never_below_the_floor() {
         const double work = period * (0.3 + 0.1 * level * level);  // a frame's GPU time: 1.2 of the period at 3x, 0.7 at 2x
         const double wall = work > period ? work : period;
         now += wall;
-        const DynresSample sample{period, wall, work, 0};
+        const DynresSample sample{period, wall, work, 0, 1};
         level = dynres_sample(&controller, now, &sample);
     }
     expect(level == 2, "a GPU over its frame at 3x settles at 2x, where the frame fits with room, not lower");
+}
+
+void incomplete_timing_skips_down_step_verification() {
+    DynresController controller;
+    DynresParams params;
+    dynres_default_params(&params);
+    constexpr double period = 0.03125;
+    params.window_s = 4.0 * period;
+    params.down_late = 1;
+    params.target_load = 0.90;
+    params.prior_scaled = 0.80;
+    params.cooldown_down_s = 10.0;
+    params.verify_fraction = 0.25;
+    dynres_init(&controller, &params, 1, 3, 3);
+    double now = 10.0;
+    int level = 3;
+    for (int index = 0; index < 4; ++index) {
+        now += 1.5 * period;
+        const DynresSample sample{period, 1.5 * period, index < 3 ? 1.6 * period : 0.0, 0, index < 3};
+        level = dynres_sample(&controller, now, &sample);
+    }
+    expect(level == 2 && !controller.post_active, "an incomplete window can ask for a lower resolution without scheduling verification");
+    for (int index = 0; index < 8; ++index) {
+        now += period;
+        const DynresSample sample{period, period, 1.6 * period, 0, 1};
+        level = dynres_sample(&controller, now, &sample);
+    }
+    expect(level == 2 && controller.undo_level == 0, "more complete timing does not undo a successful down step");
+}
+
+void valid_zero_work_counts_toward_coverage() {
+    DynresController controller;
+    DynresParams params;
+    dynres_default_params(&params);
+    constexpr double period = 0.03125;
+    params.window_s = 4.0 * period;
+    dynres_init(&controller, &params, 1, 3, 3);
+    for (int index = 0; index < 4; ++index) {
+        const DynresSample sample{period, period, index % 2 ? 0.0 : period, 0, 1};
+        dynres_sample(&controller, 10.0 + index * period, &sample);
+    }
+    expect(controller.last_valid && controller.last_complete && controller.last_load == 0.5,
+           "valid idle intervals count in the measured period");
+}
+
+void complete_idle_window_verifies_down_step() {
+    DynresController controller;
+    DynresParams params;
+    dynres_default_params(&params);
+    constexpr double period = 0.03125;
+    params.window_s = 4.0 * period;
+    params.down_late = 1;
+    params.target_load = 0.90;
+    params.prior_scaled = 0.80;
+    dynres_init(&controller, &params, 1, 3, 3);
+    double now = 10.0;
+    for (int index = 0; index < 4; ++index) {
+        now += 1.5 * period;
+        const DynresSample sample{period, 1.5 * period, 1.6 * period, 0, 1};
+        dynres_sample(&controller, now, &sample);
+    }
+    expect(controller.level == 2 && controller.post_active, "a fully measured down step is scheduled for verification");
+    const double before = controller.f;
+    for (int index = 0; index < 8; ++index) {
+        now += period;
+        const DynresSample sample{period, period, index < 4 ? 0.8 * period : 0.0, 0, 1};
+        dynres_sample(&controller, now, &sample);
+    }
+    expect(controller.last_valid && !controller.post_active && controller.undo_level == 0 && controller.f > before,
+           "a complete idle verification window is accepted and learned from");
+}
+
+void batched_gpu_results_cover_every_measured_frame() {
+    DynresController controller;
+    DynresParams params;
+    dynres_default_params(&params);
+    constexpr double period = 0.03125;
+    params.window_s = 4.0 * period;
+    constexpr int readings[][4] = {{0, 2, 1, 1}, {2, 1, 1, 0}};
+    for (const auto &window : readings) {
+        dynres_init(&controller, &params, 1, 3, 3);
+        double now = 10.0;
+        for (const int frames : window) {
+            const DynresSample sample{period, period, frames * period * 0.75, 0, frames};
+            dynres_sample(&controller, now += period, &sample);
+        }
+        expect(controller.last_valid && !controller.last_complete && controller.last_load == 0.75,
+               "batched GPU timings estimate load without certifying an aligned window");
+    }
+    params.up_after_s = params.window_s;
+    dynres_init(&controller, &params, 1, 3, 2);
+    double now = 10.0;
+    for (const int frames : readings[0]) {
+        const DynresSample sample{period, period, frames * period * 0.25, 0, frames};
+        dynres_sample(&controller, now += period, &sample);
+    }
+    const DynresSample quiet{period, period, period * 0.25, 0, 1};
+    const bool ready = controller.up_ready != 0;
+    const int level = dynres_sample(&controller, now + period, &quiet);
+    expect(!ready && level == 2,
+           "a quiet interval after an unpaired window cannot raise the resolution");
 }
 
 } // namespace
@@ -74,6 +175,10 @@ int main() {
     a_slow_frame_is_judged_and_a_pause_is_not();
     only_the_game_s_own_world_is_judged();
     the_controller_steps_down_under_load_and_never_below_the_floor();
+    incomplete_timing_skips_down_step_verification();
+    valid_zero_work_counts_toward_coverage();
+    complete_idle_window_verifies_down_step();
+    batched_gpu_results_cover_every_measured_frame();
     if (g_failures) return 1;
     std::cout << "adaptive resolution: PASS\n";
     return 0;

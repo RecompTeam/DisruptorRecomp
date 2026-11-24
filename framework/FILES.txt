@@ -13,6 +13,7 @@ runtime/chd_dependency.cmake
 runtime/include/cdrom.h
 runtime/include/crash_trace.h
 runtime/include/dirty_ram_interp.h
+runtime/include/dynamic_resolution.h
 +runtime/include/game_host.h
 runtime/include/gpu.h
 +runtime/include/gpu_coverage.h
@@ -79,11 +80,13 @@ runtime/src/debug_server.c
 runtime/src/dirty_ram_interp.c
 +runtime/src/disruptor_renderer_compat.c
 runtime/src/dma.c
+runtime/src/dynamic_resolution.c
 runtime/src/freeze_heartbeat.c
 runtime/src/gpu.c
 +runtime/src/gpu_ddgi.c.inc
 +runtime/src/gpu_ddgi_scene.c.inc
 +runtime/src/gpu_gl_ddgi.c.inc
++runtime/src/gpu_gl_factory_water.c.inc
 +runtime/src/gpu_gl_render_thread.c.inc
 runtime/src/gpu_gl_renderer.c
 +runtime/src/gpu_gl_temporal.c.inc

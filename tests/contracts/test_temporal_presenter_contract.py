@@ -54,6 +54,12 @@ require(
     "the presenter contract and the sprite depth hook for code that runs from RAM must remain registered",
 )
 
+position = function_body(temporal, "static void temporal_position(")
+require(
+    "if (textured && !corrected)\n        v[22] = 0;" in position,
+    "the sprite card's perspective weights must survive baking the regular projection into the retained command",
+)
+
 underlay = function_body(temporal, "static void temporal_underlay(float alpha,int covered)")
 require(
     "const int opaque=c->semi<0 || (t && c->semi==4);" in underlay
@@ -61,13 +67,15 @@ require(
     "the underlay must draw the textured batches the renderer keys 4, and translucent batches only in its second pass",
 )
 require(
-    "else if (show) show=opaque && !(t && s_temp_under[j*TEXV+18]!=0.0f) && (!covered || (was->modelled && show==1));"
-    in underlay,
+    "else show=opaque && !(t && source[18]!=0.0f) && (!covered || (was->modelled && show==1));" in underlay,
     "a departed face that is no sprite must be opaque, and only a GTE face with all its depths may go over the "
     "scene: a grown copy has no depth of its own and a held corner has none",
 )
 require(
-    "if (show && was->sprite) show=covered && !temporal_sprite_replaced(s,&p->gone_to[ti]);" in underlay,
+    "if (was->sprite) show=covered && !temporal_sprite_replaced(s,&p->gone_to[ti]);" in underlay
+    and "        if (!kept) continue;\n" in underlay
+    and "temporal_submit(p,c,s->height,s_temp_under,kept);\n" in underlay
+    and "int capacity=!covered && !s_temp_fill ? temporal_underlay_reserve(s) : 0;" in underlay,
     "a departed sprite must be drawn only over the scene and only when no current sprite stands in its place",
 )
 replaced = function_body(
@@ -80,12 +88,12 @@ require(
 )
 require(
     "gpu_temporal_lerp(&p->start[ti],&p->gone_to[ti],alpha,&out);" in underlay
-    and "show=gpu_temporal_mesh_facing(&p->triangles[ti],&out);" in underlay,
+    and "if (!gpu_temporal_mesh_facing(was,&out)) continue;" in underlay,
     "a departed face must move between the two ends prepared for it and hide when it turns away",
 )
 require(
     "glDepthFunc(covered ? GL_LESS : GL_ALWAYS); glDepthMask(covered ? GL_FALSE : GL_TRUE);" in underlay
-    and "v[t?23:9]=show?temporal_order(gpu_temporal_lerp_depth(&p->gone_to[ti],&out,k)*(covered?TEMP_ORDER_CLEARANCE:1.0f)):TEMP_ORDER_FAR;"
+    and "v[t?23:9]=temporal_order(gpu_temporal_lerp_depth(&p->gone_to[ti],&out,k)*(covered?TEMP_ORDER_CLEARANCE:1.0f));"
     in underlay
     and "#define TEMP_ORDER_CLEARANCE 1.03f" in temporal
     and "glDepthFunc(GL_ALWAYS); glDepthMask(GL_TRUE);" in underlay,
@@ -157,14 +165,18 @@ against = function_body(
     temporal, "static void temporal_against(const TemporalScene *s, int w, int h, TemporalAgainst *a)"
 )
 require(
-    "&s->mesh_stats,a->start,a->gone_to,a->gone," in matching
+    "&s->mesh_stats,s->start,s->gone_to,s->gone," in matching
     and "s_temp_prev" not in matching
     and "s_temp_curr" not in matching
-    and "a->start=s_temp_curr.start; a->gone_to=s_temp_curr.gone_to; a->gone=s_temp_curr.gone;" in against
+    and "        s->camera=a->camera;" in matching
+    and "        s_temp_camera.inliers=0;" not in matching
+    and "a->triangles=s_temp_curr.triangles; a->nt=s_temp_curr.nt;" in against
+    and "    a->camera=s_temp_camera;" in against
+    and "        s_temp_curr.start=s->start; s_temp_curr.gone_to=s->gone_to; s_temp_curr.gone=s->gone;" in publish
+    and "        s_temp_camera=s->camera;" in publish
     and "        memset(&s->camera,0,sizeof(s->camera));\n        memset(&s->onward,0,sizeof(s->onward));\n"
     in matching,
-    "matching may write only the builder and the current scene's departure arrays, which the presenter does not read, "
-    "and reads the current scene only through what the capture took of it",
+    "matching writes the camera and departures into the builder, and publication moves them into the display history",
 )
 job = function_body(renderer, "static void interp_match_job(const InterpMatchJob *job)")
 post = function_body(
@@ -177,23 +189,52 @@ reset = function_body(temporal, "static void temporal_reset(void)")
 begin = function_body(temporal, "static void temporal_begin(GLuint fbo, int y, int h, uint16_t color,")
 require(
     job.index("    temporal_match_scene(job->scene, &job->against);") < job.index("    SDL_LockMutex(s_interp_mutex);")
-    and "    if (job->generation == s_temp_generation) {\n" in job
+    and job.index("while (s_match_run && s_match_snapshot == MATCH_SNAPSHOT_PENDING)")
+    < job.index("SDL_LockMutex(s_interp_mutex);")
+    and "    if (submitted && job->generation == s_temp_generation) {\n" in job
     and "    temporal_against(scene, w, h, &job.against);\n    job.generation = s_temp_generation;\n" in post
-    and "    s_temp_held[slot] = 1;\n    s_match_retired = slot;\n" in post
+    and "    s_temp_held[slot] = 1;\n    SDL_LockMutex(s_match_mutex);\n" in post
+    and "    s_match_snapshot = MATCH_SNAPSHOT_PENDING;" in post
     and capture.index("    if (s_match_thread) interp_match_wait();")
     < capture.index("    if (apart) {\n        scene = temporal_prepare_scene")
     < capture.index("    SDL_LockMutex(s_interp_mutex);")
     and capture.count("ready = s_interp_valid >= 2;") == 2
-    and capture.index("        s_interp_draw_fence = NULL;\n    }\n    interp_match_release();\n") > 0
+    and capture.index("if (s_interp_draw_fence) gz_wait(0, s_interp_draw_fence);")
+    < capture.index("interp_match_release();")
+    < capture.index("s_match_retired = (int)(scene - s_temp_build);")
     and "    s_temp_held[s_match_retired] = 0;\n" in release
     and "if (!s_temp_held[i] && fbo && s->capture_fbo==fbo && s->active &&" in builder
     and "        if (!s_temp_held[i]) { s_temp_build[i].active = 0; s_temp_build[i].capture_fbo=0; }\n" in reset
     and "    ++s_temp_generation;\n" in reset
     and begin.count("!s_temp_held[i]") == 3
     and "    else if (s_interp_valid >= 2) dst = 3 - s_interp_prev - s_interp_cur;\n" in capture,
-    "the matching thread matches unlocked and publishes under the lock unless a reset came between, a capture in any mode "
-    "waits for it before preparing and tells a pair ready only once published, a slot it holds is left alone by the builder and by a reset until a capture after the "
+    "the matching thread waits for the snapshot submission and publishes under the lock unless a reset came between, "
+    "a capture in any mode waits before preparing and tells a pair ready only once published, a slot held by the matcher survives until a capture after the "
     "presenter's last draw fence, and a picture goes to the one slot the presenter is not drawing from",
+)
+picture_copy = function_body(renderer, "static int interp_picture_copy(")
+picture_fence = function_body(renderer, "static int interp_picture_fence(")
+require(
+    capture.index("SDL_UnlockMutex(s_interp_mutex);")
+    < capture.index("int copied = restored && interp_picture_copy(")
+    < capture.rindex("SDL_LockMutex(s_interp_mutex);")
+    and capture.index("if (matching) interp_match_post(")
+    < capture.index("int copied = restored && interp_picture_copy(")
+    and capture.index("copied = interp_picture_fence(")
+    < capture.index("copied = wide_remember_capture(")
+    < capture.index("interp_match_snapshot(MATCH_SNAPSHOT_SUBMITTED);")
+    and capture.index("interp_match_snapshot(MATCH_SNAPSHOT_CANCELED);")
+    < capture.index("            interp_match_wait();")
+    < capture.index("s_temp_held[scene - s_temp_build] = 0;")
+    and capture.index("copied = interp_picture_fence(") < capture.index("interp_capture_published(dst,")
+    and capture.index("picture->lighting = s_ddgi_frame_now;") < capture.index("copied = interp_picture_fence(")
+    and picture_fence.index("p_glFenceSync(") < picture_fence.index("if (checked && !wide_transfer_succeeded())")
+    and "return !checked || wide_transfer_succeeded();" in picture_fence
+    and picture_copy.index("gz_wait(0, p->sampled);") < picture_copy.index("p_glBlitFramebuffer(")
+    and picture_copy.index("p_glBlitFramebuffer(") < picture_copy.index("const int copied = wide_transfer_succeeded();")
+    and "    if (copied) p->has_depth = depth;\n    return copied;\n" in picture_copy
+    and "GL_COLOR_BUFFER_BIT | (depth ? GL_DEPTH_BUFFER_BIT : 0)" in picture_copy,
+    "snapshot the color and depth before publication without holding the present lock during the copy",
 )
 reset_wrapper = function_body(renderer, "static void interp_reset_history(void) {")
 suspend = function_body(renderer, "static void interp_set_suspended(int *reason, int suspended) {")
@@ -204,19 +245,34 @@ require(
         body.index("    interp_match_wait();\n") < body.index("SDL_LockMutex(s_interp_mutex);")
         for body in (reset_wrapper, suspend, setter)
     )
-    and "        const int diag = s_interp_diag;\n        SDL_UnlockMutex(s_interp_mutex);\n" in loop
+    and loop.index("SDL_LockMutex(s_interp_mutex);")
+    < loop.index("const int diag = s_interp_diag;")
+    < loop.index("SDL_UnlockMutex(s_interp_mutex);")
     and "            if (diag && !s_interp_settle)\n" in loop,
     "a history reset waits for the matching thread before it takes the present mutex, so a captured frame is published "
     "before the reset clears it, and the presenter reads the diagnostics switch under the mutex",
 )
+require(
+    loop.index("const uint64_t generation = s_temp_generation;")
+    < loop.index("(void)psx_host_wait_until(wake_at, freq, period);")
+    < loop.index("const int timing_current = generation == s_temp_generation")
+    < loop.index("presented = interp_present(freq, period, &deadline, &retry, &tentative);")
+    and "if (!timing_current) tentative = 0;" in loop
+    and "tentative_generation != generation || scheduled_interval != period" in loop
+    and loop.index("retry >= deadline + period") < loop.index("(void)psx_host_wait_until(wake_at, freq, period);"),
+    "retiming must reject a pending slot after a reset or a change of display period",
+)
 stop = function_body(renderer, "void gl_renderer_shutdown(void)")
 require(
-    stop.index("    interp_match_stop();\n") < stop.index("        temporal_release();\n")
+    stop.index("    interp_match_stop();\n") < stop.index("        temporal_release(context_current);\n")
     and stop.index("        SDL_WaitThread(s_interp_thread, NULL);\n") < stop.index("    interp_match_stop();\n"),
     "the matching thread stops before the scenes it may hold are freed",
 )
 
-quad_draw = function_body(renderer, "static float interp_draw_quad(float alpha, int lx, int ly, int lw, int lh) {")
+quad_draw = function_body(
+    renderer,
+    "static float interp_draw_quad(float alpha, int image, int native, uint64_t deadline, int lx, int ly, int lw, int lh) {",
+)
 require(
     "temporal_dump_alpha(" not in present
     and quad_draw.index("temporal_verify_endpoint(lx, ly, lw, lh);")
@@ -224,18 +280,64 @@ require(
     "the debug alpha pin must not reach the endpoint check, which renders alpha 1 through temporal_present",
 )
 require(
-    "if (alpha < 1.0f && temporal_present(alpha, lx, ly, lw, lh)) return alpha;\n        alpha = 1.0f;" in quad_draw
+    "if (!native) alpha = temporal_dump_alpha(alpha);" in quad_draw
+    and "if (s_interp_valid >= 2 && !native && alpha < 1.0f && (!deadline || SDL_GetPerformanceCounter() < deadline) &&\n"
+    "            temporal_present(alpha, lx, ly, lw, lh)) return alpha;\n        alpha = 1.0f;"
+    in quad_draw
     and quad_draw.rstrip().endswith("    return alpha;\n}"),
     "a present must report the alpha of the picture it drew, 1 after a fallback to the current frame",
 )
-presented = function_body(renderer, "static int interp_present(void) {")
+presented = function_body(
+    renderer,
+    "static int interp_present(uint64_t freq, uint64_t period, uint64_t *deadline, uint64_t *retry, uint64_t *tentative) {",
+)
 require(
-    "const float shown = interp_draw_quad((float)a, lx, ly, lw, lh);" in presented
-    and "const double phase = (double)s_interp_captures + shown;" in presented,
+    presented.index("if (s_interp_direct_pending || !s_interp_valid) return 0;")
+    < presented.index("psx_shown_script_step(")
+    and "s_interp_valid, &scripted);" in presented
+    and "s_interp_valid < 2 && (!s_interp_direct_cycle || s_interp_picture[s_interp_cur].cycle != s_interp_direct_cycle)"
+    in presented
+    and "s_interp_picture[s_interp_prev].cycle <= s_interp_direct_cycle" in presented
+    and "const int room = now < prepare_deadline" in presented
+    and "!native && !deadline && s_interp_valid >= 2) temporal_verify_endpoint(" in quad_draw
+    and renderer.count("    latency_ring_mark(LAT_SWAP_END);\n    interp_direct_presented(ww, wh);") == 4,
+    "live mode keeps the directly presented endpoint and checks the optional deadline again after a retry",
+)
+require(
+    "float shown = interp_draw_quad((float)a, image, native, prepare_deadline, lx, ly, lw, lh);" in presented
+    and "const double phase = (double)capture + shown;" in presented,
     "the pacing report must take its phase from the alpha that was drawn, not from the alpha asked for",
 )
+require(
+    "const uint64_t earliest = period && s_interp_swap_at" in presented
+    and "native_deadline = s_interp_last_capture + s_interp_duration;" in presented
+    and "budget_end < slot_cutoff ? budget_end : slot_cutoff" in presented
+    and "earliest < expires" in presented
+    and "const int dump_pending = (scheduled || directly_shown) && shown_dump_readback_pending();" in presented
+    and "!dump_pending && !shown_snapshot_pending(0);" in presented
+    and "!shown_snapshot_pending(!advancing)" in presented
+    and "if (advancing && s_interp_duration > period && now >= native_deadline)" in presented
+    and "if (adjusted > now) *tentative = *retry = adjusted;" in presented
+    and "else if (now < retry_at) *retry = retry_at;" in presented
+    and "if (*tentative && now >= base_next) {\n        *deadline = now;\n        *tentative = 0;\n" in presented
+    and "if (*tentative && base_next < expires) expires = base_next;" in presented
+    and "if (optional) {\n        if (*tentative && swapped < base_next) *deadline = *tentative;\n" in presented
+    and presented.count("interp_window(ww, wh, lx, ly, lw, lh);") == 2
+    and presented.index("interp_draw_quad(")
+    < presented.index("psx_host_wait_until(earliest, freq, period)")
+    < presented.index("scheduled && shown < 1.0f && before_swap >= expires")
+    < presented.index("SDL_GL_SwapWindow(s_win)")
+    < presented.index("s_interp_swap_at = swapped;")
+    < presented.index("shown_log_picture(1, shown, ww, wh, before_swap, log_session);"),
+    "the minimum swap interval uses the last swap, and an expired intermediate picture is replaced before the next swap",
+)
+require(
+    presented.index("? shown_log_session() : 0;")
+    < presented.index("const uint64_t before_swap = SDL_GetPerformanceCounter();"),
+    "a delayed log write belongs to the recording that accepted the picture before swap",
+)
 
-release = function_body(temporal, "static void temporal_release(void)")
+release = function_body(temporal, "static void temporal_release(int context_current)")
 require(
     "free(s->start); free(s->gone_to); free(s->gone);" in release and "s_temp_ready=NULL;" in release,
     "release must free the departure arrays and forget the prepared scene",

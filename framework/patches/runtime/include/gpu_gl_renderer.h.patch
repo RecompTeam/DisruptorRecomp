@@ -1,5 +1,5 @@
 diff --git a/runtime/include/gpu_gl_renderer.h b/runtime/include/gpu_gl_renderer.h
-index c53aece8f8d7f02ec4ee26fdbd3813d0041ef0c8..1c75f8b5b3487870079479c115457aeacec6a3a1 100644
+index c53aece8f8d7f02ec4ee26fdbd3813d0041ef0c8..97ab5eccf3a6e3a6efd1b9908cb9fd5585825519 100644
 --- a/runtime/include/gpu_gl_renderer.h
 +++ b/runtime/include/gpu_gl_renderer.h
 @@ -48,7 +48,7 @@
@@ -35,7 +35,7 @@ index c53aece8f8d7f02ec4ee26fdbd3813d0041ef0c8..1c75f8b5b3487870079479c115457aea
 +const char *gl_renderer_gpu_zone_name(int zone);
 +uint64_t gl_renderer_gpu_zones(int reset, double out[2][GL_RENDERER_GPU_ZONES], uint64_t frames[2], uint64_t *dropped);
 +void gl_renderer_gpu_busy_enable(int enabled);
-+double gl_renderer_gpu_busy_ms(void);
++double gl_renderer_gpu_busy_ms(int *measured_frames);
 +/* The render thread (gpu_gl_render_thread.c.inc), off unless started. */
 +int gl_renderer_render_thread_start(int max_frames);
 +void gl_renderer_render_thread_stop(void);

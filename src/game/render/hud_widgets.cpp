@@ -47,7 +47,10 @@ PSX_MOD_CONSTRUCTOR(register_disruptor_hud_widgets) {
     gpu_ws_set_hud_widgets(kTablePointer, kHudLayers, kPanels[0], 2);
     gpu_ws_set_hud_text_strip(kTextStrip);
     const char *strokes = std::getenv("PSX_DISRUPTOR_HUD_TEXT_STROKES");
-    if (!strokes || strokes[0] != '0') gpu_ws_set_hud_text_source(kTextSource[0], kTextSource[1], kTextSource[2], kTextSource[3]);
+    if (!strokes || strokes[0] != '0') {
+        gpu_ws_set_hud_text_source(kTextSource[0], kTextSource[1], kTextSource[2], kTextSource[3]);
+        gpu_ws_set_hud_digit_source(15, 1, 108, 160, 16, 55);
+    }
     gpu_ws_set_hud_held_page(kHeldPage[0], kHeldPage[1]);
 }
 

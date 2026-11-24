@@ -90,16 +90,19 @@ static inline unsigned gpu_temporal_hash(uint64_t material, int x, int y,
     return (unsigned)hash & mask;
 }
 
-static inline int gpu_temporal_compatible(const GpuTemporalTriangle *a,
-                                           const GpuTemporalTriangle *b) {
-    double area_a, area_b, ratio;
+static inline int gpu_temporal_compatible_pose(const GpuTemporalTriangle *a,
+                                               const GpuTemporalTriangle *b,
+                                               int allow_area_change) {
+    double area_a, area_b;
     double ex, ey, fx, fy, dex, dey, dfx, dfy, linear, quadratic;
     if (a->material != b->material) return 0;
     area_a = gpu_temporal_area(a);
     area_b = gpu_temporal_area(b);
     if ((area_a < 0.0) != (area_b < 0.0)) return 0;
-    ratio = fabs(area_b / area_a);
-    if (ratio < 0.5 || ratio > 2.0) return 0;
+    if (!allow_area_change) {
+        const double ratio = fabs(area_b / area_a);
+        if (ratio < 0.5 || ratio > 2.0) return 0;
+    }
     for (int vertex = 0; vertex < 3; ++vertex) {
         const double dx = (double)a->x[vertex] - b->x[vertex];
         const double dy = (double)a->y[vertex] - b->y[vertex];
@@ -135,6 +138,11 @@ static inline int gpu_temporal_compatible(const GpuTemporalTriangle *a,
     return 1;
 }
 
+static inline int gpu_temporal_compatible(const GpuTemporalTriangle *a,
+                                           const GpuTemporalTriangle *b) {
+    return gpu_temporal_compatible_pose(a, b, 0);
+}
+
 static inline void gpu_temporal_index_build(GpuTemporalIndex *index, int count) {
     for (unsigned bucket = 0; bucket <= index->mask; ++bucket)
         index->heads[bucket] = -1;
@@ -142,7 +150,10 @@ static inline void gpu_temporal_index_build(GpuTemporalIndex *index, int count) 
         unsigned bucket;
         if (!gpu_temporal_valid(&index->triangles[triangle],
                                  &index->cell_x[triangle],
-                                 &index->cell_y[triangle])) continue;
+                                 &index->cell_y[triangle])) {
+            index->cell_x[triangle] = INT_MIN;
+            continue;
+        }
         bucket = gpu_temporal_hash(index->triangles[triangle].material,
                                     index->cell_x[triangle],
                                     index->cell_y[triangle], index->mask);
@@ -153,9 +164,12 @@ static inline void gpu_temporal_index_build(GpuTemporalIndex *index, int count) 
 
 /* Find exactly one candidate. A probe limit fails closed on pathological collisions. */
 static inline int gpu_temporal_unique(const GpuTemporalIndex *index,
-                                       const GpuTemporalTriangle *triangle) {
-    int cell_x, cell_y, match = -1, probes = 0;
-    if (!gpu_temporal_valid(triangle, &cell_x, &cell_y)) return -1;
+                                       const GpuTemporalIndex *origin, int origin_index) {
+    const int cell_x = origin->cell_x[origin_index];
+    int match = -1, probes = 0;
+    if (cell_x == INT_MIN) return -1;
+    const int cell_y = origin->cell_y[origin_index];
+    const GpuTemporalTriangle *triangle = &origin->triangles[origin_index];
     for (int dy = -1; dy <= 1; ++dy) {
         for (int dx = -1; dx <= 1; ++dx) {
             const int x = cell_x + dx, y = cell_y + dy;
@@ -215,10 +229,10 @@ static inline void gpu_temporal_match(const GpuTemporalTriangle *prev,
     gpu_temporal_index_build(&previous, prev_n);
     gpu_temporal_index_build(&current, curr_n);
     for (int triangle = 0; triangle < curr_n; ++triangle) {
-        const int candidate = gpu_temporal_unique(&previous, &curr[triangle]);
+        const int candidate = gpu_temporal_unique(&previous, &current, triangle);
         if (candidate < 0) continue;
         if (reverse[candidate] == -2)
-            reverse[candidate] = gpu_temporal_unique(&current, &prev[candidate]);
+            reverse[candidate] = gpu_temporal_unique(&current, &previous, candidate);
         if (reverse[candidate] == triangle) matches[triangle] = candidate;
     }
     free(storage);

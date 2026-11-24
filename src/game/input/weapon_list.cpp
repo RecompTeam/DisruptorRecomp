@@ -72,6 +72,10 @@ extern "C" void disruptor_weapon_list_show(void) { show(kWeaponList, 1u); }
 
 extern "C" void disruptor_psionic_list_show(void) { show(kPsionicList, 2u); }
 
+extern "C" int disruptor_weapon_list_visible(void) {
+    return g_shown && psx_mod_read_word(kGameClock) - g_shown_at <= kShownFor;
+}
+
 extern "C" void disruptor_weapon_list_state_loaded(void) {
     g_asked = g_shown = g_forced = g_hand = 0u;
 }

@@ -296,27 +296,40 @@ require(
 
 renderer = read("psxrecomp/runtime/src/gpu_gl_renderer.c")
 require(
-    "    if (s_snap_state == SNAP_NONE || s_snap_state == SNAP_WAITING) {\n        s_snap_width = width;\n        s_snap_state = SNAP_ASKED;\n"
+    "    if (s_snap_state == SNAP_NONE || (!deferred && s_snap_state == SNAP_WAITING)) {\n"
+    "        s_snap_width = width;\n"
+    "        s_snap_deferred = deferred;\n"
+    "        s_snap_state = SNAP_ASKED;\n"
     in renderer
-    and "    if (s_snap_state == SNAP_READING) s_snap_dropped = 1;\n    else s_snap_state = SNAP_NONE;\n" in renderer
+    and "return shown_snapshot_request(width, 1);" in renderer
+    and "return shown_snapshot_request(width, 0);" in renderer
+    and "    } else if (!deferred && s_snap_state == SNAP_READING && s_snap_deferred && s_snap_dropped && !s_snap_queued_width) {\n"
+    "        s_snap_queued_width = width;\n        asked = 1;\n"
+    in renderer
+    and "    s_snap_queued_width = 0;\n    if (s_snap_state == SNAP_READING) s_snap_dropped = 1;\n"
+    "    else s_snap_state = SNAP_NONE;\n"
+    in renderer
     and "    if (s_snap_state == SNAP_WAITING) {\n        s_snap_state = SNAP_NONE;\n        if (s_snap_w * s_snap_h * 3 <= room) {\n"
     "            memcpy(rgb, s_snap_pixels, (size_t)s_snap_w * s_snap_h * 3);\n"
+    in renderer
+    and "    } else if (cancel_pending) shown_snapshot_cancel_locked();\n    SDL_AtomicUnlock(&s_snap_lock);\n"
     in renderer
     and "    mine = s_snap_state == SNAP_ASKED;\n    if (mine) s_snap_state = SNAP_READING;\n    width = s_snap_width;\n    SDL_AtomicUnlock(&s_snap_lock);\n"
     "    if (!mine) return;\n"
     in renderer
     and "        for (int y = 0; y < height; ++y) memcpy(down + (size_t)y * width * 3, up + (size_t)(height - 1 - y) * width * 3, (size_t)width * 3);\n"
     in renderer
-    and "    s_snap_state = down && !s_snap_dropped ? SNAP_WAITING : SNAP_NONE;\n    s_snap_dropped = 0;\n    SDL_AtomicUnlock(&s_snap_lock);\n"
+    and "    s_snap_state = down && !s_snap_dropped ? SNAP_WAITING : SNAP_NONE;\n    s_snap_dropped = 0;\n"
+    "    if (s_snap_queued_width) {\n        s_snap_width = s_snap_queued_width;\n        s_snap_queued_width = 0;\n"
+    "        s_snap_deferred = 0;\n        s_snap_state = SNAP_ASKED;\n    }\n    SDL_AtomicUnlock(&s_snap_lock);\n"
     in renderer
-    and renderer.count("SDL_AtomicLock(&s_snap_lock);") == 6
-    and renderer.count("SDL_AtomicUnlock(&s_snap_lock);") == 6
-    and "static void shown_capture(int kind, float alpha) {\n    int ww = 0, wh = 0, sequence = -1;\n    gl_visible_size(&ww, &wh);\n"
-    "    if (SDL_AtomicGet(&s_shown_log_on)) {"
+    and renderer.count("SDL_AtomicLock(&s_snap_lock);") == 7
+    and renderer.count("SDL_AtomicUnlock(&s_snap_lock);") == 7
+    and "static void shown_capture(int kind, float alpha) {\n    int ww = 0, wh = 0;\n    gl_visible_size(&ww, &wh);\n"
+    "    const int sequence = shown_log_picture(kind, alpha, ww, wh, 0, 0);\n"
     in renderer
-    and "        SDL_AtomicUnlock(&s_shown_log_lock);\n    }\n    shown_snap(sequence);\n    shown_count(kind);\n"
-    in renderer
-    and "static void shown_keep(GLuint source, int x, int y, int ww, int wh, int kind, float alpha) {\n"
+    and "    shown_snap(sequence);\n    shown_count(kind);\n" in renderer
+    and "static void shown_keep(GLuint source, int x, int y, int ww, int wh, int kind, float alpha, int script, int logged) {\n"
     "    if (s_shown_left <= 0) return;\n"
     in renderer
     and "    if (!rgb || width <= 0 || height <= 0 || width > 4096 || height > 4096) return 0;\n" in renderer
@@ -325,20 +338,22 @@ require(
     "rows top down, drops one that was cancelled, and makes a picture for the menu in the context that asks",
 )
 require(
-    "    if (!capsule.preview_asked || !gl_renderer_snap_taken(capsule.preview.data(), static_cast<int>(capsule.preview.size()), &width, &height)) return;\n"
+    "    if (!capsule.preview_asked ||\n"
+    "        !gl_renderer_snap_taken_async(capsule.preview.data(), static_cast<int>(capsule.preview.size()),\n"
+    "                                      &width, &height, cancel_pending)) return;\n"
     "    capsule.preview_asked = false;\n"
     in capsule
     and "    if (write(capsule.made / disruptor::capsule::preview_name(disruptor::capsule::preview_slot(capsule.previews)),\n"
     in capsule
     and "        ++capsule.previews;\n" in capsule
-    and "    keep_mark();\n    if (!capsule.mark_asked) keep_preview();\n    gl_renderer_snap_cancel();\n"
+    and "    keep_mark();\n    if (!capsule.mark_asked) keep_preview(true);\n    gl_renderer_snap_cancel();\n"
     "    capsule.preview_asked = capsule.mark_asked = false;\n"
     in capsule
     and "        gl_renderer_snap_cancel();\n        capsule.previews = 0;\n        capsule.preview_asked = capsule.mark_asked = false;\n"
     in capsule
     and "        keep_mark();\n        if (!capsule.mark_asked) keep_preview();\n"
     "        if (!capsule.mark_asked && disruptor::capsule::preview_due(capsule.recorded.size()) &&\n"
-    "            gl_renderer_snap_shown(static_cast<int>(disruptor::capsule::kPreviewWidth)))\n"
+    "            gl_renderer_snap_shown_async(static_cast<int>(disruptor::capsule::kPreviewWidth)))\n"
     "            capsule.preview_asked = true;\n"
     "        close_frame();\n"
     in capsule
@@ -380,13 +395,18 @@ require(
 
 temporal_thread = read("psxrecomp/runtime/src/gpu_gl_render_thread.c.inc")
 require(
-    "        const uint64_t cycle = kind ? s_interp_cur_cycle : rth_replaying() ? s_rthx_cycle : psx_get_cycle_count();\n"
-    "        SDL_AtomicLock(&s_shown_log_lock);\n        if (s_shown_log.on)\n"
+    "        const uint64_t cycle = kind ? s_interp_shown_cycle : rth_replaying() ? s_rthx_cycle : psx_get_cycle_count();\n"
+    "        SDL_AtomicLock(&s_shown_log_lock);\n        if (s_shown_log.on && (!session || s_shown_log_session == session))\n"
     "            sequence = (int)psx_shown_log_add(&s_shown_log, psx_shown_frame_of(cycle, s_shown_log_first, s_shown_log_period), kind, alpha, ww, wh,\n"
-    "                                              psx_shown_micros(SDL_GetPerformanceCounter(), s_shown_log_began, SDL_GetPerformanceFrequency()));\n"
+    "                                              psx_shown_micros(stamp ? stamp : SDL_GetPerformanceCounter(), s_shown_log_began, SDL_GetPerformanceFrequency()));\n"
     in renderer
     and "    s_shown_log_period = period;\n    s_shown_log_began = SDL_GetPerformanceCounter();\n" in renderer
     and "    s_interp_cur_cycle = cycle;\n    s_interp_captures++;\n}\n" in renderer
+    and "        picture->cycle = cycle;" in renderer
+    and "    s_interp_shown_cycle = s_interp_picture[image].cycle;" in renderer
+    and "        if (log_session) shown_log_picture(1, shown, ww, wh, before_swap, log_session);" in renderer
+    and "const int script = kind ? s_script_index : interp_direct_script_index();" in renderer
+    and "s_shown_meta[s_shown_count].script = script;" in renderer
     and "    const uint64_t cycle = rth_replaying() ? s_rthx_cycle : psx_get_cycle_count();\n" in renderer
     and renderer.count("        const uint64_t cycle = psx_get_cycle_count();\n") == 2
     and "        if (rth_rec_call(RTH_PRESENT_VRAM, v, 13)) return;\n" in renderer
@@ -396,23 +416,26 @@ require(
     and "    job.cycle = cycle;\n" in renderer
     and "job->presented, job->cycle);\n" in renderer,
     "every game frame reaches the presenter with the emulated clock of its present, whichever thread draws it, and each "
-    "picture shown while a capsule records is logged under the VBlank of the later frame it is placed before",
+    "interpolated picture keeps its later frame and a retained native picture keeps its own VBlank",
 )
 require(
     "        const int step = psx_shown_script_step(&s_script, psx_shown_frame_of(s_interp_cur_cycle, s_script.first, s_script.period),\n"
-    "                                               s_interp_valid >= 2, &scripted);\n"
+    "                                               s_interp_valid, &scripted);\n"
     in renderer
     and "    double a = scripted >= 0.0f ? (double)scripted : (double)(now - s_interp_start) / (double)s_interp_duration;\n"
     in renderer
-    and renderer.index("    s_script_index = scripted >= 0.0f ? (int)s_script.pictures[s_script.next].sequence : -1;\n")
-    < renderer.index("    shown_capture(1, shown);\n")
-    < renderer.index("        psx_shown_script_presented(&s_script);\n        SDL_CondBroadcast(s_script_cond);\n")
-    and "    SDL_LockMutex(s_interp_mutex);\n    interp_script_wait();\n    if (job->generation == s_temp_generation) {\n"
+    and renderer.index("    s_script_index = scripted_match ? (int)s_script.pictures[s_script.next].sequence : -1;\n")
+    < renderer.index("    if (!optional) shown_capture(1, shown);\n")
+    < renderer.index(
+        "        if (scripted_match) psx_shown_script_presented(&s_script);\n        else psx_shown_script_missed(&s_script);\n"
+    )
+    and "    SDL_LockMutex(s_interp_mutex);\n    if (submitted) interp_script_wait();\n"
+    "    if (submitted && job->generation == s_temp_generation) {\n"
     in renderer
     and "    const uint64_t locked = SDL_GetPerformanceCounter();\n    interp_script_wait();  /* before any history this frame resets or replaces */\n"
     in renderer
     and "            s_script.timeouts++;\n" in renderer
-    and "    s_script_index = scripted >= 0.0f ? (int)s_script.pictures[s_script.next].sequence : -1;\n" in renderer
+    and "    const int scripted_match = scripted >= 0.0f && shown == scripted;\n" in renderer
     and "        int uncapped = hz < 0.0 || scripted;" in renderer,
     "a replay as shown presents each recorded picture between the same two game frames at the same place, and no game "
     "frame's scene is handed over before the pictures of the one before are shown",

@@ -41,6 +41,7 @@
 
 #include <algorithm>
 #include <array>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstddef>
@@ -379,6 +380,36 @@ struct PacketFraction {
     uint32_t arena = 0u;
 };
 std::unordered_map<uint32_t, PacketFraction> g_packet_fractions;
+constexpr unsigned kPacketFilterIndexBits = 12;
+constexpr size_t kPacketFilterWords = size_t{1} << (kPacketFilterIndexBits - 6u);
+std::array<std::atomic<uint64_t>, kPacketFilterWords> g_packet_filter{};
+
+uint32_t packet_filter_index(uint32_t address) {
+    return (address * 0x9E3779B1u) >> (32u - kPacketFilterIndexBits);
+}
+
+void remember_packet_fraction_locked(uint32_t address, PacketFraction fraction) {
+    const uint32_t index = packet_filter_index(address);
+    auto& word = g_packet_filter[index >> 6];
+    word.store(word.load(std::memory_order_relaxed) | (uint64_t{1} << (index & 63u)), std::memory_order_release);
+    g_packet_fractions[address] = fraction;
+}
+
+void rebuild_packet_filter_locked() {
+    std::array<uint64_t, kPacketFilterWords> filter{};
+    for (const auto& entry : g_packet_fractions) {
+        const uint32_t index = packet_filter_index(entry.first);
+        filter[index >> 6] |= uint64_t{1} << (index & 63u);
+    }
+    for (size_t index = 0; index < filter.size(); ++index)
+        g_packet_filter[index].store(filter[index], std::memory_order_release);
+}
+
+void clear_packet_fractions_locked() {
+    g_packet_fractions.clear();
+    rebuild_packet_filter_locked();
+}
+
 uint32_t g_list_shaped = 0u;  /* the list body whose fade load took the frame's fog, by its packet */
 
 bool comparator_active() {
@@ -888,8 +919,9 @@ void tag_entrance_mesh(uint32_t end) {
             std::array<uint32_t, 12> command{};
             for (uint32_t i = 0; i < words; ++i) command[i] = psx_mod_read_word(packet + 4u + 4u * i);
             const uint32_t key = psx_mod_gpu_dma_resolve_address(packet);
-            if (key) g_packet_fractions[key] = {g_fog_serial, PSX_PACKET_FOG_DETAIL_BASE + detail, true,
-                                                psx_gpu_command_signature(command.data(), static_cast<int>(words)), g_frame.primitive_start};
+            if (key) remember_packet_fraction_locked(key, {g_fog_serial, PSX_PACKET_FOG_DETAIL_BASE + detail, true,
+                                                          psx_gpu_command_signature(command.data(), static_cast<int>(words)),
+                                                          g_frame.primitive_start});
         }
         packet += 4u + 4u * words;
     }
@@ -1463,7 +1495,7 @@ void shape_fade_load(CPUState *cpu, const DistanceLoadSite& site) {
     if (fog->packet_in_register) g_list_shaped = packet;
     if (!fog->rows || !g_fog.smooth) return;
     if (const uint32_t key = psx_mod_gpu_dma_resolve_address(packet))
-        g_packet_fractions[key] = PacketFraction{g_fog_serial, sprite_fog_level(pressed)};
+        remember_packet_fraction_locked(key, {g_fog_serial, sprite_fog_level(pressed)});
 }
 
 void observe_distance_load(CPUState *cpu, const DistanceLoadSite& site) {
@@ -1872,7 +1904,7 @@ extern "C" void disruptor_far_rendering_reset_session(void) {
     abandon_active_frame(false);
     g_fog = FrameFog{};
     g_fog_exponent = 1;
-    g_packet_fractions.clear();
+    clear_packet_fractions_locked();
     g_preset = DISRUPTOR_FAR_RENDERING_RETAIL;
     g_depth_fade_mode = DISRUPTOR_FAR_RENDERING_DEPTH_FADE_RETAIL;
     g_frame = ActiveFrame{};
@@ -1886,7 +1918,7 @@ extern "C" void disruptor_far_rendering_abandon_metrics(void) {
     g_frame = ActiveFrame{};
     g_pending_decision = PendingFarDecision{};
     g_fog.active = false;
-    g_packet_fractions.clear();
+    clear_packet_fractions_locked();
     g_spans.forget();
     g_beside.forget();
     g_objects.forget();
@@ -1937,6 +1969,8 @@ extern "C" int disruptor_far_rendering_get_fog_exponent(void) {
 }
 
 extern "C" int disruptor_far_rendering_packet_fraction(uint32_t resolved_packet, uint32_t signature) {
+    const uint32_t index = packet_filter_index(resolved_packet);
+    if (!(g_packet_filter[index >> 6].load(std::memory_order_acquire) & (uint64_t{1} << (index & 63u)))) return -1;
     std::lock_guard<std::mutex> lock(g_mutex);
     const auto found = g_packet_fractions.find(resolved_packet);
     if (found == g_packet_fractions.end()) return -1;
@@ -1946,6 +1980,7 @@ extern "C" int disruptor_far_rendering_packet_fraction(uint32_t resolved_packet,
         share.signature = signature;
     } else if (share.signature != signature) {
         g_packet_fractions.erase(found);
+        if (g_packet_fractions.empty()) rebuild_packet_filter_locked();
         return -1;
     }
     return share.fade;
@@ -2030,7 +2065,7 @@ static void begin_renderer_frame(CPUState *cpu) {
         std::lock_guard<std::mutex> lock(g_mutex);
         if (g_frame.active) abandon_active_frame(true);
         g_fog.active = false;
-        g_packet_fractions.clear();
+        clear_packet_fractions_locked();
         return;
     }
 
@@ -2041,7 +2076,8 @@ static void begin_renderer_frame(CPUState *cpu) {
     ++g_diagnostics.renderer_entries;
     g_fog.active = false;
     ++g_fog_serial;
-    std::erase_if(g_packet_fractions, [](const auto& entry) { return entry.second.serial + 1u < g_fog_serial; });
+    const size_t expired_packets =
+        std::erase_if(g_packet_fractions, [](const auto& entry) { return entry.second.serial + 1u < g_fog_serial; });
 
     if (psx_netplay_active()) {
         if (g_frame.active) {
@@ -2116,7 +2152,9 @@ static void begin_renderer_frame(CPUState *cpu) {
     g_walk = disruptor::sector_reach::Walk{};
     g_frame.active = true;
     g_frame.primitive_start = primitive_start;
-    std::erase_if(g_packet_fractions, [primitive_start](const auto &entry) { return entry.second.arena == primitive_start; });
+    const size_t reused_packets =
+        std::erase_if(g_packet_fractions, [primitive_start](const auto &entry) { return entry.second.arena == primitive_start; });
+    if (expired_packets || reused_packets) rebuild_packet_filter_locked();
     g_frame.started = Clock::now();
     g_frame.entrance_reach = fortress_entrance_reach(effective_far, g_frame.entrance_visibility);
     write_distances(source_far, source_fade, effective_far, effective_fade);

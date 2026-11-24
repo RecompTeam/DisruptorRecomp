@@ -384,7 +384,13 @@ static void rtb_wide_set_target(int base_x) { if (rth_record_mode()) RTH_REC(RTH
 static void rtb_wide_disable_target(void) { if (rth_record_mode()) RTH_REC(RTH_WIDE_DISABLE, 0, 0); glb_wide_disable_target(); }
 static void rtb_wide_clear(int base_x, int y, int h, uint16_t color) {
     const NightView sky = night_view(color, h, y);
-    if (rth_record_mode()) RTH_REC(RTH_WIDE_CLEAR, 0, base_x, y, h, color, sky.view, sky.camera[0], sky.camera[1], sky.camera[2], sky.camera[3], sky.balcony);
+    if (rth_record_mode()) {
+        const uint32_t tick = (uint32_t)sky.smoke_tick;
+        int32_t tick_bits;
+        memcpy(&tick_bits, &tick, sizeof tick);
+        RTH_REC(RTH_WIDE_CLEAR, 0, base_x, y, h, color, sky.view, sky.camera[0], sky.camera[1],
+                sky.camera[2], sky.camera[3], sky.balcony, sky.factory_flash, tick_bits, sky.smoke_tick >= 0);
+    }
     glb_wide_clear_view(base_x, y, h, color, sky);
 }
 static void rtb_wide_clear_margins(int base_x, int y, int h, uint16_t color, int sides) {
@@ -574,6 +580,8 @@ static void gl_rth_exec(void *user, const RtCmd *c, const void *payload) {
     case RTH_WIDE_CLEAR: {
         NightView sky = {v[4], {v[5], v[6], v[7], v[8]}};
         sky.balcony = v[9];
+        sky.factory_flash = v[10];
+        sky.smoke_tick = v[12] ? (int64_t)(uint32_t)v[11] : -1;
         glb_wide_clear_view(v[0], v[1], v[2], (uint16_t)v[3], sky); break;
     }
     case RTH_WIDE_CLEAR_MARGINS: glb_wide_clear_margins(v[0], v[1], v[2], (uint16_t)v[3], v[4]); break;
@@ -604,6 +612,10 @@ static void gl_rth_exec(void *user, const RtCmd *c, const void *payload) {
     case RTH_INTERP_SUSPENDED: gl_renderer_set_interpolation_suspended(v[0]); break;
     case RTH_UI_SUSPENDED: gl_renderer_set_host_ui_suspended(v[0]); break;
     case RTH_DDGI_MISSION: gl_renderer_set_ddgi_mission(v[0]); break;
+    case RTH_FACTORY_WATER: gl_renderer_set_factory_water(v[0], (uint32_t)v[1]); break;
+#ifdef PSX_HAS_GAME_HOST
+    case RTH_ARCHIVE_TERMINAL: gl_renderer_set_archive_terminal(v[0], v[1], v[2], v[3]); break;
+#endif
     case RTH_DDGI_SHOT: s_rthx_ddgi_shot = v[0]; break;
     case RTH_INVALIDATE_PRESENT: gl_renderer_invalidate_present(); break;
     case RTH_GROUP:

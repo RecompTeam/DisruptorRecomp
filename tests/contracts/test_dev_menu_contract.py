@@ -245,7 +245,8 @@ require(
 )
 layer_update = function_body(gl, "interp_layer_update")
 require(
-    "psx_host_ui_in_layer(ctx_ui_flags())" in layer_update
+    "const uint32_t ui_flags = ctx_ui_flags();" in layer_update
+    and "psx_host_ui_in_layer(ui_flags)" in layer_update
     and "psx_host_ui_render_gl" not in layer_update
     and layer_update.index("gz_wait(0, s_interp_draw_fence")
     < layer_update.index(f"{host_ui_helper}(ww, wh);")
@@ -305,12 +306,13 @@ for present_name in ("gl_renderer_present_vram", "gl_renderer_present_wide_fbo")
         f"{present_name} keeps the layer when the presenter shows its pictures",
     )
 presenter = function_body(gl, "interp_present")
+submission = function_body(gl, "interp_submit_picture")
 require(
     presenter.index("interp_draw_quad(")
-    < presenter.index("interp_layer_draw(ww, wh);")
-    < presenter.index("s_interp_draw_fence = p_glFenceSync(")
+    < presenter.index("interp_submit_picture(image, shown < 1.0f, ww, wh);")
     < presenter.index("shown_capture(1, shown);")
-    < presenter.index("SDL_GL_SwapWindow"),
+    < presenter.index("SDL_GL_SwapWindow")
+    and submission.index("interp_layer_draw(ww, wh);") < submission.index("s_interp_draw_fence = p_glFenceSync("),
     "the presenter lays the layer over its picture before the fence the main thread waits on, the read-back and the swap",
 )
 layer = function_body(gl, "interp_layer_draw")

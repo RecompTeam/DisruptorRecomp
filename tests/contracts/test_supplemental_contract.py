@@ -55,7 +55,8 @@ require(
     < deferred.index(
         "        s_tb_supp = kind;\n        s_tb_held_back = 1;\n        flush_tex_batch_now();\n        s_tb_held_back = 0;\n"
     )
-    and "    if (!s_tb_held_back) tex_batch_draw_passes(nverts, semi);" in renderer
+    and "    if (!s_tb_held_back && !queued) {\n        gz_begin(GZ_CANON);\n        tex_batch_draw_passes(nverts, semi);"
+    in renderer
     and "    glDepthFunc(held_back ? GL_LESS : GL_LEQUAL);\n" in renderer
     and "    p_glUniform1f(s_tex_uPull, held_back ? 0.0f : s_world_margin);\n    if (held_back) glDepthFunc(GL_EQUAL);\n"
     in renderer
@@ -120,7 +121,7 @@ require(
     in renderer
     and "        if (!s_mask_check && !s_tb_mask && s_fill_pass <= 0.0f && !s_supp_stencil) glDisable(GL_STENCIL_TEST);\n"
     in renderer
-    and "        if (s_tb_mask || s_supp_stencil) mask_stencil(s_tb_mask); else glDisable(GL_STENCIL_TEST);\n"
+    and "        if (s_tb_mask || s_supp_stencil) draw_mask_stencil(s_tb_mask, !s_tb_mask); else glDisable(GL_STENCIL_TEST);\n"
     in renderer
     and renderer.count("\n    depth_stencil_within();\n") == 1
     and flush.count("            depth_stencil_within();\n") == 1
@@ -140,9 +141,12 @@ require(
     and "    glDepthFunc(set?GL_LESS:GL_ALWAYS); glDepthMask(GL_FALSE);\n" in presenter_mark
     and "glDepthFunc(depth_after); glDepthMask(write_after);" in presenter_mark
     and "    p_glUniform4f(u->options,0,0,s->tint,s_temp_underlaying ? -1.0f : 0.0f);\n" in presenter_mark
-    and submit.index("    if (supp) { temporal_supp_mark(s,c,u,count,1,depth_after,write_after); s_temp_supp=1; }\n")
+    and submit.index(
+        "    if (supp) { temporal_supp_mark(s,c,u,first,count,1,depth_after,write_after); s_temp_supp=1; }\n"
+    )
     < submit.index("    if (fill && s_crack_fill>0.0f) {")
-    < submit.index("    if (supp) { s_temp_supp=0; temporal_supp_mark(s,c,u,count,0,depth_after,write_after); }\n")
+    < submit.index("        temporal_supp_mark(s,c,u,first,count,0,depth_after,write_after);\n")
+    and "    else clear_transient_stencil();" in presenter_mark
     and "        } else if (s_temp_supp) { glEnable(GL_STENCIL_TEST); glStencilMask(0); glStencilFunc(GL_EQUAL,SUPPLEMENTAL_STENCIL,SUPPLEMENTAL_STENCIL); }\n"
     in submit,
     "an in-between frame draws such a command the same way: marked, kept within the mark, the mark taken back",

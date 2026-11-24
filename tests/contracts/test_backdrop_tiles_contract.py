@@ -229,10 +229,6 @@ require(
     and "    setup_textured_draw(color24, semi_trans, raw_texture);\n    if (semi_trans)\n        ddgi_note_flash("
     in gpu
     and "                        raw_texture, 1.0f);\n    if (tile_placed) gr_set_screen_tile(&placed);\n    ws_hud_held_sides_send();\n"
-    "    ws_hud_glyph = shrunk && clut_x == ws_hud_text_clut_x && clut_y == ws_hud_text_clut_y && (int)texpage_x == ws_hud_text_page_x &&\n"
-    "                           (int)texpage_y == ws_hud_text_page_y\n"
-    "                       ? psx_ws_hud_glyph_code(ws_hud_scale_percent, raw_texture ? 0x808080u : color24) : 0;\n"
-    "    if (dw != w || dh != h)\n"
     in gpu
     and gpu.index(
         "    if (draw_area_out_rect(x0, y0, dw, dh)) return;\n    setup_textured_draw(color24, semi_trans, raw_texture);\n    if (semi_trans)"
@@ -290,8 +286,7 @@ require(
     "    float x = corrected || placed || flat ? v[pos_at] : v[0], y = corrected ? v[pos_at+1] : v[1];\n"
     "    const float want = placed ? v[pos_at+1] : 0.0f;  /* a tile's y slot: the slide its end wants, see tile_corner */\n"
     in presenter
-    and "    if (textured && (!corrected || v[flags_at] <= 1.5f))\n        v[22] = 0;\n    if (placed) v[22] = want;\n"
-    in presenter
+    and "    if (textured && !corrected)\n        v[22] = 0;\n    if (placed) v[22] = want;\n" in presenter
     and presenter.index("    const float want = placed ? v[pos_at+1] : 0.0f;")
     < presenter.index("    v[0] = v[pos_at] = x; v[1] = v[pos_at+1] = y;\n")
     and "    if (placed) v[2] +=" not in presenter

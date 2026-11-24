@@ -334,6 +334,48 @@ void fourth_actor(CPUState &cpu, std::uint32_t kind, std::uint32_t frame, std::u
     cpu.gpr[19] = 55u;   /* (224 * 160 * 102) >> 16 */
 }
 
+void test_visor_soldier_keeps_death_art() {
+    CPUState cpu = ready(kTestFunnels[3]);
+    fourth_actor(cpu, 7u, 107u, 0u);
+    put(kBody + kShadowDrop, 0u, 4);
+    constexpr std::uint32_t payload = 0x80160000u;
+    put(kPictures, payload, 4);
+    put(kPictures + 4u, 0x080013BCu, 4);
+    put(kPictures + 8u, 72u | 128u << 8, 2);
+    const std::uint32_t signature = payload + (0x13BCu / 2u & ~3u);
+    put(signature, 0xF30E0117u, 4);
+    const std::uint32_t dying = projected(cpu, kFunnels[3]).pose_actor;
+    put(kActor + 0x3Au, 4u, 1);
+    const std::uint32_t alive = projected(cpu, kFunnels[3]).pose_actor;
+    expect(alive && dying == (alive | GPU_TEMPORAL_SPRITE_KEEP_ART) && dying != alive,
+           "the visor soldier uses one identity and keeps the artwork in its death animation");
+    put(kActor + 0x3Au, 7u, 1);
+    put(signature, 0xF30E0116u, 4);
+    expect(!projected(cpu, kFunnels[3]).pose_actor, "matching dimensions alone do not identify the visor soldier");
+    g_memory.clear();
+}
+
+void test_reactor_soldier_keeps_art_between_bursts() {
+    CPUState cpu = ready(kTestFunnels[3]);
+    fourth_actor(cpu, 4u, 80u, 0u);
+    constexpr std::uint32_t payload = 0x80160000u;
+    put(kPictures, payload, 4);
+    put(kPictures + 4u, 0x0600153Cu, 4);
+    put(kPictures + 8u, 60u | 148u << 8, 2);
+    const std::uint32_t signature = payload + (0x153Cu / 2u & ~3u);
+    put(signature, 0x1C1C1C1Cu, 4);
+    const std::uint32_t firing = projected(cpu, kFunnels[3]).pose_actor;
+    put(kActor + 0x3Au, 1u, 1);
+    put(kActor + 0x3Bu, 40u, 1);
+    put(kPictures + 20u * 40u + 8u, 28u | 7u << 8, 2);
+    const std::uint32_t walking = projected(cpu, kFunnels[3]).pose_actor;
+    expect((firing & GPU_TEMPORAL_SPRITE_KEEP_ART) && firing == walking,
+           "the Reactor soldier keeps its art and identity across walking and firing poses");
+    put(signature, 0x1C1C1C1Du, 4);
+    expect(!projected(cpu, kFunnels[3]).pose_actor, "a different payload does not identify the Reactor soldier");
+    g_memory.clear();
+}
+
 constexpr std::uint32_t kKind = 0x80150000u;
 
 /* An effect of the third funnel: 401 units, a picture 38 x 21 over a reference 40 x 40, with what the game's two cuts leave of it. */
@@ -1644,6 +1686,13 @@ int main() {
            "both tunnel creature attack sequences have the same correction");
     expect(displacement(109, 0x06001398u, 126, 136, 6, 0u, 2) == still,
            "an unrelated sprite does not get the tunnel creature's correction");
+    const auto guard_aim = displacement(68, 0x04000BECu, 54, 146, 4, 0x0C4A2922u, 2, &preserve_art, true);
+    expect(preserve_art && guard_aim[1] > 0.0f &&
+           displacement(80, 0x04000BECu, 54, 146, 4, 0x0C4A2922u, 2, nullptr, true) == guard_aim,
+           "both Triton guard attack sequences keep their artwork and share the same correction");
+    expect(displacement(80, 0x04000BECu, 54, 146, 4, 0u, 2, nullptr, true) == still &&
+           displacement(80, 0x04000BECu, 54, 146, 4, 0x0C4A2922u, 2, &preserve_art) == still && !preserve_art,
+           "the Triton guard's correction requires its actor type and firing artwork");
     CPUState reused{};
     reused.read_byte = read_byte;
     reused.read_half = read_half;
@@ -1670,6 +1719,8 @@ int main() {
     test_only_the_reviewed_instructions_count();
     test_deferred_actor_waits_under_its_record();
     test_an_actor_hands_its_ground_over();
+    test_visor_soldier_keeps_death_art();
+    test_reactor_soldier_keeps_art_between_bursts();
     test_sizes_run_after_places();
     test_a_body_sorts_in_front_of_its_floor();
     test_a_body_that_cannot_move_stays();

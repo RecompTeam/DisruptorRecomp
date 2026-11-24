@@ -50,7 +50,9 @@ require(
 require(
     "constexpr uint32_t kPacketBytes = 0x34u;" in source
     and "constexpr std::array<uint32_t, 4> kPositions{1u, 4u, 7u, 10u};" in source
-    and "if (grown[corner] != packet[kPositions[corner]]) return 0;" in source,
+    and "for (const unsigned shift : {0u, 16u})" in source
+    and "if (static_cast<uint16_t>(axis[3 - corner]) !=" in source
+    and "static_cast<uint16_t>(packet[kPositions[corner]] >> shift)) return 0;" in source,
     "a packet may borrow corners only when all four of its positions are the arithmetic of the packet before it",
 )
 require(

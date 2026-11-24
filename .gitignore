@@ -34,6 +34,7 @@ starvation_dump.jsonl
 *.log
 *.png
 !docs/images/*.png
+!/src/game/render/assets/archive-terminal.png
 *.zip
 *.7z
 *.exe

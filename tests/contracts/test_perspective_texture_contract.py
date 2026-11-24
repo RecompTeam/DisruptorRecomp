@@ -263,16 +263,23 @@ def main() -> int:
     )
 
     # The appended temporal depth is CPU metadata: expanding the record must not shift attributes.
-    require("#define TEXV 28" in gl, "textured GL vertices must retain independent q and temporal depth")
+    require("#define TEXV 30" in gl, "textured GL vertices must retain independent q and temporal depth")
     tex_vs = source_span(gl, "static const char *TEX_VS", "static const char *TEX_FS")
     tex_fs = source_span(gl, "static const char *TEX_FS", "static const char *BLIT_VS")
     require("layout(location=11) in float a_q" in tex_vs, "TEX_VS must consume q at attribute location 11")
-    gl_compact = compact(gl)
+    bind_tex = function_body(gl, "bind_tex_vertices")
+    sizes = [int(size) for size in re.findall(r"\d+", bind_tex.partition("sizes[] = {")[2].partition("}")[0])]
     require(
-        "p_glVertexAttribPointer(11,1,GL_FLOAT,GL_FALSE,st,(void*)(22*sizeof(float)))" in gl_compact,
+        len(sizes) > 11
+        and sum(sizes[:11]) == 22
+        and sizes[11] == 1
+        and sum(sizes) == 30
+        and "p_glVertexAttribPointer(attribute, sizes[attribute], GL_FLOAT, GL_FALSE, TEXV * sizeof(float)," in bind_tex
+        and "(void *)(offset * sizeof(float)));" in bind_tex
+        and "offset += sizes[attribute];" in bind_tex,
         "VAO location 11 must read q from TEXV offset 22",
     )
-    require("p_glEnableVertexAttribArray(11)" in gl_compact, "the q vertex attribute must be enabled")
+    require("p_glEnableVertexAttribArray(attribute)" in bind_tex, "the q vertex attribute must be enabled")
     require(re.search(r"vp\s*\[\s*22\s*\]\s*=", gl) is not None, "every queued textured vertex must initialize q")
     require(
         ".set_perspective_triangle = glb_set_perspective_triangle" in gl,
@@ -349,9 +356,21 @@ def main() -> int:
         "TEX_VS must keep homogeneous W fixed at 1",
     )
     flush = function_body(gl, "flush_tex_batch_now")
-    canonical = flush.find("geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 0)")
+    canonical = flush.find("if (!s_tb_held_back && !queued) {")
     visual = flush.find("geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 1)")
-    require(0 <= canonical < visual, "the canonical affine pass must execute before the visual pass")
+    require(
+        0 <= flush.find("bind_tex_batch(semi);") < canonical < visual
+        and "tex_batch_draw_passes(nverts, semi);" in flush[canonical:visual]
+        and "geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 0)"
+        in function_body(gl, "bind_tex_batch"),
+        "an immediate canonical batch selects affine coordinates before drawing ahead of the visual pass",
+    )
+    require(
+        "if (queued) deferred_vram_enqueue(page, nverts, semi);" in flush
+        and "geometry_visual_uniforms(s_tex_uVisual,s_tex_uCamera,s_tex_uVisualOptions,0)"
+        in function_body(gl, "deferred_draw_page"),
+        "a deferred canonical batch also selects affine coordinates before drawing",
+    )
 
     # Rectangles and UI never carry GTE-world metadata: every one-shot is cleared so no q leaks.
     for name in ("gpu_flat_rect", "gpu_textured_rect"):

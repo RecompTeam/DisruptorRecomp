@@ -183,16 +183,21 @@ struct Visit {
 };
 
 template <class Memory>
+bool door_open_at(const Memory &memory, uint32_t sector) {
+    const uint32_t door = memory.byte(sector + kSectorDoor);
+    if (door == sector_reach::kNoSector) return true;
+    const uint32_t object = memory.word(memory.word(kObjects) + 4u * door);
+    return !ram_word(object) || memory.byte(object + 1u) != 0u || memory.byte(object + 5u) != 0u;
+}
+
+template <class Memory>
 Visit visit_at(const Memory &memory, uint32_t room) {
     Visit visit;
     const auto loaded = [&memory](uint32_t other) { return memory.word(sector_reach::kSectors + 4u * other) != 0u; };
     const uint32_t sector = memory.word(sector_reach::kSectors + 4u * room);
     visit.loaded = sector != 0u;
     if (!ram_word(sector)) return visit;
-    if (const uint32_t door = memory.byte(sector + kSectorDoor); door != sector_reach::kNoSector) {
-        const uint32_t object = memory.word(memory.word(kObjects) + 4u * door);
-        visit.door_open = !ram_word(object) || memory.byte(object + 1u) != 0u || memory.byte(object + 5u) != 0u;
-    }
+    visit.door_open = door_open_at(memory, sector);
     const uint32_t first = memory.byte(sector + kSectorCompanions), second = memory.byte(sector + kSectorCompanions + 1u);
     if (first == sector_reach::kNoSector) return visit;
     if (loaded(first)) visit.companions[0] = first;
@@ -405,8 +410,8 @@ public:
         for (uint32_t entry = first; entry < end; entry += stride) listed.set(memory.byte(entry + kRoomByte) & 0xFFu);
         const uint32_t limit = first + kMostRooms * stride;
         uint32_t at = end;
+        const auto can_add = [&](uint32_t room) { return room != sector_reach::kNoSector && !listed.test(room) && at < limit; };
         const auto add_loaded = [&](uint32_t room) {
-            if (room == sector_reach::kNoSector || listed.test(room) || at >= limit || !visit_at(memory, room).loaded) return;
             const uint32_t index = (at - first) / stride;
             added_[count_++] = {room, memory.byte(kListedAt + room) & 0xFFu, index, at, memory.word(at),
                                 memory.word(at + kRoomByte)};
@@ -419,17 +424,17 @@ public:
         for (uint32_t entry = first; entry < end; entry += stride) {
             const uint32_t source = memory.byte(entry + kRoomByte) & 0xFFu;
             const uint32_t sector = memory.word(sector_reach::kSectors + 4u * source);
-            if (!ram_word(sector) || !visit_at(memory, source).door_open) continue; /* the walk goes no further than a shut door */
+            if (!ram_word(sector) || !door_open_at(memory, sector)) continue;
             uint32_t gate = memory.word(sector + kSectorPortals);
             for (uint32_t walked = 0u; ram_word(gate) && walked < kMostPortals; ++walked, gate += kPortalStride) {
                 const uint32_t room = memory.byte(gate + sector_reach::kPortalSector) & 0xFFu;
-                if (room != sector_reach::kNoSector && !listed.test(room) && at < limit &&
-                    beside(sector_reach::portal_at(memory, gate), x, z, view)) add_loaded(room);
+                if (can_add(room) && beside(sector_reach::portal_at(memory, gate), x, z, view) &&
+                    memory.word(sector_reach::kSectors + 4u * room) != 0u) add_loaded(room);
                 if ((memory.byte(gate + kPortalLast) & 0xFFu) == 0xFFu) break;
             }
         }
         for (const uint8_t room : exterior)
-            if (ram_word(memory.word(sector_reach::kSectors + 4u * room))) add_loaded(room);
+            if (can_add(room) && ram_word(memory.word(sector_reach::kSectors + 4u * room))) add_loaded(room);
         old_end_ = end;
         new_end_ = at;
         return at;

@@ -525,6 +525,81 @@ void look_alikes_and_moving_objects() {
                    "the floor is the only voted geometry and the world keeps the camera's step");
         }
 
+    for (const View view : {View{0.0, {-26, 56, 4}}, View{0.0, {26, 56, 4}}, View{0.0, {0, 72, 0}}}) {
+        Scene lift = room(view);
+        const int floor = lift.faces();
+        lift.add_quad({-100, 100, 300}, {0, 100, 300}, {0, 100, 500}, {-100, 100, 500}, 900, {0, -64, 0});
+        lift.add_quad({0, 100, 300}, {100, 100, 300}, {100, 100, 500}, {0, 100, 500}, 901, {0, -64, 0});
+        lift.prepare(from, stats);
+        expect(stats.seeded_vertices == 6 && lift.worst_error(floor, lift.faces(), from) < 0.02,
+               "walking and bobbing on a lift keep the previous floor instead of a camera-projected copy");
+    }
+
+    Scene rail = room(View{0.0, {26, 56, 4}});
+    const int rail_first = rail.faces();
+    const Point shared{-100, 100, 300}, other{0, 100, 300};
+    rail.add_quad(shared, other, {0, 100, 500}, {-100, 100, 500}, 900, {0, -64, 0});
+    rail.add_quad(other, {100, 100, 300}, {100, 100, 500}, {0, 100, 500}, 901, {0, -64, 0});
+    const int collapsed = rail.faces();
+    rail.add_face({shared, other, shared}, 902, {0, -64, 0});
+    rail.prepare(from, stats);
+    expect(rail.worst_error(rail_first, collapsed, from) < 0.02 && gpu_temporal_area(&from[collapsed]) == 0.0,
+           "a collapsed edge of a matched lift moves with the railing and stays collapsed");
+    rail.previous[rail.matches[rail_first + 1]].y[0] += 0.5f;
+    rail.prepare(from, stats);
+    expect(from[rail_first].y[0] == rail.current[rail_first].y[0] && from[rail_first].w[0] == 0.0f,
+           "a conflicting lift corner holds its position instead of taking the shaft's motion");
+
+    Scene grazing = room(View{0.0, {26, 56, 4}});
+    const int rail_top = grazing.faces();
+    grazing.add_quad({-100, 4, 300}, {0, 4, 300}, {0, 4, 500}, {-100, 4, 500}, 900, {0, -64, 0});
+    grazing.add_quad({0, 4, 300}, {100, 4, 300}, {100, 4, 500}, {0, 4, 500}, 901, {0, -64, 0});
+    grazing.prepare(from, stats);
+    expect(std::abs(gpu_temporal_area(&grazing.previous[grazing.matches[rail_top]])) >
+               2.0 * std::abs(gpu_temporal_area(&grazing.current[rail_top])) &&
+           grazing.worst_error(rail_top, grazing.faces(), from) < 0.02,
+           "an exact lift match survives a perspective change in the projected area of its top face");
+
+    Scene partial = room(View{0.0, {26, 56, 4}});
+    const int partial_top = partial.faces();
+    const Point top_corner{-100, 4, 300};
+    partial.add_face({top_corner, {0, 4, 300}, {0, 4, 500}}, 900, {0, -64, 0});
+    partial.add_quad(top_corner, {-100, 80, 300}, {-180, 80, 300}, {-180, 4, 300}, 901, {0, -64, 0});
+    partial.add_quad({100, 4, 300}, {150, 4, 300}, {150, 4, 500}, {100, 4, 500}, 902, {0, -64, 0});
+    const auto &current_top = partial.current[partial_top];
+    auto &previous_top = partial.previous[partial.matches[partial_top]];
+    constexpr float diagonal = static_cast<float>(0.8 * GPU_TEMPORAL_MESH_VOTE_EPSILON);
+    previous_top.x[0] = current_top.x[0] + diagonal;
+    previous_top.y[0] = current_top.y[0] + diagonal;
+    partial.prepare(from, stats);
+    expect(from[partial_top].x[1] == current_top.x[1] && from[partial_top].y[1] == current_top.y[1] &&
+           from[partial_top].w[1] == 0.0f,
+           "a held lift corner outside the vote radius cannot exempt a partial pose from the area-ratio guard");
+
+    for (const bool decoy_first : {false, true}) {
+        Scene moving = room(View{0.0, {26, 56, -4}});
+        const int object = moving.faces();
+        moving.add_quad({-100, -50, 800}, {0, -50, 800}, {0, 50, 800}, {-100, 50, 800}, 900, {0, -16, 0});
+        moving.add_quad({0, -50, 800}, {100, -50, 800}, {100, 50, 800}, {0, 50, 800}, 901, {0, -16, 0});
+        const auto expected = moving.matches;
+        for (int face = object; face < moving.faces(); ++face) {
+            auto decoy = moving.previous[static_cast<std::size_t>(expected[face])];
+            for (int corner = 0; corner < 3; ++corner) {
+                decoy.model[corner][1] += 48;
+                decoy.y[corner] += static_cast<float>(moving.focal * 48 / decoy.depth[corner]);
+            }
+            if ((face - object < 2) == decoy_first) moving.matches[face] = static_cast<int>(moving.previous.size());
+            moving.previous.push_back(decoy);
+        }
+        std::vector<int> pairs(moving.current.size()), trusted(moving.current.size());
+        std::array<int, 3> shift{};
+        gpu_temporal_mesh_pairs(moving.previous.data(), static_cast<int>(moving.previous.size()), moving.current.data(),
+                                moving.faces(), moving.matches.data(), pairs.data(), trusted.data(), shift.data());
+        for (int face = object; face < moving.faces(); ++face)
+            expect(pairs[face] == expected[face] && trusted[face] == 2,
+                   "an in-range object match takes priority over a lift candidate in either proposal order");
+    }
+
     /* Tiles a tile away along the one axis the camera moves on are not riders. */
     for (const int axis : {0, 1}) {
         std::array<int, 3> along{0, 0, 0}, away{0, 0, 0};
@@ -615,7 +690,7 @@ struct Departure {
         departed.assign(before, 0);
         gpu_temporal_mesh_prepare_scene(scene.previous.data(), before, scene.current.data(), scene.faces(),
                                         scene.matches.data(), from.data(), &stats, start.data(), to.data(),
-                                        departed.data(), &camera);
+                                        departed.data(), &camera, nullptr);
     }
 };
 
@@ -683,7 +758,7 @@ void departed_faces_meet_their_neighbours() {
     GpuTemporalMeshStats stats{};
     gpu_temporal_mesh_prepare_scene(blind.scene.previous.data(), static_cast<int>(blind.scene.previous.size()),
                                     blind.scene.current.data(), blind.scene.faces(), blind.scene.matches.data(),
-                                    from.data(), &stats, nullptr, blind.to.data(), blind.departed.data(), nullptr);
+                                    from.data(), &stats, nullptr, blind.to.data(), blind.departed.data(), nullptr, nullptr);
     expect(stats.departed_faces == 0, "departed faces need both ends of their path");
 }
 

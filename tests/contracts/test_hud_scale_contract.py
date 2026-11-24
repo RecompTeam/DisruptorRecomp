@@ -149,10 +149,14 @@ require(
     and "void gpu_ws_set_hud_text_source(int clut_x, int clut_y, int page_x, int page_y);\n" in header
     and "int gpu_current_hud_glyph(void);\n" in header
     and "int gpu_current_hud_glyph(void) { return ws_hud_glyph; }\n" in gpu
-    and "    ws_hud_glyph = shrunk && clut_x == ws_hud_text_clut_x && clut_y == ws_hud_text_clut_y && (int)texpage_x == ws_hud_text_page_x &&\n"
-    "                           (int)texpage_y == ws_hud_text_page_y\n"
-    "                       ? psx_ws_hud_glyph_code(ws_hud_scale_percent, raw_texture ? 0x808080u : color24) : 0;\n"
-    in gpu
+    and "clut_x == ws_hud_text_clut_x && clut_y == ws_hud_text_clut_y;" in gpu
+    and "(int)texpage_x == ws_hud_text_page_x && (int)texpage_y == ws_hud_text_page_y;" in gpu
+    and "ws_hud_glyph = font_palette && hud_digit ? PSX_WS_HUD_DIGIT_EDGE : 0;" in gpu
+    and "if (font_palette && font_strip && shrunk)" in gpu
+    and "ws_hud_glyph |= psx_ws_hud_glyph_code(ws_hud_scale_percent, raw_texture ? 0x808080u : color24);" in gpu
+    and "#define PSX_WS_HUD_DIGIT_EDGE 65536" in scale_header
+    and "glyph & 65536" in renderer
+    and "texel_in(edge) && sample_texture(edge, rgb, stp)" in renderer
     and "        gr_draw_textured_rect(x0, y0, w, h, u0, v0, clut_x, clut_y, current_texpage());\n    ws_hud_glyph = 0;\n"
     in gpu
     and gpu.count("shrunk = 1;") == 2
@@ -162,7 +166,9 @@ require(
     and '"                    : !sample_texture(sample_uv, rgb, stp) && (glyph == 0 || !glyph_edge(sample_uv, glyph, rgb, stp))) discard;\\n"'
     in renderer
     and "constexpr int kTextSource[4] = {512, 177, 8, 0};" in widgets
-    and "    if (!strokes || strokes[0] != '0') gpu_ws_set_hud_text_source(kTextSource[0], kTextSource[1], kTextSource[2], kTextSource[3]);\n"
+    and "    if (!strokes || strokes[0] != '0') {\n"
+    "        gpu_ws_set_hud_text_source(kTextSource[0], kTextSource[1], kTextSource[2], kTextSource[3]);\n"
+    "        gpu_ws_set_hud_digit_source(15, 1, 108, 160, 16, 55);\n"
     in widgets,
     "a line of text in the font's palette and on its print page that the HUD size shrinks keeps its strokes: the rectangle's glyph code reaches"
     " the shader in the raw bits, which grows its strokes and draws a dark rim, none round dark text, inside the rectangle"

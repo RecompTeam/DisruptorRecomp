@@ -1,6 +1,9 @@
 #include "cpu_state.h"
+#include "game/frame/stock_frames.h"
+#include "game/render/archive_terminal.h"
 #include "game/render/ddgi_level.h"
 #include "gpu_ddgi.h"
+#include "gpu_render.h"
 #include "gte_precision.h"
 #include "mod_plugins.h"
 
@@ -16,6 +19,7 @@ constexpr uint32_t kCameraX = 0x800775CCu;     /* a vertex the GTE gets is world
 constexpr uint32_t kCameraHeight = 0x800775D0u; /* in eighths of the vertices' unit */
 constexpr uint32_t kCameraZ = 0x800775C8u;     /* a vertex the GTE gets is world z less this */
 constexpr uint32_t kMission = 0x80071354u;     /* gp+0x208 */
+constexpr uint32_t kLoadedMission = 0x80071518u;
 
 void camera_offset(int32_t offset[3]) {
     /* The game's words wrap as 32-bit integers: negate and scale them the same way, without signed overflow. */
@@ -27,6 +31,13 @@ void camera_offset(int32_t offset[3]) {
 void world_draw(CPUState *, uint32_t) {
     gte_pose_begin();
     const uint8_t mission = psx_mod_read_byte(kMission);
+    const bool loaded = mission == psx_mod_read_byte(kLoadedMission);
+    const bool gauntlet = mission == 1u && loaded;
+    int32_t eye[3]{};
+    if (gauntlet) camera_offset(eye);
+    disruptor::archive_terminal::update(gauntlet, eye);
+    const bool factory = mission == 2u && loaded;
+    gl_renderer_set_factory_water(factory, factory ? psx_mod_read_word(disruptor::stock_frames::kTicks) : 0u);
     gl_renderer_set_ddgi_mission(mission);
     /* The owner's choice: a sun on the first three missions; the first two's baked light shows none, the third's is found.
      * With the sun off none is fitted, so the lamps carry the light it would have taken and cast their full shadows. */

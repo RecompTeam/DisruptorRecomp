@@ -41,8 +41,10 @@ extern "C" void disruptor_mouse_set_vertical_pitch(double pitch);
 extern "C" const char *psx_host_user_settings_path(void);
 extern "C" int psx_netplay_active(void);
 extern "C" int gl_renderer_snap_shown(int width);
+extern "C" int gl_renderer_snap_shown_async(int width);
 extern "C" void gl_renderer_snap_cancel(void);
 extern "C" int gl_renderer_snap_taken(unsigned char *rgb, int room, int *width, int *height);
+extern "C" int gl_renderer_snap_taken_async(unsigned char *rgb, int room, int *width, int *height, int cancel_pending);
 extern "C" int gl_renderer_snap_taken_sequence(void);
 extern "C" void gl_renderer_shown_log_begin(uint64_t first, uint64_t period);
 extern "C" void gl_renderer_shown_log_end(void);
@@ -688,10 +690,12 @@ void refuse_recording(const char *why) {
 }
 
 /* The renderer hands a picture over a VBlank or two after it is asked: it is kept under the next number, the last number again once all are used. */
-void keep_preview() {
+void keep_preview(bool cancel_pending = false) {
     Capsule &capsule = g_capsule;
     int width = 0, height = 0;
-    if (!capsule.preview_asked || !gl_renderer_snap_taken(capsule.preview.data(), static_cast<int>(capsule.preview.size()), &width, &height)) return;
+    if (!capsule.preview_asked ||
+        !gl_renderer_snap_taken_async(capsule.preview.data(), static_cast<int>(capsule.preview.size()),
+                                      &width, &height, cancel_pending)) return;
     capsule.preview_asked = false;
     if (write(capsule.made / disruptor::capsule::preview_name(disruptor::capsule::preview_slot(capsule.previews)),
               disruptor::capsule::preview(capsule.preview.data(), static_cast<uint32_t>(width), static_cast<uint32_t>(height))))
@@ -736,7 +740,7 @@ bool keep_settings() {
 void store_recording(const char *why) {
     Capsule &capsule = g_capsule;
     keep_mark();
-    if (!capsule.mark_asked) keep_preview();
+    if (!capsule.mark_asked) keep_preview(true);
     gl_renderer_snap_cancel();
     capsule.preview_asked = capsule.mark_asked = false;
     gl_renderer_shown_log_end();
@@ -990,7 +994,7 @@ extern "C" int disruptor_capsule_mark(int repeat) {
     if (capsule.recording != Recording::kOn) return 0;
     if (repeat || capsule.mark_asked) return 1;
     if (capsule.preview_asked) {
-        gl_renderer_snap_cancel();
+        keep_preview(true);
         capsule.preview_asked = false;
     }
     capsule.mark_pixels.resize(static_cast<size_t>(kMarkWidth) * 2160u * 3u);
@@ -1126,7 +1130,7 @@ extern "C" void disruptor_capsule_before_input(void) {
         keep_mark();
         if (!capsule.mark_asked) keep_preview();
         if (!capsule.mark_asked && disruptor::capsule::preview_due(capsule.recorded.size()) &&
-            gl_renderer_snap_shown(static_cast<int>(disruptor::capsule::kPreviewWidth)))
+            gl_renderer_snap_shown_async(static_cast<int>(disruptor::capsule::kPreviewWidth)))
             capsule.preview_asked = true;
         close_frame();
         open_frame();

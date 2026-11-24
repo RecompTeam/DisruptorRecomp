@@ -34,8 +34,8 @@ require(
     renderer.count("upload_rect(s_raw_tex,") == 1
     and renderer.count("p_glBindFramebuffer(PSXGL_FRAMEBUFFER, s_raw_fbo);") == 2
     and renderer.count("glBindTexture(GL_TEXTURE_2D, s_raw_tex);\n        glTexSubImage2D(") == 1
-    and renderer.count("temporal_note_raw_change(") == 5
-    and renderer.count("temporal_note_raw_begin(") == 3
+    and renderer.count("temporal_note_raw_change(") == 4
+    and renderer.count("temporal_note_raw_begin(") == 2
     and "((size_t)(h - 1) * VRAM_W + (size_t)w) * sizeof(uint16_t), VRAM_W);\n        temporal_note_raw_change(x, y, w, h);\n"
     in renderer
     and "    coh_record(GL_COH_PACK, x, y, x + w - 1, y + h - 1);\n    temporal_note_raw_change(x, y, w, h);\n"
@@ -75,8 +75,16 @@ require(
     "        memset(s->textures + TEMP_KEPT_TEXTURES, 0, (TEMP_MAX_TEXTURES - TEMP_KEPT_TEXTURES) * sizeof(s->textures[0]));\n"
     "    }\n    s->texture_count = 0;"
     in presenter
-    and "        glDeleteTextures(TEMP_MAX_TEXTURES,s->textures);\n        memset(s,0,sizeof(*s));\n" in presenter,
+    and "        if (context_current) glDeleteTextures(TEMP_MAX_TEXTURES,s->textures);\n        memset(s,0,sizeof(*s));\n"
+    in presenter,
     "a scene gives back the snapshots past the first sixteen once it has not needed them for a while",
 )
+
+for name in ("gl_renderer_fbo_peek", "gl_renderer_vram_diff"):
+    operation = renderer[renderer.index(f"int {name}(") :].split("\n}\n", 1)[0]
+    require(
+        "    flush_flat_batch();\n    flush_tex_batch();\n    flush_cpu_upload();\n" in operation,
+        f"{name} reads completed flat and textured draws even without a pending CPU upload",
+    )
 
 print("Disruptor raw picture changes source contract: PASS")

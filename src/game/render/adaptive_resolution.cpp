@@ -1,5 +1,7 @@
 #include "game/render/adaptive_resolution.h"
 
+#include "game/input/menu_rows.h"
+#include "game/input/weapon_list.h"
 #include "game/session/diagnostics.h"
 
 #include "mod_plugins.h"
@@ -13,7 +15,7 @@
 
 extern "C" void mod_register_frame_hook(void (*hook)(void));
 extern "C" void gl_renderer_gpu_busy_enable(int enabled);
-extern "C" double gl_renderer_gpu_busy_ms(void);
+extern "C" double gl_renderer_gpu_busy_ms(int *measured_frames);
 extern "C" int gpu_ws_displayed_flat(void);
 extern "C" int gpu_ws_displayed_menu(void);
 extern "C" uint32_t psx_host_ui_gl_flags(void);
@@ -26,7 +28,7 @@ using namespace disruptor::adaptive_resolution;
 
 constexpr double kPeriod = 1.0 / 59.94;
 constexpr int kFloor = 1;
-constexpr double kEntryHold = 5.0;   // a level's first seconds stream its sectors in
+constexpr double kEntryHold = 1.0;
 constexpr double kRefusedHold = 10.0;
 constexpr double kStepCostCap = kPeriod / 2;  // a step to 6x or 8x took 22 ms, more than any interval's idle: up steps stopped
 
@@ -87,7 +89,8 @@ void frame() {
     if (g.ceiling <= 0) restart(g.requested > 0 ? g.requested : psx_host_video_get_internal_scale());
     if (g.ceiling <= kFloor) return;
     const double now = seconds();
-    const double busy_ms = gl_renderer_gpu_busy_ms();
+    int measured_frames = 0;
+    const double busy_ms = gl_renderer_gpu_busy_ms(&measured_frames);
     if (g.last == 0.0) {
         g.last = now;
         g.busy_ms = busy_ms;
@@ -96,19 +99,26 @@ void frame() {
     const bool world = !gpu_ws_displayed_flat() && !gpu_ws_displayed_menu();
     if (world && !g.world) dynres_hold(&g.controller, now, kEntryHold);
     g.world = world;
-    const double wall = now - g.last, gpu = work_seconds(g.busy_ms, busy_ms);
-    const bool slow = gpu_bound(wall, gpu, kPeriod, g.controller.p.gap_factor);
+    const auto scene = psx_mod_read_byte(disruptor::menu_rows::kPauseState);
+    const bool game_menu = scene == disruptor::menu_rows::kPaused || scene == disruptor::weapon_list::kWeaponList ||
+                           scene == disruptor::weapon_list::kPsionicList || disruptor_weapon_list_visible();
+    const double wall = now - g.last;
+    const double work = measured_frames ? work_seconds(g.busy_ms, busy_ms) : 0.0;
+    const double gpu_per_frame = measured_frames ? work / measured_frames : 0.0;
+    const bool slow = gpu_bound(wall, gpu_per_frame, kPeriod, g.controller.p.gap_factor);
     const DynresSample sample{kPeriod, judged_wall(wall, slow, g.late, kPeriod, g.controller.p.gap_factor),
-                              gpu * g_work_scale,
-                              held(world, menu_shown(psx_host_ui_gl_flags()), g_replaying, psx_netplay_active() != 0)};
-    g.late = gpu_bound(wall, gpu, kPeriod, g.controller.p.late_factor);
+                              work * g_work_scale,
+                              held(world, game_menu || menu_shown(psx_host_ui_gl_flags()), g_replaying, psx_netplay_active() != 0),
+                              measured_frames};
+    g.late = gpu_bound(wall, gpu_per_frame, kPeriod, g.controller.p.late_factor);
     g.last = now;
     g.busy_ms = busy_ms;
     const unsigned long long windows = g.controller.windows + g.controller.held_windows;
     const int level = dynres_sample(&g.controller, now, &sample);
     if (g.controller.windows + g.controller.held_windows != windows)
         disruptor_diagnostics_note("dynamic resolution window: %dx, GPU load %.2f, %d late%s", g.controller.level,
-                                   g.controller.last_load, g.controller.last_late, sample.held ? ", held" : "");
+                                   g.controller.last_load, g.controller.last_late,
+                                   sample.held ? ", held" : g.controller.last_valid ? "" : ", no GPU timing");
     apply(level, now);
 }
 

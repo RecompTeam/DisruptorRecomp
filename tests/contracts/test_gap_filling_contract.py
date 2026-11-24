@@ -72,7 +72,7 @@ static void filler_pass_end(void) {
 }
 """
     in renderer
-    and """    if (s_fill_pass > 0.0f) {  /* a filler obeys the mask and leaves it as it is */
+    and """    if (s_fill_pass > 0.0f || read_only) {  /* a filler obeys the mask and leaves it as it is */
         if (!s_mask_check && !within) { glDisable(GL_STENCIL_TEST); return; }
         glEnable(GL_STENCIL_TEST);
         glStencilMask(0x00);
@@ -251,9 +251,9 @@ require(
 )
 
 
+rims = between(renderer, "static void grown_rims_erase(", "\n}\n")
 require(
-    "static void grown_rims_erase(RimTargets *t, GLuint vao, GLuint fbo, int w, int h, int y0, int y1, int scale,\n"
-    in renderer
+    "static void grown_rims_erase(RimTargets *t, GLuint vao, GLuint fbo, GLuint depth," in renderer
     and '    "  return q <= 16777208.0 ? 0 : q <= 16777213.0 ? 1 : 2; }\\n"\n' in renderer
     and '    "  for (int i = 1; i <= u_reach; ++i) if (kind(p + d * i) == 0) return true;\\n"\n' in renderer
     and '    "  if ((reaches(p, ivec2(1, 0)) && reaches(p, ivec2(-1, 0))) || (reaches(p, ivec2(0, 1)) && reaches(p, ivec2(0, -1)))) discard;\\n"\n'
@@ -261,6 +261,9 @@ require(
     and "    p_glUniform1i(s_rim_uReach, (3 * scale + 1) / 2);\n" in renderer
     and renderer.count("grown_rims_erase(&s_rims_main, s_present_vao, fbo,") == 1
     and presenter.count("grown_rims_erase(&s_rims_thread,s_interp_thread_vao,s_temp_fbo,") == 1
+    and rims.index("PSXGL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, 0, 0);")
+    < rims.index("glDrawArrays(GL_TRIANGLES, 0, 3);")
+    < rims.index("PSXGL_DEPTH_STENCIL_ATTACHMENT, GL_TEXTURE_2D, depth, 0);")
     and depth_step("0.999999") < depth_step(copy_frame[0][1]) < depth_step("1.0"),
     "a copy's depth marks where it filled: on a frame shown and on an in-between one, a marked pixel with no geometry on both "
     "sides within one and a half native pixels, along a row or a column, takes the void's colour back",

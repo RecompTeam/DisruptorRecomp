@@ -20,7 +20,7 @@ typedef struct {
     int area, count, solid_count;
     float outdoor_exposure;
     float ceiling;
-    GLint frame, heading, fog, lightning, surface, sky_eye, sky_projection;
+    GLint frame, heading, fog, lightning, surface, sky_eye, sky_projection, smoke;
     int loaded, ready;
 } NightRenderer;
 
@@ -51,10 +51,11 @@ static int32_t chemical_lightning_strength(void) {
 
 static NightView night_view(int color, int height, int top) {
     NightView result = {-1, {0}};
+    result.smoke_tick = -1;
     if (color == 0x18A4 && height == 240) result.view = psx_game_night_sky_view(top, result.camera, &result.balcony);
     if (color == 0x1A76 && height == 240) {
-        result.view = psx_game_chemical_sky_view(top, result.camera);
-        if (result.view >= 0 && result.camera[3] == -1) result.camera[0] = chemical_lightning_strength();
+        result.view = psx_game_chemical_sky_view(top, result.camera, &result.smoke_tick);
+        if (result.view >= 0 && result.camera[3] == -1) result.factory_flash = chemical_lightning_strength();
     }
     if (color == 0x49EF && height == 240) result.view = psx_game_rooftops_sky_view(top, result.camera);
     return result;
@@ -111,6 +112,42 @@ static SDL_Surface *night_pixels(NightSky sky) {
 #endif
     if (sky == SKY_CHEMICAL) return night_webp(disruptor_sky_chemical_factory, disruptor_sky_chemical_factory_size);
     return night_webp(disruptor_sky_triton_night, disruptor_sky_triton_night_size);
+}
+
+#include "game/render/factory_smoke_gl.inc"
+
+static int night_smoke_elapsed(const NightView *prior, const NightView *current) {
+    if (prior->smoke_tick < 0 || current->smoke_tick < 0 ||
+        prior->view < 0 || current->view < 0 || prior->camera[3] != current->camera[3]) return -1;
+    const uint32_t elapsed = (uint32_t)(current->smoke_tick - prior->smoke_tick);
+    return elapsed <= PSX_FACTORY_SMOKE_CYCLE ? (int)elapsed : -1;
+}
+
+static int night_smoke_moving(const NightView *prior, const NightView *current, int width, int height, float focal_x) {
+    if (night_smoke_elapsed(prior, current) <= 0) return 0;
+    const float radians_per_unit = 6.28318530718f / 256.0f;
+    const float heading = (current->view & 255) + current->yaw_fraction;
+    const float previous_heading = (prior->view & 255) + prior->yaw_fraction;
+    const float yaw = heading * radians_per_unit;
+    const float turn = fabsf(remainderf(heading - previous_heading, 256.0f)) * radians_per_unit;
+    const float sin_yaw = sinf(yaw), cos_yaw = cosf(yaw);
+    const float x = 12704.0f - (float)current->camera[0], z = 3136.0f - (float)current->camera[2];
+    const float depth = x * cos_yaw + z * sin_yaw, side = fabsf(x * sin_yaw - z * cos_yaw);
+    const float travel = hypotf((float)current->camera[0] - (float)prior->camera[0],
+                                (float)current->camera[2] - (float)prior->camera[2]);
+    const float radius = 1040.0f + travel + hypotf(x, z) * turn;
+    const float near_depth = fmaxf(1.0f, depth - radius), far_depth = depth + radius;
+    const float top = fmaxf(current->horizon, prior->horizon), bottom = fminf(current->horizon, prior->horizon) - height;
+    const float lowest_eye = fminf((float)current->camera[1], (float)prior->camera[1]);
+    const float highest_eye = fmaxf((float)current->camera[1], (float)prior->camera[1]);
+    const int in_fog = current->fog_end > current->fog_start && prior->fog_end > prior->fog_start &&
+                       near_depth >= fmaxf(current->fog_end, prior->fog_end);
+    const float highest_smoke = FACTORY_SMOKE_BASE_HEIGHT + FACTORY_SMOKE_RISE + FACTORY_SMOKE_RISE_VARIATION;
+    return far_depth > 1.0f &&
+           !in_fog &&
+           side - radius < far_depth * width / (2.0f * focal_x) &&
+           (FACTORY_SMOKE_BASE_HEIGHT - highest_eye) * 160.0f < fmaxf(top * near_depth, top * far_depth) &&
+           (highest_smoke - lowest_eye) * 160.0f > fminf(bottom * near_depth, bottom * far_depth);
 }
 
 static int night_prepare(NightRenderer *night, NightSky sky) {
@@ -176,6 +213,7 @@ static int night_prepare(NightRenderer *night, NightSky sky) {
             "if(camera.w>0.) {float reach=1.-smoothstep(fog.x,fog.y,1./gl_FragCoord.w);"
             "frag=vec4(mix(haze,rgb,above_fog),fog.w*reach);return;}"
             "frag=vec4(mix(haze,rgb,visible),0.); }");
+        if (sky == SKY_CHEMICAL) night->geometry = factory_smoke_program();
         if (!panorama) night->geometry = build_program(
             "#version 330 core\nlayout(location=0) in vec3 world; layout(location=1) in vec2 uv; layout(location=2) in vec2 material;"
             "uniform vec4 camera, project; out vec2 texel; out vec3 ray; flat out ivec2 tile;"
@@ -209,7 +247,14 @@ static int night_prepare(NightRenderer *night, NightSky sky) {
             night->frame = p_glGetUniformLocation(night->program, "frame");
             night->heading = p_glGetUniformLocation(night->program, "camera");
             night->fog = p_glGetUniformLocation(night->program, "fog");
-            if (sky == SKY_CHEMICAL) night->lightning = p_glGetUniformLocation(night->program, "lightning");
+            if (sky == SKY_CHEMICAL) {
+                night->lightning = p_glGetUniformLocation(night->program, "lightning");
+                if (night->geometry) {
+                    night->transform = p_glGetUniformLocation(night->geometry, "camera");
+                    night->projection = p_glGetUniformLocation(night->geometry, "project");
+                    night->smoke = p_glGetUniformLocation(night->geometry, "smoke");
+                }
+            }
             p_glGenVertexArrays(1, &night->vao);
             glGenTextures(1, &night->texture);
             glBindTexture(GL_TEXTURE_2D, night->texture);
@@ -335,22 +380,40 @@ static void night_draw(NightRenderer *night, NightView current, NightView prior,
         const float layer = sky == SKY_CHEMICAL ? (float)(-current.camera[3] - 1) : sky == SKY_ROOFTOPS ? 0.0f : -windows;
         const float fog_lift = sky == SKY_ROOFTOPS ? 0.25f : 0.0f;
         p_glUniform4f(night->heading, -heading / 256.0f, focal_x, fog_lift, layer);
+        float eye[3];
+        for (int i=0; i<3; ++i) eye[i]=(float)prior.camera[i]+alpha*((float)current.camera[i]-(float)prior.camera[i]);
+        float start = prior.fog_start + alpha * (current.fog_start - prior.fog_start);
+        float end = prior.fog_end + alpha * (current.fog_end - prior.fog_end);
+        float yaw = heading * (6.28318530718f / 256.0f);
         if (sky != NIGHT_TERRAIN) {
             if (sky == SKY_CHEMICAL) {
                 p_glUniform4f(night->fog, 22.0f / 31.0f, 19.0f / 31.0f, 6.0f / 31.0f, 3.0f);
-                const float flash = (prior.camera[0] + alpha * (current.camera[0] - prior.camera[0])) * 0.001f;
+                const float flash = (prior.factory_flash + alpha * (current.factory_flash - prior.factory_flash)) * 0.001f;
                 p_glUniform1f(night->lightning, flash);
             } else p_glUniform4f(night->fog, 15.0f / 31.0f, 15.0f / 31.0f, 18.0f / 31.0f, 1.0f);
             glDrawArrays(GL_TRIANGLES, 0, 3);
         }
-        if (night->count > 0) {
-            float eye[3];
-            for (int i=0; i<3; ++i) eye[i]=(float)prior.camera[i]+alpha*((float)current.camera[i]-(float)prior.camera[i]);
-            const float start = prior.fog_start + alpha * (current.fog_start - prior.fog_start);
-            const float end = prior.fog_end + alpha * (current.fog_end - prior.fog_end);
+        if (sky == SKY_CHEMICAL && night->geometry && current.smoke_tick >= 0) {
+            const int elapsed = night_smoke_elapsed(&prior, &current);
+            const uint32_t tick = (uint32_t)(elapsed >= 0 ? prior.smoke_tick : current.smoke_tick);
+            const float phase = (float)(tick % PSX_FACTORY_SMOKE_CYCLE) + (elapsed >= 0 ? alpha * elapsed : 0.0f);
+            float smoke_horizon = horizon;
+            if (elapsed < 0) {
+                for (int axis = 0; axis < 3; ++axis) eye[axis] = (float)current.camera[axis];
+                yaw = ((view & 255) + current.yaw_fraction) * (6.28318530718f / 256.0f);
+                smoke_horizon = current.horizon;
+                start = current.fog_start;
+                end = current.fog_end;
+            }
+            p_glUseProgram(night->geometry);
+            p_glUniform4f(night->transform, eye[0], eye[1], eye[2], yaw);
+            p_glUniform4f(night->projection, 2.0f * focal_x / width,
+                          2.0f * (y + smoke_horizon) / VRAM_H - 1.0f, 320.0f / VRAM_H, 0.0f);
+            p_glUniform4f(night->smoke, phase / PSX_FACTORY_SMOKE_CYCLE, start, end, 0.0f);
+            night_draw_blended(0, 3 * FACTORY_SMOKE_SECTIONS * 6);
+        } else if (sky == NIGHT_TERRAIN && night->count > 0) {
             p_glUniform4f(night->fog, start, end, night->ceiling - eye[1], outside);
             glDrawArrays(GL_TRIANGLES, 0, 3);
-            const float yaw = heading * (6.28318530718f / 256.0f);
             if (windows > 0.0f) {
                 p_glUniform4f(night->sky_eye, eye[0], eye[1], eye[2], yaw);
                 p_glUniform4f(night->sky_projection, 2.0f * focal_x / width,

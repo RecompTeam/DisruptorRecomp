@@ -90,6 +90,7 @@ set(DISRUPTOR_EXTRA_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/hud_widgets.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/mover_motion.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/ddgi_view.cpp"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/archive_terminal.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/adaptive_resolution.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/ddgi_level.cpp"
     "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/sprite_depth.cpp"
@@ -117,6 +118,15 @@ foreach(sky earth city rooftop mars triton dusk green fire ${DISRUPTOR_SKY_WEBP}
     list(APPEND DISRUPTOR_SKY_SOURCES "${sky_source}")
 endforeach()
 list(APPEND DISRUPTOR_EXTRA_SOURCES ${DISRUPTOR_SKY_SOURCES})
+
+set(DISRUPTOR_ARCHIVE_ATLAS "${CMAKE_CURRENT_SOURCE_DIR}/src/game/render/assets/archive-terminal.png")
+set(DISRUPTOR_ARCHIVE_SOURCE "${CMAKE_CURRENT_BINARY_DIR}/archive_terminal_atlas.cpp")
+add_custom_command(OUTPUT "${DISRUPTOR_ARCHIVE_SOURCE}"
+    COMMAND "${CMAKE_COMMAND}" "-DINPUT=${DISRUPTOR_ARCHIVE_ATLAS}" "-DOUTPUT=${DISRUPTOR_ARCHIVE_SOURCE}"
+        "-DNAME=disruptor_archive_atlas" -P "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_bytes.cmake"
+    DEPENDS "${DISRUPTOR_ARCHIVE_ATLAS}" "${CMAKE_CURRENT_SOURCE_DIR}/cmake/embed_bytes.cmake"
+    VERBATIM)
+list(APPEND DISRUPTOR_EXTRA_SOURCES "${DISRUPTOR_ARCHIVE_SOURCE}")
 
 # The project deliberately uses the redistributable OpenBIOS backend only.
 set(PSXRECOMP_BIOS_STEMS "OpenBIOS" CACHE STRING "" FORCE)

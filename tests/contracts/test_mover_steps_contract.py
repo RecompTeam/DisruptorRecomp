@@ -246,13 +246,16 @@ require(
 
 mesh = read("psxrecomp/runtime/include/gpu_temporal_mesh.h")
 require(
-    "            for (int index = 0; index <= candidate_count; ++index) {\n"
-    "                const int *proposed = index < candidate_count ? candidates[index].shift : zero;\n"
+    "            for (int lift_pass = 0; lift_pass < 2; ++lift_pass) {\n"
+    "                for (int index = 0; index <= candidate_count; ++index) {\n"
+    "                    const int *proposed = index < candidate_count ? candidates[index].shift : zero;\n"
     in mesh
-    and "                const int rides = !proposed[0] && !proposed[1] && !proposed[2];\n" in mesh
-    and "                    near_camera &= rides || abs(proposed[axis] - best_shift[axis]) <= GPU_TEMPORAL_TWIN_OBJECT_REACH;\n"
-    in mesh
-    and "                    trusted[triangle] = rides ? 3 : 2;\n" in mesh
+    and "const int zero_shift = !proposed[0] && !proposed[1] && !proposed[2];" in mesh
+    and "const int same_horizontal = proposed[0] == best_shift[0] && proposed[2] == best_shift[2];" in mesh
+    and "if (follows_lift != lift_pass) continue;" in mesh
+    and "const int rides = zero_shift || follows_lift;" in mesh
+    and "near_camera &= rides || abs(proposed[axis] - best_shift[axis]) <= GPU_TEMPORAL_TWIN_OBJECT_REACH;" in mesh
+    and "trusted[triangle] = rides ? 3 : 2;" in mesh
     and "        const int rides = trusted[corner / 3] == 3;\n" in mesh
     and "        if (point && (major[corner] != major[order[point - 1]] || minor[corner] != minor[order[point - 1]]))\n"
     "            last[0] = last[1] = -1;\n"
@@ -263,8 +266,8 @@ require(
     and "        if (trusted && trusted[triangle] >= 2) continue;" in mesh
     and mesh.index("    twins = gpu_temporal_mesh_pairs(prev, prev_n, curr, curr_n, matches, pairs, trusted, shift);\n")
     < mesh.index("        const int rides = trusted[corner / 3] == 3;\n"),
-    "in an in-between picture the faces that kept their place before a moving camera are a rider with its own motion, whatever "
-    "the camera's step, the pairs are known before corners are welded, and no corner of a rider is welded to one of the world",
+    "in an in-between picture riders can share the scene's horizontal shift while following the camera vertically, the pairs "
+    "are known before corners are welded, and no corner of a rider is welded to one of the world",
 )
 
 frontend = read("psxrecomp/runtime/src/main.cpp")

@@ -382,6 +382,7 @@ uint32_t current_flags(void *) {
 namespace {
 disruptor::crosshair::Style g_crosshair_style;
 std::atomic<std::uint64_t> g_crosshair_taken{0};  /* the crosshair as the game's thread last answered the flags for it */
+std::atomic<std::uint64_t> g_crosshair_drawn{0};
 
 /* The crosshair alone, taken on the game's thread: the render thread draws it and nothing that thread may be changing. */
 std::uint32_t crosshair_apart() {
@@ -391,6 +392,14 @@ std::uint32_t crosshair_apart() {
     return kLayer | PSX_HOST_UI_APART;
 }
 }  // namespace
+
+extern "C" std::uint64_t psx_game_crosshair_snapshot(void) {
+    return g_crosshair_taken.load(std::memory_order_acquire);
+}
+
+extern "C" std::uint64_t psx_game_take_drawn_crosshair(void) {
+    return g_crosshair_drawn.exchange(0, std::memory_order_acq_rel);
+}
 
 void set_crosshair_style(int shape, int size, int colour, int opacity) {
     g_crosshair_style = disruptor::crosshair::clamped({shape, size, colour, opacity});
@@ -455,10 +464,12 @@ void end_frame() {
 /* On the render thread: the crosshair as it was taken with the flags. */
 void render_crosshair_apart(int width, int height) {
     begin_plain_frame(width, height);
-    if (const std::uint64_t taken = g_crosshair_taken.load(std::memory_order_acquire))
+    const std::uint64_t taken = psx_game_crosshair_snapshot();
+    if (taken)
         disruptor::crosshair::draw(ImGui::GetForegroundDrawList(), ImVec2(static_cast<float>(width) * 0.5f, static_cast<float>(height) * 0.5f),
                                    height, disruptor::crosshair::unpacked(taken));
     end_frame();
+    g_crosshair_drawn.store(taken, std::memory_order_release);
 }
 
 void render_notices(const char *word, int width, int height) {
@@ -485,6 +496,7 @@ void render_notices(const char *word, int width, int height) {
 }
 
 void render_gl(void *, int width, int height) {
+    g_crosshair_drawn.store(0, std::memory_order_release);
     if (psx_host_ui_render_apart()) {
         if (g_menu.imgui_ready) render_crosshair_apart(width, height);
         return;

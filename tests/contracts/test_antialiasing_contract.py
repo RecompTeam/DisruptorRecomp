@@ -78,13 +78,14 @@ require(
     "edges only where that filter is on and the picture carries the mirror's marks",
 )
 require(
-    '    "bool flat_picture(float mark){ return abs(mark - 0.75) < 0.02 || abs(mark - 0.95) < 0.02; }\\n"\n' in renderer
-    and '    "  vec4 here = texture(u_tex, v_uv);\\n"\n'
+    '    "bool flat_ui(float mark){ return abs(mark - 0.75) < 0.02 || abs(mark - 0.95) < 0.02; }\\n"' in renderer
+    and '    "  is_ui = flat_ui(point.a);\\n"' in renderer
+    and '    "  return is_ui ? point : vec4(filtered.rgb, point.a); }\\n"' in renderer
+    and '    "  bool here_ui; vec4 here = present_sample(u_tex, v_uv, here_ui);\\n"\n'
     '    "  frag = vec4(here.rgb, 1.0);\\n"\n'
-    '    "  if (u_px.z < 0.5 || flat_picture(here.a)) return;\\n"\n'
+    '    "  if (u_px.z < 0.5 || here_ui) return;\\n"\n'
     in renderer
-    and '    "  if (flat_picture(north.a) || flat_picture(south.a) || flat_picture(east.a) || flat_picture(west.a)) return;\\n"\n'
-    in renderer
+    and '    "  if (north_ui || south_ui || east_ui || west_ui) return;\\n"\n' in renderer
     and '    "  if (contrast < max(0.0312, most * 0.125)) return;\\n"\n' in renderer
     and '    "  bool level = across_rows >= across_columns;\\n"\n' in renderer
     and '    "  float side = (level ? px.y : px.x) * (lower ? -1.0 : 1.0);\\n"\n' in renderer
@@ -135,7 +136,9 @@ require(
     in renderer
     and '    "  ivec2 at = ivec2((gl_FragCoord.xy - u_span.xy) / max(u_span.w, 1.0)), most = textureSize(u_shade, 0) - 1;\\n"\n'
     in renderer
-    and '    "  vec4 seen = texture(u_tex, v_uv);\\n"\n    "  vec3 c = seen.rgb;\\n"\n' in renderer
+    and '    "  bool is_ui; vec4 seen = present_sample(u_tex, v_uv, is_ui);\\n"\n    "  vec3 c = seen.rgb;\\n"\n'
+    in renderer
+    and '    "  if (u_span.z < 1.5 && is_ui) { frag = seen; return; }\\n"\n' in renderer
     and '    "  frag = vec4(u_span.z > 1.5 ? vec3(0.0, 0.0, 0.25) : c, seen.a);\\n"\n' in renderer
     and '    "  frag = vec4(u_span.z > 1.5 ? vec3(lit) : c*lit, seen.a); }\\n";\n' in renderer,
     "a shaded picture goes through the target too with the mirror's marks handed on, the lighting's own passes drawn before "
@@ -183,11 +186,13 @@ require(
     and "    int want = s_geometry_correction && p_glRenderbufferStorageMultisample ? s_msaa_asked : 0;\n"
     "    if (want > s_msaa_most) want = s_msaa_most;\n"
     "    if (want < 2) want = 0;\n"
-    "    const int shaded = want && s_ssaa_asked && p_glMinSampleShading;\n"
+    "    if (want != s_msaa) {\n"
+    "        if (!wide_resolve_twins()) return;\n"
+    "        wide_free_twins();\n"
+    "        s_msaa = want;\n"
+    "    }\n"
+    "    const int shaded = s_msaa && s_ssaa_asked && p_glMinSampleShading;\n"
     "    if (shaded != s_ssaa) sample_shading(s_ssaa = shaded);\n"
-    "    if (want == s_msaa) return;\n"
-    "    for (int i = 0; i < WIDE_MAX_SURF; i++) wide_twin_drop(i);\n"
-    "    s_msaa = want;\n"
     in renderer
     and "        glGetIntegerv(PSXGL_MAX_SAMPLES, &s_msaa_most);\n" in renderer
     and '    p_glRenderbufferStorageMultisample = (void *)SDL_GL_GetProcAddress("glRenderbufferStorageMultisample");\n'
@@ -211,10 +216,11 @@ require(
     '            : SDL_GL_ExtensionSupported("GL_ARB_sample_shading") ? (void *)SDL_GL_GetProcAddress("glMinSampleShadingARB") : NULL;\n'
     in renderer
     and renderer.count("sample_shading(") == 4
-    and "    if (s_temp_shading!=s_ssaa) sample_shading(s_temp_shading=s_ssaa);\n"
-    "    p_glBindFramebuffer(PSXGL_FRAMEBUFFER,s_temp_ms_fbo ? s_temp_ms_fbo : s_temp_fbo);\n"
+    and "    const int shading=use_msaa && s_ssaa;\n"
+    "    if (s_temp_shading!=shading) sample_shading(s_temp_shading=shading);\n"
+    "    p_glBindFramebuffer(PSXGL_FRAMEBUFFER,use_msaa ? s_temp_ms.fbo : s_temp_fbo);\n"
     in presenter
-    and "    s_temp_ms_fbo=s_temp_ms_rb=s_temp_ms_depth=s_temp_ms_ds=0; s_temp_samples=s_temp_shading=0;\n"
+    and "    memset(&s_temp_ms,0,sizeof(s_temp_ms));\n    s_temp_samples=s_temp_failed_ms_height=s_temp_shading=0;\n"
     in presenter,
     "supersampling starts off and is multisampling with every sample shaded: it is on only while samples are in use and the "
     "context is GL 4.0 or has the extension, whose call alone is taken, and each of the two GL contexts is told when it "
@@ -226,12 +232,12 @@ require(
     "    s_wide_ms_fresh[i][1] = 0;\n"
     "    return s_wide_ms_fbo[i];\n"
     in renderer
-    and "    wide_blit(s_wide_fbo[i], s_wide_ms_fbo[i], 0, VRAM_H);\n    return 1;\n" in renderer
     and "    p_glRenderbufferStorageMultisample(PSXGL_RENDERBUFFER, s_msaa, GL_RGBA8, w, h);\n" in renderer
     and "        p_glTexImage2DMultisample(PSXGL_TEXTURE_2D_MULTISAMPLE, samples, PSXGL_DEPTH24_STENCIL8, w, h, GL_TRUE);\n"
     in renderer
     and "    ms_depth_attach(&s_wide_ms_depth[i], &s_wide_ms_ds[i], s_msaa, w, h);\n"
-    "    if (p_glCheckFramebufferStatus(PSXGL_FRAMEBUFFER) != PSXGL_FRAMEBUFFER_COMPLETE) {\n"
+    "    if (p_glCheckFramebufferStatus(PSXGL_FRAMEBUFFER) != PSXGL_FRAMEBUFFER_COMPLETE ||\n"
+    "        !wide_blit(s_wide_fbo[i], s_wide_ms_fbo[i], 0, VRAM_H)) {\n"
     in renderer
     and "        if (made <= 8 && p_glCheckFramebufferStatus(PSXGL_FRAMEBUFFER) == PSXGL_FRAMEBUFFER_COMPLETE) return;"
     in renderer
@@ -239,7 +245,8 @@ require(
     "    p_glBindRenderbuffer(PSXGL_RENDERBUFFER, 0);\n"
     "    p_glFramebufferRenderbuffer(PSXGL_FRAMEBUFFER, PSXGL_DEPTH_STENCIL_ATTACHMENT, PSXGL_RENDERBUFFER, *renderbuffer);\n"
     in renderer
-    and "        wide_twin_free(i);\n        for (int other = 0; other < WIDE_MAX_SURF; other++) wide_twin_drop(other);\n        s_msaa_asked = s_msaa = 0;\n        return 0;\n"
+    and "        wide_twin_free(i);\n        s_msaa_asked = 0;\n        if (!wide_resolve_twins()) return 0;\n"
+    "        wide_free_twins();\n        s_msaa = 0;\n        return 0;\n"
     in renderer
     and "    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, wide_drawn(target_fbo));\n" in renderer
     and "        p_glBindFramebuffer(PSXGL_FRAMEBUFFER, wide_drawn(g_wide_cur));\n    wide_depth_begin();\n" in renderer
@@ -256,27 +263,31 @@ require(
     "surface stands: one that cannot be made switches multisampling off with the others handed back",
 )
 require(
-    "    if (h <= 0 || (y >= s_wide_ms_fresh[i][0] && y + h <= s_wide_ms_fresh[i][0] + s_wide_ms_fresh[i][1])) return;\n"
-    "    wide_blit(s_wide_ms_fbo[i], fbo, y, h);\n    s_wide_ms_fresh[i][0] = y;\n    s_wide_ms_fresh[i][1] = h;\n"
+    "    const int cached = y >= s_wide_ms_fresh[i][0] && y + h <= s_wide_ms_fresh[i][0] + s_wide_ms_fresh[i][1];\n"
+    "    if (!wide_restore_captures(fbo, y * s_scale, h * s_scale, !cached)) return 0;\n"
+    "    if (cached) return 1;\n"
+    "    if (!wide_blit(s_wide_ms_fbo[i], fbo, y, h)) return 0;\n"
+    "    wide_overwrite_captures(fbo, y * s_scale, h * s_scale);\n"
+    "    s_wide_ms_fresh[i][0] = y;\n    s_wide_ms_fresh[i][1] = h;\n"
     in renderer
     and "                        GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT, GL_NEAREST);\n"
     in renderer
     and "    glDisable(GL_SCISSOR_TEST);\n    p_glBlitFramebuffer(0, y * s_scale, w, (y + h) * s_scale, 0, y * s_scale, w, (y + h) * s_scale,\n"
     in renderer
-    and "    wide_blit_center(fbo, disp_x, disp_y, disp_h);   /* fast-path: authoritative centre */\n    wide_resolved(fbo, disp_y, disp_h);\n"
+    and "    const int resolved = wide_blit_center(fbo, disp_x, disp_y, disp_h) && wide_resolved(fbo, disp_y, disp_h);\n"
     in renderer
-    and "    wide_resolved(target_fbo, 0, VRAM_H);\n    p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, target_fbo);\n"
+    and "    if (!wide_resolved(target_fbo, 0, VRAM_H)) return 0;\n    p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, target_fbo);\n"
     in renderer
-    and renderer.count("    wide_resolved(fbo, 0, VRAM_H);\n    p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, fbo);\n")
-    == 2
-    and "    wide_resolved(from, src_y, h);\n    const int w = g_wide_w * s_scale;\n" in renderer
-    and "    wide_resolved(fbo, src_y, h);\n    const int S = s_scale;\n    p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, fbo);\n"
+    and renderer.count("    if (!wide_resolved(fbo, 0, VRAM_H)) return 0;\n") == 2
+    and "    if (!wide_resolved(from, src_y, h)) return;\n    if (!wide_transfer_ready()) return;\n" in renderer
+    and "    if (!wide_resolved(fbo, src_y, h)) return;\n    const int S = s_scale;\n    p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER, fbo);\n"
     in renderer
     and renderer.count("wide_resolved(") == 7
-    and "    wide_blit(s_wide_ms_fbo[i], s_wide_fbo[i], 0, VRAM_H);\n    p_glBindFramebuffer(PSXGL_FRAMEBUFFER, 0);\n    wide_twin_free(i);\n"
+    and "        const int copied = wide_blit(s_wide_ms_fbo[i], s_wide_fbo[i], 0, VRAM_H);\n"
+    "        p_glBindFramebuffer(PSXGL_FRAMEBUFFER, 0);\n        s_wide_ms_fresh[i][1] = 0;\n        if (!copied) return 0;\n"
     in renderer
-    and "    for (int i = 0; i < WIDE_MAX_SURF; ++i) wide_twin_drop(i);\n    for (int i = 0; i < WIDE_MAX_SURF; ++i) {\n        if (!s_wide_fbo[i]) continue;\n"
-    in renderer
+    and "    if (!wide_resolve_twins()) goto fail;\n" in renderer
+    and "    wide_free_twins();\n    {\n        GLuint old_hr_tex = s_hr_tex, old_hr_fbo = s_hr_fbo,\n" in renderer
     and "    for (int i = 0; i < WIDE_MAX_SURF; i++) {\n        wide_twin_free(i);\n        if (s_wide_fbo[i]) { p_glDeleteFramebuffers(1, &s_wide_fbo[i]);"
     in renderer,
     "before a mirror surface is shown, captured, read back or rebuilt its twin's rows are resolved into it once for what was "
@@ -284,21 +295,29 @@ require(
 )
 require(
     "    const int samples=s_msaa;\n"
-    "    if (s_temp_fbo && s_temp_width==width && s_temp_scale==scale && s_temp_samples==samples) return 1;\n"
+    "    if (!s_temp_fbo || s_temp_width!=width || s_temp_scale!=scale || s_temp_samples!=samples) {\n"
     in presenter
-    and "        p_glRenderbufferStorageMultisample(PSXGL_RENDERBUFFER,samples,GL_RGBA8,width*scale,VRAM_H*scale);\n"
+    and "p_glRenderbufferStorageMultisample(PSXGL_RENDERBUFFER,samples,GL_RGBA8,width*scale,height*scale);" in presenter
+    and "    const int use_msaa=temporal_ms_ready(s->height);\n" in presenter
+    and "    p_glBindFramebuffer(PSXGL_FRAMEBUFFER,use_msaa ? s_temp_ms.fbo : s_temp_fbo);\n"
+    "    glViewport(0,0,s->width*s->scale,VRAM_H*s->scale);\n"
     in presenter
-    and "    p_glBindFramebuffer(PSXGL_FRAMEBUFFER,s_temp_ms_fbo ? s_temp_ms_fbo : s_temp_fbo);\n    glViewport(0,0,s->width*s->scale,VRAM_H*s->scale);\n"
+    and "    s_temp_scene_depth=0;\n    glDisable(GL_DEPTH_TEST);\n"
+    "    const int resolved=!use_msaa || temporal_resolve_msaa(s->width*s->scale,s->height*s->scale);\n"
+    "    gz_end(GZ_BETWEEN_RESOLVE);\n    if (!resolved) {\n"
     in presenter
-    and "    s_temp_scene_depth=0;\n    glDisable(GL_DEPTH_TEST);\n    if (s_temp_ms_fbo) {\n"
-    "        p_glBindFramebuffer(PSXGL_READ_FRAMEBUFFER,s_temp_ms_fbo); p_glBindFramebuffer(PSXGL_DRAW_FRAMEBUFFER,s_temp_fbo);\n"
-    "        glDisable(GL_SCISSOR_TEST);\n"
+    and "    p_glBlitFramebuffer(0,0,width,height,0,0,width,height,GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT,GL_NEAREST);\n"
+    "    const int copied=wide_transfer_succeeded();\n    p_glBindFramebuffer(PSXGL_FRAMEBUFFER,s_temp_fbo);\n    return copied;\n"
     in presenter
-    and "                            GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT,GL_NEAREST);\n        p_glBindFramebuffer(PSXGL_FRAMEBUFFER,s_temp_fbo);\n"
+    and "    ms_depth_attach(&target.depth,&target.depth_storage,samples,width*scale,height*scale);\n" in presenter
+    and "    if (!complete) {\n        temporal_multisample_release(&target);\n        return 0;\n    }\n"
+    "    temporal_multisample_release(&s_temp_ms);\n    target.height=height;\n    s_temp_ms=target;\n"
     in presenter
-    and "        ms_depth_attach(&s_temp_ms_depth,&s_temp_ms_ds,samples,width*scale,VRAM_H*scale);\n" in presenter
-    and "            if (s_temp_ms_ds) p_glDeleteRenderbuffers(1,&s_temp_ms_ds);\n"
-    "            s_temp_ms_fbo=s_temp_ms_rb=s_temp_ms_depth=s_temp_ms_ds=0;\n        }\n"
+    and "    return s_temp_ms.fbo && s_temp_ms.height>=height;\n" in presenter
+    and "    if (samples>=2 && !temporal_ms_ready(height) &&\n"
+    "        (!s_temp_failed_ms_height || height<s_temp_failed_ms_height) &&\n"
+    "        !temporal_multisample_target(width,height,scale,samples)) s_temp_failed_ms_height=height;\n"
+    "    return 1;\n"
     in presenter
     and "    if (s_wide_ms_ds[i]) p_glDeleteRenderbuffers(1, &s_wide_ms_ds[i]);\n" in renderer,
     "an in-between frame is drawn through a twin of the same samples and resolved, colour and depth, before it is shaded, "
@@ -405,7 +424,9 @@ require(
 def members(text: str, opening: str) -> set[str]:
     """Every data member of the record that `opening` begins: the word before each `=` or `;` of its body, comments dropped."""
     body = text[text.index(opening) + len(opening) :]
-    body = re.sub(r"//[^\n]*", "", body[: re.search(r"^\s*};", body, re.MULTILINE).start()])
+    closing = re.search(r"^\s*};", body, re.MULTILINE)
+    assert closing is not None, f"Missing closing brace for {opening}"
+    body = re.sub(r"//[^\n]*", "", body[: closing.start()])
     return set(re.findall(r"(\w+)\s*(?:=[^;]*)?;", body))
 
 

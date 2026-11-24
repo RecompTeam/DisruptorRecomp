@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Source contract for the experimental smooth distance fade: the law in the mirror's shaders, the presenter's copy, the setting."""
 
+import re
 from pathlib import Path
 
 from menu_sources import menu_text
@@ -19,6 +20,7 @@ def require(condition: bool, message: str) -> None:
 
 cmake = read("CMakeLists.txt")
 renderer = read("psxrecomp/runtime/src/gpu_gl_renderer.c")
+factory = read("psxrecomp/runtime/src/gpu_gl_factory_water.c.inc")
 presenter = read("psxrecomp/runtime/src/gpu_gl_temporal.c.inc")
 arena = read("src/game/render/render_arena.cpp")
 menu = menu_text(ROOT)
@@ -26,6 +28,46 @@ enhancements = read("src/game/ui/menu/tab_enhancements.cpp")
 options = read("src/game/settings/options.cpp")
 saved = read("src/game/settings/saved.cpp")
 launcher = read("src/launcher/launcher_settings.cpp")
+
+sign_image = factory.partition("const uint factory_sign_texels[390] = uint[390](")[2].partition(");")[0]
+sign_words = [int(word, 16) for word in re.findall(r"0x([0-9A-F]{8})u", sign_image)]
+sign_ink = {
+    divmod(word_index * 8 + nibble, 52)
+    for word_index, word in enumerate(sign_words)
+    for nibble in range(8)
+    if ((word >> (4 * nibble)) & 15) >= 10
+}
+sign_bands = (range(4, 11), range(12, 47), range(49, 56))
+require(
+    len(sign_words) == 390
+    and 0 in sign_words
+    and all(3 <= column < 49 and any(row in band for band in sign_bands) for row, column in sign_ink)
+    and all(any(row in band for row, _ in sign_ink) for band in sign_bands)
+    and all(column != 25 for row, column in sign_ink if row in sign_bands[0])
+    and all(column != 26 for row, column in sign_ink if row in sign_bands[2]),
+    "The warning sign keeps both labels and its emblem inside the plate and leaves a gap at the lettering joints",
+)
+
+pool = '"  if (family == 2) { color = factory_water_sample(point, side, phase); return true; }\\n"'
+river_visibility = '"  float visibility = float(299 - g_row) * (1.0 / 11.0);\\n"'
+require(
+    "factory_water_color(sample_uv, g_water_family, water_color)) rgb = water_color;" in renderer
+    and pool in factory
+    and river_visibility in factory
+    and factory.index(pool) < factory.index(river_visibility)
+    and '"  color = mix(color, mix(' in factory[factory.index(river_visibility) :]
+    and ', visibility);\\n"' in factory[factory.index(river_visibility) :],
+    "Chemical Factory tint applies only to the river and has zero strength on its fully fogged palette row",
+)
+
+river_flow = factory.partition(pool)[2].partition(river_visibility)[0]
+river_speeds = re.findall(r"vec2\((-?\d+(?:\.\d+)?), (-?\d+(?:\.\d+)?)\) \* time", river_flow)
+require(
+    "float time = tick / 1024.0;" in river_flow
+    and len(river_speeds) == 2
+    and all(float(component).is_integer() for speed in river_speeds for component in speed),
+    "River layers complete whole 64-texel repeats when the 16-bit tick wraps",
+)
 
 require(
     '    "    float range = (1.0 + u_fade.w*abs(v_fade.y - u_fade_at.x)/u_fade_at.y)/(v_fade.x*u_fade_at.z);\\n"\n'
@@ -52,12 +94,12 @@ require(
     "and the palette's block of rows begins at the row a level's texture descriptor names, a palette no descriptor names keeps the game's row",
 )
 require(
-    '    "  int glyph = (v_raw & 0x200002) == 0 && (u_twin.x | u_twin.y) == 0 ? (v_raw >> 2) & 0x3FFFF : 0;  '
-    '/* a texture window samples past the limits */\\n"\n'
-    '    "  if (v_sky_on != 0 ? !sky_sample(rgb, stp)\\n"\n'
+    '    "  bool mix_rows = level >= 0.0 && row_part > 0.0 && int(level) < rows - 1 && u_semipass < 3;\\n"\n'
+    in renderer
+    and '#define TEX_FOG_BLEND_BEGIN "  if (mix_rows) {\\n"' in renderer
+    and '    "  if (v_sky_on != 0 ? !sky_sample(rgb, stp)\\n"\n'
     '    "                    : !sample_texture(sample_uv, rgb, stp) && (glyph == 0 || !glyph_edge(sample_uv, glyph, rgb, stp))) discard;\\n"\n'
-    '    "  float row_part = fract(level);\\n"\n'
-    '    "  if (level >= 0.0 && row_part > 0.0 && int(level) < rows - 1 && u_semipass < 3) {\\n"\n'
+    "    TEX_FOG_BLEND_BEGIN\n"
     '    "    vec3 next; int next_stp; g_row += 1;\\n"\n'
     '    "    if (v_sky_on != 0 ? sky_sample(next, next_stp) : sample_texture(sample_uv, next, next_stp)) '
     'rgb = mix(rgb, next, row_part);\\n"\n'

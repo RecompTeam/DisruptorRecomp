@@ -209,7 +209,7 @@ require(
 underlay = body(temporal, "static void temporal_underlay(float alpha,int covered)")
 require(
     "            int show=p->gone[ti];\n" in underlay
-    and "            else if (show) show=opaque && !(t && s_temp_under[j*TEXV+18]!=0.0f) && (!covered || (was->modelled && show==1));"
+    and "            else show=opaque && !(t && source[18]!=0.0f) && (!covered || (was->modelled && show==1));"
     in underlay,
     "a departed face with a held corner must go under the current world only: its depth there is not the face's",
 )

@@ -1,0 +1,27 @@
+diff --git a/runtime/include/dynamic_resolution.h b/runtime/include/dynamic_resolution.h
+index d43c26adc8b035a9c40bdc1572365914c2bfe3a8..0bc01df3d0fe8888bd2b63861dac15652a567f0a 100644
+--- a/runtime/include/dynamic_resolution.h
++++ b/runtime/include/dynamic_resolution.h
+@@ -83,6 +83,7 @@
+     double wall_s;     /* this interval's wall time */
+     double work_s;     /* see LOAD above */
+     int    held;       /* the host holds: not a sample, the window restarts */
++    int    measured_frames;
+ } DynresSample;
+ 
+ typedef struct DynresController {
+@@ -90,11 +91,11 @@
+     int    floor, ceiling, level, forced;
+     double f;                         /* learned share of load ~ S^2 */
+     /* the window in progress */
+-    double win_period, win_work, win_wall;
+-    int    win_n, win_late;
++    double win_period, win_work, win_wall, win_measured;
++    int    win_n, win_late, win_unpaired;
+     /* the last closed window */
+     double last_load, last_vblank_hz;
+-    int    last_late, last_valid;
++    int    last_late, last_valid, last_complete;
+     double prev_load;                 /* the window before it (-1 = none) */
+     double hold_until;
+     double up_streak_s;

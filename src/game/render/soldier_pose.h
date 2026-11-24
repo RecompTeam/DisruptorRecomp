@@ -129,6 +129,7 @@ inline constexpr std::array<Pose, 6> robot_shooting{{
 }};
 
 inline constexpr Pose triton_soldier_first{0x09001370u, 0xD25CF76Du, 100, 134, {}, {}};
+inline constexpr Pose triton_guard_first{0x06000CE8u, 0x1C184D4Du, 48, 144, {}, {}};
 inline constexpr Pose chemical_fly_first{0x06000C28u, 0x660D0D5Cu, 126, 78, {}, {}};
 inline constexpr Pose armored_soldier_first{0x06000D2Cu, 0xF14EE3CCu, 52, 130, {}, {}};
 inline constexpr Pose ice_drone_first{0x0400086Cu, 0x2562424Cu, 72, 68, {}, {}};
@@ -139,6 +140,8 @@ inline constexpr Pose gold_helmet_soldier_first{0x06001928u, 0x920192C0u, 114, 1
 inline constexpr Pose tunnel_creature_first{0x060014E0u, 0x14813A7Eu, 82, 148, {}, {}};
 inline constexpr Pose spiked_mine_first{0x04000468u, 0x8383554Du, 36, 36, {}, {}};
 inline constexpr Pose shield_robot_first{0x04001B8Cu, 0x40404018u, 100, 156, {}, {}};
+inline constexpr Pose visor_soldier_first{0x080013BCu, 0xF30E0117u, 72, 128, {}, {}};
+inline constexpr Pose reactor_soldier_first{0x0600153Cu, 0x1C1C1C1Cu, 60, 148, {}, {}};
 
 inline constexpr std::array<Pose, 7> triton_soldier_attack{{
     {0x06001408u, 0x43881F27u, 94, 136, {1, 17, 1, 17}, {4, 0, 4, 0}},
@@ -149,6 +152,23 @@ inline constexpr std::array<Pose, 7> triton_soldier_attack{{
     {0x06001210u, 0x18CEE599u, 74, 134, {2, 16, 2, 16}, {-7, 0, -7, 0}},
     {0x060013A0u, 0xAB9191ABu, 72, 134, {7, 0, 7, 0}, {1, 20, 1, 20}},
 }};
+
+inline constexpr std::array<Pose, 12> triton_guard_attack{{
+    {0x04000C84u, 0x47474723u, 50, 144, {}, {14, 0, 14, 0}},
+    {0x04000C00u, 0x27272727u, 46, 144, {-14, 0, -14, 0}, {11, 0, 11, 0}},
+    {0x04000BB0u, 0x22220422u, 50, 144, {-11, 0, -11, 0}, {-10, 11, -10, 11}},
+    {0x04000B78u, 0x24540A0Au, 46, 144, {10, -12, 10, -12}, {-13, 6, -13, 6}},
+    {0x10000B70u, 0x47652254u, 40, 146, {13, -6, 13, -6}, {}},
+    {0x0C000B70u, 0x47652254u, 40, 146, {}, {-4, 6, -4, 6}},
+    {0x04000B80u, 0xFFFFCE99u, 44, 150, {4, -6, 4, -6}, {7, -12, 7, -12}},
+    {0x04000B64u, 0x47240A13u, 40, 146, {-7, 12, -7, 12}, {0, -17, 0, -17}},
+    {0x04000BECu, 0x0C4A2922u, 54, 146, {0, 17, 0, 17}, {20, 6, 20, 6}},
+    {0x04000BB0u, 0x22220422u, 50, 144, {-20, -6, -20, -6}, {-11, 0, -11, 0}},
+    {0x04000C00u, 0x27272727u, 46, 144, {11, 0, 11, 0}, {-14, 0, -14, 0}},
+    {0x04000C84u, 0x47474723u, 50, 144, {14, 0, 14, 0}, {}},
+}};
+inline constexpr uint32_t triton_guard_attack_start = 60u;
+inline constexpr uint32_t triton_guard_attack_end = triton_guard_attack_start + 2u * triton_guard_attack.size();
 
 inline constexpr std::array<Pose, 9> armored_soldier_attack{{
     {0x06000D58u, 0x0E283F1Du, 62, 118, {}, {18, -1, 18, -1}},
@@ -221,7 +241,7 @@ inline constexpr uint32_t tunnel_attack_end = tunnel_attack_start + 2u * tunnel_
 
 inline std::array<float, 4> displacement(uint32_t frame, uint32_t packed, uint32_t width, uint32_t height,
                                           uint32_t remaining, uint32_t middle_word, uint32_t game_tick = 0u,
-                                          bool *preserve_art = nullptr) {
+                                          bool *preserve_art = nullptr, bool guard_attack = false) {
     if (preserve_art) *preserve_art = false;
     const uint32_t duration = packed >> 24;
     const bool beast = frame >= 80u && frame - 80u < beast_attack.size();
@@ -232,6 +252,10 @@ inline std::array<float, 4> displacement(uint32_t frame, uint32_t packed, uint32
     const bool triton = frame >= 60u && frame - 60u < triton_soldier_attack.size() &&
                         triton_soldier_attack[frame - 60u].matches(packed, width, height, middle_word);
     if (triton) shot = &triton_soldier_attack[frame - 60u];
+    if (guard_attack && frame >= triton_guard_attack_start && frame < triton_guard_attack_end) {
+        const auto &pose = triton_guard_attack[(frame - triton_guard_attack_start) % triton_guard_attack.size()];
+        if (pose.matches(packed, width, height, middle_word)) shot = &pose;
+    }
     if (frame >= 80u && frame - 80u < armored_soldier_attack.size() &&
         armored_soldier_attack[frame - 80u].matches(packed, width, height, middle_word)) {
         shot = &armored_soldier_attack[frame - 80u];

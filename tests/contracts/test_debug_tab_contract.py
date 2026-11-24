@@ -140,7 +140,7 @@ require(
     in renderer
     and "int gl_renderer_recording_shown(void) { return s_shown_left > 0; }\n" in renderer
     and renderer.count("    shown_capture(0, 1.0f);\n") == 4
-    and renderer.count("    shown_capture(1, shown);\n") == 1
+    and renderer.count("    if (!optional) shown_capture(1, shown);\n") == 1
     and '"index,kind,alpha,microseconds,faces,camera_samples,camera_inliers,carried,held,conflicting,departed,script,logged\\n"'
     in renderer
     and '            fprintf(file, "P6\\n%d %d\\n255\\n", s_shown_w, s_shown_h);\n' in renderer
@@ -150,6 +150,7 @@ require(
 )
 
 flush = body(renderer, "static void flush_tex_batch_now(void) {")
+bind_tex_batch = body(renderer, "static void bind_tex_batch(int semi) {")
 draw_passes = body(renderer, "static void tex_batch_draw_passes(int nverts, int semi) {")
 split_blend = body(renderer, "static void split_texel_blend(int semi, int pass, int mirror, int night) {")
 require(
@@ -177,15 +178,16 @@ require(
     and "        split_texel_blend(semi, 2, s_visual_on, night);\n" in draw_passes
     and "    s_visual_on = on > 0.0f;\n"
     in body(renderer, "static void geometry_visual_uniforms(GLint visual, GLint camera, GLint options,")
-    and flush.index("    hr_begin(1);\n")
-    < flush.index("geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 0);")
-    < flush.index("    if (!s_tb_held_back) tex_batch_draw_passes(nverts, semi);")
+    and bind_tex_batch.index("    hr_begin(1);\n")
+    < bind_tex_batch.index("geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 0);")
+    and flush.index("    bind_tex_batch(semi);\n")
+    < flush.index("        tex_batch_draw_passes(nverts, semi);")
     < flush.index("        wide_target_begin(dx, s_tex_uXoff, s_tex_uXhalf);\n")
     < flush.index("        geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 1);\n")
     < flush.index(
         "        geometry_visual_uniforms(s_tex_uVisual, s_tex_uCamera, s_tex_uVisualOptions, 0);\n        wide_target_end("
     )
-    and flush.count("geometry_visual_uniforms(") == 3
+    and flush.count("geometry_visual_uniforms(") == 2
     and "apply_psx_blend" not in draw_passes
     and "    const int night=t && !s_uv_view && night_terrain_active(&s_night_between);\n" in temporal
     and temporal.count("split_texel_blend(c->semi,2,1,night); temporal_mask(c->check,1);") == 3

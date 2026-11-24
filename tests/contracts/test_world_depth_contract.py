@@ -96,7 +96,8 @@ require(
     glDepthMask(GL_TRUE);
     p_glUniform1i(s_uSemimode, semi < 0 ? 0 : semi);
     p_glUniform1i(s_uSemipass, semi < 0 ? 3 : 4);
-    if (s_zbuffer_oracle || !native_depth_draw(nverts, semi, wide_dx(), 0)) glDrawArrays(GL_TRIANGLES, 0, nverts);
+    if (s_zbuffer_oracle || !native_depth_draw(nverts, semi, wide_dx(), 0))
+        draw_world_depth(s_tb, nverts, !held_back, 0);
     glColorMask(GL_TRUE, GL_TRUE, GL_TRUE, GL_TRUE);
     glDepthMask(GL_FALSE);
     p_glUniform1f(s_tex_uPull, held_back ? 0.0f : s_world_margin);
@@ -299,14 +300,16 @@ require(
 )
 require(
     '"  if (depth > 0.99998 || v_ground.z <= 0.0) return false;\\n"' in renderer
+    and '"  float ray_y = u_ground_view.x - y / u_ground_view.y;\\n"' in renderer
+    and '"  if (ray_y > 0.0 && (v_ground.y <= 0.0 || v_ground.x > 16.0)) return z < own;\\n"' in renderer
     and '"  if (v_ground.y <= 0.0) return z < own * (1.0 - u_ground_share);\\n"' in renderer
     and '"  if (z >= own - min(v_ground.y, u_ground_share * own)) return false;\\n"' in renderer
-    and '"  return (u_ground_view.x - y / u_ground_view.y) * z / u_ground_view.z > v_ground.x + 16.0;\\n"' in renderer
+    and '"  return ray_y * z / u_ground_view.z > v_ground.x + 16.0;\\n"' in renderer
     and renderer.index('"  int kept = -1;')
     < renderer.index('"  if (u_ground_samples > 1) {\\n"')
     < renderer.index('"  gl_SampleMask[0] = kept;\\n"'),
-    "a surface hides a held texel when it stands nearer than the texel by more than the sprite's half width and the share "
-    "and above its ground; without a ground the share alone, and every draw writes the full sample mask but a read one",
+    "a nearer surface hides sprites viewed from below with depth alone, while the ground allowance protects sprites "
+    "standing at the camera's level, and only a read changes the full sample mask",
 )
 held_presenter = between(presenter, "    if (!round && held) {", "        continue;\n    }")
 temporal_reads = between(presenter, "static int temporal_hold_reads(const TemporalScene *s) {", "\n}\n")
@@ -320,7 +323,7 @@ require(
         "        glDepthFunc(GL_LEQUAL);  /* a farther sprite leaves the nearer surface's depth */\n"
     )
     < held_presenter.index(
-        "glDrawArrays(GL_TRIANGLES,0,count);\n        glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE); glDepthFunc(GL_ALWAYS);"
+        "glDrawArrays(GL_TRIANGLES,first,count);\n        glColorMask(GL_TRUE,GL_TRUE,GL_TRUE,GL_TRUE); glDepthFunc(GL_ALWAYS);"
     ),
     "an in-between frame reads the depth only in a scene that checks no mask, writes no mask bits while it reads, and "
     "writes the sprite's depth after under the depth test",
@@ -334,7 +337,9 @@ require(
     and "            vp[24] = sprite ? s_sprite_ground[0] : 0.0f;\n            vp[25] = sprite ? s_sprite_ground[1] : 0.0f;\n"
     "            vp[26] = sprite ? s_sprite_depth : 0.0f;\n"
     in renderer
-    and "p_glVertexAttribPointer(13, 3, GL_FLOAT, GL_FALSE, st, (void*)(24*sizeof(float)));" in renderer
+    and "static const GLint sizes[] = {2, 2, 4, 2, 2, 1, 1, 4, 1, 1, 2, 1, 1, 3, 1, 2};" in renderer
+    and "        offset += sizes[attribute];\n" in renderer
+    and "    bind_tex_vertices(s_tex_vao, s_tex_vbo);\n" in renderer
     and "    const int sizes[15]={2,2,4,2,2,1,1,4,1,1,2,1,1,3,1};\n" in presenter
     and "    case RTH_SPRITE_GROUND: glb_set_temporal_sprite_ground(fv[0], fv[1]); break;\n" in thread
     and "    .set_temporal_sprite_ground = rtb_set_temporal_sprite_ground,\n" in thread,

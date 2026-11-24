@@ -359,23 +359,38 @@ struct Effect {
         const bool tunnel_creature = first_packed == disruptor::soldier_pose::tunnel_creature_first.packed_size_and_duration;
         const bool tunnel_attack = tunnel_creature && kind == 4u && frame >= disruptor::soldier_pose::tunnel_attack_start &&
                                    frame < disruptor::soldier_pose::tunnel_attack_end;
+        const auto &guard_first = disruptor::soldier_pose::triton_guard_first;
+        const bool triton_guard = first_packed == guard_first.packed_size_and_duration &&
+                                  cpu.read_byte(pictures + 8u) == guard_first.width &&
+                                  cpu.read_byte(pictures + 9u) == guard_first.height &&
+                                  picture_signature(cpu, pictures, first_packed) == guard_first.middle_word;
+        const bool guard_attack = triton_guard && kind == 4u && frame >= disruptor::soldier_pose::triton_guard_attack_start &&
+                                  frame < disruptor::soldier_pose::triton_guard_attack_end;
         bool preserve_art = false;
-        if (flyer_attack || tunnel_attack || (kind == 1u && frame >= 30u && frame < 80u) ||
+        if (flyer_attack || tunnel_attack || guard_attack || (kind == 1u && frame >= 30u && frame < 80u) ||
             (kind == 4u && ((frame >= 60u && frame < 68u) || (frame >= 80u && frame < 94u)))) {
             const auto picture = pictures + 20u * frame;
             const uint32_t packed = cpu.read_word(picture + 4u);
             if (const auto signature = picture_signature(cpu, picture, packed)) {
                 sprite.pose = disruptor::soldier_pose::displacement(frame, packed, cpu.read_byte(picture + 8u),
-                    cpu.read_byte(picture + 9u), cpu.read_byte(actor + 0x3Cu), *signature, cpu.read_word(kAnimationTick), &preserve_art);
+                    cpu.read_byte(picture + 9u), cpu.read_byte(actor + 0x3Cu), *signature, cpu.read_word(kAnimationTick),
+                    &preserve_art, guard_attack);
             }
         }
         const auto &robot_first = disruptor::soldier_pose::robot_attack.front();
         const auto &beast_first = disruptor::soldier_pose::red_eyed_beast_first;
+        const auto &visor_first = disruptor::soldier_pose::visor_soldier_first;
         const auto *first = &robot_first;
         if (red_flyer) {
             first = &disruptor::soldier_pose::red_flyer_first;
         } else if (tunnel_creature) {
             first = &disruptor::soldier_pose::tunnel_creature_first;
+        } else if (triton_guard) {
+            first = &guard_first;
+        } else if (first_packed == visor_first.packed_size_and_duration) {
+            first = &visor_first;
+        } else if (first_packed == disruptor::soldier_pose::reactor_soldier_first.packed_size_and_duration) {
+            first = &disruptor::soldier_pose::reactor_soldier_first;
         } else if (first_packed == disruptor::soldier_pose::spiked_mine_first.packed_size_and_duration) {
             first = &disruptor::soldier_pose::spiked_mine_first;
         } else if (first_packed == disruptor::soldier_pose::shield_robot_first.packed_size_and_duration) {
@@ -395,10 +410,10 @@ struct Effect {
         } else if (((first_packed ^ beast_first.packed_size_and_duration) & 0x00FFFFFFu) == 0u) {
             first = &beast_first;
         }
-        if ((first == &beast_first || first_packed == first->packed_size_and_duration) &&
+        if (triton_guard || ((first == &beast_first || first_packed == first->packed_size_and_duration) &&
             cpu.read_byte(pictures + 8u) == first->width && cpu.read_byte(pictures + 9u) == first->height &&
-            picture_signature(cpu, pictures, first_packed) == first->middle_word) {
-            const bool keep = preserve_art || first != &robot_first;
+            picture_signature(cpu, pictures, first_packed) == first->middle_word)) {
+            const bool keep = preserve_art || (first == &visor_first ? kind == 7u : first != &robot_first);
             sprite.pose_actor = pose_actor_id(cpu, actor) | (keep ? GPU_TEMPORAL_SPRITE_KEEP_ART : 0u);
         }
     }
