@@ -102,22 +102,28 @@ int main() {
     psx_mod_write_word(0x800775D0u, 87u);
     psx_mod_write_word(0x800775C0u, 605u);
     psx_mod_write_word(0x80077624u, 255u);
+    psx_mod_write_word(disruptor::stock_frames::kTicks, 101u);
     cpu.gpr[4] = kContexts[1];
     renderer_entry(&cpu, kRendererEntry);
     psx_mod_write_word(0x80077624u, 0u);
     psx_mod_write_word(0x800775BCu, 948u);
     psx_mod_write_word(0x800775D0u, 231u);
     psx_mod_write_word(0x800775C0u, 417u);
+    psx_mod_write_word(disruptor::stock_frames::kTicks, 103u);
     cpu.gpr[4] = kContexts[0];
     margin = 0;
     renderer_entry(&cpu, kRendererEntry);
     int32_t eye[3]{};
-    require(disruptor_draw_camera(240, 12, eye) == 255 && eye[0] == 317 && eye[1] == 87 && eye[2] == 605 &&
-            disruptor_draw_camera(0, 12, eye) == 0 && eye[0] == 948 && eye[1] == 231 && eye[2] == 417,
-            "each draw page keeps the heading used to build its geometry");
+    int64_t tick = -1;
+    require(disruptor_draw_camera(240, 12, eye, &tick) == 255 && eye[0] == 317 && eye[1] == 87 && eye[2] == 605 && tick == 101,
+            "the first draw page keeps its heading, camera position and tick");
+    require(disruptor_draw_camera(0, 12, eye, &tick) == 0 && eye[0] == 948 && eye[1] == 231 && eye[2] == 417 && tick == 103,
+            "the second draw page keeps its heading, camera position and tick");
     disruptor_reset_draw_headings();
-    require(disruptor_draw_camera(240, 12, nullptr) == 12 && disruptor_draw_camera(0, 11, eye) == 11 &&
-            eye[0] == 948 && eye[1] == 231 && eye[2] == 417, "a restored state inherited a draw page heading");
+    tick = -1;
+    require(disruptor_draw_camera(240, 12, nullptr, nullptr) == 12 && disruptor_draw_camera(0, 11, eye, &tick) == 11 &&
+            eye[0] == 948 && eye[1] == 231 && eye[2] == 417 && tick == -1,
+            "a restored state inherited draw page camera data");
     require(!allocated, "4:3 allocated an enhancement arena");
     margin = 267;
     allocation_fails = true;

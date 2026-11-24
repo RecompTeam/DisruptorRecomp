@@ -109,7 +109,7 @@ void frame() {
     const DynresSample sample{kPeriod, judged_wall(wall, slow, g.late, kPeriod, g.controller.p.gap_factor),
                               work * g_work_scale,
                               held(world, game_menu || menu_shown(psx_host_ui_gl_flags()), g_replaying, psx_netplay_active() != 0),
-                              measured_frames};
+                              measured_frames ? measured_frames : -1};
     g.late = gpu_bound(wall, gpu_per_frame, kPeriod, g.controller.p.late_factor);
     g.last = now;
     g.busy_ms = busy_ms;

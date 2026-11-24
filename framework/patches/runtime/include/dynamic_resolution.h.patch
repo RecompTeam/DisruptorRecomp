@@ -1,12 +1,12 @@
 diff --git a/runtime/include/dynamic_resolution.h b/runtime/include/dynamic_resolution.h
-index d43c26adc8b035a9c40bdc1572365914c2bfe3a8..0bc01df3d0fe8888bd2b63861dac15652a567f0a 100644
+index d43c26adc8b035a9c40bdc1572365914c2bfe3a8..9e9bc42fe9f5944ddc900499ee1df02c852b16cc 100644
 --- a/runtime/include/dynamic_resolution.h
 +++ b/runtime/include/dynamic_resolution.h
 @@ -83,6 +83,7 @@
      double wall_s;     /* this interval's wall time */
      double work_s;     /* see LOAD above */
      int    held;       /* the host holds: not a sample, the window restarts */
-+    int    measured_frames;
++    int    measured_frames;  /* -1 for missing timing, 0 for a default single-frame sample */
  } DynresSample;
  
  typedef struct DynresController {
