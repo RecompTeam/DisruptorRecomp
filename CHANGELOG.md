@@ -19,6 +19,7 @@ What changed in each release. The launcher shows the section of its own version 
 ### Chemical Factory
 
 - Smoother joins on the river and in the pools
+- Removed small bright squares from the pool texture
 - A darker river that animates in the direction of the current, including during In-between frames
 - Smoke rises from the three chimneys and fades into the yellow fog
 - Clearer DANGER and BIOHAZARD lettering on the fence signs

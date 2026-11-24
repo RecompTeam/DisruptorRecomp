@@ -133,6 +133,11 @@ static int factory_material(uint16_t page, uint16_t clut_x, uint16_t clut_y, con
     "uniform float u_factory_water_tick;\n" \
     "vec3 factory_water_texel(ivec2 pos, int side, int phase){\n" \
     "  pos = ivec2(mod(vec2(pos), float(32 * side)));\n" \
+    "  if (side == 5 && phase == 1 &&\n" \
+    "      ((pos.x >= 62 && pos.x < 68 && pos.y >= 9 && pos.y < 12) ||\n" \
+    "       (pos.x >= 154 && pos.x < 157 && pos.y >= 106 && pos.y < 109) ||\n" \
+    "       (pos.x >= 126 && pos.x < 129 && pos.y >= 133 && pos.y < 136) ||\n" \
+    "       (pos.x >= 117 && pos.x < 120 && pos.y >= 152 && pos.y < 155))) phase = 0;\n" \
     "  int tile = (pos.y / 32) * side + pos.x / 32;\n" \
     "  ivec2 cell;\n" \
     "  if (side == 2) {\n" \

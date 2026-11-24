@@ -50,6 +50,15 @@ require(
 
 pool = '"  if (family == 2) { color = factory_water_sample(point, side, phase); return true; }\\n"'
 river_visibility = '"  float visibility = float(299 - g_row) * (1.0 / 11.0);\\n"'
+water_texel = factory.partition("vec3 factory_water_texel(")[2].partition("vec3 factory_water_sample(")[0]
+require(
+    '"  if (side == 5 && phase == 1 &&\\n"' in water_texel
+    and "phase = 0;" in water_texel
+    and water_texel.index("mod(vec2(pos)") < water_texel.index("phase = 0;") < water_texel.index("int word = vram_at(")
+    and len(re.findall(r"pos\.x >= \d+ && pos\.x < \d+ && pos\.y >= \d+ && pos\.y < \d+", water_texel)) == 4,
+    "The four pale rectangles use the adjacent pool phase at their wrapped texture coordinates",
+)
+
 require(
     "factory_water_color(sample_uv, g_water_family, water_color)) rgb = water_color;" in renderer
     and pool in factory
