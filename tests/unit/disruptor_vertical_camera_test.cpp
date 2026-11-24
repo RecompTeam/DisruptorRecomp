@@ -1,6 +1,7 @@
 #include "cpu_state.h"
 #include "mod_plugins.h"
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstdint>
@@ -607,6 +608,38 @@ void test_target_and_drain() {
     seed_half(0x80057E58u + 2u * 288u, 256u);
     g_combat_callbacks[3](&cpu, 0x8002DFE0u);
     expect(cpu.gpr[2] == 232u, "a retail hit after expiry does not veto an earlier hit");
+    seed_half(cpu.gpr[21] + 0x16u, 0u);
+    seed_half(cpu.gpr[21] + 0x1Au, 16u);
+    seed_word(0x80014024u, 40u);
+    seed_word(0x80014028u, 16u);
+    seed_projectile(8192, 0, 0);
+    seed_half(0x80057E58u + 2u * 33u, 37000u);
+    for (int aim_offset : {10, -16}) {
+        for (uint32_t site : {0x8002DFE0u, 0x8002E31Cu}) {
+            const bool fixed_speed = site == 0x8002DFE0u;
+            seed_word(0x8001407Cu, static_cast<uint32_t>(aim_offset));
+            cpu.gpr[2] = 600u;
+            cpu.gpr[4] = 16u;
+            cpu.lo = static_cast<uint32_t>((16 + aim_offset) * 32);
+            g_combat_callbacks[fixed_speed ? 3 : 5](&cpu, site);
+            const int reciprocal = load_half(0x80057E58u + 2u * cpu.gpr[2]);
+            const int numerator = fixed_speed ? (static_cast<int>(cpu.gpr[4]) + aim_offset) * 32 : static_cast<int>(cpu.lo);
+            const int velocity = (numerator * reciprocal) >> 8;
+            const int rise_step = std::clamp(velocity, -5120, 5120) >> 6;
+            expect(velocity >= INT16_MIN && velocity <= INT16_MAX &&
+                       (std::abs((rise_step >> 3) - 16) < 8 || std::abs(((2 * rise_step) >> 3) - 16) < 8),
+                   "a close elevated target gets an unwrapped shot into its collision band even when the aim point is outside");
+        }
+    }
+    seed_word(kTestProjectile + 4u, 8u);
+    cpu.gpr[2] = 600u;
+    cpu.gpr[4] = 16u;
+    g_combat_callbacks[3](&cpu, 0x8002DFE0u);
+    expect(cpu.gpr[2] == 600u && cpu.gpr[4] == 16u, "keep a shot already headed away from the target");
+    seed_half(cpu.gpr[21] + 0x16u, 200u);
+    seed_half(cpu.gpr[21] + 0x1Au, 100u);
+    seed_word(0x80014028u, 10u);
+    seed_word(0x8001407Cu, 0u);
     seed_word(0x80014024u, 20u);
     cpu.gpr[16] = cpu.gpr[21];
     cpu.gpr[17] = kTestProjectile;

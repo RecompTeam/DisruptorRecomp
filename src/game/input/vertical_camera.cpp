@@ -363,7 +363,7 @@ void correct_aim_range(CPUState *cpu, uint32_t pc) {
     if (!valid_main_ram_pointer(body, 0x7Fu)) return;
     const int half_height = static_cast<int32_t>(psx_mod_read_word(body + 0x28u)) / 2;
     const int64_t aim_offset = static_cast<int32_t>(psx_mod_read_word(body + 0x7Cu));
-    if (std::abs(aim_offset) >= half_height) return;
+    if (half_height <= 0) return;
     const int vx = load_signed_half(projectile + kVelocityXOffset);
     const int vz = load_signed_half(projectile + kVelocityZOffset);
     const double step_x = (vx >> 6) / 8.0, step_z = (vz >> 6) / 8.0;
@@ -379,56 +379,65 @@ void correct_aim_range(CPUState *cpu, uint32_t pc) {
     const int weapon_speed = psx_mod_read_byte(weapon + 0x22u);
     const int speed = fixed_speed ? 32 : weapon_speed;
     const double distance = substeps * speed / 2.0;
-    if (distance < 1 || distance > 4095) return;
+    if (substeps < 0.0 || distance > 4095) return;
+    constexpr uint32_t end_of_table = 4128u;
     const uint32_t old_depth = cpu->gpr[2];
-    // The retail lookup starts 32 halfwords before the 4096 reciprocals at 0x80057E98.
-    const uint32_t new_depth = static_cast<uint32_t>(std::lround(distance)) + 32u;
-    if (old_depth >= 4128u) return;
+    const uint32_t new_depth = static_cast<uint32_t>(std::lround(std::max(1.0, distance))) + 32u;
+    if (old_depth >= end_of_table) return;
     int64_t x = static_cast<int32_t>(psx_mod_read_word(projectile + 4u));
     int64_t z = static_cast<int32_t>(psx_mod_read_word(projectile + 8u));
     const int64_t y = static_cast<int32_t>(psx_mod_read_word(projectile + 12u));
     const int target_x = psx_mod_read_half(target + 0x16u), target_z = psx_mod_read_half(target + 0x18u);
     const int target_y = psx_mod_read_half(target + 0x1Au);
     const int radius = static_cast<int32_t>(psx_mod_read_word(body + 0x24u));
-    const int64_t rise = target_y + aim_offset - (y >> 3);
-    const auto raw_velocity = [&](uint32_t depth) {
-        const uint32_t reciprocal = psx_mod_read_half(0x80057E58u + 2u * depth);
-        return (rise * speed * reciprocal) >> 8;
+    const int64_t center_rise = target_y - (y >> 3);
+    const int64_t retail_rise = center_rise + aim_offset;
+    const int64_t rise = std::abs(aim_offset) < half_height ? retail_rise : center_rise;
+    const auto raw_velocity = [speed](int64_t height, uint32_t depth) {
+        return (height * speed * psx_mod_read_half(0x80057E58u + 2u * depth)) >> 8;
     };
-    const auto vertical_step = [&](uint32_t depth) {
-        int velocity = static_cast<int16_t>(raw_velocity(depth));
-        velocity = std::clamp(velocity, -160 * weapon_speed, 160 * weapon_speed);
-        return velocity >> 6;
+    const int64_t new_velocity = raw_velocity(rise, new_depth);
+    const bool new_depth_valid = new_velocity >= INT16_MIN && new_velocity <= INT16_MAX;
+    const auto vertical_step = [weapon_speed](int64_t raw) {
+        const int velocity = static_cast<int16_t>(raw);
+        return std::clamp(velocity, -160 * weapon_speed, 160 * weapon_speed) >> 6;
     };
-    const int old_step = vertical_step(old_depth), new_step = vertical_step(new_depth);
-    if (rise == 0) return;
+    const int old_step = vertical_step(raw_velocity(retail_rise, old_depth)), new_step = vertical_step(new_velocity);
+    if (rise == 0 && old_step == 0) return;
     const int timer = psx_mod_read_byte(weapon + 0x21u);
     const int lifetime = timer ? timer : 256;
-    uint32_t selected = old_depth;
+    uint32_t selected = end_of_table;
     for (int step = 1; step < lifetime; ++step) {
         x += vx >> 6;
         z += vz >> 6;
         if (horizontal_distance((x >> 3) - target_x, (z >> 3) - target_z) >= radius) continue;
         if (std::abs(((y + step * old_step) >> 3) - target_y) < half_height) return;
-        if (std::abs(((y + step * new_step) >> 3) - target_y) < half_height) {
+        if (new_depth_valid && std::abs(((y + step * new_step) >> 3) - target_y) < half_height) {
             selected = new_depth;
-        } else if (selected == old_depth) {
+        } else if (selected == end_of_table) {
             // Find an unwrapped retail slope that reaches the open height band on this substep.
-            uint32_t first = 33u, last = 4128u;
+            uint32_t first = 33u, last = end_of_table;
             while (first < last) {
                 const uint32_t middle = first + (last - first) / 2u;
-                const auto velocity = raw_velocity(middle);
-                const auto error = ((y + step * vertical_step(middle)) >> 3) - target_y;
+                const auto velocity = raw_velocity(rise, middle);
+                const auto error = ((y + step * vertical_step(velocity)) >> 3) - target_y;
                 if (velocity < INT16_MIN || velocity > INT16_MAX || (rise < 0 ? -error : error) >= half_height)
                     first = middle + 1u;
                 else
                     last = middle;
             }
-            if (first < 4128u && std::abs(((y + step * vertical_step(first)) >> 3) - target_y) < half_height)
+            if (first < end_of_table &&
+                std::abs(((y + step * vertical_step(raw_velocity(rise, first))) >> 3) - target_y) < half_height)
                 selected = first;
         }
     }
+    if (selected == end_of_table) return;
     cpu->gpr[2] = selected;
+    if (rise != retail_rise) {
+        // The variable-speed paths have already multiplied the rise into LO.
+        if (fixed_speed) cpu->gpr[4] += static_cast<uint32_t>(rise - retail_rise);
+        else cpu->lo = static_cast<uint32_t>(rise * speed);
+    }
 }
 
 void limit_drain_flight_time(CPUState *cpu, uint32_t) {
